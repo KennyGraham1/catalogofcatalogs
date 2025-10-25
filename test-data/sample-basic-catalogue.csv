@@ -1,0 +1,7 @@
+eventid,time,lat,lon,depth,mag,source,region
+nz2024001,2024-10-24T12:34:56.789Z,-41.2865,174.7762,33.0,5.8,GeoNet,10 km NE of Wellington
+nz2024002,2024-10-24T14:22:10.123Z,-39.1234,176.5432,15.5,4.2,GeoNet,20 km W of Napier
+nz2024003,2024-10-24T16:45:33.456Z,-43.5321,172.6543,8.2,3.5,GeoNet,5 km S of Christchurch
+nz2024004,2024-10-24T18:12:45.789Z,-36.8485,174.7633,25.0,4.8,GeoNet,Auckland region
+nz2024005,2024-10-24T20:30:22.111Z,-41.5678,173.9876,42.3,5.1,GeoNet,Marlborough Sounds
+
