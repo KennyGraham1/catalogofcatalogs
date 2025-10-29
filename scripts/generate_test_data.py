@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 Generate realistic earthquake test data for the catalogue application.
-Creates 3 catalogues with 1000 events each for different regions.
+Creates 3 example catalogues with 1000 events each:
+1. North Island Seismic Events (shallow subduction)
+2. South Island Seismic Events (shallow strike-slip)
+3. NZ Deep Seismic Events (deep subduction)
 """
 
 import json
@@ -153,11 +156,45 @@ def generate_catalogue(name, region, bounds, num_events=1000,
     
     return catalogue
 
-# Generate New Zealand catalogue
-print("Generating New Zealand catalogue...")
-nz_catalogue = generate_catalogue(
-    name="New Zealand Seismic Events 2024",
-    region="New Zealand",
+# Generate 3 example catalogues for New Zealand regions
+
+# 1. North Island catalogue
+print("Generating North Island catalogue...")
+north_island_catalogue = generate_catalogue(
+    name="North Island Seismic Events",
+    region="New Zealand - North Island",
+    bounds={
+        "minLatitude": -41.5,
+        "maxLatitude": -34.0,
+        "minLongitude": 172.0,
+        "maxLongitude": 179.0
+    },
+    num_events=1000,
+    tectonic_type="subduction",
+    depth_type="shallow"
+)
+
+# 2. South Island catalogue
+print("Generating South Island catalogue...")
+south_island_catalogue = generate_catalogue(
+    name="South Island Seismic Events",
+    region="New Zealand - South Island",
+    bounds={
+        "minLatitude": -47.0,
+        "maxLatitude": -40.5,
+        "minLongitude": 166.0,
+        "maxLongitude": 174.5
+    },
+    num_events=1000,
+    tectonic_type="strike_slip",
+    depth_type="shallow"
+)
+
+# 3. Deep events catalogue
+print("Generating Deep Events catalogue...")
+deep_events_catalogue = generate_catalogue(
+    name="NZ Deep Seismic Events",
+    region="New Zealand - Deep Events",
     bounds={
         "minLatitude": -47.0,
         "maxLatitude": -34.0,
@@ -166,28 +203,37 @@ nz_catalogue = generate_catalogue(
     },
     num_events=1000,
     tectonic_type="subduction",
-    depth_type="shallow"
+    depth_type="deep"
 )
 
-# Save catalogue
-print("\nSaving catalogue to JSON file...")
-with open("test-data/new-zealand-catalogue.json", "w") as f:
-    json.dump(nz_catalogue, f, indent=2)
-print("✓ Saved: test-data/new-zealand-catalogue.json")
+# Save catalogues
+print("\nSaving catalogues to JSON files...")
+with open("test-data/north-island-catalogue.json", "w") as f:
+    json.dump(north_island_catalogue, f, indent=2)
+print("✓ Saved: test-data/north-island-catalogue.json")
+
+with open("test-data/south-island-catalogue.json", "w") as f:
+    json.dump(south_island_catalogue, f, indent=2)
+print("✓ Saved: test-data/south-island-catalogue.json")
+
+with open("test-data/deep-events-catalogue.json", "w") as f:
+    json.dump(deep_events_catalogue, f, indent=2)
+print("✓ Saved: test-data/deep-events-catalogue.json")
 
 print("\n" + "="*60)
 print("SUMMARY")
 print("="*60)
-print(f"\n{nz_catalogue['catalogue_name']}:")
-print(f"  Region: {nz_catalogue['region']}")
-print(f"  Total events: {nz_catalogue['statistics']['total_events']}")
-print(f"  Events with focal mechanisms: {nz_catalogue['statistics']['events_with_focal_mechanisms']}")
-print(f"  Magnitude range: {nz_catalogue['statistics']['magnitude_range']['min']} - {nz_catalogue['statistics']['magnitude_range']['max']}")
-print(f"  Geographic bounds:")
-print(f"    Latitude: {nz_catalogue['geographic_bounds']['minLatitude']} to {nz_catalogue['geographic_bounds']['maxLatitude']}")
-print(f"    Longitude: {nz_catalogue['geographic_bounds']['minLongitude']} to {nz_catalogue['geographic_bounds']['maxLongitude']}")
+for cat in [north_island_catalogue, south_island_catalogue, deep_events_catalogue]:
+    print(f"\n{cat['catalogue_name']}:")
+    print(f"  Region: {cat['region']}")
+    print(f"  Total events: {cat['statistics']['total_events']}")
+    print(f"  Events with focal mechanisms: {cat['statistics']['events_with_focal_mechanisms']}")
+    print(f"  Magnitude range: {cat['statistics']['magnitude_range']['min']} - {cat['statistics']['magnitude_range']['max']}")
+    print(f"  Geographic bounds:")
+    print(f"    Latitude: {cat['geographic_bounds']['minLatitude']} to {cat['geographic_bounds']['maxLatitude']}")
+    print(f"    Longitude: {cat['geographic_bounds']['minLongitude']} to {cat['geographic_bounds']['maxLongitude']}")
 
 print("\n" + "="*60)
-print("File generated successfully!")
+print("3 example catalogues generated successfully!")
 print("="*60)
 
