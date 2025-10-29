@@ -322,26 +322,14 @@ export function EnhancedMapView({
             </div>
           </div>
         ) : (
-          <div className="space-y-1 text-xs">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded bg-red-600"></div>
-              <span>&gt; 7.0</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded bg-orange-500"></div>
-              <span>6.0 - 6.9</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded bg-yellow-500"></div>
-              <span>5.0 - 5.9</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded bg-green-500"></div>
-              <span>4.0 - 4.9</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded bg-blue-500"></div>
-              <span>&lt; 4.0</span>
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground mb-2">Circle size represents magnitude</p>
+            <div className="flex items-center justify-center gap-1 py-2">
+              <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <div className="w-4 h-4 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <div className="w-5 h-5 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <div className="w-6 h-6 rounded-full bg-blue-500 flex-shrink-0"></div>
             </div>
           </div>
         )}

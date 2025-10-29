@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { MergeActions } from '@/components/merge/MergeActions';
+import { useCatalogues } from '@/contexts/CatalogueContext';
 import {
   Select,
   SelectContent,
@@ -31,8 +32,9 @@ import {
   Loader2
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { GeographicSearchPanel, GeographicBounds } from '@/components/catalogues/GeographicSearchPanel';
 
-// Mock data for New Zealand earthquakes
+// Mock data for New Zealand earthquakes (kept for map preview)
 const mockEvents = [
   { id: 1, latitude: -41.2865, longitude: 174.7762, magnitude: 4.5, depth: 25, time: "2023-09-01T10:30:00Z", region: "Wellington" },
   { id: 2, latitude: -36.8485, longitude: 174.7633, magnitude: 3.2, depth: 12, time: "2023-09-02T15:45:00Z", region: "Auckland" },
@@ -41,20 +43,21 @@ const mockEvents = [
   { id: 5, latitude: -39.0556, longitude: 174.0752, magnitude: 5.2, depth: 30, time: "2023-09-05T22:30:00Z", region: "New Plymouth" }
 ];
 
-const mockCatalogues = [
-  { id: 1, name: 'GeoNet New Zealand Data 2023 Q1', events: 1298, source: 'GeoNet' },
-  { id: 2, name: 'Wellington Region Network Data', events: 645, source: 'VUW' },
-  { id: 3, name: 'Canterbury Seismic Network', events: 789, source: 'CSN' },
-  { id: 4, name: 'Alpine Fault Monitoring Data', events: 432, source: 'GNS' },
-  { id: 5, name: 'Northland Seismic Records', events: 234, source: 'GNS' },
-  { id: 6, name: 'Otago Regional Network', events: 567, source: 'ORC' },
-  { id: 7, name: 'Hawke\'s Bay Seismic Data', events: 345, source: 'GeoNet' }
-];
+// NOTE: mockCatalogues removed - now using real data from CatalogueContext
 
 type CatalogueStatus = 'all' | 'complete' | 'processing' | 'incomplete';
 type SortField = 'name' | 'date' | 'events' | 'source';
 type SortDirection = 'asc' | 'desc';
 type MergeStatus = 'idle' | 'merging' | 'complete' | 'error';
+
+// Type that supports both mock data and real API data
+type CatalogueItem = {
+  id: number | string;
+  name: string;
+  events?: number;      // Mock data field
+  event_count?: number; // Real API data field
+  source?: string;      // Mock data field
+};
 
 // Status labels for merge status
 const statusLabels: Record<MergeStatus, string> = {
@@ -81,8 +84,11 @@ const getStatusColor = (status: MergeStatus): string => {
 };
 
 export default function MergePage() {
+  // Use global catalogue context
+  const { catalogues: realCatalogues, loading: cataloguesLoading, invalidateCache } = useCatalogues();
+
   const [activeTab, setActiveTab] = useState('select');
-  const [selectedCatalogues, setSelectedCatalogues] = useState<number[]>([]);
+  const [selectedCatalogues, setSelectedCatalogues] = useState<(number | string)[]>([]);
   const [mergedName, setMergedName] = useState('Merged NZ Catalogue');
   const [timeThreshold, setTimeThreshold] = useState(60);
   const [distanceThreshold, setDistanceThreshold] = useState(10);
@@ -90,8 +96,20 @@ export default function MergePage() {
   const [mergeStrategy, setMergeStrategy] = useState('priority');
   const [mergeStatus, setMergeStatus] = useState<MergeStatus>('idle');
   const [mergedEvents, setMergedEvents] = useState(mockEvents);
+  const [geoSearchActive, setGeoSearchActive] = useState(false);
+  const [geoSearching, setGeoSearching] = useState(false);
+  const [geoSearchBounds, setGeoSearchBounds] = useState<GeographicBounds | null>(null);
+  const [filteredCatalogues, setFilteredCatalogues] = useState<CatalogueItem[]>([]);
 
-  const handleCatalogueSelect = (id: number) => {
+  // Initialize filtered catalogues with real data from context
+  useEffect(() => {
+    if (!geoSearchActive && realCatalogues.length > 0) {
+      setFilteredCatalogues(realCatalogues);
+    }
+  }, [realCatalogues, geoSearchActive]);
+
+  // Memoized catalogue selection handler
+  const handleCatalogueSelect = useCallback((id: number | string) => {
     setSelectedCatalogues(prev => {
       if (prev.includes(id)) {
         return prev.filter(catalogueId => catalogueId !== id);
@@ -99,23 +117,24 @@ export default function MergePage() {
         return [...prev, id];
       }
     });
-  };
+  }, []);
 
-  const handleNextStep = () => {
+  // Memoized navigation handlers
+  const handleNextStep = useCallback(() => {
     if (activeTab === 'select') {
       setActiveTab('configure');
     } else if (activeTab === 'configure') {
       setActiveTab('preview');
     }
-  };
+  }, [activeTab]);
 
-  const handlePreviousStep = () => {
+  const handlePreviousStep = useCallback(() => {
     if (activeTab === 'configure') {
       setActiveTab('select');
     } else if (activeTab === 'preview') {
       setActiveTab('configure');
     }
-  };
+  }, [activeTab]);
 
   const handleStartMerge = async () => {
     if (selectedCatalogues.length < 2) {
@@ -130,8 +149,8 @@ export default function MergePage() {
     setMergeStatus('merging');
 
     try {
-      const selectedCatalogueData = getSelectedCatalogues();
-      
+      const selectedCatalogueData = getSelectedCatalogues;
+
       const response = await fetch('/api/merge', {
         method: 'POST',
         headers: {
@@ -157,7 +176,10 @@ export default function MergePage() {
 
       // Set mock merged events for now
       setMergedEvents(mockEvents);
-      
+
+      // Invalidate cache and refresh catalogues across all pages
+      invalidateCache();
+
       setMergeStatus('complete');
       toast({
         title: "Merge Complete",
@@ -173,23 +195,78 @@ export default function MergePage() {
     }
   };
 
-  const getSelectedCatalogues = () => {
-    return mockCatalogues.filter(catalogue => selectedCatalogues.includes(catalogue.id));
-  };
+  // Memoized selected catalogues
+  const getSelectedCatalogues = useMemo(() => {
+    return realCatalogues.filter(catalogue => selectedCatalogues.includes(catalogue.id));
+  }, [selectedCatalogues, realCatalogues]);
 
-  const getTotalSelectedEvents = () => {
-    return getSelectedCatalogues().reduce((total, catalogue) => total + catalogue.events, 0);
-  };
+  // Memoized total events calculation
+  const getTotalSelectedEvents = useMemo(() => {
+    return getSelectedCatalogues.reduce((total, catalogue) => {
+      const eventCount = catalogue.events || catalogue.event_count || 0;
+      return total + eventCount;
+    }, 0);
+  }, [getSelectedCatalogues]);
 
-  const getEstimatedMergedEvents = () => {
-    const selected = getSelectedCatalogues();
+  // Memoized estimated merged events calculation
+  const estimatedMergedEvents = useMemo(() => {
+    const selected = getSelectedCatalogues;
     if (selected.length === 0) return 0;
-    if (selected.length === 1) return selected[0].events;
-    
-    const totalEvents = getTotalSelectedEvents();
+    if (selected.length === 1) {
+      const eventCount = selected[0].events || selected[0].event_count || 0;
+      return eventCount;
+    }
+
+    const totalEvents = getTotalSelectedEvents;
     const overlapFactor = 0.15 * (selected.length - 1);
     return Math.round(totalEvents * (1 - overlapFactor));
-  };
+  }, [getSelectedCatalogues, getTotalSelectedEvents]);
+
+  // Memoized geographic search handler
+  const handleGeoSearch = useCallback(async (bounds: GeographicBounds) => {
+    try {
+      setGeoSearching(true);
+      setGeoSearchBounds(bounds);
+
+      const params = new URLSearchParams({
+        minLat: bounds.minLatitude.toString(),
+        maxLat: bounds.maxLatitude.toString(),
+        minLon: bounds.minLongitude.toString(),
+        maxLon: bounds.maxLongitude.toString(),
+      });
+
+      const response = await fetch(`/api/catalogues/search/region?${params}`);
+
+      if (!response.ok) {
+        throw new Error('Failed to search catalogues by region');
+      }
+
+      const data = await response.json();
+      setFilteredCatalogues(data.catalogues);
+      setGeoSearchActive(true);
+
+      toast({
+        title: 'Region Search Complete',
+        description: `Found ${data.count} catalogue(s) in the selected region`,
+      });
+    } catch (error) {
+      console.error('Geographic search error:', error);
+      toast({
+        title: 'Search Failed',
+        description: 'Failed to search catalogues by region. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setGeoSearching(false);
+    }
+  }, []);
+
+  // Memoized clear handler
+  const handleGeoClear = useCallback(() => {
+    setGeoSearchActive(false);
+    setGeoSearchBounds(null);
+    setFilteredCatalogues(realCatalogues);
+  }, [realCatalogues]);
 
   const renderMergeButton = () => {
     if (mergeStatus === 'merging') {
@@ -270,33 +347,83 @@ export default function MergePage() {
                     Select at least two catalogues to merge. Catalogues should cover overlapping time periods or regions.
                   </p>
                 </div>
-                
+
+                {/* Geographic Search Panel */}
+                <div className="mt-4">
+                  <GeographicSearchPanel
+                    onSearch={handleGeoSearch}
+                    onClear={handleGeoClear}
+                    isSearching={geoSearching}
+                  />
+                </div>
+
+                {/* Active Filter Indicator */}
+                {geoSearchActive && geoSearchBounds && (
+                  <div className="mt-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                          Filtered by geographic region
+                        </span>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleGeoClear}
+                        className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+                      >
+                        Clear Filter
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="border rounded-lg overflow-hidden mt-4">
-                  <div className="bg-muted/50 px-4 py-2 text-sm font-medium">
-                    Available Catalogues
+                  <div className="bg-muted/50 px-4 py-2 text-sm font-medium flex items-center justify-between">
+                    <span>Available Catalogues</span>
+                    {geoSearchActive && (
+                      <span className="text-xs text-muted-foreground">
+                        Showing {filteredCatalogues.length} of {realCatalogues.length} catalogues
+                      </span>
+                    )}
                   </div>
                   <div className="divide-y">
-                    {mockCatalogues.map(catalogue => (
-                      <div key={catalogue.id} className="flex items-center space-x-2 p-4">
-                        <Checkbox
-                          id={`catalogue-${catalogue.id}`}
-                          checked={selectedCatalogues.includes(catalogue.id)}
-                          onCheckedChange={() => handleCatalogueSelect(catalogue.id)}
-                        />
-                        <div className="grid gap-1.5 leading-none">
-                          <Label
-                            htmlFor={`catalogue-${catalogue.id}`}
-                            className="text-base font-medium flex items-center gap-1.5"
-                          >
-                            <Layers className="h-4 w-4 text-muted-foreground" />
-                            {catalogue.name}
-                          </Label>
-                          <p className="text-sm text-muted-foreground">
-                            {catalogue.events.toLocaleString()} events • Source: {catalogue.source}
-                          </p>
-                        </div>
+                    {cataloguesLoading ? (
+                      <div className="p-8 text-center text-muted-foreground">
+                        <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
+                        <p>Loading catalogues...</p>
                       </div>
-                    ))}
+                    ) : filteredCatalogues.length === 0 ? (
+                      <div className="p-8 text-center text-muted-foreground">
+                        <Layers className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                        <p>No catalogues available</p>
+                        <p className="text-sm mt-1">Import or create catalogues to merge them</p>
+                      </div>
+                    ) : (
+                      filteredCatalogues.map(catalogue => (
+                        <div key={catalogue.id} className="flex items-center space-x-2 p-4">
+                          <Checkbox
+                            id={`catalogue-${catalogue.id}`}
+                            checked={selectedCatalogues.includes(catalogue.id)}
+                            onCheckedChange={() => handleCatalogueSelect(catalogue.id)}
+                          />
+                          <div className="grid gap-1.5 leading-none">
+                            <Label
+                              htmlFor={`catalogue-${catalogue.id}`}
+                              className="text-base font-medium flex items-center gap-1.5"
+                            >
+                              <Layers className="h-4 w-4 text-muted-foreground" />
+                              {catalogue.name}
+                            </Label>
+                            <p className="text-sm text-muted-foreground">
+                              {(catalogue.events || catalogue.event_count || 0).toLocaleString()} events
+                              {catalogue.source && ` • Source: ${catalogue.source}`}
+                            </p>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
                 
@@ -314,7 +441,7 @@ export default function MergePage() {
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Est. Merged Events</p>
-                        <p className="text-xl font-semibold">{getEstimatedMergedEvents().toLocaleString()}</p>
+                        <p className="text-xl font-semibold">{estimatedMergedEvents.toLocaleString()}</p>
                       </div>
                     </div>
                   </div>
@@ -463,7 +590,7 @@ export default function MergePage() {
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Estimated Events</p>
-                        <p className="font-medium">{getEstimatedMergedEvents().toLocaleString()}</p>
+                        <p className="font-medium">{estimatedMergedEvents.toLocaleString()}</p>
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Selected Catalogues</p>
@@ -489,15 +616,16 @@ export default function MergePage() {
                       Catalogues to be Merged
                     </div>
                     <div className="divide-y">
-                      {getSelectedCatalogues().map((catalogue, index) => (
+                      {getSelectedCatalogues.map((catalogue, index) => (
                         <div key={catalogue.id} className="flex items-center p-4">
                           <div className="flex-1">
                             <p className="font-medium">{catalogue.name}</p>
                             <p className="text-sm text-muted-foreground">
-                              {catalogue.events.toLocaleString()} events • Source: {catalogue.source}
+                              {(catalogue.events || catalogue.event_count || 0).toLocaleString()} events
+                              {catalogue.source && ` • Source: ${catalogue.source}`}
                             </p>
                           </div>
-                          {index < getSelectedCatalogues().length - 1 && (
+                          {index < getSelectedCatalogues.length - 1 && (
                             <ArrowRightLeft className="h-5 w-5 text-muted-foreground mx-4" />
                           )}
                         </div>

@@ -290,15 +290,6 @@ node scripts/migrate-add-source-id.js
 node scripts/populate-test-data.js
 ```
 
-## 🤝 Contributing
-
-Contributions are welcome! Please follow these guidelines:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Merge Request
 
 ### Code Style
 
@@ -313,46 +304,17 @@ This project is developed for earthquake research and monitoring purposes.
 
 ## 👥 Authors
 
-- GNS Science Earthquake Team
-
-## 🙏 Acknowledgments
-
-- **GeoNet**: For providing real-time earthquake data via FDSN web services
-- **QuakeML**: For the standardized earthquake data format specification
-- **shadcn/ui**: For the beautiful UI component library
-- **Next.js Team**: For the excellent React framework
-
-## 📞 Support
-
-For questions, issues, or feature requests:
-- Open an issue in the GitLab repository
-- Contact the GNS Science Earthquake Team
+- Kenny Graham 
 
 ## 🗺 Roadmap
 
 ### Planned Features
-- [ ] Scheduled automatic imports with background job scheduler
 - [ ] Enhanced QuakeML support with picks, arrivals, and focal mechanisms
-- [ ] Multi-source import (USGS, IRIS, other FDSN services)
 - [ ] Advanced data quality validation and anomaly detection
 - [ ] Export to additional formats (GeoJSON, KML)
 - [ ] User authentication and authorization
 - [ ] Collaborative features (sharing, comments)
 - [ ] Performance optimization for large datasets
-
-## 📊 Project Status
-
-**Status**: ✅ Production Ready
-
-The application is fully functional with comprehensive features for earthquake catalogue management, including:
-- ✅ Data upload and parsing
-- ✅ GeoNet automatic import
-- ✅ Catalogue merging
-- ✅ QuakeML 1.2 support
-- ✅ Interactive visualization
-- ✅ Quality-based filtering
-- ✅ Complete test coverage
-- ✅ Full documentation
 
 ---
 

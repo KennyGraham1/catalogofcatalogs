@@ -11,7 +11,8 @@ import {
   X,
   Database,
   BarChart3,
-  TrendingUp
+  TrendingUp,
+  Download
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -34,6 +35,7 @@ export function Header() {
     { href: '/dashboard', label: 'Dashboard', icon: Activity },
     { href: '/upload', label: 'Upload', icon: Upload },
     { href: '/catalogues', label: 'Catalogues', icon: Database },
+    { href: '/import', label: 'Import', icon: Download },
     { href: '/merge', label: 'Merge', icon: Layers },
     { href: '/visualize', label: 'Visualize', icon: BarChart3 },
     { href: '/analytics', label: 'Analytics', icon: TrendingUp },

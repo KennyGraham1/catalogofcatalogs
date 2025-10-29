@@ -200,25 +200,13 @@ export default function NZEarthquakeMap({ earthquakes, colorBy }: NZEarthquakeMa
         
         {colorBy === 'magnitude' ? (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#8B0000' }}></div>
-              <span>≥ 6.0 (Major)</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#FF0000' }}></div>
-              <span>5.0 - 5.9 (Moderate)</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#FF6B00' }}></div>
-              <span>4.0 - 4.9 (Light)</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#FFD700' }}></div>
-              <span>3.0 - 3.9 (Minor)</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#90EE90' }}></div>
-              <span>&lt; 3.0 (Micro)</span>
+            <p className="text-xs text-muted-foreground mb-2">Circle size represents magnitude</p>
+            <div className="flex items-center justify-center gap-1 py-2">
+              <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <div className="w-4 h-4 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <div className="w-5 h-5 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <div className="w-6 h-6 rounded-full bg-blue-500 flex-shrink-0"></div>
             </div>
           </div>
         ) : (

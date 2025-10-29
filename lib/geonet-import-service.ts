@@ -1,6 +1,6 @@
 /**
  * GeoNet Import Service
- * 
+ *
  * Handles importing earthquake data from GeoNet API into the database.
  * Supports duplicate detection, event updates, and comprehensive field mapping.
  */
@@ -8,6 +8,8 @@
 import { geonetClient, GeoNetEventText } from './geonet-client';
 import { dbQueries } from './db';
 import { v4 as uuidv4 } from 'uuid';
+import { extractBoundsFromMergedEvents } from './geo-bounds-utils';
+import { parseStringPromise } from 'xml2js';
 
 /**
  * Import configuration options
@@ -70,11 +72,74 @@ export interface ImportHistory {
 }
 
 /**
+ * Extract focal mechanism from QuakeML XML
+ */
+function extractFocalMechanismFromXML(xml: string): any | null {
+  try {
+    // Look for focalMechanism elements
+    const focalMechRegex = /<focalMechanism[^>]*>(.*?)<\/focalMechanism>/gs;
+    const focalMechMatches = xml.matchAll(focalMechRegex);
+
+    for (const match of focalMechMatches) {
+      const fmXML = match[1];
+
+      // Extract nodalPlanes
+      const nodalPlanesRegex = /<nodalPlanes>(.*?)<\/nodalPlanes>/s;
+      const nodalPlanesMatch = fmXML.match(nodalPlanesRegex);
+
+      if (nodalPlanesMatch) {
+        const nodalPlanesXML = nodalPlanesMatch[1];
+
+        // Extract nodalPlane1
+        const np1Regex = /<nodalPlane1>(.*?)<\/nodalPlane1>/s;
+        const np1Match = nodalPlanesXML.match(np1Regex);
+
+        // Extract nodalPlane2
+        const np2Regex = /<nodalPlane2>(.*?)<\/nodalPlane2>/s;
+        const np2Match = nodalPlanesXML.match(np2Regex);
+
+        const extractPlane = (planeXML: string) => {
+          const strikeMatch = planeXML.match(/<strike>.*?<value>([^<]+)<\/value>.*?<\/strike>/s);
+          const dipMatch = planeXML.match(/<dip>.*?<value>([^<]+)<\/value>.*?<\/dip>/s);
+          const rakeMatch = planeXML.match(/<rake>.*?<value>([^<]+)<\/value>.*?<\/rake>/s);
+
+          if (strikeMatch && dipMatch && rakeMatch) {
+            return {
+              strike: parseFloat(strikeMatch[1]),
+              dip: parseFloat(dipMatch[1]),
+              rake: parseFloat(rakeMatch[1])
+            };
+          }
+          return null;
+        };
+
+        const nodalPlane1 = np1Match ? extractPlane(np1Match[1]) : null;
+        const nodalPlane2 = np2Match ? extractPlane(np2Match[1]) : null;
+
+        if (nodalPlane1) {
+          const focalMechanism: any = { nodalPlane1 };
+          if (nodalPlane2) {
+            focalMechanism.nodalPlane2 = nodalPlane2;
+          }
+          return focalMechanism;
+        }
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error('[extractFocalMechanismFromXML] Error:', error);
+    return null;
+  }
+}
+
+/**
  * GeoNet Import Service
  */
 export class GeoNetImportService {
   private static readonly DEFAULT_CATALOGUE_NAME = 'GeoNet - Automated Import';
   private static readonly DEFAULT_CATALOGUE_DESCRIPTION = 'Automatically imported earthquake events from GeoNet FDSN Event Web Service';
+  private static readonly FOCAL_MECHANISM_MIN_MAGNITUDE = 5.0; // Only fetch focal mechanisms for M5.0+
   
   /**
    * Import events from GeoNet
@@ -138,8 +203,30 @@ export class GeoNetImportService {
       
       const endTime = new Date();
       const duration = endTime.getTime() - startTime.getTime();
-      
-      // 4. Save import history
+
+      // 4. Update geographic bounds for the catalogue
+      if (newEvents > 0 || updatedEvents > 0) {
+        try {
+          const catalogueEvents = await dbQueries.getEventsByCatalogueId(catalogueId);
+          const eventsArray = Array.isArray(catalogueEvents) ? catalogueEvents : catalogueEvents.data;
+          const bounds = extractBoundsFromMergedEvents(eventsArray);
+          if (bounds) {
+            await dbQueries.updateCatalogueGeoBounds(
+              catalogueId,
+              bounds.minLatitude,
+              bounds.maxLatitude,
+              bounds.minLongitude,
+              bounds.maxLongitude
+            );
+            console.log(`[GeoNetImportService] Updated geographic bounds for catalogue ${catalogueId}`);
+          }
+        } catch (error) {
+          console.error(`[GeoNetImportService] Failed to update geographic bounds:`, error);
+          // Don't fail the import if bounds update fails
+        }
+      }
+
+      // 5. Save import history
       await this.saveImportHistory({
         catalogueId,
         startTime,
@@ -150,7 +237,7 @@ export class GeoNetImportService {
         skippedEvents,
         errors,
       });
-      
+
       console.log(`[GeoNetImportService] Import complete: ${newEvents} new, ${updatedEvents} updated, ${skippedEvents} skipped, ${errors.length} errors`);
       
       return {
@@ -288,6 +375,31 @@ export class GeoNetImportService {
   private async insertEvent(event: GeoNetEventText, catalogueId: string): Promise<void> {
     const eventId = uuidv4();
 
+    // Fetch focal mechanism for significant events (M5.0+)
+    let focalMechanisms: string | null = null;
+    if (event.Magnitude >= GeoNetImportService.FOCAL_MECHANISM_MIN_MAGNITUDE) {
+      try {
+        console.log(`[GeoNetImportService] Fetching focal mechanism for event ${event.EventID} (M${event.Magnitude})`);
+        const quakeML = await geonetClient.fetchEventById(event.EventID);
+
+        if (quakeML) {
+          // Convert QuakeML object back to XML string for parsing
+          const xml2js = await import('xml2js');
+          const builder = new xml2js.Builder();
+          const xmlString = builder.buildObject(quakeML);
+
+          const focalMechanism = extractFocalMechanismFromXML(xmlString);
+          if (focalMechanism) {
+            focalMechanisms = JSON.stringify([focalMechanism]);
+            console.log(`[GeoNetImportService] Found focal mechanism for event ${event.EventID}`);
+          }
+        }
+      } catch (error) {
+        console.error(`[GeoNetImportService] Failed to fetch focal mechanism for ${event.EventID}:`, error);
+        // Continue without focal mechanism - don't fail the import
+      }
+    }
+
     await dbQueries.insertEvent({
       id: eventId,
       catalogue_id: catalogueId,
@@ -304,6 +416,7 @@ export class GeoNetImportService {
       }]),
       magnitude_type: event.MagType || null,
       event_type: event.EventType || null,
+      focal_mechanisms: focalMechanisms,
     });
   }
   
@@ -311,8 +424,31 @@ export class GeoNetImportService {
    * Update existing event
    */
   private async updateEvent(eventId: string, event: GeoNetEventText): Promise<void> {
-    // For now, just update basic fields
-    // In the future, we could compare and only update if data has changed
+    // Fetch focal mechanism for significant events (M5.0+) if not already present
+    let focalMechanisms: string | null = null;
+    if (event.Magnitude >= GeoNetImportService.FOCAL_MECHANISM_MIN_MAGNITUDE) {
+      try {
+        console.log(`[GeoNetImportService] Fetching focal mechanism for event ${event.EventID} (M${event.Magnitude})`);
+        const quakeML = await geonetClient.fetchEventById(event.EventID);
+
+        if (quakeML) {
+          // Convert QuakeML object back to XML string for parsing
+          const xml2js = await import('xml2js');
+          const builder = new xml2js.Builder();
+          const xmlString = builder.buildObject(quakeML);
+
+          const focalMechanism = extractFocalMechanismFromXML(xmlString);
+          if (focalMechanism) {
+            focalMechanisms = JSON.stringify([focalMechanism]);
+            console.log(`[GeoNetImportService] Found focal mechanism for event ${event.EventID}`);
+          }
+        }
+      } catch (error) {
+        console.error(`[GeoNetImportService] Failed to fetch focal mechanism for ${event.EventID}:`, error);
+        // Continue without focal mechanism - don't fail the update
+      }
+    }
+
     await dbQueries.updateEvent(eventId, {
       time: event.Time,
       latitude: event.Latitude,
@@ -321,6 +457,7 @@ export class GeoNetImportService {
       magnitude: event.Magnitude,
       magnitude_type: event.MagType || null,
       event_type: event.EventType || null,
+      focal_mechanisms: focalMechanisms,
     });
   }
   

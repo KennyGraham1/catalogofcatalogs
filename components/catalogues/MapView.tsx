@@ -174,29 +174,15 @@ export function MapView({ catalogueId, events: propEvents, onBoundsChange, onSha
       </MapContainer>
 
       {/* Legend */}
-      <div className="absolute bottom-4 right-4 bg-background/95 backdrop-blur-sm p-4 rounded-lg border shadow-sm">
+      <div className="absolute bottom-4 right-4 z-[1000] bg-background/95 backdrop-blur-sm p-4 rounded-lg border shadow-lg">
         <h4 className="font-medium mb-2">Magnitude Scale</h4>
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-purple-600"></div>
-            <span className="text-sm">&gt; 6.0</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-red-600"></div>
-            <span className="text-sm">5.0 - 6.0</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-orange-600"></div>
-            <span className="text-sm">4.0 - 5.0</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-yellow-600"></div>
-            <span className="text-sm">3.0 - 4.0</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-green-600"></div>
-            <span className="text-sm">&lt; 3.0</span>
-          </div>
+        <p className="text-xs text-muted-foreground mb-3">Circle size represents magnitude</p>
+        <div className="flex items-center justify-center gap-1 py-2">
+          <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
+          <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0"></div>
+          <div className="w-4 h-4 rounded-full bg-blue-500 flex-shrink-0"></div>
+          <div className="w-5 h-5 rounded-full bg-blue-500 flex-shrink-0"></div>
+          <div className="w-6 h-6 rounded-full bg-blue-500 flex-shrink-0"></div>
         </div>
       </div>
     </div>

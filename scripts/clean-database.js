@@ -15,33 +15,40 @@ if (fs.existsSync(dbPath)) {
   console.log('ℹ No existing database file found\n');
 }
 
-console.log('🔧 Running Database Migration...');
+console.log('🔧 Initializing Database Schema...');
 console.log('================================\n');
 
-// Run migration script
+// Run database initialization script
 try {
-  execSync('npx tsx scripts/migrate-database.ts', { stdio: 'inherit' });
+  execSync('npx tsx scripts/init-database.ts', { stdio: 'inherit' });
 } catch (error) {
-  console.error('❌ Migration failed:', error.message);
+  console.error('❌ Database initialization failed:', error.message);
   process.exit(1);
 }
 
-console.log('\n📊 Populating Test Data...');
+console.log('\n📊 Populating Realistic NZ Earthquake Data...');
 console.log('================================\n');
 
-// Run test data population script
+// Run realistic NZ data population script
 try {
-  execSync('node scripts/populate-test-data.js', { stdio: 'inherit' });
+  execSync('npx tsx scripts/populate-realistic-nz-data.ts', { stdio: 'inherit' });
 } catch (error) {
-  console.error('❌ Test data population failed:', error.message);
+  console.error('❌ Data population failed:', error.message);
   process.exit(1);
 }
 
 console.log('\n✅ Database setup complete!');
 console.log('================================\n');
-console.log('Summary:');
-console.log('- Old database removed');
-console.log('- New database created with QuakeML 1.2 schema');
-console.log('- Test data populated (5 catalogues, ~192 events)\n');
-console.log('You can now start the application with: npm run dev\n');
+
+// Optional: Populate GeoNet baseline catalogue with real data
+console.log('📡 GeoNet Baseline Catalogue (Optional)');
+console.log('================================\n');
+console.log('Would you like to import real earthquake data from GeoNet?');
+console.log('This will create a baseline catalogue with actual NZ seismic data.');
+console.log('');
+console.log('To import GeoNet data now, run:');
+console.log('  npx tsx scripts/populate-geonet-baseline.ts');
+console.log('');
+console.log('Or visit http://localhost:3001/import to import data manually.');
+console.log('');
 

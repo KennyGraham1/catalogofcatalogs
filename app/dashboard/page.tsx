@@ -1,13 +1,26 @@
 'use client';
 
 import { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Activity, FileText, AlertTriangle, Clock, CheckCircle } from 'lucide-react';
 import { RecentCatalogues } from '@/components/dashboard/RecentCatalogues';
 import { StatisticsCards } from '@/components/dashboard/StatisticsCards';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
-import { CatalogueMap } from '@/components/dashboard/CatalogueMap';
+import { ProcessingStatus } from '@/components/dashboard/ProcessingStatus';
+
+// Dynamically import CatalogueMap to avoid SSR issues with Leaflet
+const CatalogueMap = dynamic(
+  () => import('@/components/dashboard/CatalogueMap').then(mod => ({ default: mod.CatalogueMap })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[600px] w-full flex items-center justify-center bg-muted/20">
+        <p className="text-muted-foreground">Loading map...</p>
+      </div>
+    )
+  }
+);
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState('overview');
@@ -49,22 +62,7 @@ export default function DashboardPage() {
                   <CardDescription>Status of your catalogue processing jobs</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    {[
-                      { name: 'GeoNet New Zealand Data 2023 Q3', status: 'complete', icon: CheckCircle, statusColor: 'text-green-500' },
-                      { name: 'Wellington Region Network Data', status: 'processing', icon: Clock, statusColor: 'text-amber-500' },
-                      { name: 'Taupo Volcanic Zone Seismic Records', status: 'error', icon: AlertTriangle, statusColor: 'text-red-500' },
-                      { name: 'Kaikoura Aftershock Sequence 2016-2023', status: 'complete', icon: CheckCircle, statusColor: 'text-green-500' },
-                    ].map((job, i) => (
-                      <div key={i} className="flex items-center justify-between p-3 border rounded-md">
-                        <div className="flex items-center gap-3">
-                          <job.icon className={`h-5 w-5 ${job.statusColor}`} />
-                          <span>{job.name}</span>
-                        </div>
-                        <span className="capitalize text-sm text-muted-foreground">{job.status}</span>
-                      </div>
-                    ))}
-                  </div>
+                  <ProcessingStatus />
                 </CardContent>
               </Card>
             </div>

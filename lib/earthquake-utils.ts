@@ -11,14 +11,12 @@ export interface EarthquakeEvent {
 }
 
 /**
- * Get color based on earthquake magnitude
+ * Get color for earthquake markers (single color for all magnitudes)
+ * Magnitude is now represented by size only, not color
+ * @param _magnitude - Magnitude value (unused, kept for API compatibility)
  */
-export function getMagnitudeColor(magnitude: number): string {
-  if (magnitude >= 7.0) return '#9333ea'; // purple - Major
-  if (magnitude >= 6.0) return '#dc2626'; // red - Strong
-  if (magnitude >= 5.0) return '#ea580c'; // orange - Moderate
-  if (magnitude >= 4.0) return '#ca8a04'; // yellow - Light
-  return '#16a34a'; // green - Minor
+export function getMagnitudeColor(_magnitude: number): string {
+  return '#3b82f6'; // blue-500 - uniform color for all earthquake events
 }
 
 /**

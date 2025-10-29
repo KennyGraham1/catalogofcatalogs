@@ -1,7 +1,0 @@
-event_id,origin_time,latitude,longitude,depth_km,magnitude,mag_type,event_type,evaluation_status,azimuthal_gap,used_phase_count,used_station_count,standard_error,time_uncertainty,lat_uncertainty,lon_uncertainty,depth_uncertainty,mag_uncertainty,mag_station_count,source_agency
-2024abcd,2024-10-24T12:34:56.789Z,-41.2865,174.7762,33.0,5.8,Mw,earthquake,reviewed,85.5,45,18,0.35,0.5,2.5,3.1,5.0,0.2,25,GeoNet
-2024efgh,2024-10-24T14:22:10.123Z,-39.1234,176.5432,15.5,4.2,ML,earthquake,preliminary,120.3,32,12,0.52,0.8,3.2,3.8,6.5,0.3,18,GeoNet
-2024ijkl,2024-10-24T16:45:33.456Z,-43.5321,172.6543,8.2,3.5,ML,earthquake,final,95.2,28,10,0.28,0.4,2.1,2.5,4.2,0.15,15,GeoNet
-2024mnop,2024-10-24T18:12:45.789Z,-36.8485,174.7633,25.0,4.8,Mw,earthquake,reviewed,110.8,38,15,0.42,0.6,2.8,3.3,5.5,0.25,20,GeoNet
-2024qrst,2024-10-24T20:30:22.111Z,-41.5678,173.9876,42.3,5.1,Mw,earthquake,reviewed,78.4,52,22,0.31,0.45,2.2,2.9,4.8,0.18,28,GeoNet
-

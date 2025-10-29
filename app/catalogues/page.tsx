@@ -1,17 +1,18 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import { useCatalogues } from '@/contexts/CatalogueContext';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from '@/components/ui/table';
-import { 
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -26,7 +27,8 @@ import {
   Map,
   Calendar,
   Trash2,
-  Edit
+  Edit,
+  RefreshCw
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -43,6 +45,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
+import { GeographicSearchPanel, GeographicBounds } from '@/components/catalogues/GeographicSearchPanel';
+import { useDebounce } from '@/hooks/use-debounce';
 
 interface Catalogue {
   id: string;
@@ -52,6 +56,10 @@ interface Catalogue {
   merge_config: string;
   event_count: number;
   status: string;
+  min_latitude?: number | null;
+  max_latitude?: number | null;
+  min_longitude?: number | null;
+  max_longitude?: number | null;
 }
 
 type CatalogueStatus = 'all' | 'complete' | 'processing' | 'error';
@@ -60,59 +68,104 @@ type SortDirection = 'asc' | 'desc';
 
 export default function CataloguesPage() {
   const router = useRouter();
-  const [catalogues, setCatalogues] = useState<Catalogue[]>([]);
-  const [loading, setLoading] = useState(true);
+
+  // Use global catalogue context
+  const { catalogues: contextCatalogues, loading: contextLoading, refreshCatalogues } = useCatalogues();
+
+  const [catalogues, setCatalogues] = useState<Catalogue[]>(contextCatalogues);
+  const [loading, setLoading] = useState(contextLoading);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<CatalogueStatus>('all');
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedCatalogue, setSelectedCatalogue] = useState<Catalogue | null>(null);
+  const [geoSearchActive, setGeoSearchActive] = useState(false);
+  const [geoSearching, setGeoSearching] = useState(false);
+  const [geoSearchBounds, setGeoSearchBounds] = useState<GeographicBounds | null>(null);
 
-  // Fetch catalogues from API
+  // Debounce search query to avoid filtering on every keystroke
+  const debouncedSearchQuery = useDebounce(searchQuery, 300);
+
+  // Sync with context catalogues
   useEffect(() => {
+    if (!geoSearchActive) {
+      setCatalogues(contextCatalogues);
+      setLoading(contextLoading);
+    }
+  }, [contextCatalogues, contextLoading, geoSearchActive]);
+
+  const fetchCatalogues = async () => {
+    await refreshCatalogues();
+  };
+
+  // Memoized geographic search handler
+  const handleGeoSearch = useCallback(async (bounds: GeographicBounds) => {
+    try {
+      setGeoSearching(true);
+      const params = new URLSearchParams({
+        minLat: bounds.minLatitude.toString(),
+        maxLat: bounds.maxLatitude.toString(),
+        minLon: bounds.minLongitude.toString(),
+        maxLon: bounds.maxLongitude.toString(),
+      });
+
+      const response = await fetch(`/api/catalogues/search/region?${params}`);
+      if (!response.ok) throw new Error('Failed to search catalogues');
+
+      const data = await response.json();
+      setCatalogues(data.catalogues);
+      setGeoSearchActive(true);
+      setGeoSearchBounds(bounds);
+
+      toast({
+        title: "Search complete",
+        description: `Found ${data.count} catalogue(s) in the specified region`,
+      });
+    } catch (error) {
+      toast({
+        title: "Search failed",
+        description: error instanceof Error ? error.message : "Failed to search catalogues",
+        variant: "destructive",
+      });
+    } finally {
+      setGeoSearching(false);
+    }
+  }, []);
+
+  // Memoized clear handler
+  const handleClearGeoSearch = useCallback(() => {
+    setGeoSearchActive(false);
+    setGeoSearchBounds(null);
     fetchCatalogues();
   }, []);
 
-  const fetchCatalogues = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch('/api/catalogues');
-      if (!response.ok) throw new Error('Failed to fetch catalogues');
-      const data = await response.json();
-      setCatalogues(data);
-    } catch (error) {
-      toast({
-        title: "Error loading catalogues",
-        description: "Failed to load catalogues from the database",
-        variant: "destructive",
-      });
-      setCatalogues([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Memoized filtered catalogues (using debounced search query)
+  const filteredCatalogues = useMemo(() => {
+    return catalogues.filter(catalogue => {
+      const matchesSearch = catalogue.name.toLowerCase().includes(debouncedSearchQuery.toLowerCase());
+      const matchesStatus = statusFilter === 'all' || catalogue.status === statusFilter;
 
-  const filteredCatalogues = catalogues.filter(catalogue => {
-    const matchesSearch = catalogue.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || catalogue.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [catalogues, debouncedSearchQuery, statusFilter]);
 
-    return matchesSearch && matchesStatus;
-  });
+  // Memoized sorted catalogues
+  const sortedCatalogues = useMemo(() => {
+    return [...filteredCatalogues].sort((a, b) => {
+      let comparison = 0;
 
-  const sortedCatalogues = [...filteredCatalogues].sort((a, b) => {
-    let comparison = 0;
+      if (sortField === 'name') {
+        comparison = a.name.localeCompare(b.name);
+      } else if (sortField === 'date') {
+        comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      } else if (sortField === 'events') {
+        comparison = a.event_count - b.event_count;
+      }
 
-    if (sortField === 'name') {
-      comparison = a.name.localeCompare(b.name);
-    } else if (sortField === 'date') {
-      comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-    } else if (sortField === 'events') {
-      comparison = a.event_count - b.event_count;
-    }
-
-    return sortDirection === 'asc' ? comparison : -comparison;
-  });
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  }, [filteredCatalogues, sortField, sortDirection]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -329,13 +382,13 @@ export default function CataloguesPage() {
         <TableBody>
           {loading ? (
             <TableRow>
-              <TableCell colSpan={7} className="h-24 text-center">
+              <TableCell colSpan={8} className="h-24 text-center">
                 Loading catalogues...
               </TableCell>
             </TableRow>
           ) : catalogues.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={7} className="h-24 text-center">
+              <TableCell colSpan={8} className="h-24 text-center">
                 No catalogues found. Try adjusting your search or filters.
               </TableCell>
             </TableRow>
@@ -423,12 +476,48 @@ export default function CataloguesPage() {
     <>
       <div className="container py-8">
         <div className="flex flex-col gap-6">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Catalogues</h1>
-            <p className="text-muted-foreground">
-              Manage your earthquake catalogues and datasets
-            </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">Catalogues</h1>
+              <p className="text-muted-foreground">
+                Manage your earthquake catalogues and datasets
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={refreshCatalogues}
+              disabled={loading}
+              className="gap-2"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
           </div>
+
+          {/* Geographic Search Panel */}
+          <GeographicSearchPanel
+            onSearch={handleGeoSearch}
+            onClear={handleClearGeoSearch}
+            isSearching={geoSearching}
+          />
+
+          {geoSearchActive && geoSearchBounds && (
+            <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Map className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                  <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                    Showing catalogues in region: Lat {geoSearchBounds.minLatitude.toFixed(2)}° to {geoSearchBounds.maxLatitude.toFixed(2)}°,
+                    Lon {geoSearchBounds.minLongitude.toFixed(2)}° to {geoSearchBounds.maxLongitude.toFixed(2)}°
+                  </span>
+                </div>
+                <Button variant="ghost" size="sm" onClick={handleClearGeoSearch}>
+                  Clear Filter
+                </Button>
+              </div>
+            </div>
+          )}
 
           <Tabs defaultValue="all" value={statusFilter} onValueChange={(value) => setStatusFilter(value as CatalogueStatus)}>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
@@ -438,7 +527,7 @@ export default function CataloguesPage() {
                 <TabsTrigger value="processing">Processing</TabsTrigger>
                 <TabsTrigger value="error">Error</TabsTrigger>
               </TabsList>
-              
+
               <div className="flex flex-col sm:flex-row gap-2">
                 <div className="relative">
                   <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />

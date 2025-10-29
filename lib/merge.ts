@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { eventsMatch, calculateDistance, calculateTimeDifference } from './earthquake-utils';
 import type { SourceCatalogue, MergeConfig } from './validation';
 import type { QuakeMLEvent, Origin, Magnitude } from './types/quakeml';
+import { extractBoundsFromEvents } from './geo-bounds-utils';
 
 interface EventData {
   id?: string;
@@ -160,6 +161,18 @@ export async function mergeCatalogues(
       }
 
       await dbQueries.insertEvent(dbEvent);
+    }
+
+    // Extract and update geographic bounds
+    const bounds = extractBoundsFromEvents(mergedEvents);
+    if (bounds) {
+      await dbQueries.updateCatalogueGeoBounds(
+        catalogueId,
+        bounds.minLatitude,
+        bounds.maxLatitude,
+        bounds.minLongitude,
+        bounds.maxLongitude
+      );
     }
 
     // Update catalogue with event count and status

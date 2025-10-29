@@ -57,7 +57,20 @@ export async function GET(
     
     const maxStandardError = searchParams.get('maxStandardError');
     if (maxStandardError) filters.maxStandardError = parseFloat(maxStandardError);
-    
+
+    // Geographic bounds
+    const minLatitude = searchParams.get('minLatitude');
+    if (minLatitude) filters.minLatitude = parseFloat(minLatitude);
+
+    const maxLatitude = searchParams.get('maxLatitude');
+    if (maxLatitude) filters.maxLatitude = parseFloat(maxLatitude);
+
+    const minLongitude = searchParams.get('minLongitude');
+    if (minLongitude) filters.minLongitude = parseFloat(minLongitude);
+
+    const maxLongitude = searchParams.get('maxLongitude');
+    if (maxLongitude) filters.maxLongitude = parseFloat(maxLongitude);
+
     // Get filtered events
     const events = await dbQueries.getFilteredEvents(catalogueId, filters);
     

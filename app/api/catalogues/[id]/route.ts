@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { Logger, NotFoundError, DatabaseError, formatErrorResponse } from '@/lib/errors';
+import { apiCache } from '@/lib/cache';
 
 const logger = new Logger('CatalogueAPI');
 
@@ -50,6 +51,9 @@ export async function PATCH(
 
     logger.info('Catalogue updated successfully', { id: params.id });
 
+    // Clear cache since catalogue was updated
+    apiCache.clearAll();
+
     return NextResponse.json({ success: true });
   } catch (error) {
     logger.error('Failed to update catalogue', error, { id: params.id });
@@ -72,6 +76,9 @@ export async function DELETE(
     await dbQueries.deleteCatalogue(params.id);
 
     logger.info('Catalogue deleted successfully', { id: params.id });
+
+    // Clear cache since catalogue was deleted
+    apiCache.clearAll();
 
     return NextResponse.json({ success: true });
   } catch (error) {

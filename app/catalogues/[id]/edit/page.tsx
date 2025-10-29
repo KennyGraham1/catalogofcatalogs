@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
 import { ArrowLeft } from 'lucide-react';
+import { GeographicBoundsDisplay } from '@/components/catalogues/GeographicBoundsDisplay';
 
 interface Catalogue {
   id: string;
@@ -17,6 +18,10 @@ interface Catalogue {
   merge_config: string;
   event_count: number;
   status: string;
+  min_latitude?: number | null;
+  max_latitude?: number | null;
+  min_longitude?: number | null;
+  max_longitude?: number | null;
 }
 
 export default function EditCataloguePage({ params }: { params: { id: string } }) {
@@ -152,6 +157,15 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
               <p className="text-sm text-muted-foreground capitalize">
                 {catalogue.status}
               </p>
+            </div>
+
+            <div className="space-y-2">
+              <GeographicBoundsDisplay
+                minLatitude={catalogue.min_latitude}
+                maxLatitude={catalogue.max_latitude}
+                minLongitude={catalogue.min_longitude}
+                maxLongitude={catalogue.max_longitude}
+              />
             </div>
 
             <div className="flex gap-3 pt-4">

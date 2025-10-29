@@ -30,13 +30,13 @@ export function StationMarker({
   useEffect(() => {
     if (!map) return;
 
-    // Create SVG triangle icon
+    // Create SVG triangle icon (red for stations)
     const triangleSvg = `
       <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-        <path 
-          d="M 12 4 L 20 20 L 4 20 Z" 
-          fill="#3b82f6" 
-          stroke="#1e40af" 
+        <path
+          d="M 12 4 L 20 20 L 4 20 Z"
+          fill="#dc2626"
+          stroke="#991b1b"
           stroke-width="2"
           opacity="0.9"
         />

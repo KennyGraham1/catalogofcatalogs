@@ -1,5 +1,0 @@
-id,date,lat,lng,dep,m,magType,nst,gap,rms,net,place
-us2024001,2024-10-24T12:34:56.789Z,-41.2865,174.7762,33.0,5.8,mw,18,85.5,0.35,us,10 km NE of Wellington New Zealand
-us2024002,2024-10-24T14:22:10.123Z,-39.1234,176.5432,15.5,4.2,ml,12,120.3,0.52,us,20 km W of Napier New Zealand
-us2024003,2024-10-24T16:45:33.456Z,-43.5321,172.6543,8.2,3.5,ml,10,95.2,0.28,us,5 km S of Christchurch New Zealand
-

@@ -16,27 +16,20 @@ else
 fi
 
 echo ""
-echo "🔧 Running Database Migration..."
+echo "🔧 Initializing Database Schema..."
 echo "================================"
 
-# Run migration script
-npx tsx scripts/migrate-database.ts
+# Run database initialization script
+npx tsx scripts/init-database.ts
 
 echo ""
-echo "📊 Populating Test Data..."
+echo "📊 Populating Realistic NZ Earthquake Data..."
 echo "================================"
 
-# Run test data population script
-node scripts/populate-test-data.js
+# Run realistic NZ data population script
+npx tsx scripts/populate-realistic-nz-data.ts
 
 echo ""
 echo "✅ Database setup complete!"
 echo "================================"
-echo ""
-echo "Summary:"
-echo "- Old database removed"
-echo "- New database created with QuakeML 1.2 schema"
-echo "- Test data populated (5 catalogues, ~192 events)"
-echo ""
-echo "You can now start the application with: npm run dev"
 

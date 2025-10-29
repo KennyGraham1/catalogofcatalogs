@@ -10,6 +10,11 @@ export interface MergedCatalogue {
   merge_config: string;
   event_count: number;
   status: 'processing' | 'complete' | 'error';
+  // Geographic bounds
+  min_latitude?: number | null;
+  max_latitude?: number | null;
+  min_longitude?: number | null;
+  max_longitude?: number | null;
 }
 
 export interface MergedEvent {
@@ -110,6 +115,10 @@ export interface DbQueries {
 
   updateCatalogueName: (name: string, id: string) => Promise<void>;
 
+  updateCatalogueGeoBounds: (id: string, minLat: number, maxLat: number, minLon: number, maxLon: number) => Promise<void>;
+
+  getCataloguesByRegion: (minLat: number, maxLat: number, minLon: number, maxLon: number) => Promise<MergedCatalogue[]>;
+
   deleteCatalogue: (id: string) => Promise<void>;
 
   getFilteredEvents: (catalogueId: string, filters: EventFilters) => Promise<MergedEvent[]>;
@@ -178,6 +187,11 @@ export interface EventFilters {
   minUsedPhaseCount?: number;
   minUsedStationCount?: number;
   maxStandardError?: number;
+  // Geographic bounds
+  minLatitude?: number;
+  maxLatitude?: number;
+  minLongitude?: number;
+  maxLongitude?: number;
 }
 
 // Only initialize database on the server side
@@ -202,7 +216,11 @@ if (typeof window === 'undefined') {
         source_catalogues TEXT NOT NULL,
         merge_config TEXT NOT NULL,
         event_count INTEGER NOT NULL DEFAULT 0,
-        status TEXT NOT NULL DEFAULT 'processing'
+        status TEXT NOT NULL DEFAULT 'processing',
+        min_latitude REAL,
+        max_latitude REAL,
+        min_longitude REAL,
+        max_longitude REAL
       )
     `);
 
@@ -481,6 +499,62 @@ if (typeof window === 'undefined') {
       await dbRun(`UPDATE merged_catalogues SET name = ? WHERE id = ?`, [name, id]);
     },
 
+    updateCatalogueGeoBounds: async (id: string, minLat: number, maxLat: number, minLon: number, maxLon: number): Promise<void> => {
+      if (!id) {
+        throw new Error('Catalogue ID is required');
+      }
+      // Validate bounds
+      if (minLat < -90 || minLat > 90 || maxLat < -90 || maxLat > 90) {
+        throw new Error('Latitude must be between -90 and 90');
+      }
+      if (minLon < -180 || minLon > 180 || maxLon < -180 || maxLon > 180) {
+        throw new Error('Longitude must be between -180 and 180');
+      }
+      if (minLat > maxLat) {
+        throw new Error('Minimum latitude cannot be greater than maximum latitude');
+      }
+      if (minLon > maxLon) {
+        throw new Error('Minimum longitude cannot be greater than maximum longitude');
+      }
+
+      await dbRun(
+        `UPDATE merged_catalogues SET min_latitude = ?, max_latitude = ?, min_longitude = ?, max_longitude = ? WHERE id = ?`,
+        [minLat, maxLat, minLon, maxLon, id]
+      );
+    },
+
+    getCataloguesByRegion: async (minLat: number, maxLat: number, minLon: number, maxLon: number): Promise<MergedCatalogue[]> => {
+      // Validate bounds
+      if (minLat < -90 || minLat > 90 || maxLat < -90 || maxLat > 90) {
+        throw new Error('Latitude must be between -90 and 90');
+      }
+      if (minLon < -180 || minLon > 180 || maxLon < -180 || maxLon > 180) {
+        throw new Error('Longitude must be between -180 and 180');
+      }
+
+      // Find catalogues that overlap with the search region
+      // A catalogue overlaps if:
+      // - Its max_latitude >= search min_latitude AND
+      // - Its min_latitude <= search max_latitude AND
+      // - Its max_longitude >= search min_longitude AND
+      // - Its min_longitude <= search max_longitude
+      const catalogues = await dbAll(
+        `SELECT * FROM merged_catalogues
+         WHERE min_latitude IS NOT NULL
+         AND max_latitude IS NOT NULL
+         AND min_longitude IS NOT NULL
+         AND max_longitude IS NOT NULL
+         AND max_latitude >= ?
+         AND min_latitude <= ?
+         AND max_longitude >= ?
+         AND min_longitude <= ?
+         ORDER BY created_at DESC`,
+        [minLat, maxLat, minLon, maxLon]
+      );
+
+      return catalogues as MergedCatalogue[];
+    },
+
     deleteCatalogue: async (id: string): Promise<void> => {
       await dbRun(`DELETE FROM merged_catalogues WHERE id = ?`, [id]);
     },
@@ -545,6 +619,23 @@ if (typeof window === 'undefined') {
       if (filters.maxStandardError !== undefined) {
         conditions.push('standard_error <= ?');
         params.push(filters.maxStandardError);
+      }
+      // Geographic bounds filtering
+      if (filters.minLatitude !== undefined) {
+        conditions.push('latitude >= ?');
+        params.push(filters.minLatitude);
+      }
+      if (filters.maxLatitude !== undefined) {
+        conditions.push('latitude <= ?');
+        params.push(filters.maxLatitude);
+      }
+      if (filters.minLongitude !== undefined) {
+        conditions.push('longitude >= ?');
+        params.push(filters.minLongitude);
+      }
+      if (filters.maxLongitude !== undefined) {
+        conditions.push('longitude <= ?');
+        params.push(filters.maxLongitude);
       }
 
       const whereClause = conditions.join(' AND ');

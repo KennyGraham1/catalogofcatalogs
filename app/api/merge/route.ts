@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { mergeCatalogues as dbMergeCatalogues } from '@/lib/merge';
 import { validateMergeRequest, formatZodErrors } from '@/lib/validation';
+import { apiCache } from '@/lib/cache';
 
 export async function POST(request: Request) {
   try {
@@ -22,6 +23,9 @@ export async function POST(request: Request) {
     const { name, sourceCatalogues, config } = validation.data!;
 
     const result = await dbMergeCatalogues(name, sourceCatalogues, config);
+
+    // Clear cache since a new catalogue was created
+    apiCache.clearAll();
 
     return NextResponse.json(result);
   } catch (error) {

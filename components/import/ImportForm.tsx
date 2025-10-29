@@ -36,6 +36,10 @@ export function ImportForm() {
   const [endDate, setEndDate] = useState('');
   const [minMagnitude, setMinMagnitude] = useState('');
   const [maxMagnitude, setMaxMagnitude] = useState('');
+  const [minLatitude, setMinLatitude] = useState('');
+  const [maxLatitude, setMaxLatitude] = useState('');
+  const [minLongitude, setMinLongitude] = useState('');
+  const [maxLongitude, setMaxLongitude] = useState('');
   const [updateExisting, setUpdateExisting] = useState(false);
   const [catalogueName, setCatalogueName] = useState('GeoNet - Automated Import');
   
@@ -65,6 +69,20 @@ export function ImportForm() {
       }
       if (maxMagnitude) {
         body.maxMagnitude = parseFloat(maxMagnitude);
+      }
+
+      // Add geographic filters
+      if (minLatitude) {
+        body.minLatitude = parseFloat(minLatitude);
+      }
+      if (maxLatitude) {
+        body.maxLatitude = parseFloat(maxLatitude);
+      }
+      if (minLongitude) {
+        body.minLongitude = parseFloat(minLongitude);
+      }
+      if (maxLongitude) {
+        body.maxLongitude = parseFloat(maxLongitude);
       }
       
       const response = await fetch('/api/import/geonet', {
@@ -185,7 +203,58 @@ export function ImportForm() {
                 </div>
               </div>
             </div>
-            
+
+            {/* Geographic Filters */}
+            <div className="space-y-4">
+              <Label>Geographic Bounds (Optional)</Label>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="minLatitude">Minimum Latitude</Label>
+                  <Input
+                    id="minLatitude"
+                    type="number"
+                    step="0.1"
+                    placeholder="e.g., -47.5 (South)"
+                    value={minLatitude}
+                    onChange={(e) => setMinLatitude(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="maxLatitude">Maximum Latitude</Label>
+                  <Input
+                    id="maxLatitude"
+                    type="number"
+                    step="0.1"
+                    placeholder="e.g., -34.0 (North)"
+                    value={maxLatitude}
+                    onChange={(e) => setMaxLatitude(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="minLongitude">Minimum Longitude</Label>
+                  <Input
+                    id="minLongitude"
+                    type="number"
+                    step="0.1"
+                    placeholder="e.g., 165.0 (West)"
+                    value={minLongitude}
+                    onChange={(e) => setMinLongitude(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="maxLongitude">Maximum Longitude</Label>
+                  <Input
+                    id="maxLongitude"
+                    type="number"
+                    step="0.1"
+                    placeholder="e.g., 179.0 (East)"
+                    value={maxLongitude}
+                    onChange={(e) => setMaxLongitude(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+
             {/* Catalogue Name */}
             <div className="space-y-2">
               <Label htmlFor="catalogueName">Catalogue Name</Label>

@@ -6,6 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { geonetImportService } from '@/lib/geonet-import-service';
+import { apiCache } from '@/lib/cache';
 
 export async function POST(request: NextRequest) {
   try {
@@ -119,7 +120,10 @@ export async function POST(request: NextRequest) {
     });
     
     console.log('[API] Import completed:', result);
-    
+
+    // Clear cache since new events were imported
+    apiCache.clearAll();
+
     return NextResponse.json(result);
   } catch (error) {
     console.error('[API] Import error:', error);

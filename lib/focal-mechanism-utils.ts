@@ -23,18 +23,37 @@ export interface BeachBallPoint {
 
 /**
  * Parse focal mechanism data from JSON string
+ * Supports both QuakeML format and simplified format
  */
 export function parseFocalMechanism(focalMechanismsJson: string | null | undefined): FocalMechanism | null {
   if (!focalMechanismsJson) return null;
-  
+
   try {
     const mechanisms = JSON.parse(focalMechanismsJson);
     if (!Array.isArray(mechanisms) || mechanisms.length === 0) return null;
-    
+
     const fm = mechanisms[0]; // Use first focal mechanism
-    
+
+    // Check if this is the simplified format (direct nodalPlane1/nodalPlane2)
+    if (fm.nodalPlane1 && typeof fm.nodalPlane1.strike === 'number') {
+      return {
+        nodalPlane1: {
+          strike: fm.nodalPlane1.strike,
+          dip: fm.nodalPlane1.dip,
+          rake: fm.nodalPlane1.rake,
+        },
+        nodalPlane2: fm.nodalPlane2 ? {
+          strike: fm.nodalPlane2.strike,
+          dip: fm.nodalPlane2.dip,
+          rake: fm.nodalPlane2.rake,
+        } : undefined,
+        preferredPlane: fm.preferredPlane || 1,
+      };
+    }
+
+    // Otherwise, try QuakeML format (nested nodalPlanes with value objects)
     if (!fm.nodalPlanes) return null;
-    
+
     return {
       nodalPlane1: fm.nodalPlanes.nodalPlane1 ? {
         strike: fm.nodalPlanes.nodalPlane1.strike?.value || 0,
@@ -122,20 +141,10 @@ export function generateBeachBallSVG(
     compressionalPaths.push(pointsToPath(currentPath, center, radius));
   }
   
-  // Build SVG
-  const svg = `
-    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
-      <!-- White background circle -->
-      <circle cx="${center}" cy="${center}" r="${radius * 0.95}" fill="white" stroke="black" stroke-width="2"/>
-      
-      <!-- Compressional quadrants (black) -->
-      ${compressionalPaths.map(path => `<path d="${path}" fill="black" />`).join('\n      ')}
-      
-      <!-- Outer circle border -->
-      <circle cx="${center}" cy="${center}" r="${radius * 0.95}" fill="none" stroke="black" stroke-width="2"/>
-    </svg>
-  `;
-  
+  // Build SVG (compact format for better data URL encoding)
+  const pathElements = compressionalPaths.map(path => `<path d="${path}" fill="black"/>`).join('');
+  const svg = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg"><circle cx="${center}" cy="${center}" r="${radius * 0.95}" fill="white" stroke="black" stroke-width="2"/>${pathElements}<circle cx="${center}" cy="${center}" r="${radius * 0.95}" fill="none" stroke="black" stroke-width="2"/></svg>`;
+
   return svg;
 }
 
