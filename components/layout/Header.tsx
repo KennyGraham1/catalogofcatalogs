@@ -10,12 +10,10 @@ import {
   Menu,
   X,
   Database,
-  BarChart3,
   TrendingUp,
   Download,
   Keyboard,
-  Search,
-  LineChart
+  Search
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -45,9 +43,7 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
     { href: '/catalogues', label: 'Catalogues', icon: Database },
     { href: '/import', label: 'Import', icon: Download },
     { href: '/merge', label: 'Merge', icon: Layers },
-    { href: '/visualize', label: 'Visualize', icon: BarChart3 },
-    { href: '/analytics', label: 'Analytics', icon: TrendingUp },
-    { href: '/advanced-analytics', label: 'Advanced Analytics', icon: LineChart },
+    { href: '/analytics', label: 'Visualization & Analytics', icon: TrendingUp },
     { href: '/settings', label: 'Settings', icon: Settings },
   ];
 

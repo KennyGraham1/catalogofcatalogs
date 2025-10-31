@@ -26,40 +26,40 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState('overview');
 
   return (
-    <div className="container py-8">
+    <div className="container py-6 max-w-7xl mx-auto">
       <div className="flex flex-col gap-6">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-sm text-muted-foreground">
             Overview of your earthquake catalogue data and recent activity.
           </p>
         </div>
 
         <Tabs defaultValue="overview" value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList>
+          <TabsList className="grid w-full max-w-md grid-cols-3">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="activity">Activity</TabsTrigger>
             <TabsTrigger value="map">Map View</TabsTrigger>
           </TabsList>
-          
+
           <TabsContent value="overview" className="space-y-4">
             <StatisticsCards />
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Recent Catalogues</CardTitle>
-                  <CardDescription>Your recently uploaded and processed earthquake catalogues</CardDescription>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Card className="shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Recent Catalogues</CardTitle>
+                  <CardDescription className="text-xs">Your recently uploaded and processed earthquake catalogues</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <RecentCatalogues />
                 </CardContent>
               </Card>
-              
-              <Card>
-                <CardHeader>
-                  <CardTitle>Processing Status</CardTitle>
-                  <CardDescription>Status of your catalogue processing jobs</CardDescription>
+
+              <Card className="shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Processing Status</CardTitle>
+                  <CardDescription className="text-xs">Status of your catalogue processing jobs</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <ProcessingStatus />
@@ -67,24 +67,24 @@ export default function DashboardPage() {
               </Card>
             </div>
           </TabsContent>
-          
+
           <TabsContent value="activity">
-            <Card>
-              <CardHeader>
-                <CardTitle>Activity Feed</CardTitle>
-                <CardDescription>Recent activity on your earthquake catalogues</CardDescription>
+            <Card className="shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Activity Feed</CardTitle>
+                <CardDescription className="text-xs">Recent activity on your earthquake catalogues</CardDescription>
               </CardHeader>
               <CardContent>
                 <ActivityFeed />
               </CardContent>
             </Card>
           </TabsContent>
-          
+
           <TabsContent value="map">
-            <Card>
-              <CardHeader>
-                <CardTitle>Earthquake Data Visualization</CardTitle>
-                <CardDescription>Geographical view of your earthquake catalogue data</CardDescription>
+            <Card className="shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Earthquake Data Visualization</CardTitle>
+                <CardDescription className="text-xs">Geographical view of your earthquake catalogue data</CardDescription>
               </CardHeader>
               <CardContent className="p-0">
                 <CatalogueMap />

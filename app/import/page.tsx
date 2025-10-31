@@ -46,10 +46,10 @@ export default function ImportPage() {
   }, []);
   
   return (
-    <div className="container mx-auto py-8 px-4 max-w-6xl">
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold mb-2">GeoNet Data Import</h1>
-        <p className="text-muted-foreground">
+    <div className="container py-6 max-w-7xl mx-auto">
+      <div className="mb-6 space-y-1">
+        <h1 className="text-2xl font-bold tracking-tight">GeoNet Data Import</h1>
+        <p className="text-sm text-muted-foreground">
           Automatically import earthquake events from the GeoNet FDSN Event Web Service
         </p>
       </div>
@@ -74,18 +74,18 @@ export default function ImportPage() {
           <ImportForm />
         </TabsContent>
         
-        <TabsContent value="history" className="space-y-6">
+        <TabsContent value="history" className="space-y-4">
           {!isLoadingCatalogues && catalogues.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Select Catalogue</CardTitle>
-                <CardDescription>
+            <Card className="shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Select Catalogue</CardTitle>
+                <CardDescription className="text-xs">
                   Choose a catalogue to view its import history
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  <Label htmlFor="catalogue-select">Catalogue</Label>
+                  <Label htmlFor="catalogue-select" className="text-sm">Catalogue</Label>
                   <Select value={selectedCatalogueId} onValueChange={setSelectedCatalogueId}>
                     <SelectTrigger id="catalogue-select">
                       <SelectValue placeholder="Select a catalogue" />
@@ -102,15 +102,15 @@ export default function ImportPage() {
               </CardContent>
             </Card>
           )}
-          
+
           <ImportHistory catalogueId={selectedCatalogueId} limit={20} />
         </TabsContent>
-        
-        <TabsContent value="info" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>About GeoNet Import</CardTitle>
-              <CardDescription>
+
+        <TabsContent value="info" className="space-y-4">
+          <Card className="shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">About GeoNet Import</CardTitle>
+              <CardDescription className="text-xs">
                 Information about the GeoNet FDSN Event Web Service integration
               </CardDescription>
             </CardHeader>

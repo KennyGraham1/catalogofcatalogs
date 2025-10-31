@@ -542,12 +542,12 @@ export default function CataloguesPage() {
 
   return (
     <>
-      <div className="container py-8">
+      <div className="container py-6 max-w-7xl mx-auto">
         <div className="flex flex-col gap-6">
           <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">Catalogues</h1>
-              <p className="text-muted-foreground">
+            <div className="space-y-1">
+              <h1 className="text-2xl font-bold tracking-tight">Catalogues</h1>
+              <p className="text-sm text-muted-foreground">
                 Manage your earthquake catalogues and datasets
               </p>
             </div>

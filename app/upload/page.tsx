@@ -10,8 +10,12 @@ import { Label } from '@/components/ui/label';
 import { FileUploader } from '@/components/upload/FileUploader';
 import { EnhancedSchemaMapper } from '@/components/upload/EnhancedSchemaMapper';
 import { ValidationResults } from '@/components/upload/ValidationResults';
+import { DataQualityReport } from '@/components/upload/DataQualityReport';
+import { DataCompletenessMetrics } from '@/components/upload/DataCompletenessMetrics';
 import { CatalogueMetadataForm, CatalogueMetadata } from '@/components/upload/CatalogueMetadataForm';
 import { toast } from '@/hooks/use-toast';
+import { performQualityCheck } from '@/lib/data-quality-checker';
+import { validateEventsCrossFields } from '@/lib/cross-field-validation';
 
 type UploadStatus = 'idle' | 'uploading' | 'validating' | 'mapping' | 'metadata' | 'processing' | 'complete' | 'error';
 
@@ -20,6 +24,9 @@ export default function UploadPage() {
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
   const [files, setFiles] = useState<File[]>([]);
   const [validationResults, setValidationResults] = useState<any | null>(null);
+  const [qualityCheckResult, setQualityCheckResult] = useState<any | null>(null);
+  const [crossFieldValidation, setCrossFieldValidation] = useState<any | null>(null);
+  const [parsedEvents, setParsedEvents] = useState<any[]>([]);
   const [isSchemaReady, setIsSchemaReady] = useState(false);
   const [catalogueName, setCatalogueName] = useState('');
   const [metadata, setMetadata] = useState<CatalogueMetadata>({});
@@ -53,7 +60,7 @@ export default function UploadPage() {
         // Generate mock validation results
         const results = files.map(file => {
           const isValid = Math.random() > 0.3;
-          
+
           return {
             fileName: file.name,
             isValid,
@@ -69,7 +76,32 @@ export default function UploadPage() {
             fields: ['time', 'latitude', 'longitude', 'depth', 'magnitude', 'source', 'eventId']
           };
         });
-        
+
+        // Generate mock parsed events for quality assessment
+        const mockEvents = Array.from({ length: 100 }, (_, i) => ({
+          time: new Date(Date.now() - Math.random() * 365 * 24 * 60 * 60 * 1000).toISOString(),
+          latitude: -41.5 + (Math.random() - 0.5) * 10,
+          longitude: 174.0 + (Math.random() - 0.5) * 10,
+          depth: Math.random() * 100,
+          magnitude: 2 + Math.random() * 5,
+          latitude_uncertainty: Math.random() > 0.5 ? Math.random() * 0.1 : undefined,
+          longitude_uncertainty: Math.random() > 0.5 ? Math.random() * 0.1 : undefined,
+          depth_uncertainty: Math.random() > 0.5 ? Math.random() * 5 : undefined,
+          azimuthal_gap: Math.random() > 0.5 ? Math.random() * 180 : undefined,
+          used_phase_count: Math.random() > 0.5 ? Math.floor(Math.random() * 50) + 10 : undefined,
+          used_station_count: Math.random() > 0.5 ? Math.floor(Math.random() * 20) + 5 : undefined,
+        }));
+
+        setParsedEvents(mockEvents);
+
+        // Perform quality check
+        const qualityResult = performQualityCheck(mockEvents);
+        setQualityCheckResult(qualityResult);
+
+        // Perform cross-field validation
+        const crossFieldResult = validateEventsCrossFields(mockEvents);
+        setCrossFieldValidation(crossFieldResult);
+
         setValidationResults(results);
         setUploadStatus(results.some(r => !r.isValid) ? 'error' : 'mapping');
 
@@ -137,21 +169,21 @@ export default function UploadPage() {
   };
 
   return (
-    <div className="container py-8">
+    <div className="container py-6 max-w-7xl mx-auto">
       <div className="flex flex-col gap-6">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Upload Catalogues</h1>
-          <p className="text-muted-foreground">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold tracking-tight">Upload Catalogues</h1>
+          <p className="text-sm text-muted-foreground">
             Upload and process earthquake catalogue files from various sources and formats.
           </p>
         </div>
 
-        <Card>
-          <CardHeader>
+        <Card className="shadow-sm">
+          <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle>Catalogue Processing</CardTitle>
-                <CardDescription>
+                <CardTitle className="text-base">Catalogue Processing</CardTitle>
+                <CardDescription className="text-xs">
                   Upload, validate, and configure your earthquake catalogue data
                 </CardDescription>
               </div>
@@ -176,16 +208,55 @@ export default function UploadPage() {
               </TabsList>
               
               <TabsContent value="upload" className="pt-6">
-                <FileUploader 
+                <FileUploader
                   files={files}
                   onFilesAdded={handleFilesAdded}
                   onFileRemoved={handleFileRemoved}
-                  uploading={uploadStatus === 'uploading'} 
+                  uploading={uploadStatus === 'uploading'}
                 />
 
                 {validationResults && (
-                  <div className="mt-6">
+                  <div className="mt-6 space-y-6">
                     <ValidationResults results={validationResults} />
+
+                    {qualityCheckResult && (
+                      <DataQualityReport result={qualityCheckResult} />
+                    )}
+
+                    {parsedEvents.length > 0 && (
+                      <DataCompletenessMetrics events={parsedEvents} />
+                    )}
+
+                    {crossFieldValidation && crossFieldValidation.summary.errors > 0 && (
+                      <Card className="shadow-sm border-amber-200 dark:border-amber-800">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-base text-amber-800 dark:text-amber-300">
+                            Cross-Field Validation Issues
+                          </CardTitle>
+                          <CardDescription className="text-xs">
+                            {crossFieldValidation.summary.errors} error(s), {crossFieldValidation.summary.warnings} warning(s) detected
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-2">
+                            {crossFieldValidation.results
+                              .filter((r: any) => r.checks.length > 0)
+                              .slice(0, 5)
+                              .map((result: any, idx: number) => (
+                                <div key={idx} className="text-xs p-2 bg-muted/50 rounded">
+                                  <span className="font-medium">Event {result.eventIndex + 1}:</span>{' '}
+                                  {result.checks[0].message}
+                                </div>
+                              ))}
+                            {crossFieldValidation.results.filter((r: any) => r.checks.length > 0).length > 5 && (
+                              <p className="text-xs text-muted-foreground italic">
+                                ...and {crossFieldValidation.results.filter((r: any) => r.checks.length > 0).length - 5} more issues
+                              </p>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
                   </div>
                 )}
               </TabsContent>

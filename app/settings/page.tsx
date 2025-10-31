@@ -27,11 +27,11 @@ import {
 
 export default function SettingsPage() {
   return (
-    <div className="container py-8">
+    <div className="container py-6 max-w-7xl mx-auto">
       <div className="flex flex-col gap-6">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-          <p className="text-muted-foreground">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+          <p className="text-sm text-muted-foreground">
             Manage application settings and preferences
           </p>
         </div>
@@ -45,13 +45,13 @@ export default function SettingsPage() {
           </TabsList>
           
           <TabsContent value="general" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Settings className="h-5 w-5" />
+            <Card className="shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Settings className="h-4 w-4" />
                   General Settings
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="text-xs">
                   Configure basic application settings and preferences
                 </CardDescription>
               </CardHeader>
@@ -149,13 +149,13 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
             
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Shield className="h-5 w-5" />
+            <Card className="shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Shield className="h-4 w-4" />
                   Account Settings
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="text-xs">
                   Manage your account information and security preferences
                 </CardDescription>
               </CardHeader>
@@ -208,13 +208,13 @@ export default function SettingsPage() {
           </TabsContent>
           
           <TabsContent value="schema" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Database className="h-5 w-5" />
+            <Card className="shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Database className="h-4 w-4" />
                   Schema Mapping Configuration
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="text-xs">
                   Configure default schema mappings for different file formats
                 </CardDescription>
               </CardHeader>
@@ -352,13 +352,13 @@ export default function SettingsPage() {
           </TabsContent>
           
           <TabsContent value="visualization" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Map className="h-5 w-5" />
+            <Card className="shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Map className="h-4 w-4" />
                   Visualization Settings
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="text-xs">
                   Configure how earthquake data is displayed in maps and charts
                 </CardDescription>
               </CardHeader>
@@ -484,13 +484,13 @@ export default function SettingsPage() {
           </TabsContent>
           
           <TabsContent value="advanced" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Sliders className="h-5 w-5" />
+            <Card className="shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Sliders className="h-4 w-4" />
                   Advanced Settings
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="text-xs">
                   Configure advanced application settings for performance and compatibility
                 </CardDescription>
               </CardHeader>

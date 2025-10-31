@@ -384,21 +384,21 @@ export default function MergePage() {
   };
 
   return (
-    <div className="container py-8">
+    <div className="container py-6 max-w-7xl mx-auto">
       <div className="flex flex-col gap-6">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Merge Catalogues</h1>
-          <p className="text-muted-foreground">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold tracking-tight">Merge Catalogues</h1>
+          <p className="text-sm text-muted-foreground">
             Combine multiple earthquake catalogues into a unified dataset
           </p>
         </div>
 
-        <Card>
-          <CardHeader>
+        <Card className="shadow-sm">
+          <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle>Catalogue Merging Wizard</CardTitle>
-                <CardDescription>
+                <CardTitle className="text-base">Catalogue Merging Wizard</CardTitle>
+                <CardDescription className="text-xs">
                   Merge multiple earthquake catalogues using configurable rules for matching events
                 </CardDescription>
               </div>
