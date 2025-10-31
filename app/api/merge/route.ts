@@ -20,12 +20,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const { name, sourceCatalogues, config } = validation.data!;
+    const { name, sourceCatalogues, config, metadata, exportOnly } = body;
 
-    const result = await dbMergeCatalogues(name, sourceCatalogues, config);
+    const result = await dbMergeCatalogues(name, sourceCatalogues, config, metadata, exportOnly);
 
-    // Clear cache since a new catalogue was created
-    apiCache.clearAll();
+    // Clear cache since a new catalogue was created (unless export-only mode)
+    if (!exportOnly) {
+      apiCache.clearAll();
+    }
 
     return NextResponse.json(result);
   } catch (error) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
@@ -14,7 +14,8 @@ import {
   Activity,
   Calendar,
   Filter,
-  RefreshCw
+  RefreshCw,
+  Loader2
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { 
@@ -42,29 +43,16 @@ const NZEarthquakeMap = dynamic(() => import('@/components/visualize/NZEarthquak
   loading: () => <div className="h-[600px] w-full bg-muted animate-pulse rounded-lg" />
 });
 
-// Mock New Zealand earthquake data
-const mockNZEarthquakes = [
-  { id: 1, latitude: -41.2865, longitude: 174.7762, magnitude: 4.5, depth: 25, time: "2023-09-01T10:30:00Z", region: "Wellington", catalogue: "GeoNet" },
-  { id: 2, latitude: -36.8485, longitude: 174.7633, magnitude: 3.2, depth: 12, time: "2023-09-02T15:45:00Z", region: "Auckland", catalogue: "GeoNet" },
-  { id: 3, latitude: -43.5321, longitude: 172.6362, magnitude: 4.8, depth: 15, time: "2023-09-03T08:15:00Z", region: "Christchurch", catalogue: "Canterbury Seismic Network" },
-  { id: 4, latitude: -45.0312, longitude: 168.6626, magnitude: 3.7, depth: 8, time: "2023-09-04T12:00:00Z", region: "Queenstown", catalogue: "Otago Regional Network" },
-  { id: 5, latitude: -39.0556, longitude: 174.0752, magnitude: 5.2, depth: 30, time: "2023-09-05T22:30:00Z", region: "New Plymouth", catalogue: "GeoNet" },
-  { id: 6, latitude: -37.7870, longitude: 175.2793, magnitude: 2.8, depth: 5, time: "2023-09-06T14:20:00Z", region: "Hamilton", catalogue: "GeoNet" },
-  { id: 7, latitude: -40.9006, longitude: 175.9972, magnitude: 4.1, depth: 20, time: "2023-09-07T09:10:00Z", region: "Masterton", catalogue: "Wellington Region Network" },
-  { id: 8, latitude: -38.1368, longitude: 176.2497, magnitude: 3.9, depth: 15, time: "2023-09-08T18:05:00Z", region: "Rotorua", catalogue: "Taupo Volcanic Zone" },
-  { id: 9, latitude: -42.4497, longitude: 173.5446, magnitude: 5.8, depth: 12, time: "2023-09-09T03:25:00Z", region: "Kaikoura", catalogue: "GeoNet" },
-  { id: 10, latitude: -39.4902, longitude: 176.9169, magnitude: 3.5, depth: 18, time: "2023-09-10T16:40:00Z", region: "Napier", catalogue: "Hawke's Bay Network" },
-  { id: 11, latitude: -44.3869, longitude: 171.2505, magnitude: 4.2, depth: 22, time: "2023-09-11T11:15:00Z", region: "Timaru", catalogue: "Canterbury Seismic Network" },
-  { id: 12, latitude: -46.4132, longitude: 168.3538, magnitude: 4.9, depth: 35, time: "2023-09-12T07:50:00Z", region: "Fiordland", catalogue: "GNS" },
-  { id: 13, latitude: -41.5000, longitude: 173.9667, magnitude: 3.1, depth: 8, time: "2023-09-13T20:30:00Z", region: "Blenheim", catalogue: "GeoNet" },
-  { id: 14, latitude: -38.6857, longitude: 176.0702, magnitude: 4.6, depth: 28, time: "2023-09-14T05:20:00Z", region: "Taupo", catalogue: "Taupo Volcanic Zone" },
-  { id: 15, latitude: -43.8821, longitude: 170.5028, magnitude: 3.8, depth: 10, time: "2023-09-15T13:45:00Z", region: "Wanaka", catalogue: "Alpine Fault Monitoring" },
-  { id: 16, latitude: -35.7275, longitude: 174.3166, magnitude: 2.9, depth: 6, time: "2023-09-16T09:00:00Z", region: "Whangarei", catalogue: "Northland Network" },
-  { id: 17, latitude: -41.7833, longitude: 171.5833, magnitude: 5.1, depth: 40, time: "2023-09-17T22:10:00Z", region: "Westport", catalogue: "GNS" },
-  { id: 18, latitude: -37.0167, longitude: 174.8833, magnitude: 3.3, depth: 14, time: "2023-09-18T15:30:00Z", region: "Manukau", catalogue: "GeoNet" },
-  { id: 19, latitude: -45.8667, longitude: 170.5000, magnitude: 4.4, depth: 25, time: "2023-09-19T08:25:00Z", region: "Dunedin", catalogue: "Otago Regional Network" },
-  { id: 20, latitude: -40.3500, longitude: 175.6167, magnitude: 3.6, depth: 16, time: "2023-09-20T12:55:00Z", region: "Palmerston North", catalogue: "Wellington Region Network" }
-];
+interface Earthquake {
+  id: number;
+  latitude: number;
+  longitude: number;
+  magnitude: number;
+  depth: number;
+  time: string;
+  region?: string;
+  catalogue?: string;
+}
 
 export default function VisualizePage() {
   const [activeTab, setActiveTab] = useState('map');
@@ -74,29 +62,72 @@ export default function VisualizePage() {
   const [selectedCatalogues, setSelectedCatalogues] = useState<string[]>([]);
   const [colorBy, setColorBy] = useState<'magnitude' | 'depth'>('magnitude');
   const [timeFilter, setTimeFilter] = useState('all');
+  const [earthquakes, setEarthquakes] = useState<Earthquake[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch all earthquakes from all catalogues
+  useEffect(() => {
+    async function fetchEarthquakes() {
+      try {
+        setLoading(true);
+        const response = await fetch('/api/catalogues');
+        if (!response.ok) throw new Error('Failed to fetch catalogues');
+
+        const catalogues = await response.json();
+
+        // Fetch events from all catalogues
+        const allEvents: Earthquake[] = [];
+        for (const catalogue of catalogues) {
+          try {
+            const eventsResponse = await fetch(`/api/catalogues/${catalogue.id}/events`);
+            if (eventsResponse.ok) {
+              const events = await eventsResponse.json();
+              // Add catalogue name to each event
+              const eventsWithCatalogue = events.map((event: any) => ({
+                ...event,
+                catalogue: catalogue.name,
+                region: event.region || 'Unknown'
+              }));
+              allEvents.push(...eventsWithCatalogue);
+            }
+          } catch (error) {
+            console.error(`Failed to fetch events for catalogue ${catalogue.id}:`, error);
+          }
+        }
+
+        setEarthquakes(allEvents);
+      } catch (error) {
+        console.error('Error fetching earthquake data:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchEarthquakes();
+  }, []);
 
   // Get unique regions and catalogues
-  const regions = useMemo(() => 
-    Array.from(new Set(mockNZEarthquakes.map(e => e.region))).sort(),
-    []
+  const regions = useMemo(() =>
+    Array.from(new Set(earthquakes.map(e => e.region || 'Unknown'))).sort(),
+    [earthquakes]
   );
 
-  const catalogues = useMemo(() => 
-    Array.from(new Set(mockNZEarthquakes.map(e => e.catalogue))).sort(),
-    []
+  const catalogues = useMemo(() =>
+    Array.from(new Set(earthquakes.map(e => e.catalogue || 'Unknown'))).sort(),
+    [earthquakes]
   );
 
   // Filter earthquakes based on current filters
   const filteredEarthquakes = useMemo(() => {
-    return mockNZEarthquakes.filter(eq => {
+    return earthquakes.filter(eq => {
       const magnitudeMatch = eq.magnitude >= magnitudeRange[0] && eq.magnitude <= magnitudeRange[1];
       const depthMatch = eq.depth >= depthRange[0] && eq.depth <= depthRange[1];
-      const regionMatch = selectedRegions.length === 0 || selectedRegions.includes(eq.region);
-      const catalogueMatch = selectedCatalogues.length === 0 || selectedCatalogues.includes(eq.catalogue);
-      
+      const regionMatch = selectedRegions.length === 0 || selectedRegions.includes(eq.region || 'Unknown');
+      const catalogueMatch = selectedCatalogues.length === 0 || selectedCatalogues.includes(eq.catalogue || 'Unknown');
+
       return magnitudeMatch && depthMatch && regionMatch && catalogueMatch;
     });
-  }, [magnitudeRange, depthRange, selectedRegions, selectedCatalogues]);
+  }, [earthquakes, magnitudeRange, depthRange, selectedRegions, selectedCatalogues]);
 
   // Prepare data for charts
   const magnitudeDistribution = useMemo(() => {
@@ -136,9 +167,10 @@ export default function VisualizePage() {
   const regionDistribution = useMemo(() => {
     const distribution: Record<string, number> = {};
     filteredEarthquakes.forEach(eq => {
-      distribution[eq.region] = (distribution[eq.region] || 0) + 1;
+      const region = eq.region || 'Unknown';
+      distribution[region] = (distribution[region] || 0) + 1;
     });
-    
+
     return Object.entries(distribution)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
@@ -148,9 +180,10 @@ export default function VisualizePage() {
   const catalogueDistribution = useMemo(() => {
     const distribution: Record<string, number> = {};
     filteredEarthquakes.forEach(eq => {
-      distribution[eq.catalogue] = (distribution[eq.catalogue] || 0) + 1;
+      const catalogue = eq.catalogue || 'Unknown';
+      distribution[catalogue] = (distribution[catalogue] || 0) + 1;
     });
-    
+
     return Object.entries(distribution)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value);
@@ -172,7 +205,7 @@ export default function VisualizePage() {
     return filteredEarthquakes.map(eq => ({
       magnitude: eq.magnitude,
       depth: eq.depth,
-      region: eq.region
+      region: eq.region || 'Unknown'
     }));
   }, [filteredEarthquakes]);
 
@@ -195,12 +228,40 @@ export default function VisualizePage() {
   };
 
   const handleCatalogueToggle = (catalogue: string) => {
-    setSelectedCatalogues(prev => 
-      prev.includes(catalogue) 
+    setSelectedCatalogues(prev =>
+      prev.includes(catalogue)
         ? prev.filter(c => c !== catalogue)
         : [...prev, catalogue]
     );
   };
+
+  if (loading) {
+    return (
+      <div className="container py-8">
+        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+          <Loader2 className="h-12 w-12 animate-spin text-primary" />
+          <p className="text-muted-foreground">Loading earthquake data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (earthquakes.length === 0) {
+    return (
+      <div className="container py-8">
+        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+          <MapPin className="h-12 w-12 text-muted-foreground" />
+          <h2 className="text-2xl font-bold">No Earthquake Data Available</h2>
+          <p className="text-muted-foreground text-center max-w-md">
+            Upload catalogues or create merged catalogues to visualize earthquake data.
+          </p>
+          <Button onClick={() => window.location.href = '/upload'}>
+            Upload Catalogue
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="container py-8">
@@ -208,7 +269,7 @@ export default function VisualizePage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Data Visualization</h1>
           <p className="text-muted-foreground">
-            Interactive visualization and analysis of New Zealand earthquake catalogue data
+            Interactive visualization and analysis of earthquake catalogue data
           </p>
         </div>
 
@@ -226,7 +287,7 @@ export default function VisualizePage() {
                 </Button>
               </div>
               <CardDescription>
-                {filteredEarthquakes.length} of {mockNZEarthquakes.length} events
+                {filteredEarthquakes.length} of {earthquakes.length} events
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -347,7 +408,7 @@ export default function VisualizePage() {
                 <CardContent>
                   <div className="text-2xl font-bold">{filteredEarthquakes.length}</div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Filtered from {mockNZEarthquakes.length}
+                    Filtered from {earthquakes.length}
                   </p>
                 </CardContent>
               </Card>

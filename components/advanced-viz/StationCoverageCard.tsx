@@ -4,12 +4,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Radio, Target, Ruler, TrendingUp } from 'lucide-react';
-import { 
-  StationCoverage, 
+import {
+  StationCoverage,
   getCoverageQualityColor,
   calculateStationDistributionRatio,
-  getStationDistributionDescription 
+  getStationDistributionDescription
 } from '@/lib/station-coverage-utils';
+import { TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 
 interface StationCoverageCardProps {
   coverage: StationCoverage;
@@ -52,6 +53,7 @@ export function StationCoverageCard({ coverage }: StationCoverageCardProps) {
             <div className="flex items-center gap-2">
               <Radio className="h-4 w-4 text-primary" />
               <span className="font-medium text-sm">Recording Stations</span>
+              <TechnicalTermTooltip term="stationCount" />
             </div>
             <span className="text-2xl font-bold">{coverage.stationCount}</span>
           </div>
@@ -69,8 +71,9 @@ export function StationCoverageCard({ coverage }: StationCoverageCardProps) {
             <div className="flex items-center gap-2">
               <Target className="h-4 w-4 text-primary" />
               <span className="font-medium text-sm">Azimuthal Gap</span>
+              <TechnicalTermTooltip term="azimuthalGap" />
             </div>
-            <Badge 
+            <Badge
               variant={coverage.azimuthalGap < 90 ? 'default' : coverage.azimuthalGap < 180 ? 'secondary' : 'destructive'}
             >
               {coverage.azimuthalGap.toFixed(0)}°

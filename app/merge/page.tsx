@@ -10,6 +10,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { MergeActions } from '@/components/merge/MergeActions';
+import { MergeMetadataForm, MergeMetadata } from '@/components/merge/MergeMetadataForm';
+import { MergeProgressIndicator, MergeStep } from '@/components/merge/MergeProgressIndicator';
 import { useCatalogues } from '@/contexts/CatalogueContext';
 import {
   Select,
@@ -19,29 +21,21 @@ import {
   SelectValue
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { 
-  Layers, 
-  Settings, 
-  Tag, 
+import {
+  Layers,
+  Settings,
+  Tag,
   ArrowRight,
   AlertTriangle,
   ArrowRightLeft,
   Save,
   Clock,
   MapPin,
-  Loader2
+  Loader2,
+  FileDown
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { GeographicSearchPanel, GeographicBounds } from '@/components/catalogues/GeographicSearchPanel';
-
-// Mock data for New Zealand earthquakes (kept for map preview)
-const mockEvents = [
-  { id: 1, latitude: -41.2865, longitude: 174.7762, magnitude: 4.5, depth: 25, time: "2023-09-01T10:30:00Z", region: "Wellington" },
-  { id: 2, latitude: -36.8485, longitude: 174.7633, magnitude: 3.2, depth: 12, time: "2023-09-02T15:45:00Z", region: "Auckland" },
-  { id: 3, latitude: -43.5321, longitude: 172.6362, magnitude: 4.8, depth: 15, time: "2023-09-03T08:15:00Z", region: "Christchurch" },
-  { id: 4, latitude: -45.0312, longitude: 168.6626, magnitude: 3.7, depth: 8, time: "2023-09-04T12:00:00Z", region: "Queenstown" },
-  { id: 5, latitude: -39.0556, longitude: 174.0752, magnitude: 5.2, depth: 30, time: "2023-09-05T22:30:00Z", region: "New Plymouth" }
-];
 
 // NOTE: mockCatalogues removed - now using real data from CatalogueContext
 
@@ -95,11 +89,24 @@ export default function MergePage() {
   const [priority, setPriority] = useState('newest');
   const [mergeStrategy, setMergeStrategy] = useState('priority');
   const [mergeStatus, setMergeStatus] = useState<MergeStatus>('idle');
-  const [mergedEvents, setMergedEvents] = useState(mockEvents);
+  const [mergedEvents, setMergedEvents] = useState<any[]>([]);
   const [geoSearchActive, setGeoSearchActive] = useState(false);
   const [geoSearching, setGeoSearching] = useState(false);
   const [geoSearchBounds, setGeoSearchBounds] = useState<GeographicBounds | null>(null);
   const [filteredCatalogues, setFilteredCatalogues] = useState<CatalogueItem[]>([]);
+
+  // New state for metadata and export-only mode
+  const [mergeMetadata, setMergeMetadata] = useState<MergeMetadata>({});
+  const [exportOnly, setExportOnly] = useState(false);
+  const [mergeProgress, setMergeProgress] = useState(0);
+  const [mergeSteps, setMergeSteps] = useState<MergeStep[]>([
+    { id: 'fetch-1', label: 'Fetching first catalogue events', status: 'pending' },
+    { id: 'fetch-2', label: 'Fetching second catalogue events', status: 'pending' },
+    { id: 'match', label: 'Matching duplicate events', status: 'pending' },
+    { id: 'merge', label: 'Merging events', status: 'pending' },
+    { id: 'bounds', label: 'Calculating geographic bounds', status: 'pending' },
+    { id: 'save', label: 'Saving merged catalogue', status: 'pending' }
+  ]);
 
   // Initialize filtered catalogues with real data from context
   useEffect(() => {
@@ -147,9 +154,37 @@ export default function MergePage() {
     }
 
     setMergeStatus('merging');
+    setMergeProgress(0);
+
+    // Reset all steps to pending
+    setMergeSteps(steps => steps.map(s => ({ ...s, status: 'pending' as const })));
+
+    // Simulate progress updates (in real implementation, this would come from the API)
+    const progressInterval = setInterval(() => {
+      setMergeProgress(prev => {
+        if (prev >= 95) {
+          clearInterval(progressInterval);
+          return prev;
+        }
+        return prev + 5;
+      });
+    }, 300);
 
     try {
       const selectedCatalogueData = getSelectedCatalogues;
+
+      // Transform catalogue data to match validation schema
+      const sourceCatalogues = selectedCatalogueData.map(cat => ({
+        id: cat.id,
+        name: cat.name,
+        events: cat.event_count || cat.events || 0,
+        source: cat.source || cat.name || 'unknown'
+      }));
+
+      // Update step 1
+      setMergeSteps(steps => steps.map(s =>
+        s.id === 'fetch-1' ? { ...s, status: 'in-progress' as const } : s
+      ));
 
       const response = await fetch('/api/merge', {
         method: 'POST',
@@ -158,15 +193,24 @@ export default function MergePage() {
         },
         body: JSON.stringify({
           name: mergedName,
-          sourceCatalogues: selectedCatalogueData,
+          sourceCatalogues,
           config: {
             timeThreshold,
             distanceThreshold,
             mergeStrategy,
             priority
-          }
+          },
+          metadata: mergeMetadata,
+          exportOnly
         }),
       });
+
+      // Mark all fetch steps as complete
+      setMergeSteps(steps => steps.map(s =>
+        s.id.startsWith('fetch') || s.id === 'match' || s.id === 'merge' || s.id === 'bounds'
+          ? { ...s, status: 'complete' as const }
+          : s
+      ));
 
       if (!response.ok) {
         throw new Error('Failed to merge catalogues');
@@ -174,19 +218,60 @@ export default function MergePage() {
 
       const result = await response.json();
 
-      // Set mock merged events for now
-      setMergedEvents(mockEvents);
+      // Update save step
+      if (!exportOnly) {
+        setMergeSteps(steps => steps.map(s =>
+          s.id === 'save' ? { ...s, status: 'in-progress' as const } : s
+        ));
+      }
 
-      // Invalidate cache and refresh catalogues across all pages
-      invalidateCache();
+      // Fetch the actual merged events from the newly created catalogue
+      if (result.catalogueId && !exportOnly) {
+        try {
+          const eventsResponse = await fetch(`/api/catalogues/${result.catalogueId}/events`);
+          if (eventsResponse.ok) {
+            const eventsData = await eventsResponse.json();
+            const events = Array.isArray(eventsData) ? eventsData : eventsData.data || [];
+            setMergedEvents(events);
+          } else {
+            // Fallback to empty array if fetch fails
+            console.warn('Failed to fetch merged events');
+            setMergedEvents([]);
+          }
+        } catch (error) {
+          console.error('Error fetching merged events:', error);
+          setMergedEvents([]);
+        }
+      } else if (result.events && exportOnly) {
+        // For export-only mode, use the returned events
+        setMergedEvents(result.events);
+      } else {
+        setMergedEvents([]);
+      }
+
+      // Mark all steps as complete
+      setMergeSteps(steps => steps.map(s => ({ ...s, status: 'complete' as const })));
+      setMergeProgress(100);
+      clearInterval(progressInterval);
+
+      // Invalidate cache and refresh catalogues across all pages (only if not export-only)
+      if (!exportOnly) {
+        invalidateCache();
+      }
 
       setMergeStatus('complete');
       toast({
-        title: "Merge Complete",
-        description: `Successfully merged ${selectedCatalogues.length} catalogues into "${mergedName}"`,
+        title: exportOnly ? "Merge Complete (Export Only)" : "Merge Complete",
+        description: exportOnly
+          ? `Successfully merged ${selectedCatalogues.length} catalogues. Ready for export.`
+          : `Successfully merged ${selectedCatalogues.length} catalogues into "${mergedName}"`,
       });
     } catch (error) {
+      clearInterval(progressInterval);
       setMergeStatus('error');
+      setMergeSteps(steps => steps.map(s =>
+        s.status === 'in-progress' ? { ...s, status: 'error' as const } : s
+      ));
       toast({
         title: "Merge Failed",
         description: "An error occurred while merging the catalogues. Please try again.",
@@ -437,7 +522,7 @@ export default function MergePage() {
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Total Events</p>
-                        <p className="text-xl font-semibold">{getTotalSelectedEvents().toLocaleString()}</p>
+                        <p className="text-xl font-semibold">{getTotalSelectedEvents.toLocaleString()}</p>
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Est. Merged Events</p>
@@ -562,8 +647,8 @@ export default function MergePage() {
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="newest">Newest First</SelectItem>
-                                <SelectItem value="geonet">GeoNet > Others</SelectItem>
-                                <SelectItem value="gns">GNS > Others</SelectItem>
+                                <SelectItem value="geonet">GeoNet &gt; Others</SelectItem>
+                                <SelectItem value="gns">GNS &gt; Others</SelectItem>
                                 <SelectItem value="custom">Custom Order</SelectItem>
                               </SelectContent>
                             </Select>
@@ -575,9 +660,57 @@ export default function MergePage() {
                       </div>
                     </div>
                   </div>
+
+                  <Separator className="my-6" />
+
+                  {/* Merge Metadata Section */}
+                  <div className="space-y-4">
+                    <MergeMetadataForm
+                      metadata={mergeMetadata}
+                      onChange={setMergeMetadata}
+                    />
+                  </div>
+
+                  <Separator className="my-6" />
+
+                  {/* Export-Only Mode */}
+                  <div className="space-y-4">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <FileDown className="h-5 w-5" />
+                          Export Options
+                        </CardTitle>
+                        <CardDescription>
+                          Choose whether to save the merged catalogue or export only
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="export-only"
+                            checked={exportOnly}
+                            onCheckedChange={(checked) => setExportOnly(checked as boolean)}
+                          />
+                          <div className="grid gap-1.5 leading-none">
+                            <Label
+                              htmlFor="export-only"
+                              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                            >
+                              Export only (don't save to database)
+                            </Label>
+                            <p className="text-sm text-muted-foreground">
+                              Perform the merge in memory and prepare for export without saving to the database.
+                              Useful for one-time analysis or testing merge parameters.
+                            </p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
                 </div>
               </TabsContent>
-              
+
               <TabsContent value="preview" className="pt-6">
                 <div className="space-y-4">
                   <div className="bg-muted/30 p-4 rounded-md">
@@ -632,9 +765,26 @@ export default function MergePage() {
                       ))}
                     </div>
                   </div>
-                  
+
+                  {/* Progress Indicator */}
+                  {mergeStatus === 'merging' && (
+                    <MergeProgressIndicator
+                      steps={mergeSteps}
+                      currentStep={mergeSteps.findIndex(s => s.status === 'in-progress')}
+                      progress={mergeProgress}
+                      estimatedTimeRemaining={mergeProgress < 100 ? ((100 - mergeProgress) / 5) * 0.3 : 0}
+                    />
+                  )}
+
                   {mergeStatus === 'complete' && (
-                    <MergeActions events={mergedEvents} onDownload={() => {}} />
+                    <MergeActions
+                      events={mergedEvents}
+                      onDownload={() => {}}
+                      catalogueMetadata={{
+                        name: mergedName,
+                        ...mergeMetadata
+                      }}
+                    />
                   )}
                   
                   {mergeStatus !== 'complete' && (

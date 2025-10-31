@@ -5,11 +5,14 @@ import {
   Copy,
   AlertTriangle,
   CheckCircle,
-  FileText
+  FileText,
+  Activity as ActivityIcon
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCatalogues } from '@/contexts/CatalogueContext';
 import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { useRouter } from 'next/navigation';
 
 type ActivityType = 'upload' | 'merge' | 'error' | 'complete';
 
@@ -37,6 +40,7 @@ const activityColors: Record<ActivityType, string> = {
 
 export function ActivityFeed() {
   const { catalogues, loading } = useCatalogues();
+  const router = useRouter();
 
   // Generate activities from real catalogue data
   const activities: Activity[] = catalogues
@@ -126,11 +130,15 @@ export function ActivityFeed() {
 
   if (activities.length === 0) {
     return (
-      <div className="text-center py-12 text-muted-foreground">
-        <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
-        <p>No activity yet</p>
-        <p className="text-sm mt-1">Create or import catalogues to see activity</p>
-      </div>
+      <EmptyState
+        icon={ActivityIcon}
+        title="No activity yet"
+        description="Your recent catalogue uploads, imports, and merges will appear here."
+        action={{
+          label: "Import from GeoNet",
+          onClick: () => router.push('/import')
+        }}
+      />
     );
   }
 

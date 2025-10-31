@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Download, Map, ChevronDown } from 'lucide-react';
+import { Download, Map, ChevronDown, List } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Activity, Calendar, Ruler } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,6 +17,8 @@ import {
 import dynamic from 'next/dynamic';
 import 'leaflet/dist/leaflet.css';
 import { getMagnitudeColor, getMagnitudeRadius } from '@/lib/earthquake-utils';
+import { generateMergedCatalogueFilename } from '@/lib/export-utils';
+import { EventTable } from '@/components/events/EventTable';
 
 const MapWithNoSSR = dynamic(
   () => import('./MapComponent'),
@@ -29,12 +32,28 @@ const MapWithNoSSR = dynamic(
   }
 );
 
+interface CatalogueMetadata {
+  name?: string;
+  description?: string;
+  data_source?: string;
+  provider?: string;
+  geographic_region?: string;
+  time_period_start?: string;
+  time_period_end?: string;
+  license?: string;
+  citation?: string;
+  merge_description?: string;
+  merge_methodology?: string;
+  [key: string]: any;
+}
+
 interface MergeActionsProps {
   events: any[];
   onDownload: () => void;
+  catalogueMetadata?: CatalogueMetadata;
 }
 
-export function MergeActions({ events, onDownload }: MergeActionsProps) {
+export function MergeActions({ events, onDownload, catalogueMetadata = {} }: MergeActionsProps) {
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
@@ -56,8 +75,50 @@ export function MergeActions({ events, onDownload }: MergeActionsProps) {
   };
 
   const downloadCSV = () => {
+    // Build metadata header comments
+    const metadataLines: string[] = [];
+    metadataLines.push('# Earthquake Catalogue Export');
+    metadataLines.push(`# Export Date: ${new Date().toISOString()}`);
+    metadataLines.push(`# Event Count: ${events.length}`);
+
+    if (catalogueMetadata.name) {
+      metadataLines.push(`# Catalogue: ${catalogueMetadata.name}`);
+    }
+    if (catalogueMetadata.description) {
+      metadataLines.push(`# Description: ${catalogueMetadata.description}`);
+    }
+    if (catalogueMetadata.data_source) {
+      metadataLines.push(`# Source: ${catalogueMetadata.data_source}`);
+    }
+    if (catalogueMetadata.provider) {
+      metadataLines.push(`# Provider: ${catalogueMetadata.provider}`);
+    }
+    if (catalogueMetadata.geographic_region) {
+      metadataLines.push(`# Region: ${catalogueMetadata.geographic_region}`);
+    }
+    if (catalogueMetadata.time_period_start || catalogueMetadata.time_period_end) {
+      const start = catalogueMetadata.time_period_start || 'N/A';
+      const end = catalogueMetadata.time_period_end || 'N/A';
+      metadataLines.push(`# Time Period: ${start} to ${end}`);
+    }
+    if (catalogueMetadata.license) {
+      metadataLines.push(`# License: ${catalogueMetadata.license}`);
+    }
+    if (catalogueMetadata.citation) {
+      metadataLines.push(`# Citation: ${catalogueMetadata.citation}`);
+    }
+    if (catalogueMetadata.merge_description) {
+      metadataLines.push(`# Merge Description: ${catalogueMetadata.merge_description}`);
+    }
+    if (catalogueMetadata.merge_methodology) {
+      metadataLines.push(`# Merge Methodology: ${catalogueMetadata.merge_methodology}`);
+    }
+
+    metadataLines.push('#');
+
     const headers = ['Time', 'Latitude', 'Longitude', 'Depth', 'Magnitude', 'Region'];
     const csvContent = [
+      ...metadataLines,
       headers.join(','),
       ...events.map(event => [
         event.time,
@@ -69,17 +130,33 @@ export function MergeActions({ events, onDownload }: MergeActionsProps) {
       ].join(','))
     ].join('\n');
 
-    downloadFile(csvContent, 'merged_catalogue.csv', 'text/csv');
+    const filename = generateMergedCatalogueFilename('csv', events.length);
+    downloadFile(csvContent, filename, 'text/csv');
   };
 
   const downloadJSON = () => {
     const jsonContent = JSON.stringify({
       metadata: {
-        title: 'Merged New Zealand Earthquake Catalogue',
+        title: catalogueMetadata.name || 'Merged Earthquake Catalogue',
+        description: catalogueMetadata.description,
         generated: new Date().toISOString(),
         eventCount: events.length,
         format: 'JSON',
-        region: 'New Zealand'
+        source: catalogueMetadata.data_source,
+        provider: catalogueMetadata.provider,
+        region: catalogueMetadata.geographic_region || 'New Zealand',
+        timePeriod: {
+          start: catalogueMetadata.time_period_start,
+          end: catalogueMetadata.time_period_end
+        },
+        license: catalogueMetadata.license,
+        citation: catalogueMetadata.citation,
+        merge: {
+          description: catalogueMetadata.merge_description,
+          methodology: catalogueMetadata.merge_methodology,
+          useCase: catalogueMetadata.merge_use_case,
+          qualityAssessment: catalogueMetadata.merge_quality_assessment
+        }
       },
       events: events.map(event => ({
         time: event.time,
@@ -93,17 +170,31 @@ export function MergeActions({ events, onDownload }: MergeActionsProps) {
       }))
     }, null, 2);
 
-    downloadFile(jsonContent, 'merged_catalogue.json', 'application/json');
+    const filename = generateMergedCatalogueFilename('json', events.length);
+    downloadFile(jsonContent, filename, 'application/json');
   };
 
   const downloadGeoJSON = () => {
     const geoJsonContent = JSON.stringify({
       type: 'FeatureCollection',
       metadata: {
-        title: 'Merged New Zealand Earthquake Catalogue',
+        title: catalogueMetadata.name || 'Merged Earthquake Catalogue',
+        description: catalogueMetadata.description,
         generated: new Date().toISOString(),
         eventCount: events.length,
-        region: 'New Zealand'
+        source: catalogueMetadata.data_source,
+        provider: catalogueMetadata.provider,
+        region: catalogueMetadata.geographic_region || 'New Zealand',
+        timePeriod: {
+          start: catalogueMetadata.time_period_start,
+          end: catalogueMetadata.time_period_end
+        },
+        license: catalogueMetadata.license,
+        citation: catalogueMetadata.citation,
+        merge: {
+          description: catalogueMetadata.merge_description,
+          methodology: catalogueMetadata.merge_methodology
+        }
       },
       features: events.map(event => ({
         type: 'Feature',
@@ -121,14 +212,36 @@ export function MergeActions({ events, onDownload }: MergeActionsProps) {
       }))
     }, null, 2);
 
-    downloadFile(geoJsonContent, 'merged_catalogue.geojson', 'application/geo+json');
+    const filename = generateMergedCatalogueFilename('geojson', events.length);
+    downloadFile(geoJsonContent, filename, 'application/geo+json');
   };
 
   const downloadQuakeML = () => {
     const timestamp = new Date().toISOString();
 
+    // Build metadata comments
+    let metadataComments = '';
+    if (catalogueMetadata.name) {
+      metadataComments += `<!-- Catalogue: ${catalogueMetadata.name} -->\n`;
+    }
+    if (catalogueMetadata.description) {
+      metadataComments += `<!-- Description: ${catalogueMetadata.description} -->\n`;
+    }
+    if (catalogueMetadata.data_source) {
+      metadataComments += `<!-- Source: ${catalogueMetadata.data_source} -->\n`;
+    }
+    if (catalogueMetadata.provider) {
+      metadataComments += `<!-- Provider: ${catalogueMetadata.provider} -->\n`;
+    }
+    if (catalogueMetadata.license) {
+      metadataComments += `<!-- License: ${catalogueMetadata.license} -->\n`;
+    }
+    if (catalogueMetadata.citation) {
+      metadataComments += `<!-- Citation: ${catalogueMetadata.citation} -->\n`;
+    }
+
     const quakeMLContent = `<?xml version="1.0" encoding="UTF-8"?>
-<q:quakeml xmlns:q="http://quakeml.org/xmlns/quakeml/1.2" xmlns="http://quakeml.org/xmlns/bed/1.2">
+${metadataComments}<q:quakeml xmlns:q="http://quakeml.org/xmlns/quakeml/1.2" xmlns="http://quakeml.org/xmlns/bed/1.2">
   <eventParameters publicID="quakeml:nz.geonet/merged_catalogue">
     <creationInfo>
       <creationTime>${timestamp}</creationTime>
@@ -174,7 +287,8 @@ ${events.map((event, index) => `    <event publicID="quakeml:nz.geonet/event/${e
   </eventParameters>
 </q:quakeml>`;
 
-    downloadFile(quakeMLContent, 'merged_catalogue.xml', 'application/xml');
+    const filename = generateMergedCatalogueFilename('xml', events.length);
+    downloadFile(quakeMLContent, filename, 'application/xml');
   };
 
   if (!isMounted) {
@@ -218,9 +332,44 @@ ${events.map((event, index) => `    <event publicID="quakeml:nz.geonet/event/${e
         </DropdownMenu>
       </div>
 
-      <div className="h-[600px] w-full relative z-0">
-        <MapWithNoSSR events={events} />
-      </div>
+      <Tabs defaultValue="map" className="w-full">
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="map">
+            <Map className="mr-2 h-4 w-4" />
+            Map View
+          </TabsTrigger>
+          <TabsTrigger value="table">
+            <List className="mr-2 h-4 w-4" />
+            Table View
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="map" className="mt-4">
+          <div className="h-[600px] w-full relative z-0">
+            <MapWithNoSSR events={events} />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="table" className="mt-4">
+          <EventTable
+            events={events.map(e => ({
+              id: e.id,
+              time: e.time,
+              latitude: e.latitude,
+              longitude: e.longitude,
+              depth: e.depth || 0,
+              magnitude: e.magnitude,
+              magnitude_type: e.magnitude_type || null,
+              location_name: e.region || null,
+              event_type: e.event_type || null,
+              quality_score: e.quality_score || null,
+              azimuthal_gap: e.azimuthal_gap || null,
+              used_station_count: e.used_station_count || null,
+              public_id: e.public_id || null,
+            }))}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

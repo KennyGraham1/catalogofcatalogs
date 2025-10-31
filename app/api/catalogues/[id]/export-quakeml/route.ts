@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { eventsToQuakeMLDocument } from '@/lib/quakeml-exporter';
+import { generateExportFilename, createDownloadHeaders } from '@/lib/export-utils';
 
 export async function GET(
   request: NextRequest,
@@ -34,14 +35,14 @@ export async function GET(
     
     // Convert to QuakeML
     const quakemlXml = eventsToQuakeMLDocument(events, catalogue.name);
-    
-    // Return as downloadable file
+
+    // Generate descriptive filename with timestamp
+    const filename = generateExportFilename(catalogue.name, 'xml', { prefix: 'quakeml' });
+
+    // Return as downloadable file with improved headers
     return new NextResponse(quakemlXml, {
       status: 200,
-      headers: {
-        'Content-Type': 'application/xml',
-        'Content-Disposition': `attachment; filename="${catalogue.name.replace(/[^a-z0-9]/gi, '_')}_quakeml.xml"`,
-      },
+      headers: createDownloadHeaders(filename, 'xml'),
     });
   } catch (error) {
     console.error('Error exporting QuakeML:', error);

@@ -6,6 +6,7 @@ import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { CheckCircle2, AlertTriangle, XCircle, Info } from 'lucide-react';
 import { QualityScore, getQualityColor, getQualityBadgeVariant } from '@/lib/quality-scoring';
+import { TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 
 interface QualityScoreCardProps {
   score: QualityScore;
@@ -17,11 +18,14 @@ export function QualityScoreCard({ score, showDetails = true }: QualityScoreCard
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle>Quality Assessment</CardTitle>
-          <Badge 
+          <div className="flex items-center gap-2">
+            <CardTitle>Quality Assessment</CardTitle>
+            <TechnicalTermTooltip term="qualityGrade" />
+          </div>
+          <Badge
             variant={getQualityBadgeVariant(score.grade)}
             className="text-lg px-3 py-1"
-            style={{ 
+            style={{
               backgroundColor: getQualityColor(score.overall),
               color: 'white'
             }}

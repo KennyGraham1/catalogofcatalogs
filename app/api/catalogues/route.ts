@@ -6,11 +6,11 @@ const logger = new Logger('CataloguesAPI');
 
 export async function GET() {
   try {
-    logger.info('Fetching all catalogues');
+    // logger.info('Fetching all catalogues');
     
     const catalogues = await dbQueries.getCatalogues();
     
-    logger.info('Catalogues fetched successfully', { count: catalogues.length });
+    // logger.info('Catalogues fetched successfully', { count: catalogues.length });
     
     return NextResponse.json(catalogues);
   } catch (error) {

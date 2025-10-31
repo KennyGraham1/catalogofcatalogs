@@ -243,29 +243,6 @@ export function getStationDistributionDescription(ratio: number): {
   }
 }
 
-/**
- * Generate mock station data for New Zealand
- * (In production, this would come from a real station database)
- */
-export function generateMockNZStations(): Station[] {
-  return [
-    { code: 'WEL', network: 'NZ', latitude: -41.2865, longitude: 174.7762, name: 'Wellington' },
-    { code: 'AKL', network: 'NZ', latitude: -36.8485, longitude: 174.7633, name: 'Auckland' },
-    { code: 'CHC', network: 'NZ', latitude: -43.5321, longitude: 172.6362, name: 'Christchurch' },
-    { code: 'DUN', network: 'NZ', latitude: -45.8788, longitude: 170.5028, name: 'Dunedin' },
-    { code: 'NPL', network: 'NZ', latitude: -39.0556, longitude: 174.0752, name: 'New Plymouth' },
-    { code: 'GIS', network: 'NZ', latitude: -38.6620, longitude: 178.0176, name: 'Gisborne' },
-    { code: 'NSN', network: 'NZ', latitude: -41.2706, longitude: 173.2840, name: 'Nelson' },
-    { code: 'INV', network: 'NZ', latitude: -46.4132, longitude: 168.3538, name: 'Invercargill' },
-    { code: 'ROT', network: 'NZ', latitude: -38.1368, longitude: 176.2497, name: 'Rotorua' },
-    { code: 'TAU', network: 'NZ', latitude: -38.6857, longitude: 176.0702, name: 'Taupo' },
-    { code: 'HAM', network: 'NZ', latitude: -37.7870, longitude: 175.2793, name: 'Hamilton' },
-    { code: 'PMR', network: 'NZ', latitude: -40.3206, longitude: 175.6177, name: 'Palmerston North' },
-    { code: 'TIM', network: 'NZ', latitude: -44.3904, longitude: 171.2373, name: 'Timaru' },
-    { code: 'WHK', network: 'NZ', latitude: -37.5333, longitude: 175.6833, name: 'Whakatane' },
-    { code: 'MAS', network: 'NZ', latitude: -40.8333, longitude: 175.5500, name: 'Masterton' },
-  ];
-}
 
 /**
  * Calculate distance between two points (Haversine formula)

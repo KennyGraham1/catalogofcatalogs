@@ -33,34 +33,94 @@ interface MergedEventData extends EventData {
 export async function mergeCatalogues(
   name: string,
   sourceCatalogues: SourceCatalogue[],
-  config: MergeConfig
+  config: MergeConfig,
+  metadata?: any,
+  exportOnly: boolean = false
 ) {
+  if (!dbQueries) {
+    throw new Error('Database not initialized');
+  }
+
   const catalogueId = uuidv4();
 
   try {
-    // Insert the merged catalogue record
-    await dbQueries.insertCatalogue(
-      catalogueId,
-      name,
-      JSON.stringify(sourceCatalogues),
-      JSON.stringify(config),
-      0,
-      'processing'
-    );
+    // Insert the merged catalogue record (skip if export-only mode)
+    if (!exportOnly) {
+      // Prepare metadata for database
+      const dbMetadata: any = {};
+
+      if (metadata) {
+        // Map merge metadata fields
+        if (metadata.merge_description) dbMetadata.merge_description = metadata.merge_description;
+        if (metadata.merge_use_case) dbMetadata.merge_use_case = metadata.merge_use_case;
+        if (metadata.merge_methodology) dbMetadata.merge_methodology = metadata.merge_methodology;
+        if (metadata.merge_quality_assessment) dbMetadata.merge_quality_assessment = metadata.merge_quality_assessment;
+
+        // Map other metadata fields if present
+        if (metadata.description) dbMetadata.description = metadata.description;
+        if (metadata.data_source) dbMetadata.data_source = metadata.data_source;
+        if (metadata.provider) dbMetadata.provider = metadata.provider;
+        if (metadata.geographic_region) dbMetadata.geographic_region = metadata.geographic_region;
+        if (metadata.data_quality) dbMetadata.data_quality = JSON.stringify(metadata.data_quality);
+        if (metadata.quality_notes) dbMetadata.quality_notes = metadata.quality_notes;
+        if (metadata.keywords) dbMetadata.keywords = JSON.stringify(metadata.keywords);
+        if (metadata.reference_links) dbMetadata.reference_links = JSON.stringify(metadata.reference_links);
+        if (metadata.notes) dbMetadata.notes = metadata.notes;
+      }
+
+      await dbQueries.insertCatalogue(
+        catalogueId,
+        name,
+        JSON.stringify(sourceCatalogues),
+        JSON.stringify(config),
+        0,
+        'processing',
+        dbMetadata
+      );
+    }
 
     // Fetch events from all source catalogues
-    // In a real implementation, you would fetch from your data source
-    // For now, we'll use mock data structure
     const allEvents: EventData[] = [];
 
-    // TODO: Replace with actual data fetching
-    // sourceCatalogues.forEach(catalogue => {
-    //   const events = fetchEventsFromCatalogue(catalogue.id);
-    //   allEvents.push(...events.map(e => ({ ...e, source: catalogue.source })));
-    // });
+    // Fetch events from each source catalogue
+    for (const catalogue of sourceCatalogues) {
+      if (!dbQueries) {
+        throw new Error('Database not initialized');
+      }
+
+      const catalogueIdStr = String(catalogue.id);
+      const events = await dbQueries.getEventsByCatalogueId(catalogueIdStr);
+      const eventsArray = Array.isArray(events) ? events : events.data || [];
+
+      allEvents.push(...eventsArray.map(e => ({
+        ...e,
+        source: catalogue.source || catalogue.name || 'unknown',
+        catalogueId: catalogueIdStr,
+      } as EventData)));
+    }
 
     // Perform the merge
     const mergedEvents = performMerge(allEvents, config);
+
+    // If export-only mode, return events without saving to database
+    if (exportOnly) {
+      return {
+        success: true,
+        catalogueId: null,
+        eventCount: mergedEvents.length,
+        originalEventCount: allEvents.length,
+        events: mergedEvents.map(e => ({
+          id: e.id || uuidv4(),
+          time: e.time,
+          latitude: e.latitude,
+          longitude: e.longitude,
+          depth: e.depth,
+          magnitude: e.magnitude,
+          source: e.source,
+          sourceEvents: e.sourceEvents
+        }))
+      };
+    }
 
     // Insert merged events into database
     for (const event of mergedEvents) {
@@ -137,8 +197,8 @@ export async function mergeCatalogues(
         if (quakeml.picks && quakeml.picks.length > 0) {
           dbEvent.picks = JSON.stringify(quakeml.picks);
         }
-        if (quakeml.arrivals && quakeml.arrivals.length > 0) {
-          dbEvent.arrivals = JSON.stringify(quakeml.arrivals);
+        if ((quakeml as any).arrivals && (quakeml as any).arrivals.length > 0) {
+          dbEvent.arrivals = JSON.stringify((quakeml as any).arrivals);
         }
         if (quakeml.focalMechanisms && quakeml.focalMechanisms.length > 0) {
           dbEvent.focal_mechanisms = JSON.stringify(quakeml.focalMechanisms);
@@ -176,6 +236,7 @@ export async function mergeCatalogues(
     }
 
     // Update catalogue with event count and status
+    await dbQueries.updateCatalogueEventCount(catalogueId, mergedEvents.length);
     await dbQueries.updateCatalogueStatus('complete', catalogueId);
 
     return {
@@ -185,7 +246,10 @@ export async function mergeCatalogues(
       originalEventCount: allEvents.length
     };
   } catch (error) {
-    await dbQueries.updateCatalogueStatus('error', catalogueId);
+    // Only update status if not in export-only mode
+    if (!exportOnly) {
+      await dbQueries.updateCatalogueStatus('error', catalogueId);
+    }
     throw error;
   }
 }
@@ -356,7 +420,7 @@ function mergeByCompleteness(events: EventData[]): MergedEventData {
       if (e.quakeml.origins && e.quakeml.origins.length > 0) eScore += 5;
       if (e.quakeml.magnitudes && e.quakeml.magnitudes.length > 0) eScore += 5;
       if (e.quakeml.picks && e.quakeml.picks.length > 0) eScore += 3;
-      if (e.quakeml.arrivals && e.quakeml.arrivals.length > 0) eScore += 3;
+      if ((e.quakeml as any).arrivals && (e.quakeml as any).arrivals.length > 0) eScore += 3;
       if (e.quakeml.focalMechanisms && e.quakeml.focalMechanisms.length > 0) eScore += 2;
       if (e.quakeml.amplitudes && e.quakeml.amplitudes.length > 0) eScore += 2;
 
@@ -371,7 +435,7 @@ function mergeByCompleteness(events: EventData[]): MergedEventData {
       if (best.quakeml.origins && best.quakeml.origins.length > 0) bestScore += 5;
       if (best.quakeml.magnitudes && best.quakeml.magnitudes.length > 0) bestScore += 5;
       if (best.quakeml.picks && best.quakeml.picks.length > 0) bestScore += 3;
-      if (best.quakeml.arrivals && best.quakeml.arrivals.length > 0) bestScore += 3;
+      if ((best.quakeml as any).arrivals && (best.quakeml as any).arrivals.length > 0) bestScore += 3;
       if (best.quakeml.focalMechanisms && best.quakeml.focalMechanisms.length > 0) bestScore += 2;
       if (best.quakeml.amplitudes && best.quakeml.amplitudes.length > 0) bestScore += 2;
 
@@ -423,13 +487,22 @@ function mergeByPriority(events: EventData[], priority: string): MergedEventData
 }
 
 export async function getMergedCatalogues() {
+  if (!dbQueries) {
+    throw new Error('Database not initialized');
+  }
   return dbQueries.getCatalogues();
 }
 
 export async function getMergedCatalogue(id: string) {
+  if (!dbQueries) {
+    throw new Error('Database not initialized');
+  }
   return dbQueries.getCatalogueById(id);
 }
 
 export async function getMergedEvents(catalogueId: string) {
+  if (!dbQueries) {
+    throw new Error('Database not initialized');
+  }
   return dbQueries.getEventsByCatalogueId(catalogueId);
 }

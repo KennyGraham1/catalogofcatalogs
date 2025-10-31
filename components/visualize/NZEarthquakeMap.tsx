@@ -15,8 +15,8 @@ interface Earthquake {
   magnitude: number;
   depth: number;
   time: string;
-  region: string;
-  catalogue: string;
+  region?: string;
+  catalogue?: string;
 }
 
 interface NZEarthquakeMapProps {

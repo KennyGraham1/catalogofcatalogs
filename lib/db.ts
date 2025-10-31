@@ -10,11 +10,54 @@ export interface MergedCatalogue {
   merge_config: string;
   event_count: number;
   status: 'processing' | 'complete' | 'error';
+
   // Geographic bounds
   min_latitude?: number | null;
   max_latitude?: number | null;
   min_longitude?: number | null;
   max_longitude?: number | null;
+
+  // Basic metadata
+  description?: string | null;
+  data_source?: string | null;
+  provider?: string | null;
+  geographic_region?: string | null;
+
+  // Time period coverage
+  time_period_start?: string | null;
+  time_period_end?: string | null;
+
+  // Quality and completeness
+  data_quality?: string | null; // JSON: {completeness, accuracy, reliability}
+  quality_notes?: string | null;
+
+  // Contact and attribution
+  contact_name?: string | null;
+  contact_email?: string | null;
+  contact_organization?: string | null;
+
+  // License and usage
+  license?: string | null;
+  usage_terms?: string | null;
+  citation?: string | null;
+
+  // Additional metadata
+  doi?: string | null;
+  version?: string | null;
+  keywords?: string | null; // JSON array
+  reference_links?: string | null; // JSON array
+  notes?: string | null;
+
+  // Merge-specific metadata
+  merge_description?: string | null;
+  merge_use_case?: string | null;
+  merge_methodology?: string | null;
+  merge_quality_assessment?: string | null;
+
+  // Provenance tracking
+  created_by?: string | null;
+  modified_at?: string | null;
+  modified_by?: string | null;
 }
 
 export interface MergedEvent {
@@ -92,7 +135,8 @@ export interface DbQueries {
     sourceCatalogues: string,
     mergeConfig: string,
     eventCount: number,
-    status: string
+    status: string,
+    metadata?: Partial<MergedCatalogue>
   ) => Promise<void>;
 
   insertEvent: (event: Partial<MergedEvent> & {
@@ -115,7 +159,11 @@ export interface DbQueries {
 
   updateCatalogueName: (name: string, id: string) => Promise<void>;
 
+  updateCatalogueEventCount: (id: string, eventCount: number) => Promise<void>;
+
   updateCatalogueGeoBounds: (id: string, minLat: number, maxLat: number, minLon: number, maxLon: number) => Promise<void>;
+
+  updateCatalogueMetadata: (id: string, metadata: Partial<MergedCatalogue>) => Promise<void>;
 
   getCataloguesByRegion: (minLat: number, maxLat: number, minLon: number, maxLon: number) => Promise<MergedCatalogue[]>;
 
@@ -145,6 +193,9 @@ export interface DbQueries {
     errors: string | null
   ) => Promise<void>;
   getImportHistory: (catalogueId: string, limit: number) => Promise<ImportHistory[]>;
+
+  // Search method
+  searchEvents: (query: string, limit: number, catalogueId?: string) => Promise<any[]>;
 }
 
 // Import history interface
@@ -325,7 +376,7 @@ if (typeof window === 'undefined') {
 
   // Initialize queries with proper typing and validation
   dbQueries = {
-    insertCatalogue: async (id: string, name: string, sourceCatalogues: string, mergeConfig: string, eventCount: number, status: string): Promise<void> => {
+    insertCatalogue: async (id: string, name: string, sourceCatalogues: string, mergeConfig: string, eventCount: number, status: string, metadata?: Partial<MergedCatalogue>): Promise<void> => {
       // Validate inputs
       if (!id || !name || !sourceCatalogues || !mergeConfig) {
         throw new Error('Missing required fields for catalogue');
@@ -337,10 +388,33 @@ if (typeof window === 'undefined') {
         throw new Error('Invalid status value');
       }
 
-      await dbRun(
-        `INSERT INTO merged_catalogues (id, name, source_catalogues, merge_config, event_count, status) VALUES (?, ?, ?, ?, ?, ?)`,
-        [id, name, sourceCatalogues, mergeConfig, eventCount, status]
-      );
+      // Build SQL with optional metadata fields
+      const baseFields = ['id', 'name', 'source_catalogues', 'merge_config', 'event_count', 'status'];
+      const baseValues: any[] = [id, name, sourceCatalogues, mergeConfig, eventCount, status];
+
+      const metadataFields = [
+        'description', 'data_source', 'provider', 'geographic_region',
+        'time_period_start', 'time_period_end', 'data_quality', 'quality_notes',
+        'contact_name', 'contact_email', 'contact_organization',
+        'license', 'usage_terms', 'citation', 'doi', 'version',
+        'keywords', 'reference_links', 'notes',
+        'merge_description', 'merge_use_case', 'merge_methodology', 'merge_quality_assessment',
+        'created_by', 'modified_at', 'modified_by'
+      ];
+
+      if (metadata) {
+        for (const field of metadataFields) {
+          if (metadata[field as keyof MergedCatalogue] !== undefined) {
+            baseFields.push(field);
+            baseValues.push(metadata[field as keyof MergedCatalogue]);
+          }
+        }
+      }
+
+      const placeholders = baseFields.map(() => '?').join(', ');
+      const sql = `INSERT INTO merged_catalogues (${baseFields.join(', ')}) VALUES (${placeholders})`;
+
+      await dbRun(sql, baseValues);
     },
 
     insertEvent: async (event: Partial<MergedEvent> & {
@@ -499,6 +573,16 @@ if (typeof window === 'undefined') {
       await dbRun(`UPDATE merged_catalogues SET name = ? WHERE id = ?`, [name, id]);
     },
 
+    updateCatalogueEventCount: async (id: string, eventCount: number): Promise<void> => {
+      if (!id) {
+        throw new Error('Catalogue ID is required');
+      }
+      if (eventCount < 0) {
+        throw new Error('Event count cannot be negative');
+      }
+      await dbRun(`UPDATE merged_catalogues SET event_count = ? WHERE id = ?`, [eventCount, id]);
+    },
+
     updateCatalogueGeoBounds: async (id: string, minLat: number, maxLat: number, minLon: number, maxLon: number): Promise<void> => {
       if (!id) {
         throw new Error('Catalogue ID is required');
@@ -521,6 +605,42 @@ if (typeof window === 'undefined') {
         `UPDATE merged_catalogues SET min_latitude = ?, max_latitude = ?, min_longitude = ?, max_longitude = ? WHERE id = ?`,
         [minLat, maxLat, minLon, maxLon, id]
       );
+    },
+
+    updateCatalogueMetadata: async (id: string, metadata: Partial<MergedCatalogue>): Promise<void> => {
+      if (!id) {
+        throw new Error('Catalogue ID is required');
+      }
+
+      // Build dynamic UPDATE query based on provided metadata fields
+      const allowedFields = [
+        'description', 'data_source', 'provider', 'geographic_region',
+        'time_period_start', 'time_period_end', 'data_quality', 'quality_notes',
+        'contact_name', 'contact_email', 'contact_organization',
+        'license', 'usage_terms', 'citation', 'doi', 'version',
+        'keywords', 'reference_links', 'notes',
+        'merge_description', 'merge_use_case', 'merge_methodology', 'merge_quality_assessment',
+        'created_by', 'modified_at', 'modified_by'
+      ];
+
+      const updates: string[] = [];
+      const values: any[] = [];
+
+      for (const [key, value] of Object.entries(metadata)) {
+        if (allowedFields.includes(key) && value !== undefined) {
+          updates.push(`${key} = ?`);
+          values.push(value);
+        }
+      }
+
+      if (updates.length === 0) {
+        return; // No valid fields to update
+      }
+
+      values.push(id); // Add id for WHERE clause
+      const sql = `UPDATE merged_catalogues SET ${updates.join(', ')} WHERE id = ?`;
+
+      await dbRun(sql, values);
     },
 
     getCataloguesByRegion: async (minLat: number, maxLat: number, minLon: number, maxLon: number): Promise<MergedCatalogue[]> => {
@@ -757,6 +877,50 @@ if (typeof window === 'undefined') {
       );
 
       return history as ImportHistory[];
+    },
+
+    searchEvents: async (query: string, limit: number, catalogueId?: string): Promise<any[]> => {
+      if (!query || query.trim().length < 2) {
+        return [];
+      }
+
+      const searchTerm = `%${query.trim()}%`;
+
+      let sql = `
+        SELECT
+          e.id,
+          e.catalogue_id,
+          e.event_public_id as public_id,
+          e.time,
+          e.latitude,
+          e.longitude,
+          e.depth,
+          e.magnitude,
+          e.magnitude_type,
+          e.event_type,
+          c.name as catalogue_name
+        FROM merged_events e
+        LEFT JOIN merged_catalogues c ON e.catalogue_id = c.id
+        WHERE (
+          e.event_public_id LIKE ? OR
+          e.event_type LIKE ? OR
+          CAST(e.magnitude AS TEXT) LIKE ? OR
+          e.id LIKE ?
+        )
+      `;
+
+      const params: any[] = [searchTerm, searchTerm, searchTerm, searchTerm];
+
+      if (catalogueId) {
+        sql += ' AND e.catalogue_id = ?';
+        params.push(catalogueId);
+      }
+
+      sql += ' ORDER BY e.time DESC LIMIT ?';
+      params.push(limit);
+
+      const results = await dbAll(sql, params);
+      return results;
     }
   };
 }

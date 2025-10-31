@@ -5,12 +5,15 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { FileUploader } from '@/components/upload/FileUploader';
 import { EnhancedSchemaMapper } from '@/components/upload/EnhancedSchemaMapper';
 import { ValidationResults } from '@/components/upload/ValidationResults';
+import { CatalogueMetadataForm, CatalogueMetadata } from '@/components/upload/CatalogueMetadataForm';
 import { toast } from '@/hooks/use-toast';
 
-type UploadStatus = 'idle' | 'uploading' | 'validating' | 'mapping' | 'processing' | 'complete' | 'error';
+type UploadStatus = 'idle' | 'uploading' | 'validating' | 'mapping' | 'metadata' | 'processing' | 'complete' | 'error';
 
 export default function UploadPage() {
   const [activeTab, setActiveTab] = useState('upload');
@@ -18,6 +21,8 @@ export default function UploadPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [validationResults, setValidationResults] = useState<any | null>(null);
   const [isSchemaReady, setIsSchemaReady] = useState(false);
+  const [catalogueName, setCatalogueName] = useState('');
+  const [metadata, setMetadata] = useState<CatalogueMetadata>({});
 
   const handleFilesAdded = (newFiles: File[]) => {
     setFiles([...files, ...newFiles]);
@@ -67,7 +72,7 @@ export default function UploadPage() {
         
         setValidationResults(results);
         setUploadStatus(results.some(r => !r.isValid) ? 'error' : 'mapping');
-        
+
         if (!results.some(r => !r.isValid)) {
           setTimeout(() => {
             setActiveTab('schema');
@@ -78,6 +83,20 @@ export default function UploadPage() {
   };
 
   const handleSchemaSubmit = () => {
+    setUploadStatus('metadata');
+    setActiveTab('metadata');
+  };
+
+  const handleMetadataSubmit = () => {
+    if (!catalogueName.trim()) {
+      toast({
+        title: "Catalogue name required",
+        description: "Please provide a name for this catalogue.",
+        variant: "destructive"
+      });
+      return;
+    }
+
     setUploadStatus('processing');
     
     // Simulate processing
@@ -96,6 +115,7 @@ export default function UploadPage() {
     uploading: 'Uploading files...',
     validating: 'Validating catalogues...',
     mapping: 'Ready for schema mapping',
+    metadata: 'Ready for metadata',
     processing: 'Processing catalogues...',
     complete: 'Processing complete',
     error: 'Validation failed'
@@ -142,10 +162,13 @@ export default function UploadPage() {
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="upload" value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-3">
+              <TabsList className="grid w-full grid-cols-4">
                 <TabsTrigger value="upload">Upload</TabsTrigger>
-                <TabsTrigger value="schema" disabled={uploadStatus !== 'mapping' && uploadStatus !== 'processing' && uploadStatus !== 'complete'}>
+                <TabsTrigger value="schema" disabled={uploadStatus !== 'mapping' && uploadStatus !== 'metadata' && uploadStatus !== 'processing' && uploadStatus !== 'complete'}>
                   Schema Mapping
+                </TabsTrigger>
+                <TabsTrigger value="metadata" disabled={uploadStatus !== 'metadata' && uploadStatus !== 'processing' && uploadStatus !== 'complete'}>
+                  Metadata
                 </TabsTrigger>
                 <TabsTrigger value="results" disabled={uploadStatus !== 'complete'}>
                   Results
@@ -172,6 +195,31 @@ export default function UploadPage() {
                   isProcessing={uploadStatus === 'processing'}
                   validationResults={validationResults}
                   onSchemaReady={setIsSchemaReady}
+                />
+              </TabsContent>
+
+              <TabsContent value="metadata" className="pt-6 space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Catalogue Name</CardTitle>
+                    <CardDescription>Provide a unique name for this catalogue</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <Label htmlFor="catalogue-name">Name *</Label>
+                      <Input
+                        id="catalogue-name"
+                        placeholder="e.g., New Zealand Seismic Events 2024"
+                        value={catalogueName}
+                        onChange={(e) => setCatalogueName(e.target.value)}
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <CatalogueMetadataForm
+                  metadata={metadata}
+                  onChange={setMetadata}
                 />
               </TabsContent>
 
@@ -207,27 +255,35 @@ export default function UploadPage() {
             </Tabs>
           </CardContent>
           <CardFooter className="flex justify-between border-t bg-muted/20 px-6 py-4">
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               disabled={uploadStatus === 'uploading' || uploadStatus === 'validating' || uploadStatus === 'processing'}
             >
               Cancel
             </Button>
             <div className="flex gap-2">
               {activeTab === 'upload' && (
-                <Button 
+                <Button
                   onClick={handleUpload}
-                  disabled={files.length === 0 || uploadStatus === 'uploading' || uploadStatus === 'validating' || uploadStatus === 'mapping' || uploadStatus === 'processing' || uploadStatus === 'complete'}
+                  disabled={files.length === 0 || uploadStatus === 'uploading' || uploadStatus === 'validating' || uploadStatus === 'mapping' || uploadStatus === 'metadata' || uploadStatus === 'processing' || uploadStatus === 'complete'}
                 >
                   {uploadStatus === 'error' ? 'Retry Upload' : 'Upload and Validate'}
                 </Button>
               )}
               {activeTab === 'schema' && (
-                <Button 
+                <Button
                   onClick={handleSchemaSubmit}
-                  disabled={!isSchemaReady || uploadStatus === 'processing' || uploadStatus === 'complete'}
+                  disabled={!isSchemaReady || uploadStatus === 'metadata' || uploadStatus === 'processing' || uploadStatus === 'complete'}
                 >
-                  Process Catalogues
+                  Continue to Metadata
+                </Button>
+              )}
+              {activeTab === 'metadata' && (
+                <Button
+                  onClick={handleMetadataSubmit}
+                  disabled={uploadStatus === 'processing' || uploadStatus === 'complete'}
+                >
+                  Process Catalogue
                 </Button>
               )}
               {activeTab === 'results' && (

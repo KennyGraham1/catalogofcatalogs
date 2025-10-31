@@ -47,6 +47,12 @@ import { toast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { GeographicSearchPanel, GeographicBounds } from '@/components/catalogues/GeographicSearchPanel';
 import { useDebounce } from '@/hooks/use-debounce';
+import { CatalogueTableSkeleton } from '@/components/ui/skeleton-loaders';
+import { TableEmptyState } from '@/components/ui/empty-state';
+import { Database } from 'lucide-react';
+import { CatalogueStatsPopover } from '@/components/catalogues/CatalogueStatsPopover';
+import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { useRef } from 'react';
 
 interface Catalogue {
   id: string;
@@ -68,6 +74,7 @@ type SortDirection = 'asc' | 'desc';
 
 export default function CataloguesPage() {
   const router = useRouter();
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Use global catalogue context
   const { catalogues: contextCatalogues, loading: contextLoading, refreshCatalogues } = useCatalogues();
@@ -86,6 +93,32 @@ export default function CataloguesPage() {
 
   // Debounce search query to avoid filtering on every keystroke
   const debouncedSearchQuery = useDebounce(searchQuery, 300);
+
+  // Page-specific keyboard shortcuts
+  useKeyboardShortcuts({
+    shortcuts: [
+      {
+        key: 'f',
+        ctrl: true,
+        description: 'Focus search input',
+        action: () => {
+          searchInputRef.current?.focus();
+        },
+      },
+      {
+        key: 'r',
+        ctrl: true,
+        description: 'Refresh catalogues',
+        action: () => {
+          refreshCatalogues();
+          toast({
+            title: 'Refreshing catalogues',
+            description: 'Fetching latest catalogue data...',
+          });
+        },
+      },
+    ],
+  });
 
   // Sync with context catalogues
   useEffect(() => {
@@ -233,12 +266,23 @@ export default function CataloguesPage() {
       // Get the QuakeML content
       const quakemlContent = await response.text();
 
+      // Get filename from Content-Disposition header or generate one
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let filename = `quakeml_${catalogue.name.replace(/[^a-z0-9]/gi, '_')}.xml`;
+
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, '');
+        }
+      }
+
       // Create and trigger download
       const blob = new Blob([quakemlContent], { type: 'application/xml' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${catalogue.name.replace(/[^a-z0-9]/gi, '_')}_quakeml.xml`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -270,15 +314,26 @@ export default function CataloguesPage() {
       const response = await fetch(`/api/catalogues/${catalogue.id}/download`);
       if (!response.ok) throw new Error('Download failed');
 
+      // Get filename from Content-Disposition header or generate one
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let filename = `${catalogue.name}.csv`;
+
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, '');
+        }
+      }
+
       // Get the CSV content
       const csvContent = await response.text();
-      
+
       // Create and trigger download
       const blob = new Blob([csvContent], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${catalogue.name}.csv`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -381,17 +436,26 @@ export default function CataloguesPage() {
         </TableHeader>
         <TableBody>
           {loading ? (
-            <TableRow>
-              <TableCell colSpan={8} className="h-24 text-center">
-                Loading catalogues...
-              </TableCell>
-            </TableRow>
+            <CatalogueTableSkeleton rows={5} />
           ) : catalogues.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={8} className="h-24 text-center">
-                No catalogues found. Try adjusting your search or filters.
-              </TableCell>
-            </TableRow>
+            <TableEmptyState
+              colSpan={8}
+              icon={Database}
+              title="No catalogues found"
+              description={
+                searchQuery || geoSearchActive
+                  ? "Try adjusting your search or filters to find catalogues."
+                  : "Get started by uploading a QuakeML file or importing from GeoNet."
+              }
+              action={
+                !searchQuery && !geoSearchActive
+                  ? {
+                      label: "Import from GeoNet",
+                      onClick: () => router.push('/import')
+                    }
+                  : undefined
+              }
+            />
           ) : (
             catalogues.map((catalogue) => (
               <TableRow key={catalogue.id}>
@@ -413,9 +477,13 @@ export default function CataloguesPage() {
                 <TableCell>{getStatusBadge(catalogue.status)}</TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-1">
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
+                    <CatalogueStatsPopover
+                      catalogueId={catalogue.id}
+                      catalogueName={catalogue.name}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       className="h-8 w-8"
                       onClick={() => handleViewMap(catalogue)}
                     >
@@ -532,8 +600,9 @@ export default function CataloguesPage() {
                 <div className="relative">
                   <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input
+                    ref={searchInputRef}
                     type="search"
-                    placeholder="Search catalogues..."
+                    placeholder="Search catalogues... (Ctrl+F)"
                     className="pl-8 w-full sm:w-[250px]"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}

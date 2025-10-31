@@ -12,13 +12,21 @@ import {
   Database,
   BarChart3,
   TrendingUp,
-  Download
+  Download,
+  Keyboard,
+  Search,
+  LineChart
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '../theme/ThemeToggle';
 
-export function Header() {
+interface HeaderProps {
+  onShowShortcuts?: () => void;
+  onShowSearch?: () => void;
+}
+
+export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -39,6 +47,7 @@ export function Header() {
     { href: '/merge', label: 'Merge', icon: Layers },
     { href: '/visualize', label: 'Visualize', icon: BarChart3 },
     { href: '/analytics', label: 'Analytics', icon: TrendingUp },
+    { href: '/advanced-analytics', label: 'Advanced Analytics', icon: LineChart },
     { href: '/settings', label: 'Settings', icon: Settings },
   ];
 
@@ -56,8 +65,8 @@ export function Header() {
         {/* Desktop Navigation */}
         <nav className="hidden md:flex items-center gap-6">
           {navItems.map((item) => (
-            <Link 
-              key={item.href} 
+            <Link
+              key={item.href}
               href={item.href}
               className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
             >
@@ -65,6 +74,26 @@ export function Header() {
               <span>{item.label}</span>
             </Link>
           ))}
+          {onShowSearch && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onShowSearch}
+              title="Search events (/)"
+            >
+              <Search className="h-4 w-4" />
+            </Button>
+          )}
+          {onShowShortcuts && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onShowShortcuts}
+              title="Keyboard shortcuts (Ctrl+/)"
+            >
+              <Keyboard className="h-4 w-4" />
+            </Button>
+          )}
           <ThemeToggle />
         </nav>
 

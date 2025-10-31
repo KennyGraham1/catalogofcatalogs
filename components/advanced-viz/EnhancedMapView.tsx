@@ -15,7 +15,7 @@ import { BeachBallMarker } from './BeachBallMarker';
 import { StationMarker } from './StationMarker';
 import { calculateUncertaintyEllipse, UncertaintyData } from '@/lib/uncertainty-utils';
 import { parseFocalMechanism } from '@/lib/focal-mechanism-utils';
-import { parseStationData, generateMockNZStations, calculateAzimuth, calculateDistance } from '@/lib/station-coverage-utils';
+import { parseStationData, calculateAzimuth, calculateDistance } from '@/lib/station-coverage-utils';
 import { calculateQualityScore, QualityMetrics, getQualityColor } from '@/lib/quality-scoring';
 import { getMagnitudeColor, getMagnitudeRadius } from '@/lib/earthquake-utils';
 
@@ -116,8 +116,8 @@ export function EnhancedMapView({
     return getMagnitudeColor(event.magnitude);
   };
 
-  // Mock stations for demonstration
-  const stations = generateMockNZStations();
+  // Stations array - empty for now (would be fetched from database in production)
+  const stations: any[] = [];
 
   return (
     <div className="relative">

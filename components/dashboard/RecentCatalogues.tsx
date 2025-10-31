@@ -5,10 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useCatalogues } from '@/contexts/CatalogueContext';
 import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 export function RecentCatalogues() {
   const { catalogues, loading } = useCatalogues();
+  const router = useRouter();
 
   // Get the 5 most recent catalogues
   const recentCatalogues = [...catalogues]
@@ -64,11 +67,19 @@ export function RecentCatalogues() {
 
   if (recentCatalogues.length === 0) {
     return (
-      <div className="text-center py-8 text-muted-foreground">
-        <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
-        <p>No catalogues found</p>
-        <p className="text-sm mt-1">Upload your first catalogue to get started</p>
-      </div>
+      <EmptyState
+        icon={FileText}
+        title="No catalogues yet"
+        description="Get started by importing earthquake data from GeoNet or uploading a QuakeML file."
+        action={{
+          label: "Import from GeoNet",
+          onClick: () => router.push('/import')
+        }}
+        secondaryAction={{
+          label: "Upload File",
+          onClick: () => router.push('/upload')
+        }}
+      />
     );
   }
 

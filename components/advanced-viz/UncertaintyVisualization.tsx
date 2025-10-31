@@ -4,12 +4,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { MapPin, Ruler, Clock, Target } from 'lucide-react';
-import { 
-  formatUncertainty, 
-  getUncertaintyLevel, 
+import {
+  formatUncertainty,
+  getUncertaintyLevel,
   calculateLocationQuality,
-  UncertaintyData 
+  UncertaintyData
 } from '@/lib/uncertainty-utils';
+import { TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 
 interface UncertaintyVisualizationProps {
   data: UncertaintyData;
@@ -49,7 +50,10 @@ export function UncertaintyVisualization({ data }: UncertaintyVisualizationProps
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle>Location Uncertainty</CardTitle>
+          <div className="flex items-center gap-2">
+            <CardTitle>Location Uncertainty</CardTitle>
+            <TechnicalTermTooltip term="uncertainty" />
+          </div>
           <Badge variant={getLevelBadgeVariant(quality.grade)}>
             Grade: {quality.grade}
           </Badge>
@@ -161,6 +165,7 @@ export function UncertaintyVisualization({ data }: UncertaintyVisualizationProps
               <div className="flex items-center gap-2">
                 <Target className="h-4 w-4 text-primary" />
                 <span className="font-medium text-sm">Azimuthal Gap</span>
+                <TechnicalTermTooltip term="azimuthalGap" />
               </div>
               <Badge variant={data.azimuthal_gap < 90 ? 'default' : data.azimuthal_gap < 180 ? 'secondary' : 'destructive'}>
                 {data.azimuthal_gap.toFixed(0)}°

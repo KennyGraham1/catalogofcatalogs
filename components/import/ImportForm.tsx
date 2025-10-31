@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Download, CheckCircle, XCircle } from 'lucide-react';
+import { IndeterminateProgress } from '@/components/ui/progress-indicator';
 
 interface ImportResult {
   success: boolean;
@@ -296,7 +297,19 @@ export function ImportForm() {
           </form>
         </CardContent>
       </Card>
-      
+
+      {/* Loading Progress */}
+      {isImporting && (
+        <Card>
+          <CardContent className="pt-6">
+            <IndeterminateProgress label="Fetching earthquake data from GeoNet..." />
+            <p className="text-sm text-muted-foreground mt-4 text-center">
+              This may take a few moments depending on the time range and filters selected.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Result */}
       {result && (
         <Card>

@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { BarChart3, Map, Target, Radio, Award, TrendingUp } from 'lucide-react';
+import { BarChart3, Map, Target, Radio, Award, TrendingUp, List } from 'lucide-react';
 import { QualityScoreCard } from '@/components/advanced-viz/QualityScoreCard';
 import { UncertaintyVisualization } from '@/components/advanced-viz/UncertaintyVisualization';
 import { FocalMechanismCard } from '@/components/advanced-viz/FocalMechanismCard';
@@ -15,6 +15,7 @@ import { StationCoverageCard } from '@/components/advanced-viz/StationCoverageCa
 import { calculateQualityScore, QualityMetrics } from '@/lib/quality-scoring';
 import { parseFocalMechanism } from '@/lib/focal-mechanism-utils';
 import { parseStationData } from '@/lib/station-coverage-utils';
+import { EventTable } from '@/components/events/EventTable';
 
 // Dynamically import map component to avoid SSR issues
 const EnhancedMapView = dynamic(() => import('@/components/advanced-viz/EnhancedMapView').then(mod => mod.EnhancedMapView), {
@@ -198,6 +199,10 @@ export default function AnalyticsPage() {
             <Map className="h-4 w-4 mr-2" />
             Enhanced Map
           </TabsTrigger>
+          <TabsTrigger value="event-list">
+            <List className="h-4 w-4 mr-2" />
+            Event List
+          </TabsTrigger>
           <TabsTrigger value="event-details">
             <Target className="h-4 w-4 mr-2" />
             Event Details
@@ -222,6 +227,53 @@ export default function AnalyticsPage() {
                 <EnhancedMapView events={events} />
               ) : (
                 <div className="h-[700px] flex items-center justify-center text-muted-foreground">
+                  {loading ? 'Loading events...' : 'No events to display'}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Event List Tab */}
+        <TabsContent value="event-list" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Event List</CardTitle>
+              <CardDescription>
+                Sortable table of all events in the selected catalogue. Click column headers to sort.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              {events.length > 0 ? (
+                <EventTable
+                  events={events.map(e => ({
+                    id: e.id,
+                    time: e.time,
+                    latitude: e.latitude,
+                    longitude: e.longitude,
+                    depth: e.depth || 0,
+                    magnitude: e.magnitude,
+                    magnitude_type: e.magnitude_type || null,
+                    location_name: e.region || e.location_name || null,
+                    event_type: e.event_type || null,
+                    quality_score: e.quality_score || null,
+                    azimuthal_gap: e.azimuthal_gap || null,
+                    used_station_count: e.used_station_count || null,
+                    public_id: e.public_id || null,
+                  }))}
+                  onEventClick={(event) => {
+                    const fullEvent = events.find(e => e.id === event.id);
+                    if (fullEvent) {
+                      setSelectedEvent(fullEvent);
+                      // Switch to event details tab
+                      const tabsList = document.querySelector('[role="tablist"]');
+                      const eventDetailsTab = tabsList?.querySelector('[value="event-details"]') as HTMLElement;
+                      eventDetailsTab?.click();
+                    }
+                  }}
+                />
+              ) : (
+                <div className="py-12 text-center text-muted-foreground">
                   {loading ? 'Loading events...' : 'No events to display'}
                 </div>
               )}
