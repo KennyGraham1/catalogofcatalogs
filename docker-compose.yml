@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: earthquake-catalogue-platform
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_PATH=/app/data/earthquake-catalogues.db
+    volumes:
+      # Persist database
+      - earthquake-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - earthquake-network
+
+  # Optional: Add a reverse proxy (nginx) for production
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: earthquake-nginx
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./ssl:/etc/nginx/ssl:ro
+  #   depends_on:
+  #     - app
+  #   restart: unless-stopped
+  #   networks:
+  #     - earthquake-network
+
+volumes:
+  earthquake-data:
+    driver: local
+
+networks:
+  earthquake-network:
+    driver: bridge
+

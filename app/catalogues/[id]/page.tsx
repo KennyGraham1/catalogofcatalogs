@@ -1,22 +1,32 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
-  FileText, 
-  Map as MapIcon, 
-  ArrowLeft, 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  FileText,
+  Map as MapIcon,
+  ArrowLeft,
   Download,
   BarChart3,
-  Activity
+  Activity,
+  ChevronDown
 } from 'lucide-react';
 import { EventTable } from '@/components/events/EventTable';
 import { toast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useCachedFetch } from '@/hooks/use-cached-fetch';
 
 interface Event {
   id: string | number;
@@ -48,79 +58,89 @@ export default function CatalogueDetailPage() {
   const router = useRouter();
   const catalogueId = params.id as string;
 
-  const [catalogue, setCatalogue] = useState<Catalogue | null>(null);
-  const [events, setEvents] = useState<Event[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Use cached fetch for catalogues list
+  const { data: catalogues, loading: cataloguesLoading, error: cataloguesError } = useCachedFetch<Catalogue[]>(
+    '/api/catalogues',
+    { cacheTime: 5 * 60 * 1000 } // 5 minutes
+  );
 
+  // Use cached fetch for events
+  const { data: eventsData, loading: eventsLoading, error: eventsError } = useCachedFetch<Event[] | { data: Event[] }>(
+    catalogueId ? `/api/catalogues/${catalogueId}/events` : null,
+    { cacheTime: 2 * 60 * 1000 } // 2 minutes
+  );
+
+  // Find current catalogue from the list
+  const catalogue = useMemo(() => {
+    if (!catalogues || !catalogueId) return null;
+    return catalogues.find((c: Catalogue) => c.id === catalogueId) || null;
+  }, [catalogues, catalogueId]);
+
+  // Extract events array from response
+  const events = useMemo(() => {
+    if (!eventsData) return [];
+    if (Array.isArray(eventsData)) return eventsData;
+    if ('data' in eventsData && Array.isArray(eventsData.data)) return eventsData.data;
+    return [];
+  }, [eventsData]);
+
+  const loading = cataloguesLoading || eventsLoading;
+  const error = cataloguesError || eventsError;
+
+  // Show error toast if there's an error
   useEffect(() => {
-    fetchCatalogueData();
-  }, [catalogueId]);
-
-  const fetchCatalogueData = async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      // Fetch catalogue details
-      const catalogueRes = await fetch('/api/catalogues');
-      const catalogues = await catalogueRes.json();
-      const currentCatalogue = catalogues.find((c: Catalogue) => c.id === catalogueId);
-
-      if (currentCatalogue) {
-        setCatalogue(currentCatalogue);
-      } else {
-        setError('Catalogue not found');
-        return;
-      }
-
-      // Fetch events
-      const eventsRes = await fetch(`/api/catalogues/${catalogueId}/events`);
-      const eventsData = await eventsRes.json();
-
-      if (Array.isArray(eventsData)) {
-        setEvents(eventsData);
-      } else if (eventsData.data && Array.isArray(eventsData.data)) {
-        setEvents(eventsData.data);
-      } else {
-        setError('Invalid events data format');
-      }
-    } catch (err) {
-      console.error('Error fetching catalogue data:', err);
-      setError('Failed to load catalogue data');
+    if (error) {
       toast({
         title: 'Error',
-        description: 'Failed to load catalogue data. Please try again.',
+        description: error.message || 'Failed to load catalogue data. Please try again.',
         variant: 'destructive',
       });
-    } finally {
-      setLoading(false);
     }
-  };
+  }, [error]);
 
   const handleEventClick = (event: Event) => {
     // Could navigate to event detail page or show modal
     console.log('Event clicked:', event);
   };
 
-  const handleExport = async () => {
+  const handleExport = async (format: 'csv' | 'json' | 'geojson' | 'kml' | 'quakeml') => {
     try {
-      const response = await fetch(`/api/catalogues/${catalogueId}/download`);
+      const response = await fetch(`/api/catalogues/${catalogueId}/export?format=${format}`);
       if (!response.ok) throw new Error('Export failed');
 
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${catalogue?.name || 'catalogue'}.csv`;
+
+      // Get filename from Content-Disposition header or generate one
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let filename = `${catalogue?.name || 'catalogue'}.${format === 'quakeml' ? 'xml' : format}`;
+
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, '');
+        }
+      }
+
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
+      const formatLabels = {
+        csv: 'CSV',
+        json: 'JSON',
+        geojson: 'GeoJSON',
+        kml: 'KML (Google Earth)',
+        quakeml: 'QuakeML'
+      };
+
       toast({
         title: 'Export successful',
-        description: 'Catalogue exported as CSV',
+        description: `Catalogue exported as ${formatLabels[format]}`,
       });
     } catch (error) {
       toast({
@@ -198,10 +218,39 @@ export default function CatalogueDetailPage() {
         </div>
 
         <div className="flex gap-2">
-          <Button variant="outline" onClick={handleExport}>
-            <Download className="mr-2 h-4 w-4" />
-            Export CSV
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <Download className="mr-2 h-4 w-4" />
+                Export
+                <ChevronDown className="ml-2 h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>Export Format</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => handleExport('csv')}>
+                <Download className="mr-2 h-4 w-4" />
+                CSV (Spreadsheet)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('json')}>
+                <Download className="mr-2 h-4 w-4" />
+                JSON (Structured Data)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('geojson')}>
+                <Download className="mr-2 h-4 w-4" />
+                GeoJSON (Geographic)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('kml')}>
+                <Download className="mr-2 h-4 w-4" />
+                KML (Google Earth)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('quakeml')}>
+                <Download className="mr-2 h-4 w-4" />
+                QuakeML (Seismology)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button onClick={() => router.push(`/catalogues/${catalogueId}/map`)}>
             <MapIcon className="mr-2 h-4 w-4" />
             View Map

@@ -3,8 +3,6 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Download, Map, ChevronDown, List } from 'lucide-react';
-import { Card } from '@/components/ui/card';
-import { Activity, Calendar, Ruler } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   DropdownMenu,
@@ -16,8 +14,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import dynamic from 'next/dynamic';
 import 'leaflet/dist/leaflet.css';
-import { getMagnitudeColor, getMagnitudeRadius } from '@/lib/earthquake-utils';
 import { generateMergedCatalogueFilename } from '@/lib/export-utils';
+import { eventsToGeoJSON, eventsToJSON } from '@/lib/exporters';
 import { EventTable } from '@/components/events/EventTable';
 
 const MapWithNoSSR = dynamic(
@@ -53,7 +51,7 @@ interface MergeActionsProps {
   catalogueMetadata?: CatalogueMetadata;
 }
 
-export function MergeActions({ events, onDownload, catalogueMetadata = {} }: MergeActionsProps) {
+export function MergeActions({ events, catalogueMetadata = {} }: MergeActionsProps) {
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
@@ -135,83 +133,43 @@ export function MergeActions({ events, onDownload, catalogueMetadata = {} }: Mer
   };
 
   const downloadJSON = () => {
-    const jsonContent = JSON.stringify({
-      metadata: {
-        title: catalogueMetadata.name || 'Merged Earthquake Catalogue',
-        description: catalogueMetadata.description,
-        generated: new Date().toISOString(),
-        eventCount: events.length,
-        format: 'JSON',
-        source: catalogueMetadata.data_source,
-        provider: catalogueMetadata.provider,
-        region: catalogueMetadata.geographic_region || 'New Zealand',
-        timePeriod: {
-          start: catalogueMetadata.time_period_start,
-          end: catalogueMetadata.time_period_end
-        },
-        license: catalogueMetadata.license,
-        citation: catalogueMetadata.citation,
-        merge: {
-          description: catalogueMetadata.merge_description,
-          methodology: catalogueMetadata.merge_methodology,
-          useCase: catalogueMetadata.merge_use_case,
-          qualityAssessment: catalogueMetadata.merge_quality_assessment
-        }
-      },
-      events: events.map(event => ({
-        time: event.time,
-        location: {
-          latitude: event.latitude,
-          longitude: event.longitude,
-          depth: event.depth
-        },
-        magnitude: event.magnitude,
-        region: event.region || 'Unknown'
-      }))
-    }, null, 2);
+    // Prepare metadata for export
+    const metadata = {
+      catalogueName: catalogueMetadata.name || 'Merged Earthquake Catalogue',
+      description: catalogueMetadata.description,
+      source: catalogueMetadata.data_source,
+      provider: catalogueMetadata.provider,
+      region: catalogueMetadata.geographic_region || 'New Zealand',
+      timePeriodStart: catalogueMetadata.time_period_start,
+      timePeriodEnd: catalogueMetadata.time_period_end,
+      license: catalogueMetadata.license,
+      citation: catalogueMetadata.citation,
+      eventCount: events.length,
+      generatedAt: new Date().toISOString(),
+    };
 
+    const jsonContent = eventsToJSON(events, metadata);
     const filename = generateMergedCatalogueFilename('json', events.length);
     downloadFile(jsonContent, filename, 'application/json');
   };
 
   const downloadGeoJSON = () => {
-    const geoJsonContent = JSON.stringify({
-      type: 'FeatureCollection',
-      metadata: {
-        title: catalogueMetadata.name || 'Merged Earthquake Catalogue',
-        description: catalogueMetadata.description,
-        generated: new Date().toISOString(),
-        eventCount: events.length,
-        source: catalogueMetadata.data_source,
-        provider: catalogueMetadata.provider,
-        region: catalogueMetadata.geographic_region || 'New Zealand',
-        timePeriod: {
-          start: catalogueMetadata.time_period_start,
-          end: catalogueMetadata.time_period_end
-        },
-        license: catalogueMetadata.license,
-        citation: catalogueMetadata.citation,
-        merge: {
-          description: catalogueMetadata.merge_description,
-          methodology: catalogueMetadata.merge_methodology
-        }
-      },
-      features: events.map(event => ({
-        type: 'Feature',
-        geometry: {
-          type: 'Point',
-          coordinates: [event.longitude, event.latitude, event.depth || 0]
-        },
-        properties: {
-          time: event.time,
-          magnitude: event.magnitude,
-          depth: event.depth,
-          region: event.region || 'Unknown',
-          id: event.id
-        }
-      }))
-    }, null, 2);
+    // Prepare metadata for export
+    const metadata = {
+      catalogueName: catalogueMetadata.name || 'Merged Earthquake Catalogue',
+      description: catalogueMetadata.description,
+      source: catalogueMetadata.data_source,
+      provider: catalogueMetadata.provider,
+      region: catalogueMetadata.geographic_region || 'New Zealand',
+      timePeriodStart: catalogueMetadata.time_period_start,
+      timePeriodEnd: catalogueMetadata.time_period_end,
+      license: catalogueMetadata.license,
+      citation: catalogueMetadata.citation,
+      eventCount: events.length,
+      generatedAt: new Date().toISOString(),
+    };
 
+    const geoJsonContent = eventsToGeoJSON(events, metadata);
     const filename = generateMergedCatalogueFilename('geojson', events.length);
     downloadFile(geoJsonContent, filename, 'application/geo+json');
   };

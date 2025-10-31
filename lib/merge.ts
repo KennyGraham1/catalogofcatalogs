@@ -29,6 +29,7 @@ interface MergedEventData extends EventData {
 
 /**
  * Merge multiple earthquake catalogues based on spatial and temporal matching
+ * Uses database transactions to ensure atomicity
  */
 export async function mergeCatalogues(
   name: string,
@@ -42,6 +43,38 @@ export async function mergeCatalogues(
   }
 
   const catalogueId = uuidv4();
+
+  // If export-only mode, don't use transactions
+  if (exportOnly) {
+    return await executeMergeOperation(catalogueId, name, sourceCatalogues, config, metadata, exportOnly);
+  }
+
+  // Use transaction for database writes
+  try {
+    return await dbQueries.transaction(async () => {
+      return await executeMergeOperation(catalogueId, name, sourceCatalogues, config, metadata, exportOnly);
+    });
+  } catch (error) {
+    console.error('[Merge] Transaction failed, changes rolled back:', error);
+    throw error;
+  }
+}
+
+/**
+ * Internal merge operation implementation
+ * Performs the actual merge logic with database writes
+ */
+async function executeMergeOperation(
+  catalogueId: string,
+  name: string,
+  sourceCatalogues: SourceCatalogue[],
+  config: MergeConfig,
+  metadata?: any,
+  exportOnly: boolean = false
+) {
+  if (!dbQueries) {
+    throw new Error('Database not initialized');
+  }
 
   try {
     // Insert the merged catalogue record (skip if export-only mode)

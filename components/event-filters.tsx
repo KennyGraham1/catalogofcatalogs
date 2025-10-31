@@ -19,6 +19,16 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Filter, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
@@ -37,6 +47,8 @@ export interface EventFilterValues {
   minUsedPhaseCount?: number;
   minUsedStationCount?: number;
   maxStandardError?: number;
+  maxFaultDistance?: number; // Maximum distance from nearest fault (km)
+  nearFaultsOnly?: boolean; // Only show events near known faults
 }
 
 interface EventFiltersProps {
@@ -47,16 +59,18 @@ interface EventFiltersProps {
 export function EventFilters({ onFilterChange, activeFilters }: EventFiltersProps) {
   const [filters, setFilters] = useState<EventFilterValues>(activeFilters);
   const [isOpen, setIsOpen] = useState(false);
+  const [showResetDialog, setShowResetDialog] = useState(false);
 
   const handleApply = () => {
     onFilterChange(filters);
     setIsOpen(false);
   };
 
-  const handleReset = () => {
+  const confirmReset = () => {
     const emptyFilters: EventFilterValues = {};
     setFilters(emptyFilters);
     onFilterChange(emptyFilters);
+    setShowResetDialog(false);
   };
 
   const handleRemoveFilter = (key: keyof EventFilterValues) => {
@@ -83,6 +97,8 @@ export function EventFilters({ onFilterChange, activeFilters }: EventFiltersProp
     minUsedPhaseCount: 'Min Phase Count',
     minUsedStationCount: 'Min Station Count',
     maxStandardError: 'Max Standard Error',
+    maxFaultDistance: 'Max Fault Distance',
+    nearFaultsOnly: 'Near Faults Only',
   };
 
   return (
@@ -387,18 +403,81 @@ export function EventFilters({ onFilterChange, activeFilters }: EventFiltersProp
               </div>
             </div>
 
+            {/* Fault proximity filters */}
+            <div className="space-y-4">
+              <h3 className="font-semibold">Fault Proximity</h3>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="nearFaultsOnly">Show only events near faults</Label>
+                  <input
+                    id="nearFaultsOnly"
+                    type="checkbox"
+                    checked={filters.nearFaultsOnly ?? false}
+                    onChange={(e) =>
+                      setFilters({
+                        ...filters,
+                        nearFaultsOnly: e.target.checked || undefined,
+                      })
+                    }
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Filter events within 50 km of known active faults
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="maxFaultDistance">Max Distance from Fault (km)</Label>
+                <Input
+                  id="maxFaultDistance"
+                  type="number"
+                  step="1"
+                  placeholder="e.g., 50"
+                  value={filters.maxFaultDistance ?? ''}
+                  onChange={(e) =>
+                    setFilters({
+                      ...filters,
+                      maxFaultDistance: e.target.value ? parseFloat(e.target.value) : undefined,
+                    })
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  Only show events within this distance from nearest fault
+                </p>
+              </div>
+            </div>
+
             {/* Action buttons */}
             <div className="flex gap-2 pt-4">
               <Button onClick={handleApply} className="flex-1">
                 Apply Filters
               </Button>
-              <Button onClick={handleReset} variant="outline">
+              <Button onClick={() => setShowResetDialog(true)} variant="outline">
                 Reset
               </Button>
             </div>
           </div>
         </SheetContent>
       </Sheet>
+
+      <AlertDialog open={showResetDialog} onOpenChange={setShowResetDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset all filters?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will clear all active filters and reset them to their default values. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmReset}>
+              Reset Filters
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

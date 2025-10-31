@@ -1,21 +1,32 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { DatePicker } from '@/components/ui/date-picker';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
-import { 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { SavedFiltersDialog } from './SavedFiltersDialog';
+import {
   Search,
   Filter,
   Save,
@@ -28,7 +39,7 @@ import {
 
 interface FilterPanelProps {
   onFiltersChange: (filters: any) => void;
-  onSaveFilter: () => void;
+  onSaveFilter?: () => void;
   onClearFilters: () => void;
 }
 
@@ -39,18 +50,57 @@ export function FilterPanel({ onFiltersChange, onSaveFilter, onClearFilters }: F
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [eventType, setEventType] = useState('all');
   const [useMapBounds, setUseMapBounds] = useState(true);
+  const [showClearDialog, setShowClearDialog] = useState(false);
+
+  const getCurrentFilters = () => ({
+    magnitude: magnitudeRange,
+    depth: depthRange,
+    dateRange: [startDate, endDate],
+    eventType,
+    useMapBounds
+  });
 
   const handleFiltersChange = () => {
-    onFiltersChange({
-      magnitude: magnitudeRange,
-      depth: depthRange,
-      dateRange: [startDate, endDate],
-      eventType,
-      useMapBounds
-    });
+    onFiltersChange(getCurrentFilters());
+  };
+
+  const handleClearFilters = () => {
+    setMagnitudeRange([0, 10]);
+    setDepthRange([0, 700]);
+    setStartDate(null);
+    setEndDate(null);
+    setEventType('all');
+    setUseMapBounds(true);
+    onClearFilters();
+    setShowClearDialog(false);
+  };
+
+  const handleLoadFilter = (filterConfig: any) => {
+    if (filterConfig.magnitude) {
+      setMagnitudeRange(filterConfig.magnitude);
+    }
+    if (filterConfig.depth) {
+      setDepthRange(filterConfig.depth);
+    }
+    if (filterConfig.dateRange) {
+      setStartDate(filterConfig.dateRange[0] ? new Date(filterConfig.dateRange[0]) : null);
+      setEndDate(filterConfig.dateRange[1] ? new Date(filterConfig.dateRange[1]) : null);
+    }
+    if (filterConfig.eventType) {
+      setEventType(filterConfig.eventType);
+    }
+    if (filterConfig.useMapBounds !== undefined) {
+      setUseMapBounds(filterConfig.useMapBounds);
+    }
+
+    // Automatically apply the loaded filters
+    setTimeout(() => {
+      onFiltersChange(filterConfig);
+    }, 100);
   };
 
   return (
+    <>
     <div className="space-y-6 p-4">
       <div>
         <h3 className="text-lg font-medium mb-2">Search Filters</h3>
@@ -159,30 +209,47 @@ export function FilterPanel({ onFiltersChange, onSaveFilter, onClearFilters }: F
 
         <Separator />
 
-        <div className="flex items-center gap-2">
-          <Button
-            className="flex-1"
-            onClick={handleFiltersChange}
-          >
-            <Search className="mr-2 h-4 w-4" />
-            Apply Filters
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={onSaveFilter}
-          >
-            <Save className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={onClearFilters}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+        <div className="space-y-2">
+          <SavedFiltersDialog
+            currentFilters={getCurrentFilters()}
+            onLoadFilter={handleLoadFilter}
+          />
+
+          <div className="flex items-center gap-2">
+            <Button
+              className="flex-1"
+              onClick={handleFiltersChange}
+            >
+              <Search className="mr-2 h-4 w-4" />
+              Apply Filters
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setShowClearDialog(true)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
-    </div>
+
+      <AlertDialog open={showClearDialog} onOpenChange={setShowClearDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear all filters?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will reset all filter settings to their default values. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleClearFilters}>
+              Clear Filters
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

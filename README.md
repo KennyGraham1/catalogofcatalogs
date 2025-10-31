@@ -259,14 +259,58 @@ catalogofcatalogs/
 
 ## 📚 Documentation
 
-- **[GeoNet Import Documentation](GEONET_IMPORT_DOCUMENTATION.md)**: Complete guide to the GeoNet automatic import feature
-- **[GeoNet Baseline Setup](GEONET_BASELINE_SETUP.md)**: Setting up baseline GeoNet data
-- **[GeoNet Implementation Summary](GEONET_IMPORT_IMPLEMENTATION_SUMMARY.md)**: Technical implementation details
-- **[QuakeML Schema Design](QUAKEML_SCHEMA_DESIGN.md)**: Database schema for QuakeML 1.2 support
-- **[QuakeML Testing Report](QUAKEML_TESTING_REPORT.md)**: Comprehensive testing results
-- **[Database Management](DATABASE_MANAGEMENT.md)**: Database storage, backups, and maintenance
-- **[Quick Test Guide](QUICK_TEST_GUIDE.md)**: Quick reference for testing features
-- **[Catalogues Page Fixes](CATALOGUES_PAGE_FIXES.md)**: Bug fixes and improvements
+### 📖 User Documentation
+
+- **[User Guide](docs/USER_GUIDE.md)** - Complete guide for end users
+  - Getting started and navigation
+  - Managing catalogues
+  - Uploading and importing data
+  - Visualization and analytics
+  - Exporting data
+  - Advanced features and best practices
+
+- **[FAQ](docs/FAQ.md)** - Frequently asked questions
+  - Common issues and solutions
+  - Best practices
+  - Troubleshooting guide
+
+### 🔧 Technical Documentation
+
+- **[Developer Guide](docs/DEVELOPER_GUIDE.md)** - Technical documentation for developers
+  - Architecture overview
+  - Technology stack and project structure
+  - Development workflow
+  - Testing and deployment
+  - Contributing guidelines
+
+- **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation
+  - All endpoints with examples
+  - Request/response formats
+  - Error handling
+  - Authentication (future)
+
+- **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)** - Production deployment instructions
+  - Environment setup
+  - Docker deployment
+  - Manual deployment with systemd
+  - Reverse proxy configuration
+  - Security hardening
+  - Monitoring and backup strategies
+
+- **[Data Validation Guide](docs/DATA_VALIDATION_GUIDE.md)** - Data quality and validation
+  - Validation rules and constraints
+  - Quality metrics and scoring
+  - Best practices for data quality
+
+### 📋 Feature-Specific Documentation
+
+- **[GeoNet Import Documentation](docs/GEONET_IMPORT_DOCUMENTATION.md)** - Complete guide to the GeoNet automatic import feature
+- **[GeoNet Baseline Setup](docs/GEONET_BASELINE_SETUP.md)** - Setting up baseline GeoNet data
+- **[GeoNet Implementation Summary](docs/GEONET_IMPORT_IMPLEMENTATION_SUMMARY.md)** - Technical implementation details
+- **[QuakeML Schema Design](docs/QUAKEML_SCHEMA_DESIGN.md)** - Database schema for QuakeML 1.2 support
+- **[QuakeML Testing Report](docs/QUAKEML_TESTING_REPORT.md)** - Comprehensive testing results
+- **[Database Management](docs/DATABASE_MANAGEMENT.md)** - Database storage, backups, and maintenance
+- **[Quick Test Guide](docs/QUICK_TEST_GUIDE.md)** - Quick reference for testing features
 
 ## 🔌 API Endpoints
 

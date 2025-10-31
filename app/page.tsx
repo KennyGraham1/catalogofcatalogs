@@ -30,8 +30,8 @@ export default function Home() {
     <div className="flex flex-col min-h-screen">
       {/* Hero Section */}
       <section className="py-20 md:py-32 bg-gradient-to-br from-background via-background to-muted">
-        <div className="container px-4 md:px-6">
-          <div className="flex flex-col items-center text-center space-y-6 md:space-y-8">
+        <div className="container mx-auto px-4 md:px-6">
+          <div className="flex flex-col items-center justify-center text-center space-y-6 md:space-y-8">
             <div className="space-y-2">
               <h1 className="text-3xl md:text-5xl font-bold tracking-tighter">
                 Earthquake Catalogue Integration Platform
@@ -58,7 +58,7 @@ export default function Home() {
 
       {/* Features Section */}
       <section className="py-16 md:py-24 bg-card">
-        <div className="container px-4 md:px-6">
+        <div className="container mx-auto px-4 md:px-6">
           <div className="text-center mb-12">
             <h2 className="text-3xl font-bold tracking-tighter">Key Features</h2>
             <p className="text-muted-foreground mt-2 text-lg">
@@ -84,7 +84,7 @@ export default function Home() {
 
       {/* CTA Section */}
       <section className="py-16 md:py-24 bg-primary text-primary-foreground">
-        <div className="container px-4 md:px-6 text-center">
+        <div className="container mx-auto px-4 md:px-6 text-center">
           <h2 className="text-3xl font-bold tracking-tighter mb-4">
             Ready to Streamline Your Earthquake Data Management?
           </h2>

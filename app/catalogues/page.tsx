@@ -251,72 +251,30 @@ export default function CataloguesPage() {
     router.push(`/catalogues/${catalogue.id}/map`);
   };
 
-  const handleExportQuakeML = async (catalogue: Catalogue) => {
+  const handleExport = async (catalogue: Catalogue, format: 'csv' | 'json' | 'geojson' | 'kml' | 'quakeml') => {
     try {
+      const formatLabels = {
+        csv: 'CSV',
+        json: 'JSON',
+        geojson: 'GeoJSON',
+        kml: 'KML (Google Earth)',
+        quakeml: 'QuakeML'
+      };
+
       // Show loading toast
       toast({
-        title: "Exporting QuakeML",
-        description: "Generating QuakeML 1.2 document...",
-      });
-
-      // Fetch the QuakeML file
-      const response = await fetch(`/api/catalogues/${catalogue.id}/export-quakeml`);
-      if (!response.ok) throw new Error('Export failed');
-
-      // Get the QuakeML content
-      const quakemlContent = await response.text();
-
-      // Get filename from Content-Disposition header or generate one
-      const contentDisposition = response.headers.get('Content-Disposition');
-      let filename = `quakeml_${catalogue.name.replace(/[^a-z0-9]/gi, '_')}.xml`;
-
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-        if (filenameMatch && filenameMatch[1]) {
-          filename = filenameMatch[1].replace(/['"]/g, '');
-        }
-      }
-
-      // Create and trigger download
-      const blob = new Blob([quakemlContent], { type: 'application/xml' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-
-      toast({
-        title: "Export successful",
-        description: "QuakeML file has been downloaded",
-      });
-    } catch (error) {
-      console.error('Error exporting QuakeML:', error);
-      toast({
-        title: "Export failed",
-        description: "Failed to export catalogue as QuakeML",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleDownload = async (catalogue: Catalogue) => {
-    try {
-      // Show loading toast
-      toast({
-        title: "Starting download",
+        title: `Exporting ${formatLabels[format]}`,
         description: "Preparing catalogue data...",
       });
 
-      // Fetch the CSV file
-      const response = await fetch(`/api/catalogues/${catalogue.id}/download`);
-      if (!response.ok) throw new Error('Download failed');
+      // Fetch the file using unified export endpoint
+      const response = await fetch(`/api/catalogues/${catalogue.id}/export?format=${format}`);
+      if (!response.ok) throw new Error('Export failed');
 
       // Get filename from Content-Disposition header or generate one
       const contentDisposition = response.headers.get('Content-Disposition');
-      let filename = `${catalogue.name}.csv`;
+      const extension = format === 'quakeml' ? 'xml' : format;
+      let filename = `${catalogue.name}.${extension}`;
 
       if (contentDisposition) {
         const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
@@ -325,11 +283,10 @@ export default function CataloguesPage() {
         }
       }
 
-      // Get the CSV content
-      const csvContent = await response.text();
+      // Get the content
+      const blob = await response.blob();
 
       // Create and trigger download
-      const blob = new Blob([csvContent], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -340,13 +297,13 @@ export default function CataloguesPage() {
       window.URL.revokeObjectURL(url);
 
       toast({
-        title: "Download complete",
-        description: `${catalogue.name} has been downloaded`,
+        title: "Export successful",
+        description: `${catalogue.name} exported as ${formatLabels[format]}`,
       });
     } catch (error) {
       toast({
-        title: "Download failed",
-        description: "There was an error downloading the catalogue",
+        title: "Export failed",
+        description: "There was an error exporting the catalogue",
         variant: "destructive",
       });
     }
@@ -495,14 +452,26 @@ export default function CataloguesPage() {
                           <Download className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleDownload(catalogue)}>
+                      <DropdownMenuContent align="end" className="w-56">
+                        <DropdownMenuItem onClick={() => handleExport(catalogue, 'csv')}>
                           <FileText className="h-4 w-4 mr-2" />
-                          Download as CSV
+                          CSV (Spreadsheet)
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleExportQuakeML(catalogue)}>
+                        <DropdownMenuItem onClick={() => handleExport(catalogue, 'json')}>
                           <FileText className="h-4 w-4 mr-2" />
-                          Download as QuakeML
+                          JSON (Structured)
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleExport(catalogue, 'geojson')}>
+                          <FileText className="h-4 w-4 mr-2" />
+                          GeoJSON (Geographic)
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleExport(catalogue, 'kml')}>
+                          <FileText className="h-4 w-4 mr-2" />
+                          KML (Google Earth)
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleExport(catalogue, 'quakeml')}>
+                          <FileText className="h-4 w-4 mr-2" />
+                          QuakeML (Seismology)
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

@@ -143,16 +143,29 @@ function initializeDatabase() {
 
     // Create indexes
     console.log('\n🔍 Creating indexes...');
-    
+
     const indexes = [
+      // Single column indexes
       'CREATE INDEX IF NOT EXISTS idx_merged_events_catalogue_id ON merged_events(catalogue_id)',
       'CREATE INDEX IF NOT EXISTS idx_merged_events_source_id ON merged_events(source_id)',
       'CREATE INDEX IF NOT EXISTS idx_merged_events_time ON merged_events(time)',
       'CREATE INDEX IF NOT EXISTS idx_merged_events_magnitude ON merged_events(magnitude)',
+      'CREATE INDEX IF NOT EXISTS idx_merged_events_depth ON merged_events(depth)',
+      'CREATE INDEX IF NOT EXISTS idx_merged_events_latitude ON merged_events(latitude)',
+      'CREATE INDEX IF NOT EXISTS idx_merged_events_longitude ON merged_events(longitude)',
       'CREATE INDEX IF NOT EXISTS idx_merged_events_event_type ON merged_events(event_type)',
       'CREATE INDEX IF NOT EXISTS idx_merged_events_magnitude_type ON merged_events(magnitude_type)',
       'CREATE INDEX IF NOT EXISTS idx_merged_events_evaluation_status ON merged_events(evaluation_status)',
       'CREATE INDEX IF NOT EXISTS idx_merged_events_azimuthal_gap ON merged_events(azimuthal_gap)',
+      'CREATE INDEX IF NOT EXISTS idx_merged_events_used_station_count ON merged_events(used_station_count)',
+      'CREATE INDEX IF NOT EXISTS idx_merged_events_standard_error ON merged_events(standard_error)',
+
+      // Composite indexes for common query patterns
+      'CREATE INDEX IF NOT EXISTS idx_merged_events_catalogue_time ON merged_events(catalogue_id, time DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_merged_events_catalogue_magnitude ON merged_events(catalogue_id, magnitude DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_merged_events_location ON merged_events(latitude, longitude)',
+
+      // Other table indexes
       'CREATE INDEX IF NOT EXISTS idx_mapping_templates_name ON mapping_templates(name)',
       'CREATE INDEX IF NOT EXISTS idx_import_history_catalogue_id ON import_history(catalogue_id)',
       'CREATE INDEX IF NOT EXISTS idx_import_history_created_at ON import_history(created_at)'

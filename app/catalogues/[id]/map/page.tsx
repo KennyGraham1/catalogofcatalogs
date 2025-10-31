@@ -1,12 +1,13 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { EnhancedMapView } from '@/components/advanced-viz/EnhancedMapView';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, MapPin, AlertCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useCachedFetch } from '@/hooks/use-cached-fetch';
 
 interface CatalogueEvent {
   id: number | string;
@@ -56,50 +57,34 @@ export default function CatalogueMapPage() {
   const params = useParams();
   const catalogueId = params.id as string;
 
-  const [events, setEvents] = useState<CatalogueEvent[]>([]);
-  const [catalogue, setCatalogue] = useState<Catalogue | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Use cached fetch for catalogues list
+  const { data: catalogues, loading: cataloguesLoading, error: cataloguesError } = useCachedFetch<Catalogue[]>(
+    '/api/catalogues',
+    { cacheTime: 5 * 60 * 1000 } // 5 minutes
+  );
 
-  // Fetch catalogue details and events
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      setError(null);
+  // Use cached fetch for events
+  const { data: eventsData, loading: eventsLoading, error: eventsError } = useCachedFetch<CatalogueEvent[] | { data: CatalogueEvent[] }>(
+    catalogueId ? `/api/catalogues/${catalogueId}/events` : null,
+    { cacheTime: 2 * 60 * 1000 } // 2 minutes
+  );
 
-      try {
-        // Fetch catalogue details
-        const catalogueRes = await fetch('/api/catalogues');
-        const catalogues = await catalogueRes.json();
-        const currentCatalogue = catalogues.find((c: Catalogue) => c.id === catalogueId);
+  // Find current catalogue from the list
+  const catalogue = useMemo(() => {
+    if (!catalogues || !catalogueId) return null;
+    return catalogues.find((c: Catalogue) => c.id === catalogueId) || null;
+  }, [catalogues, catalogueId]);
 
-        if (currentCatalogue) {
-          setCatalogue(currentCatalogue);
-        }
+  // Extract events array from response
+  const events = useMemo(() => {
+    if (!eventsData) return [];
+    if (Array.isArray(eventsData)) return eventsData;
+    if ('data' in eventsData && Array.isArray(eventsData.data)) return eventsData.data;
+    return [];
+  }, [eventsData]);
 
-        // Fetch events
-        const eventsRes = await fetch(`/api/catalogues/${catalogueId}/events`);
-        const eventsData = await eventsRes.json();
-
-        if (Array.isArray(eventsData)) {
-          setEvents(eventsData);
-        } else if (eventsData.data && Array.isArray(eventsData.data)) {
-          setEvents(eventsData.data);
-        } else {
-          setError('Invalid events data format');
-        }
-      } catch (err) {
-        console.error('Error fetching data:', err);
-        setError('Failed to load catalogue data. Please try again.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (catalogueId) {
-      fetchData();
-    }
-  }, [catalogueId]);
+  const loading = cataloguesLoading || eventsLoading;
+  const error = cataloguesError?.message || eventsError?.message || null;
 
   // Calculate statistics
   const stats = {

@@ -1,20 +1,21 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { MapContainer, TileLayer, Circle, Popup, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, Circle, Popup, GeoJSON } from 'react-leaflet';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Activity, Ruler, Calendar, MapPin, Layers, Target, Radio } from 'lucide-react';
+import { Activity, Ruler, Calendar, MapPin, Layers, Target, Radio, Zap } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { BeachBallMarker } from '../advanced-viz/BeachBallMarker';
-import { StationMarker } from '../advanced-viz/StationMarker';
-import { parseFocalMechanism } from '@/lib/focal-mechanism-utils';
-import { calculateDistance } from '@/lib/station-coverage-utils';
+
+import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
 import { calculateQualityScore, QualityMetrics, getQualityColor } from '@/lib/quality-scoring';
-import { getMagnitudeColor, getMagnitudeRadius } from '@/lib/earthquake-utils';
+import { getMagnitudeRadius, getMagnitudeColor } from '@/lib/earthquake-utils';
+import { useNearbyFaults } from '@/hooks/use-nearby-faults';
+import { loadFaultData, getFaultsInBounds, simplifyFaultsForZoom, FaultCollection, FaultFeature } from '@/lib/fault-data';
+import type { PathOptions } from 'leaflet';
 
 interface Earthquake {
   id: number | string;
@@ -47,45 +48,39 @@ interface UnifiedEarthquakeMapProps {
   showFocalMechanisms?: boolean;
   showStations?: boolean;
   showFaultLines?: boolean;
+  showActiveFaults?: boolean;
 }
 
-// New Zealand fault lines (simplified major faults)
-const alpineFault = [
-  [-42.0, 171.5],
-  [-42.5, 171.8],
-  [-43.0, 170.5],
-  [-43.5, 170.0],
-  [-44.0, 169.5],
-  [-44.5, 168.8],
-];
 
-const hikurangiSubductionZone = [
-  [-37.5, 179.0],
-  [-38.0, 178.5],
-  [-39.0, 178.0],
-  [-40.0, 177.5],
-  [-41.0, 177.0],
-  [-42.0, 176.5],
-];
 
-const wellingtonFault = [
-  [-41.1, 174.8],
-  [-41.3, 174.9],
-  [-41.5, 175.0],
-];
-
-export default function UnifiedEarthquakeMap({ 
-  earthquakes, 
+export default function UnifiedEarthquakeMap({
+  earthquakes,
   colorBy = 'magnitude',
   showFocalMechanisms = false,
   showStations = false,
-  showFaultLines = true
+  showFaultLines = true,
+  showActiveFaults = true
 }: UnifiedEarthquakeMapProps) {
   const [selectedEvent, setSelectedEvent] = useState<Earthquake | null>(null);
-  const [showFocal, setShowFocal] = useState(showFocalMechanisms);
-  const [showStationCoverage, setShowStationCoverage] = useState(showStations);
   const [showFaults, setShowFaults] = useState(showFaultLines);
   const [colorMode, setColorMode] = useState<'magnitude' | 'depth' | 'quality'>(colorBy);
+  const [faultData, setFaultData] = useState<FaultCollection | null>(null);
+
+  // Dark mode support
+  const mapTheme = useMapTheme();
+  const mapColors = useMapColors();
+
+  // Update color mode when colorBy prop changes
+  useEffect(() => {
+    setColorMode(colorBy);
+  }, [colorBy]);
+
+  // Load fault data
+  useEffect(() => {
+    if (showFaults) {
+      loadFaultData().then(setFaultData);
+    }
+  }, [showFaults]);
 
   // Fix Leaflet icons
   useEffect(() => {
@@ -96,15 +91,6 @@ export default function UnifiedEarthquakeMap({
       shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
     });
   }, []);
-
-  // Parse focal mechanisms
-  const focalMechanisms = useMemo(() => {
-    return earthquakes.map(event => ({
-      eventId: event.id,
-      position: [event.latitude, event.longitude] as [number, number],
-      mechanism: parseFocalMechanism(event.focal_mechanisms)
-    })).filter(item => item.mechanism !== null);
-  }, [earthquakes]);
 
   // Calculate quality scores
   const qualityScores = useMemo(() => {
@@ -141,9 +127,6 @@ export default function UnifiedEarthquakeMap({
     return 'Micro';
   };
 
-  // Stations array - empty for now
-  const stations: any[] = [];
-
   return (
     <div className="relative">
       {/* Control Panel */}
@@ -155,19 +138,8 @@ export default function UnifiedEarthquakeMap({
           </h3>
           
           <div className="flex items-center justify-between gap-3">
-            <Label htmlFor="focal" className="text-xs cursor-pointer">
-              Focal Mechanisms
-            </Label>
-            <Switch
-              id="focal"
-              checked={showFocal}
-              onCheckedChange={setShowFocal}
-            />
-          </div>
-          
-          <div className="flex items-center justify-between gap-3">
             <Label htmlFor="faults" className="text-xs cursor-pointer">
-              Fault Lines
+              NZ Active Faults
             </Label>
             <Switch
               id="faults"
@@ -226,38 +198,26 @@ export default function UnifiedEarthquakeMap({
           scrollWheelZoom={true}
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution={mapTheme.attribution}
+            url={mapTheme.tileLayerUrl}
           />
 
-          {/* Fault Lines */}
-          {showFaults && (
-            <>
-              <Polyline
-                positions={alpineFault as any}
-                color="#FF0000"
-                weight={3}
-                opacity={0.6}
-                dashArray="10, 10"
-              />
-              <Polyline
-                positions={hikurangiSubductionZone as any}
-                color="#8B0000"
-                weight={3}
-                opacity={0.6}
-                dashArray="10, 10"
-              />
-              <Polyline
-                positions={wellingtonFault as any}
-                color="#FF4500"
-                weight={2}
-                opacity={0.6}
-                dashArray="5, 5"
-              />
-            </>
+          {/* NZ Active Faults from Local GeoJSON */}
+          {showFaults && faultData && (
+            <GeoJSON
+              data={faultData}
+              style={(feature) => {
+                const pathOptions: PathOptions = {
+                  color: '#ff0000',
+                  weight: 2,
+                  opacity: 0.6,
+                };
+                return pathOptions;
+              }}
+            />
           )}
 
-          {/* Earthquake markers */}
+          {/* Earthquake markers - No clustering */}
           {earthquakes.map((eq) => (
             <Circle
               key={eq.id}
@@ -266,7 +226,7 @@ export default function UnifiedEarthquakeMap({
               pathOptions={{
                 color: getEventColor(eq),
                 fillColor: getEventColor(eq),
-                fillOpacity: 0.6,
+                fillOpacity: mapColors.markerOpacity,
                 weight: 2,
               }}
               eventHandlers={{
@@ -278,28 +238,15 @@ export default function UnifiedEarthquakeMap({
               </Popup>
             </Circle>
           ))}
-
-          {/* Focal mechanisms */}
-          {showFocal && focalMechanisms.map(({ eventId, position, mechanism }) => (
-            mechanism && (
-              <BeachBallMarker
-                key={`focal-${eventId}`}
-                position={position}
-                mechanism={mechanism}
-                eventId={eventId}
-                size={30}
-                onClick={() => {
-                  const event = earthquakes.find(e => e.id === eventId);
-                  if (event) setSelectedEvent(event);
-                }}
-              />
-            )
-          ))}
         </MapContainer>
       </div>
 
       {/* Legend */}
-      <LegendPanel colorMode={colorMode} showFaults={showFaults} />
+      <LegendPanel
+        colorMode={colorMode}
+        showFaults={showFaults}
+        faultCount={faultData?.features.length}
+      />
     </div>
   );
 }
@@ -307,9 +254,18 @@ export default function UnifiedEarthquakeMap({
 // Event popup component
 function EventPopup({ event, qualityScores }: { event: Earthquake; qualityScores: any[] }) {
   const quality = qualityScores.find(q => q.eventId === event.id);
-  
+
+  // Fetch nearby faults for this event
+  const { faults, loading: faultsLoading, count: faultCount } = useNearbyFaults({
+    latitude: event.latitude,
+    longitude: event.longitude,
+    radius: 50, // 50 km radius
+    limit: 3, // Show top 3 nearest faults
+    enabled: true,
+  });
+
   return (
-    <div className="p-2 min-w-[280px]">
+    <div className="p-2 min-w-[280px] max-w-[320px]">
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-bold text-base">{event.region || 'Event'}</h3>
         {quality && (
@@ -367,13 +323,40 @@ function EventPopup({ event, qualityScores }: { event: Earthquake; qualityScores
             <span>{event.used_station_count}</span>
           </div>
         )}
+
+        {/* Nearby Faults Section */}
+        {!faultsLoading && faultCount > 0 && (
+          <div className="pt-2 border-t mt-2">
+            <div className="flex items-center gap-2 mb-2">
+              <Zap className="h-4 w-4 text-orange-500" />
+              <span className="font-medium text-sm">Nearby Faults ({faultCount})</span>
+            </div>
+            <div className="space-y-1.5">
+              {faults.map((fault, idx) => (
+                <div key={fault.id || idx} className="text-xs bg-muted/50 p-2 rounded">
+                  <div className="font-medium text-foreground">{fault.name}</div>
+                  <div className="text-muted-foreground">
+                    {fault.distance.toFixed(1)} km away
+                    {fault.slipType && ` • ${fault.slipType}`}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {faultsLoading && (
+          <div className="pt-2 border-t mt-2">
+            <div className="text-xs text-muted-foreground">Loading nearby faults...</div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 // Legend panel component
-function LegendPanel({ colorMode, showFaults }: { colorMode: string; showFaults: boolean }) {
+function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string; showFaults: boolean; faultCount?: number }) {
   return (
     <Card className="absolute bottom-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[220px]">
       <h4 className="font-semibold text-sm mb-3">
@@ -444,18 +427,13 @@ function LegendPanel({ colorMode, showFaults }: { colorMode: string; showFaults:
           <h4 className="font-semibold text-xs mb-2">Fault Lines</h4>
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-xs">
-              <div className="w-6 h-0.5 bg-red-600" style={{ borderTop: '2px dashed' }}></div>
-              <span>Alpine Fault</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-6 h-0.5 bg-red-900" style={{ borderTop: '2px dashed' }}></div>
-              <span>Hikurangi Zone</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-6 h-0.5 bg-orange-600" style={{ borderTop: '2px dashed' }}></div>
-              <span>Wellington Fault</span>
+              <div className="w-6 h-0.5 bg-red-500"></div>
+              <span>NZ Active Faults{faultCount ? ` (${faultCount.toLocaleString()})` : ''}</span>
             </div>
           </div>
+          <p className="text-[10px] text-muted-foreground mt-2">
+            Data: GNS Science (CC-BY 3.0 NZ)
+          </p>
         </div>
       )}
     </Card>

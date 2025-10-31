@@ -72,6 +72,10 @@ export interface MergedEvent {
   source_events: string;
   created_at: string;
 
+  // Location information
+  region?: string | null;  // Geographic region or location name
+  location_name?: string | null;  // Specific location description
+
   // QuakeML 1.2 Event metadata
   event_public_id?: string | null;
   event_type?: string | null;
@@ -127,6 +131,9 @@ export interface PaginatedResult<T> {
   };
 }
 
+// Transaction callback type
+export type TransactionCallback<T> = () => Promise<T>;
+
 // Database query interface with proper typing
 export interface DbQueries {
   insertCatalogue: (
@@ -171,6 +178,9 @@ export interface DbQueries {
 
   getFilteredEvents: (catalogueId: string, filters: EventFilters) => Promise<MergedEvent[]>;
 
+  // Transaction support
+  transaction: <T>(callback: TransactionCallback<T>) => Promise<T>;
+
   // Mapping template methods
   insertMappingTemplate: (id: string, name: string, description: string | null, mappings: string) => Promise<void>;
   getMappingTemplates: () => Promise<MappingTemplate[]>;
@@ -196,6 +206,13 @@ export interface DbQueries {
 
   // Search method
   searchEvents: (query: string, limit: number, catalogueId?: string) => Promise<any[]>;
+
+  // Saved filter methods
+  insertSavedFilter: (id: string, name: string, description: string | null, filterConfig: string) => Promise<void>;
+  getSavedFilters: () => Promise<SavedFilter[]>;
+  getSavedFilterById: (id: string) => Promise<SavedFilter | undefined>;
+  updateSavedFilter: (id: string, name: string, description: string | null, filterConfig: string) => Promise<void>;
+  deleteSavedFilter: (id: string) => Promise<void>;
 }
 
 // Import history interface
@@ -218,6 +235,16 @@ export interface MappingTemplate {
   name: string;
   description: string | null;
   mappings: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Saved filter interface
+export interface SavedFilter {
+  id: string;
+  name: string;
+  description: string | null;
+  filter_config: string; // JSON string
   created_at: string;
   updated_at: string;
 }
@@ -288,6 +315,10 @@ if (typeof window === 'undefined') {
         source_events TEXT NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 
+        -- Location information
+        region TEXT,
+        location_name TEXT,
+
         -- QuakeML 1.2 Event metadata
         event_public_id TEXT,
         event_type TEXT,
@@ -331,13 +362,26 @@ if (typeof window === 'undefined') {
       )
     `);
 
+    // Create indexes for performance optimization
     db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_catalogue_id ON merged_events(catalogue_id)`);
     db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_source_id ON merged_events(source_id)`);
     db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_time ON merged_events(time)`);
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_magnitude ON merged_events(magnitude)`);
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_depth ON merged_events(depth)`);
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_latitude ON merged_events(latitude)`);
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_longitude ON merged_events(longitude)`);
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_region ON merged_events(region)`);
     db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_event_type ON merged_events(event_type)`);
     db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_magnitude_type ON merged_events(magnitude_type)`);
     db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_evaluation_status ON merged_events(evaluation_status)`);
     db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_azimuthal_gap ON merged_events(azimuthal_gap)`);
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_used_station_count ON merged_events(used_station_count)`);
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_standard_error ON merged_events(standard_error)`);
+
+    // Composite indexes for common query patterns
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_catalogue_time ON merged_events(catalogue_id, time DESC)`);
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_catalogue_magnitude ON merged_events(catalogue_id, magnitude DESC)`);
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_location ON merged_events(latitude, longitude)`);
 
     // Create mapping templates table
     db!.run(`
@@ -372,6 +416,20 @@ if (typeof window === 'undefined') {
 
     db!.run(`CREATE INDEX IF NOT EXISTS idx_import_history_catalogue_id ON import_history(catalogue_id)`);
     db!.run(`CREATE INDEX IF NOT EXISTS idx_import_history_created_at ON import_history(created_at)`);
+
+    // Create saved filters table
+    db!.run(`
+      CREATE TABLE IF NOT EXISTS saved_filters (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        filter_config TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_saved_filters_name ON saved_filters(name)`);
   });
 
   // Initialize queries with proper typing and validation
@@ -764,6 +822,37 @@ if (typeof window === 'undefined') {
       return await dbAll(query, params) as MergedEvent[];
     },
 
+    // Transaction support
+    transaction: async <T>(callback: TransactionCallback<T>): Promise<T> => {
+      if (!db) {
+        throw new Error('Database not initialized');
+      }
+
+      // Begin transaction
+      await dbRun('BEGIN TRANSACTION');
+
+      try {
+        // Execute callback
+        const result = await callback();
+
+        // Commit transaction
+        await dbRun('COMMIT');
+
+        return result;
+      } catch (error) {
+        // Rollback transaction on error
+        try {
+          await dbRun('ROLLBACK');
+          console.log('[Database] Transaction rolled back due to error');
+        } catch (rollbackError) {
+          console.error('[Database] Failed to rollback transaction:', rollbackError);
+        }
+
+        // Re-throw the original error
+        throw error;
+      }
+    },
+
     // Mapping template methods
     insertMappingTemplate: async (id: string, name: string, description: string | null, mappings: string): Promise<void> => {
       if (!id || !name || !mappings) {
@@ -801,6 +890,45 @@ if (typeof window === 'undefined') {
       }
 
       await dbRun(`DELETE FROM mapping_templates WHERE id = ?`, [id]);
+    },
+
+    // Saved filter methods
+    insertSavedFilter: async (id: string, name: string, description: string | null, filterConfig: string): Promise<void> => {
+      if (!id || !name || !filterConfig) {
+        throw new Error('Missing required fields for saved filter');
+      }
+
+      await dbRun(
+        `INSERT INTO saved_filters (id, name, description, filter_config) VALUES (?, ?, ?, ?)`,
+        [id, name, description, filterConfig]
+      );
+    },
+
+    getSavedFilters: async (): Promise<SavedFilter[]> => {
+      return await dbAll(`SELECT * FROM saved_filters ORDER BY created_at DESC`) as SavedFilter[];
+    },
+
+    getSavedFilterById: async (id: string): Promise<SavedFilter | undefined> => {
+      return await dbGet(`SELECT * FROM saved_filters WHERE id = ?`, [id]) as SavedFilter | undefined;
+    },
+
+    updateSavedFilter: async (id: string, name: string, description: string | null, filterConfig: string): Promise<void> => {
+      if (!id || !name || !filterConfig) {
+        throw new Error('Missing required fields for saved filter');
+      }
+
+      await dbRun(
+        `UPDATE saved_filters SET name = ?, description = ?, filter_config = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [name, description, filterConfig, id]
+      );
+    },
+
+    deleteSavedFilter: async (id: string): Promise<void> => {
+      if (!id) {
+        throw new Error('Missing filter ID');
+      }
+
+      await dbRun(`DELETE FROM saved_filters WHERE id = ?`, [id]);
     },
 
     // GeoNet import methods
@@ -923,6 +1051,13 @@ if (typeof window === 'undefined') {
       return results;
     }
   };
+}
+
+/**
+ * Get the database instance (for advanced operations)
+ */
+export function getDb(): sqlite3.Database | null {
+  return db;
 }
 
 export { db as default, dbQueries };

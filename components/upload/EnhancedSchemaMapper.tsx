@@ -40,6 +40,16 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Accordion,
   AccordionContent,
   AccordionItem,
@@ -84,6 +94,8 @@ export function EnhancedSchemaMapper({
   const [templateName, setTemplateName] = useState('');
   const [templateDescription, setTemplateDescription] = useState('');
   const [expandedCategories, setExpandedCategories] = useState<string[]>(['basic']);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [templateToDelete, setTemplateToDelete] = useState<string | null>(null);
   
   // Load templates on mount
   useEffect(() => {
@@ -288,12 +300,14 @@ export function EnhancedSchemaMapper({
   };
   
   // Delete a template
-  const deleteTemplate = async (id: string) => {
+  const confirmDeleteTemplate = async () => {
+    if (!templateToDelete) return;
+
     try {
-      const response = await fetch(`/api/mapping-templates/${id}`, {
+      const response = await fetch(`/api/mapping-templates/${templateToDelete}`, {
         method: 'DELETE'
       });
-      
+
       if (response.ok) {
         toast({
           title: 'Template deleted',
@@ -307,7 +321,15 @@ export function EnhancedSchemaMapper({
         description: 'Failed to delete mapping template',
         variant: 'destructive'
       });
+    } finally {
+      setDeleteDialogOpen(false);
+      setTemplateToDelete(null);
     }
+  };
+
+  const handleDeleteTemplate = (id: string) => {
+    setTemplateToDelete(id);
+    setDeleteDialogOpen(true);
   };
   
   // Toggle category expansion
@@ -391,7 +413,7 @@ export function EnhancedSchemaMapper({
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => deleteTemplate(template.id)}
+                            onClick={() => handleDeleteTemplate(template.id)}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -679,6 +701,26 @@ export function EnhancedSchemaMapper({
           <span>Processing your catalogues...</span>
         </div>
       )}
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete mapping template?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this mapping template. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDeleteTemplate}
+              className="bg-red-600 hover:bg-red-700 dark:bg-red-900 dark:hover:bg-red-800"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

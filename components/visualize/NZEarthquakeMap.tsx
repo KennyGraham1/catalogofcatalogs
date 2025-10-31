@@ -1,12 +1,19 @@
 'use client';
 
-import { useEffect } from 'react';
-import { MapContainer, TileLayer, Circle, Popup, Polyline } from 'react-leaflet';
+import { useState, useEffect, useMemo } from 'react';
+import { MapContainer, TileLayer, Circle, Popup, GeoJSON } from 'react-leaflet';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Activity, Ruler, Calendar, MapPin } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Activity, Ruler, Calendar, MapPin, Layers } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
+import { calculateQualityScore, QualityMetrics, getQualityColor } from '@/lib/quality-scoring';
+import { getMagnitudeRadius, getMagnitudeColor } from '@/lib/earthquake-utils';
+import { loadFaultData, FaultCollection } from '@/lib/fault-data';
+import type { PathOptions } from 'leaflet';
 
 interface Earthquake {
   id: number;
@@ -21,35 +28,25 @@ interface Earthquake {
 
 interface NZEarthquakeMapProps {
   earthquakes: Earthquake[];
-  colorBy: 'magnitude' | 'depth';
+  colorBy?: 'magnitude' | 'depth' | 'quality';
 }
 
-// New Zealand fault lines (simplified major faults)
-const alpineFault = [
-  [-42.0, 171.5],
-  [-42.5, 171.8],
-  [-43.0, 170.5],
-  [-43.5, 170.0],
-  [-44.0, 169.5],
-  [-44.5, 168.8],
-];
+export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: NZEarthquakeMapProps) {
+  const [showFaults, setShowFaults] = useState(true);
+  const [colorMode, setColorMode] = useState<'magnitude' | 'depth' | 'quality'>(colorBy);
+  const [faultData, setFaultData] = useState<FaultCollection | null>(null);
 
-const hikurangiSubductionZone = [
-  [-37.5, 179.0],
-  [-38.0, 178.5],
-  [-39.0, 178.0],
-  [-40.0, 177.5],
-  [-41.0, 177.0],
-  [-42.0, 176.5],
-];
+  // Dark mode support
+  const mapTheme = useMapTheme();
+  const mapColors = useMapColors();
 
-const wellingtonFault = [
-  [-41.1, 174.8],
-  [-41.3, 174.9],
-  [-41.5, 175.0],
-];
+  // Load fault data
+  useEffect(() => {
+    if (showFaults) {
+      loadFaultData().then(setFaultData);
+    }
+  }, [showFaults]);
 
-export default function NZEarthquakeMap({ earthquakes, colorBy }: NZEarthquakeMapProps) {
   // Fix for Leaflet icons in Next.js
   useEffect(() => {
     delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -60,13 +57,13 @@ export default function NZEarthquakeMap({ earthquakes, colorBy }: NZEarthquakeMa
     });
   }, []);
 
-  const getMagnitudeColor = (magnitude: number): string => {
-    if (magnitude >= 6.0) return '#8B0000'; // Dark red
-    if (magnitude >= 5.0) return '#FF0000'; // Red
-    if (magnitude >= 4.0) return '#FF6B00'; // Orange
-    if (magnitude >= 3.0) return '#FFD700'; // Gold
-    return '#90EE90'; // Light green
-  };
+  // Calculate quality scores
+  const qualityScores = useMemo(() => {
+    return earthquakes.map(event => ({
+      eventId: event.id,
+      score: calculateQualityScore(event as QualityMetrics)
+    }));
+  }, [earthquakes]);
 
   const getDepthColor = (depth: number): string => {
     if (depth >= 40) return '#000080'; // Navy
@@ -76,15 +73,14 @@ export default function NZEarthquakeMap({ earthquakes, colorBy }: NZEarthquakeMa
     return '#ADD8E6'; // Light blue
   };
 
-  const getColor = (eq: Earthquake): string => {
-    return colorBy === 'magnitude' 
-      ? getMagnitudeColor(eq.magnitude)
-      : getDepthColor(eq.depth);
-  };
-
-  const getMagnitudeRadius = (magnitude: number): number => {
-    // Radius in meters for the circle
-    return Math.pow(2, magnitude) * 1000;
+  const getEventColor = (eq: Earthquake): string => {
+    if (colorMode === 'quality') {
+      const quality = qualityScores.find(q => q.eventId === eq.id);
+      return quality ? getQualityColor(quality.score.overall) : getMagnitudeColor(eq.magnitude);
+    } else if (colorMode === 'depth') {
+      return getDepthColor(eq.depth);
+    }
+    return getMagnitudeColor(eq.magnitude);
   };
 
   const getMagnitudeLabel = (magnitude: number): string => {
@@ -95,8 +91,77 @@ export default function NZEarthquakeMap({ earthquakes, colorBy }: NZEarthquakeMa
     return 'Micro';
   };
 
+  const getQualityGrade = (score: number): string => {
+    if (score >= 90) return 'A+';
+    if (score >= 85) return 'A';
+    if (score >= 80) return 'B';
+    if (score >= 70) return 'C';
+    if (score >= 60) return 'D';
+    return 'F';
+  };
+
   return (
     <div className="relative">
+      {/* Control Panel */}
+      <Card className="absolute top-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[240px]">
+        <div className="space-y-3">
+          <h3 className="font-semibold text-sm flex items-center gap-2">
+            <Layers className="h-4 w-4" />
+            Map Options
+          </h3>
+
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor="faults" className="text-xs cursor-pointer">
+              NZ Active Faults
+            </Label>
+            <Switch
+              id="faults"
+              checked={showFaults}
+              onCheckedChange={setShowFaults}
+            />
+          </div>
+
+          <div className="pt-2 border-t">
+            <Label className="text-xs font-medium mb-2 block">Color By</Label>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  id="color-magnitude"
+                  name="colorMode"
+                  checked={colorMode === 'magnitude'}
+                  onChange={() => setColorMode('magnitude')}
+                  className="cursor-pointer"
+                />
+                <Label htmlFor="color-magnitude" className="text-xs cursor-pointer">Magnitude</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  id="color-depth"
+                  name="colorMode"
+                  checked={colorMode === 'depth'}
+                  onChange={() => setColorMode('depth')}
+                  className="cursor-pointer"
+                />
+                <Label htmlFor="color-depth" className="text-xs cursor-pointer">Depth</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  id="color-quality"
+                  name="colorMode"
+                  checked={colorMode === 'quality'}
+                  onChange={() => setColorMode('quality')}
+                  className="cursor-pointer"
+                />
+                <Label htmlFor="color-quality" className="text-xs cursor-pointer">Quality</Label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
       <div className="h-[600px] w-full rounded-lg overflow-hidden border">
         <MapContainer
           center={[-41.0, 174.0]} // Center on New Zealand
@@ -105,87 +170,45 @@ export default function NZEarthquakeMap({ earthquakes, colorBy }: NZEarthquakeMa
           scrollWheelZoom={true}
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution={mapTheme.attribution}
+            url={mapTheme.tileLayerUrl}
           />
 
-          {/* Major Fault Lines */}
-          <Polyline
-            positions={alpineFault as any}
-            color="#FF0000"
-            weight={3}
-            opacity={0.6}
-            dashArray="10, 10"
-          />
-          <Polyline
-            positions={hikurangiSubductionZone as any}
-            color="#8B0000"
-            weight={3}
-            opacity={0.6}
-            dashArray="10, 10"
-          />
-          <Polyline
-            positions={wellingtonFault as any}
-            color="#FF4500"
-            weight={2}
-            opacity={0.6}
-            dashArray="5, 5"
-          />
+          {/* NZ Active Faults from Local GeoJSON */}
+          {showFaults && faultData && (
+            <GeoJSON
+              data={faultData}
+              style={(_feature) => {
+                const pathOptions: PathOptions = {
+                  color: '#ff0000',
+                  weight: 2,
+                  opacity: 0.6,
+                };
+                return pathOptions;
+              }}
+            />
+          )}
 
-          {/* Earthquake Markers */}
+          {/* Earthquake Markers - No clustering */}
           {earthquakes.map((eq) => (
             <Circle
               key={eq.id}
               center={[eq.latitude, eq.longitude]}
               radius={getMagnitudeRadius(eq.magnitude)}
               pathOptions={{
-                color: getColor(eq),
-                fillColor: getColor(eq),
-                fillOpacity: 0.6,
+                color: getEventColor(eq),
+                fillColor: getEventColor(eq),
+                fillOpacity: mapColors.markerOpacity,
                 weight: 2,
               }}
             >
               <Popup>
-                <div className="p-2 min-w-[250px]">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-bold text-base">{eq.region}</h3>
-                    <Badge variant={eq.magnitude >= 5.0 ? 'destructive' : 'default'}>
-                      {getMagnitudeLabel(eq.magnitude)}
-                    </Badge>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm">
-                      <Activity className="h-4 w-4 text-primary" />
-                      <span className="font-medium">Magnitude:</span>
-                      <span className="font-bold">{eq.magnitude.toFixed(1)}</span>
-                    </div>
-                    
-                    <div className="flex items-center gap-2 text-sm">
-                      <Ruler className="h-4 w-4 text-primary" />
-                      <span className="font-medium">Depth:</span>
-                      <span>{eq.depth} km</span>
-                    </div>
-                    
-                    <div className="flex items-center gap-2 text-sm">
-                      <Calendar className="h-4 w-4 text-primary" />
-                      <span className="font-medium">Time:</span>
-                      <span className="text-xs">{new Date(eq.time).toLocaleString()}</span>
-                    </div>
-                    
-                    <div className="flex items-center gap-2 text-sm">
-                      <MapPin className="h-4 w-4 text-primary" />
-                      <span className="font-medium">Location:</span>
-                      <span className="text-xs">{eq.latitude.toFixed(4)}°, {eq.longitude.toFixed(4)}°</span>
-                    </div>
-                    
-                    <div className="pt-2 border-t">
-                      <div className="text-xs text-muted-foreground">
-                        <span className="font-medium">Source:</span> {eq.catalogue}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <EventPopup
+                  eq={eq}
+                  qualityScores={qualityScores}
+                  getMagnitudeLabel={getMagnitudeLabel}
+                  getQualityGrade={getQualityGrade}
+                />
               </Popup>
             </Circle>
           ))}
@@ -193,64 +216,166 @@ export default function NZEarthquakeMap({ earthquakes, colorBy }: NZEarthquakeMa
       </div>
 
       {/* Legend */}
-      <div className="absolute bottom-4 right-4 bg-background/95 backdrop-blur-sm border rounded-lg p-4 shadow-lg">
-        <h4 className="font-semibold text-sm mb-3">
-          {colorBy === 'magnitude' ? 'Magnitude Scale' : 'Depth Scale'}
-        </h4>
-        
-        {colorBy === 'magnitude' ? (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground mb-2">Circle size represents magnitude</p>
-            <div className="flex items-center justify-center gap-1 py-2">
-              <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <div className="w-4 h-4 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <div className="w-5 h-5 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <div className="w-6 h-6 rounded-full bg-blue-500 flex-shrink-0"></div>
-            </div>
+      <LegendPanel
+        colorMode={colorMode}
+        showFaults={showFaults}
+        faultCount={faultData?.features.length}
+      />
+    </div>
+  );
+}
+
+// Legend panel component
+function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string; showFaults: boolean; faultCount?: number }) {
+  return (
+    <Card className="absolute bottom-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[220px]">
+      <h4 className="font-semibold text-sm mb-3">
+        {colorMode === 'quality' ? 'Quality Score' : colorMode === 'depth' ? 'Depth Scale' : 'Magnitude Scale'}
+      </h4>
+
+      {colorMode === 'quality' ? (
+        <div className="space-y-1.5 text-xs">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#22c55e' }}></div>
+            <span>A+ / A (90-100)</span>
           </div>
-        ) : (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#000080' }}></div>
-              <span>≥ 40 km (Deep)</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#0000FF' }}></div>
-              <span>30 - 39 km</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#4169E1' }}></div>
-              <span>20 - 29 km</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#87CEEB' }}></div>
-              <span>10 - 19 km</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#ADD8E6' }}></div>
-              <span>&lt; 10 km (Shallow)</span>
-            </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#84cc16' }}></div>
+            <span>B (80-89)</span>
           </div>
-        )}
-        
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#eab308' }}></div>
+            <span>C (70-79)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#f97316' }}></div>
+            <span>D (60-69)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#ef4444' }}></div>
+            <span>F (&lt; 60)</span>
+          </div>
+        </div>
+      ) : colorMode === 'depth' ? (
+        <div className="space-y-1.5 text-xs">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#000080' }}></div>
+            <span>≥ 40 km (Deep)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#0000FF' }}></div>
+            <span>30 - 39 km</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#4169E1' }}></div>
+            <span>20 - 29 km</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#87CEEB' }}></div>
+            <span>10 - 19 km</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#ADD8E6' }}></div>
+            <span>&lt; 10 km (Shallow)</span>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">Circle size = magnitude</p>
+          <div className="flex items-center justify-center gap-1 py-1">
+            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+            <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+            <div className="w-4 h-4 rounded-full bg-blue-500"></div>
+            <div className="w-5 h-5 rounded-full bg-blue-500"></div>
+            <div className="w-6 h-6 rounded-full bg-blue-500"></div>
+          </div>
+        </div>
+      )}
+
+      {showFaults && (
         <div className="mt-3 pt-3 border-t">
           <h4 className="font-semibold text-xs mb-2">Fault Lines</h4>
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-xs">
-              <div className="w-6 h-0.5 bg-red-600" style={{ borderTop: '2px dashed' }}></div>
-              <span>Alpine Fault</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-6 h-0.5 bg-red-900" style={{ borderTop: '2px dashed' }}></div>
-              <span>Hikurangi Zone</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-6 h-0.5 bg-orange-600" style={{ borderTop: '2px dashed' }}></div>
-              <span>Wellington Fault</span>
+              <div className="w-6 h-0.5 bg-red-500"></div>
+              <span>NZ Active Faults{faultCount ? ` (${faultCount.toLocaleString()})` : ''}</span>
             </div>
           </div>
+          <p className="text-[10px] text-muted-foreground mt-2">
+            Data: GNS Science (CC-BY 3.0 NZ)
+          </p>
         </div>
+      )}
+    </Card>
+  );
+}
+
+// Event popup component
+function EventPopup({
+  eq,
+  qualityScores,
+  getMagnitudeLabel,
+  getQualityGrade
+}: {
+  eq: Earthquake;
+  qualityScores: any[];
+  getMagnitudeLabel: (mag: number) => string;
+  getQualityGrade: (score: number) => string;
+}) {
+  const quality = qualityScores.find(q => q.eventId === eq.id);
+
+  return (
+    <div className="p-3 min-w-[280px] max-w-[320px]">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-bold text-base">{eq.region || 'Unknown Region'}</h3>
+        <Badge variant={eq.magnitude >= 5.0 ? 'destructive' : 'default'}>
+          {getMagnitudeLabel(eq.magnitude)}
+        </Badge>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-sm">
+          <Activity className="h-4 w-4 text-primary" />
+          <span className="font-medium">M {eq.magnitude.toFixed(1)}</span>
+        </div>
+        <div className="flex items-center gap-2 text-sm">
+          <Ruler className="h-4 w-4 text-primary" />
+          <span>Depth: {eq.depth} km</span>
+        </div>
+        <div className="flex items-center gap-2 text-sm">
+          <Calendar className="h-4 w-4 text-primary" />
+          <span className="text-xs">{new Date(eq.time).toLocaleString()}</span>
+        </div>
+        <div className="flex items-center gap-2 text-sm">
+          <MapPin className="h-4 w-4 text-primary" />
+          <span className="text-xs">{eq.latitude.toFixed(4)}°, {eq.longitude.toFixed(4)}°</span>
+        </div>
+
+        {quality && (
+          <div className="pt-2 border-t">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium">Quality Score:</span>
+              <Badge
+                variant="outline"
+                style={{
+                  backgroundColor: getQualityColor(quality.score.overall),
+                  color: 'white',
+                  borderColor: getQualityColor(quality.score.overall)
+                }}
+              >
+                {getQualityGrade(quality.score.overall)} ({quality.score.overall.toFixed(0)})
+              </Badge>
+            </div>
+          </div>
+        )}
+
+        {eq.catalogue && (
+          <div className="pt-2 border-t">
+            <div className="text-xs text-muted-foreground">
+              <span className="font-medium">Source:</span> {eq.catalogue}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

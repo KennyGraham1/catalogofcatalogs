@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo } from 'react';
 import { MapContainer, TileLayer, Circle, Popup, Polyline } from 'react-leaflet';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Activity, Ruler, Calendar, MapPin, Layers, Target, Radio } from 'lucide-react';
@@ -13,9 +12,10 @@ import 'leaflet/dist/leaflet.css';
 import { UncertaintyEllipse } from './UncertaintyEllipse';
 import { BeachBallMarker } from './BeachBallMarker';
 import { StationMarker } from './StationMarker';
+import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
 import { calculateUncertaintyEllipse, UncertaintyData } from '@/lib/uncertainty-utils';
 import { parseFocalMechanism } from '@/lib/focal-mechanism-utils';
-import { parseStationData, calculateAzimuth, calculateDistance } from '@/lib/station-coverage-utils';
+import { calculateDistance } from '@/lib/station-coverage-utils';
 import { calculateQualityScore, QualityMetrics, getQualityColor } from '@/lib/quality-scoring';
 import { getMagnitudeColor, getMagnitudeRadius } from '@/lib/earthquake-utils';
 
@@ -61,16 +61,20 @@ interface EnhancedMapViewProps {
   zoom?: number;
 }
 
-export function EnhancedMapView({ 
-  events, 
-  center = [-41.0, 174.0], 
-  zoom = 6 
+export function EnhancedMapView({
+  events,
+  center = [-41.0, 174.0],
+  zoom = 6
 }: EnhancedMapViewProps) {
   const [selectedEvent, setSelectedEvent] = useState<EnhancedEvent | null>(null);
   const [showUncertainty, setShowUncertainty] = useState(true);
   const [showFocalMechanisms, setShowFocalMechanisms] = useState(true);
   const [showStations, setShowStations] = useState(false);
   const [showQualityColors, setShowQualityColors] = useState(false);
+
+  // Dark mode support
+  const mapTheme = useMapTheme();
+  const mapColors = useMapColors();
 
   // Fix Leaflet icons
   useEffect(() => {
@@ -184,11 +188,11 @@ export function EnhancedMapView({
           scrollWheelZoom={true}
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution={mapTheme.attribution}
+            url={mapTheme.tileLayerUrl}
           />
 
-          {/* Earthquake markers */}
+          {/* Earthquake markers - No clustering */}
           {events.map((event) => (
             <Circle
               key={event.id}
@@ -197,7 +201,7 @@ export function EnhancedMapView({
               pathOptions={{
                 color: getEventColor(event),
                 fillColor: getEventColor(event),
-                fillOpacity: 0.6,
+                fillOpacity: mapColors.markerOpacity,
                 weight: 2,
               }}
               eventHandlers={{

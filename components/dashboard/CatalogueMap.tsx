@@ -4,9 +4,11 @@ import { useEffect, useState } from 'react';
 import L from 'leaflet';
 import { MapContainer, TileLayer, Circle, Popup } from 'react-leaflet';
 import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Activity, Calendar, Ruler, MapPin } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getMagnitudeColor, getMagnitudeRadius } from '@/lib/earthquake-utils';
+import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
 import 'leaflet/dist/leaflet.css';
 
 interface EarthquakeEvent {
@@ -25,6 +27,11 @@ export function CatalogueMap() {
   const [events, setEvents] = useState<EarthquakeEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Dark mode support
+  const mapTheme = useMapTheme();
+  const mapColors = useMapColors();
+
   // Fetch sample events from database
   useEffect(() => {
     async function fetchEvents() {
@@ -95,6 +102,14 @@ export function CatalogueMap() {
     );
   }
 
+  const getMagnitudeLabel = (magnitude: number): string => {
+    if (magnitude >= 6.0) return 'Major';
+    if (magnitude >= 5.0) return 'Moderate';
+    if (magnitude >= 4.0) return 'Light';
+    if (magnitude >= 3.0) return 'Minor';
+    return 'Micro';
+  };
+
   return (
     <div className="h-[600px] w-full relative">
       <MapContainer
@@ -105,63 +120,86 @@ export function CatalogueMap() {
         maxZoom={12}
       >
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution={mapTheme.attribution}
+          url={mapTheme.tileLayerUrl}
         />
 
+        {/* Earthquake markers - No clustering */}
         {events.map((event) => (
           <Circle
             key={event.id}
             center={[event.latitude, event.longitude]}
             radius={getMagnitudeRadius(event.magnitude)}
-            color={getMagnitudeColor(event.magnitude)}
-            fillColor={getMagnitudeColor(event.magnitude)}
-            fillOpacity={0.5}
-            weight={1}
+            pathOptions={{
+              color: getMagnitudeColor(event.magnitude),
+              fillColor: getMagnitudeColor(event.magnitude),
+              fillOpacity: mapColors.markerOpacity,
+              weight: 2,
+            }}
           >
             <Popup>
-              <Card className="p-4 min-w-[220px]">
-                <h3 className="font-medium mb-2">{event.catalogue_name}</h3>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm">
-                    <Activity className="h-4 w-4 text-primary" />
-                    <span>Magnitude: {event.magnitude.toFixed(1)}{event.magnitude_type ? ` ${event.magnitude_type}` : ''}</span>
-                  </div>
-                  {event.depth !== null && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <Ruler className="h-4 w-4 text-primary" />
-                      <span>Depth: {event.depth.toFixed(1)} km</span>
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2 text-sm">
-                    <Calendar className="h-4 w-4 text-primary" />
-                    <span>{new Date(event.time).toLocaleString()}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm">
-                    <MapPin className="h-4 w-4 text-primary" />
-                    <span className="text-xs">{event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°</span>
-                  </div>
-                </div>
-              </Card>
+              <EventPopup event={event} getMagnitudeLabel={getMagnitudeLabel} />
             </Popup>
           </Circle>
         ))}
       </MapContainer>
 
       {/* Legend */}
-      <div className="absolute bottom-4 right-4 z-[1000] bg-background/95 backdrop-blur-sm p-4 rounded-lg border shadow-lg">
-        <h4 className="font-medium mb-2 text-sm">Magnitude Scale</h4>
-        <p className="text-xs text-muted-foreground mb-3">Circle size represents magnitude</p>
-        <div className="flex items-center justify-center gap-1 py-2">
-          <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
-          <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0"></div>
-          <div className="w-4 h-4 rounded-full bg-blue-500 flex-shrink-0"></div>
-          <div className="w-5 h-5 rounded-full bg-blue-500 flex-shrink-0"></div>
-          <div className="w-6 h-6 rounded-full bg-blue-500 flex-shrink-0"></div>
+      <Card className="absolute bottom-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[220px]">
+        <h4 className="font-semibold text-sm mb-3">Magnitude Scale</h4>
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">Circle size = magnitude</p>
+          <div className="flex items-center justify-center gap-1 py-1">
+            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+            <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+            <div className="w-4 h-4 rounded-full bg-blue-500"></div>
+            <div className="w-5 h-5 rounded-full bg-blue-500"></div>
+            <div className="w-6 h-6 rounded-full bg-blue-500"></div>
+          </div>
         </div>
-        <div className="mt-2 pt-2 border-t text-xs text-muted-foreground text-center">
+        <div className="mt-3 pt-3 border-t text-xs text-muted-foreground text-center">
           {events.length} events
         </div>
+      </Card>
+    </div>
+  );
+}
+
+// Event popup component
+function EventPopup({ event, getMagnitudeLabel }: { event: EarthquakeEvent; getMagnitudeLabel: (mag: number) => string }) {
+  return (
+    <div className="p-3 min-w-[250px]">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-bold text-base">{event.catalogue_name}</h3>
+        <Badge variant={event.magnitude >= 5.0 ? 'destructive' : 'default'}>
+          {getMagnitudeLabel(event.magnitude)}
+        </Badge>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-sm">
+          <Activity className="h-4 w-4 text-primary" />
+          <span className="font-medium">M {event.magnitude.toFixed(1)}{event.magnitude_type ? ` ${event.magnitude_type}` : ''}</span>
+        </div>
+        {event.depth !== null && (
+          <div className="flex items-center gap-2 text-sm">
+            <Ruler className="h-4 w-4 text-primary" />
+            <span>Depth: {event.depth.toFixed(1)} km</span>
+          </div>
+        )}
+        <div className="flex items-center gap-2 text-sm">
+          <Calendar className="h-4 w-4 text-primary" />
+          <span className="text-xs">{new Date(event.time).toLocaleString()}</span>
+        </div>
+        <div className="flex items-center gap-2 text-sm">
+          <MapPin className="h-4 w-4 text-primary" />
+          <span className="text-xs">{event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°</span>
+        </div>
+        {event.event_type && (
+          <div className="pt-2 border-t">
+            <Badge variant="outline">{event.event_type}</Badge>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -74,6 +74,7 @@ export default function AnalyticsPage() {
   const [events, setEvents] = useState<any[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('map');
 
   // Visualize page filters
   const [magnitudeRange, setMagnitudeRange] = useState([2.0, 6.0]);
@@ -419,19 +420,26 @@ export default function AnalyticsPage() {
             Comprehensive visualization, quality assessment, and seismological analysis
           </p>
         </div>
-        <Select value={selectedCatalogue} onValueChange={setSelectedCatalogue}>
-          <SelectTrigger className="w-[300px]">
-            <SelectValue placeholder="Select catalogue" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Catalogues ({events.length} events)</SelectItem>
-            {catalogues.map((cat) => (
-              <SelectItem key={cat.id} value={cat.id}>
-                {cat.name} ({cat.event_count || 0} events)
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex flex-col items-end gap-1">
+          <Select value={selectedCatalogue} onValueChange={setSelectedCatalogue}>
+            <SelectTrigger className="w-[300px]">
+              <SelectValue placeholder="Select catalogue" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Catalogues ({events.length} events)</SelectItem>
+              {catalogues.map((cat) => (
+                <SelectItem key={cat.id} value={cat.id}>
+                  {cat.name} ({cat.event_count || 0} events)
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {['quality', 'gutenberg-richter', 'completeness', 'temporal', 'moment'].includes(activeTab)
+              ? 'Filters quality analysis tabs'
+              : 'Use filters in Map tab for visualization'}
+          </p>
+        </div>
       </div>
 
       {/* Statistics Cards */}
@@ -492,7 +500,7 @@ export default function AnalyticsPage() {
       )}
 
       {/* Main Content */}
-      <Tabs defaultValue="map" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="grid w-full grid-cols-5 lg:grid-cols-11 gap-1">
           <TabsTrigger value="map" className="text-xs">
             <MapPin className="h-3 w-3 mr-1" />
@@ -530,7 +538,7 @@ export default function AnalyticsPage() {
             <BarChart3 className="h-3 w-3 mr-1" />
             Mc
           </TabsTrigger>
-          <TabsTrigger value="temporal-analysis" className="text-xs">
+          <TabsTrigger value="temporal" className="text-xs">
             <Clock className="h-3 w-3 mr-1" />
             Temporal
           </TabsTrigger>
@@ -663,6 +671,7 @@ export default function AnalyticsPage() {
                 </CardHeader>
                 <CardContent>
                   <UnifiedEarthquakeMap
+                    key={`map-${filteredEarthquakes.length}-${magnitudeRange.join('-')}-${depthRange.join('-')}-${timeFilter}`}
                     earthquakes={filteredEarthquakes}
                     colorBy={colorBy}
                     showFocalMechanisms={true}

@@ -3,6 +3,8 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  // Enable standalone output for Docker deployment
+  output: 'standalone',
   webpack: (config, { isServer }) => {
     if (!isServer) {
       // Don't attempt to load these modules on the client side

@@ -11,9 +11,9 @@ import {
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { 
-  ArrowUpDown, 
-  ArrowUp, 
+import {
+  ArrowUpDown,
+  ArrowUp,
   ArrowDown,
   Activity,
   MapPin,
@@ -21,6 +21,7 @@ import {
   Layers
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { VirtualizedEventTable } from './VirtualizedEventTable';
 
 interface Event {
   id: string | number;
@@ -47,15 +48,29 @@ interface EventTableProps {
   className?: string;
   defaultSortField?: SortField;
   defaultSortDirection?: SortDirection;
+  virtualizationThreshold?: number; // Use virtualization if events > this number
 }
 
-export function EventTable({ 
-  events, 
+export function EventTable({
+  events,
   onEventClick,
   className,
   defaultSortField = 'time',
-  defaultSortDirection = 'desc'
+  defaultSortDirection = 'desc',
+  virtualizationThreshold = 100
 }: EventTableProps) {
+  // Use virtualized table for large datasets
+  if (events.length > virtualizationThreshold) {
+    return (
+      <VirtualizedEventTable
+        events={events}
+        onEventClick={onEventClick}
+        className={className}
+        defaultSortField={defaultSortField}
+        defaultSortDirection={defaultSortDirection}
+      />
+    );
+  }
   const [sortField, setSortField] = useState<SortField>(defaultSortField);
   const [sortDirection, setSortDirection] = useState<SortDirection>(defaultSortDirection);
 
