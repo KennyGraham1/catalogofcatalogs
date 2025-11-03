@@ -5,14 +5,16 @@ import L from 'leaflet';
 import { MapContainer, TileLayer, Circle, Popup } from 'react-leaflet';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Activity, Calendar, Ruler, MapPin } from 'lucide-react';
+import { Activity, Calendar, Ruler, MapPin, Filter } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getMagnitudeColor, getMagnitudeRadius } from '@/lib/earthquake-utils';
 import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
 import 'leaflet/dist/leaflet.css';
 
 interface EarthquakeEvent {
   id: string;
+  catalogue_id?: string;
   latitude: number;
   longitude: number;
   magnitude: number;
@@ -23,8 +25,16 @@ interface EarthquakeEvent {
   event_type?: string | null;
 }
 
+interface Catalogue {
+  id: string;
+  name: string;
+  event_count: number;
+}
+
 export function CatalogueMap() {
   const [events, setEvents] = useState<EarthquakeEvent[]>([]);
+  const [catalogues, setCatalogues] = useState<Catalogue[]>([]);
+  const [selectedCatalogue, setSelectedCatalogue] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,20 +42,53 @@ export function CatalogueMap() {
   const mapTheme = useMapTheme();
   const mapColors = useMapColors();
 
-  // Fetch sample events from database
+  // Fetch catalogues list
+  useEffect(() => {
+    async function fetchCatalogues() {
+      try {
+        const response = await fetch('/api/catalogues');
+        if (!response.ok) {
+          throw new Error('Failed to fetch catalogues');
+        }
+        const data = await response.json();
+        setCatalogues(data || []);
+
+        // Auto-select first catalogue if available
+        if (data && data.length > 0 && !selectedCatalogue) {
+          setSelectedCatalogue(data[0].id);
+        }
+      } catch (err) {
+        console.error('Error fetching catalogues:', err);
+      }
+    }
+
+    fetchCatalogues();
+  }, []);
+
+  // Fetch events based on selected catalogue
   useEffect(() => {
     async function fetchEvents() {
+      if (!selectedCatalogue) {
+        return;
+      }
+
       try {
         setLoading(true);
         setError(null);
-        const response = await fetch('/api/events/sample?limit=100');
+
+        // Fetch events from specific catalogue only
+        const response = await fetch(`/api/catalogues/${selectedCatalogue}/events`);
 
         if (!response.ok) {
           throw new Error('Failed to fetch events');
         }
 
         const data = await response.json();
-        setEvents(data.events || []);
+
+        // Handle different response formats
+        const eventsList: EarthquakeEvent[] = Array.isArray(data) ? data : (data.data || []);
+
+        setEvents(eventsList);
       } catch (err) {
         console.error('Error fetching events:', err);
         setError(err instanceof Error ? err.message : 'Failed to load events');
@@ -55,7 +98,7 @@ export function CatalogueMap() {
     }
 
     fetchEvents();
-  }, []);
+  }, [selectedCatalogue]);
 
   // Fix for Leaflet icons in Next.js
   useEffect(() => {
@@ -90,13 +133,25 @@ export function CatalogueMap() {
     );
   }
 
-  if (events.length === 0) {
+  if (catalogues.length === 0) {
     return (
       <div className="h-[600px] w-full relative flex items-center justify-center bg-muted/20">
         <div className="text-center text-muted-foreground">
           <MapPin className="h-12 w-12 mx-auto mb-2 opacity-50" />
-          <p>No earthquake events found</p>
+          <p>No catalogues found</p>
           <p className="text-sm mt-1">Import or create catalogues to see events on the map</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (events.length === 0 && !loading) {
+    return (
+      <div className="h-[600px] w-full relative flex items-center justify-center bg-muted/20">
+        <div className="text-center text-muted-foreground">
+          <MapPin className="h-12 w-12 mx-auto mb-2 opacity-50" />
+          <p>No earthquake events found in this catalogue</p>
+          <p className="text-sm mt-1">Select a different catalogue or import more data</p>
         </div>
       </div>
     );
@@ -112,6 +167,27 @@ export function CatalogueMap() {
 
   return (
     <div className="h-[600px] w-full relative">
+      {/* Catalogue Filter */}
+      <div className="absolute top-4 left-4 z-[2000]">
+        <Card className="p-3 bg-background/95 backdrop-blur-sm shadow-lg">
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-muted-foreground" />
+            <Select value={selectedCatalogue} onValueChange={setSelectedCatalogue}>
+              <SelectTrigger className="w-[250px] h-8">
+                <SelectValue placeholder="Select catalogue" />
+              </SelectTrigger>
+              <SelectContent className="z-[2001]">
+                {catalogues.map((catalogue) => (
+                  <SelectItem key={catalogue.id} value={catalogue.id}>
+                    {catalogue.name} ({catalogue.event_count} events)
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </Card>
+      </div>
+
       <MapContainer
         center={[-41.0, 174.0]} // Center on New Zealand
         zoom={5}
@@ -145,7 +221,7 @@ export function CatalogueMap() {
       </MapContainer>
 
       {/* Legend */}
-      <Card className="absolute bottom-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[220px]">
+      <Card className="absolute bottom-4 right-4 z-[2000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[220px]">
         <h4 className="font-semibold text-sm mb-3">Magnitude Scale</h4>
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">Circle size = magnitude</p>
@@ -157,8 +233,15 @@ export function CatalogueMap() {
             <div className="w-6 h-6 rounded-full bg-blue-500"></div>
           </div>
         </div>
-        <div className="mt-3 pt-3 border-t text-xs text-muted-foreground text-center">
-          {events.length} events
+        <div className="mt-3 pt-3 border-t space-y-1">
+          <div className="text-xs text-muted-foreground text-center">
+            {events.length} events
+          </div>
+          {selectedCatalogue && (
+            <div className="text-xs text-muted-foreground text-center">
+              {catalogues.find(c => c.id === selectedCatalogue)?.name}
+            </div>
+          )}
         </div>
       </Card>
     </div>

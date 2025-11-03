@@ -18,6 +18,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '../theme/ThemeToggle';
+import { UserMenu } from '@/components/auth/UserMenu';
 
 interface HeaderProps {
   onShowShortcuts?: () => void;
@@ -91,13 +92,15 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
             </Button>
           )}
           <ThemeToggle />
+          <UserMenu />
         </nav>
 
         {/* Mobile Menu Button */}
         <div className="flex md:hidden items-center gap-4">
           <ThemeToggle />
-          <Button 
-            variant="ghost" 
+          <UserMenu />
+          <Button
+            variant="ghost"
             size="icon"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             aria-label="Toggle menu"

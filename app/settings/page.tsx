@@ -6,21 +6,23 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { 
-  Settings, 
-  Shield, 
-  Database, 
-  Sliders, 
+import { UserProfileForm } from '@/components/auth/UserProfileForm';
+import { ChangePasswordForm } from '@/components/auth/ChangePasswordForm';
+import { ApiKeyManagement } from '@/components/auth/ApiKeyManagement';
+import {
+  Settings,
+  Database,
+  Sliders,
   Save,
   Map
 } from 'lucide-react';
@@ -36,13 +38,20 @@ export default function SettingsPage() {
           </p>
         </div>
 
-        <Tabs defaultValue="general" className="space-y-4">
+        <Tabs defaultValue="account" className="space-y-4">
           <TabsList>
+            <TabsTrigger value="account">Account</TabsTrigger>
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="schema">Schema Mapping</TabsTrigger>
             <TabsTrigger value="visualization">Visualization</TabsTrigger>
             <TabsTrigger value="advanced">Advanced</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="account" className="space-y-4">
+            <UserProfileForm />
+            <ChangePasswordForm />
+            <ApiKeyManagement />
+          </TabsContent>
           
           <TabsContent value="general" className="space-y-4">
             <Card className="shadow-sm">
@@ -137,63 +146,6 @@ export default function SettingsPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                  </div>
-                </div>
-                
-                <div className="flex justify-end">
-                  <Button>
-                    <Save className="mr-2 h-4 w-4" />
-                    Save Changes
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-            
-            <Card className="shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Shield className="h-4 w-4" />
-                  Account Settings
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Manage your account information and security preferences
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="email">Email Address</Label>
-                    <Input id="email" defaultValue="user@example.com" />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Full Name</Label>
-                    <Input id="name" defaultValue="John Doe" />
-                  </div>
-                </div>
-                
-                <Separator />
-                
-                <div className="space-y-4">
-                  <h3 className="text-lg font-medium">Security</h3>
-                  
-                  <div className="space-y-2">
-                    <Button variant="outline">Change Password</Button>
-                    <p className="text-sm text-muted-foreground">
-                      Last changed 45 days ago
-                    </p>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="2fa" className="text-base">
-                        Two-Factor Authentication
-                      </Label>
-                      <Switch id="2fa" />
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      Enhance your account security with two-factor authentication
-                    </p>
                   </div>
                 </div>
                 

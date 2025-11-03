@@ -19,23 +19,24 @@ export interface ImportOptions {
   startDate?: Date;
   endDate?: Date;
   hours?: number;  // Fetch last N hours (alternative to date range)
-  
+
   // Filters
   minMagnitude?: number;
   maxMagnitude?: number;
   minDepth?: number;
   maxDepth?: number;
-  
+
   // Geographic bounds
   minLatitude?: number;
   maxLatitude?: number;
   minLongitude?: number;
   maxLongitude?: number;
-  
+
   // Behavior
   updateExisting?: boolean;  // Update existing events if data has changed
   catalogueId?: string;      // Target catalogue ID (auto-created if not provided)
   catalogueName?: string;    // Catalogue name (default: "GeoNet - Automated Import")
+  userId?: string;           // User ID for tracking who created the catalogue
 }
 
 /**
@@ -174,7 +175,8 @@ export class GeoNetImportService {
       // 2. Get or create catalogue
       const catalogueId = await this.getOrCreateCatalogue(
         options.catalogueId,
-        options.catalogueName || GeoNetImportService.DEFAULT_CATALOGUE_NAME
+        options.catalogueName || GeoNetImportService.DEFAULT_CATALOGUE_NAME,
+        options.userId
       );
       console.log(`[GeoNetImportService] Using catalogue: ${catalogueId}`);
       
@@ -315,7 +317,7 @@ export class GeoNetImportService {
   /**
    * Get existing catalogue or create new one
    */
-  private async getOrCreateCatalogue(catalogueId?: string, catalogueName?: string): Promise<string> {
+  private async getOrCreateCatalogue(catalogueId?: string, catalogueName?: string, userId?: string): Promise<string> {
     if (catalogueId) {
       // Check if catalogue exists
       const catalogue = await dbQueries.getCatalogueById(catalogueId);
@@ -323,7 +325,7 @@ export class GeoNetImportService {
         return catalogueId;
       }
     }
-    
+
     // Create new catalogue
     const newId = uuidv4();
     const name = catalogueName || GeoNetImportService.DEFAULT_CATALOGUE_NAME;
@@ -334,7 +336,8 @@ export class GeoNetImportService {
       JSON.stringify([{ source: 'GeoNet', description: GeoNetImportService.DEFAULT_CATALOGUE_DESCRIPTION }]),
       JSON.stringify({ source: 'GeoNet', importDate: new Date().toISOString() }),
       0,  // Initial event count
-      'complete'
+      'complete',
+      userId ? { created_by: userId } : undefined
     );
 
     console.log(`[GeoNetImportService] Created new catalogue: ${name} (${newId})`);

@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { Logger, NotFoundError, DatabaseError, formatErrorResponse } from '@/lib/errors';
 import { apiCache } from '@/lib/cache';
+import { getSession } from '@/lib/auth';
+import { auditApiAction } from '@/lib/api-middleware';
 
 const logger = new Logger('CatalogueAPI');
 
@@ -37,6 +39,10 @@ export async function PATCH(
   try {
     logger.info('Updating catalogue', { id: params.id });
 
+    // Get authenticated user
+    const session = await getSession();
+    const userId = session?.user?.id;
+
     const body = await request.json();
     const { name } = body;
 
@@ -47,9 +53,29 @@ export async function PATCH(
       );
     }
 
+    if (!dbQueries) {
+      return NextResponse.json(
+        { error: 'Database not initialized' },
+        { status: 500 }
+      );
+    }
+
     await dbQueries.updateCatalogueName(name, params.id);
 
-    logger.info('Catalogue updated successfully', { id: params.id });
+    // Update modified_by and modified_at if user is authenticated
+    if (userId) {
+      await dbQueries.updateCatalogueMetadata(params.id, {
+        modified_by: userId,
+        modified_at: new Date().toISOString(),
+      });
+
+      // Create audit log
+      await auditApiAction(request as any, 'update_catalogue', 'catalogue', params.id, {
+        name,
+      });
+    }
+
+    logger.info('Catalogue updated successfully', { id: params.id, userId });
 
     // Clear cache since catalogue was updated
     apiCache.clearAll();
@@ -73,9 +99,25 @@ export async function DELETE(
   try {
     logger.info('Deleting catalogue', { id: params.id });
 
+    // Get authenticated user
+    const session = await getSession();
+    const userId = session?.user?.id;
+
+    if (!dbQueries) {
+      return NextResponse.json(
+        { error: 'Database not initialized' },
+        { status: 500 }
+      );
+    }
+
     await dbQueries.deleteCatalogue(params.id);
 
-    logger.info('Catalogue deleted successfully', { id: params.id });
+    // Create audit log if user is authenticated
+    if (userId) {
+      await auditApiAction(request as any, 'delete_catalogue', 'catalogue', params.id);
+    }
+
+    logger.info('Catalogue deleted successfully', { id: params.id, userId });
 
     // Clear cache since catalogue was deleted
     apiCache.clearAll();

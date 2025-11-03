@@ -2,10 +2,16 @@ import { NextResponse } from 'next/server';
 import { mergeCatalogues as dbMergeCatalogues } from '@/lib/merge';
 import { validateMergeRequest, formatZodErrors } from '@/lib/validation';
 import { apiCache } from '@/lib/cache';
+import { getSession } from '@/lib/auth';
+import { auditApiAction } from '@/lib/api-middleware';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+
+    // Get authenticated user
+    const session = await getSession();
+    const userId = session?.user?.id;
 
     // Validate request body
     const validation = validateMergeRequest(body);
@@ -22,7 +28,22 @@ export async function POST(request: Request) {
 
     const { name, sourceCatalogues, config, metadata, exportOnly } = body;
 
-    const result = await dbMergeCatalogues(name, sourceCatalogues, config, metadata, exportOnly);
+    // Add user context to metadata
+    const enrichedMetadata = {
+      ...metadata,
+      created_by: userId,
+    };
+
+    const result = await dbMergeCatalogues(name, sourceCatalogues, config, enrichedMetadata, exportOnly);
+
+    // Create audit log if user is authenticated and not export-only
+    if (userId && !exportOnly) {
+      await auditApiAction(request as any, 'merge_catalogues', 'catalogue', result.catalogueId, {
+        name,
+        sourceCatalogues: sourceCatalogues.map((c: any) => c.id),
+        config,
+      });
+    }
 
     // Clear cache since a new catalogue was created (unless export-only mode)
     if (!exportOnly) {

@@ -1,17 +1,23 @@
 /**
  * GeoNet Import API Endpoint
- * 
+ *
  * POST /api/import/geonet - Trigger a GeoNet import
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { geonetImportService } from '@/lib/geonet-import-service';
 import { apiCache } from '@/lib/cache';
+import { getSession } from '@/lib/auth';
+import { auditApiAction } from '@/lib/api-middleware';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    
+
+    // Get authenticated user
+    const session = await getSession();
+    const userId = session?.user?.id;
+
     // Parse and validate request body
     const {
       startDate,
@@ -117,9 +123,22 @@ export async function POST(request: NextRequest) {
       updateExisting: updateExisting ?? false,
       catalogueId,
       catalogueName,
+      userId, // Pass user ID to import service
     });
-    
+
     console.log('[API] Import completed:', result);
+
+    // Create audit log if user is authenticated
+    if (userId) {
+      await auditApiAction(request, 'import_geonet', 'catalogue', result.catalogueId, {
+        startDate: parsedStartDate?.toISOString(),
+        endDate: parsedEndDate?.toISOString(),
+        hours,
+        totalFetched: result.totalFetched,
+        newEvents: result.newEvents,
+        updatedEvents: result.updatedEvents,
+      });
+    }
 
     // Clear cache since new events were imported
     apiCache.clearAll();
