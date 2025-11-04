@@ -57,8 +57,15 @@ describe('Data Quality Checker', () => {
           time: '2024-01-15T10:30:00Z',
           latitude: -41.5,
           longitude: 174.0,
-          magnitude: 5.2,
-          // Missing depth and all quality metrics
+          // Missing magnitude - required field
+          depth: 10,
+        },
+        {
+          time: '2024-01-15T11:00:00Z',
+          // Missing latitude - required field
+          longitude: 174.5,
+          magnitude: 4.5,
+          depth: 15,
         },
       ];
 

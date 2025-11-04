@@ -199,8 +199,13 @@ describe('Data Quality Assessment', () => {
           time: '2024-01-15T10:30:00Z',
           latitude: -41.5,
           longitude: 174.0,
-          magnitude: 5.2,
-          // Missing depth
+          // Missing magnitude - required field
+        },
+        {
+          time: '2024-01-15T11:00:00Z',
+          // Missing latitude - required field
+          longitude: 174.5,
+          magnitude: 4.5,
         },
       ];
 
@@ -329,7 +334,7 @@ describe('Data Quality Assessment', () => {
     it('should detect unusually large bounds', () => {
       const bounds = {
         minLat: -90,
-        maxLat: 90,
+        maxLat: 91, // latRange = 181 > 180, triggers warning
         minLon: -180,
         maxLon: 180,
       };

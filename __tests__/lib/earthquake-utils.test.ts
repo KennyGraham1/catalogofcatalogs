@@ -14,12 +14,13 @@ import {
 
 describe('earthquake-utils', () => {
   describe('getMagnitudeColor', () => {
-    it('should return correct colors for different magnitudes', () => {
-      expect(getMagnitudeColor(1)).toBe('#16a34a'); // green - Minor
-      expect(getMagnitudeColor(4)).toBe('#ca8a04'); // yellow - Light
-      expect(getMagnitudeColor(5)).toBe('#ea580c'); // orange - Moderate
-      expect(getMagnitudeColor(6)).toBe('#dc2626'); // red - Strong
-      expect(getMagnitudeColor(7)).toBe('#9333ea'); // purple - Major
+    it('should return single blue color for all magnitudes', () => {
+      // User preference: single color (blue) for all events, size represents magnitude
+      expect(getMagnitudeColor(1)).toBe('#3b82f6'); // blue-500
+      expect(getMagnitudeColor(4)).toBe('#3b82f6'); // blue-500
+      expect(getMagnitudeColor(5)).toBe('#3b82f6'); // blue-500
+      expect(getMagnitudeColor(6)).toBe('#3b82f6'); // blue-500
+      expect(getMagnitudeColor(7)).toBe('#3b82f6'); // blue-500
     });
   });
 

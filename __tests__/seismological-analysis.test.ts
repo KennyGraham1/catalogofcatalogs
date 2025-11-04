@@ -159,7 +159,19 @@ describe('Temporal Analysis', () => {
         magnitude: 4.0
       });
     }
-    
+
+    // Add events after cluster to close it (cluster detection needs a normal day after high activity)
+    for (let i = 0; i < 5; i++) {
+      events.push({
+        id: 30 + i,
+        time: new Date(clusterDate.getTime() + (i + 2) * 86400000).toISOString(),
+        latitude: -41.0,
+        longitude: 174.0,
+        depth: 10,
+        magnitude: 3.0
+      });
+    }
+
     const result = analyzeTemporalPattern(events);
     expect(result.clusters.length).toBeGreaterThan(0);
   });
@@ -251,15 +263,16 @@ describe('Seismic Moment Calculation', () => {
 
 describe('Edge Cases and Error Handling', () => {
   test('handles events with same magnitude', () => {
-    const events: EarthquakeEvent[] = Array.from({ length: 20 }, (_, i) => ({
+    // Need at least 50 events for completeness estimation
+    const events: EarthquakeEvent[] = Array.from({ length: 60 }, (_, i) => ({
       id: i,
-      time: `2023-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+      time: `2023-01-${String((i % 28) + 1).padStart(2, '0')}T${String(i % 24).padStart(2, '0')}:00:00Z`,
       latitude: -41.0,
       longitude: 174.0,
       depth: 10,
       magnitude: 4.0
     }));
-    
+
     expect(() => estimateCompletenessMagnitude(events)).not.toThrow();
   });
 

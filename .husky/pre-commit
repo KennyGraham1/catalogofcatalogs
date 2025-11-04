@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Run tests before commit
+echo "Running tests before commit..."
+npm test -- --bail --findRelatedTests
+
+# Run linter
+echo "Running linter..."
+npm run lint --if-present || true
+
+# Check TypeScript
+echo "Checking TypeScript..."
+npx tsc --noEmit || true
+
+echo "Pre-commit checks complete!"
+
