@@ -51,17 +51,23 @@ export default function MapComponent({ events }: MapComponentProps) {
         />
 
         {/* Earthquake Markers */}
-        {events.map((event, index) => (
-          <Circle
-            key={event.id || index}
-            center={[event.latitude, event.longitude]}
-            radius={getMagnitudeRadius(event.magnitude)}
-            pathOptions={{
-              color: getMagnitudeColor(event.magnitude),
-              fillColor: getMagnitudeColor(event.magnitude),
-              fillOpacity: mapColors.markerOpacity,
-              weight: 2,
-            }}
+        {events.map((event, index) => {
+          const eventDate = new Date(event.time).toLocaleDateString();
+          const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
+
+          return (
+            <Circle
+              key={event.id || index}
+              center={[event.latitude, event.longitude]}
+              radius={getMagnitudeRadius(event.magnitude)}
+              pathOptions={{
+                color: getMagnitudeColor(event.magnitude),
+                fillColor: getMagnitudeColor(event.magnitude),
+                fillOpacity: mapColors.markerOpacity,
+                weight: 2,
+                // Add title for accessibility (shows on hover)
+                title: ariaLabel,
+              } as any}
           >
             <Popup>
               <div className="p-2 min-w-[250px]">
@@ -110,7 +116,8 @@ export default function MapComponent({ events }: MapComponentProps) {
               </div>
             </Popup>
           </Circle>
-        ))}
+          )
+        })}
       </MapContainer>
 
       {/* Legend */}

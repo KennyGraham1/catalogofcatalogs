@@ -5,7 +5,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
+import { getSession } from '@/lib/auth';
 import { createAuditLog } from '@/lib/auth-db';
 
 /**
@@ -14,7 +14,7 @@ import { createAuditLog } from '@/lib/auth-db';
  */
 export async function POST(request: Request) {
   try {
-    const session = await auth();
+    const session = await getSession();
 
     if (session?.user) {
       // Create audit log for logout

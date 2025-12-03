@@ -171,6 +171,35 @@ class Cache {
     }
     return count;
   }
+
+  /**
+   * Performance Optimization: Invalidate entries matching a string pattern
+   * More efficient than regex for simple string matching
+   */
+  invalidateByPrefix(prefix: string): number {
+    let count = 0;
+    for (const key of this.cache.keys()) {
+      if (key.startsWith(prefix)) {
+        this.cache.delete(key);
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /**
+   * Performance Optimization: Invalidate entries containing a substring
+   */
+  invalidateBySubstring(substring: string): number {
+    let count = 0;
+    for (const key of this.cache.keys()) {
+      if (key.includes(substring)) {
+        this.cache.delete(key);
+        count++;
+      }
+    }
+    return count;
+  }
 }
 
 // Export singleton instances for different data types
@@ -195,16 +224,36 @@ export function generateCacheKey(prefix: string, params: Record<string, any>): s
 }
 
 /**
- * Invalidate all caches related to a catalogue
+ * Performance Optimization: Invalidate all caches related to a catalogue
+ * Uses substring matching instead of regex for better performance
  */
 export function invalidateCatalogueCache(catalogueId: string): void {
-  const pattern = new RegExp(`.*${catalogueId}.*`);
-
-  const catalogueCount = catalogueCache.invalidatePattern(pattern);
-  const eventCount = eventCache.invalidatePattern(pattern);
-  const statsCount = statisticsCache.invalidatePattern(pattern);
+  const catalogueCount = catalogueCache.invalidateBySubstring(catalogueId);
+  const eventCount = eventCache.invalidateBySubstring(catalogueId);
+  const statsCount = statisticsCache.invalidateBySubstring(catalogueId);
 
   console.log(`[Cache] Invalidated ${catalogueCount + eventCount + statsCount} entries for catalogue ${catalogueId}`);
+}
+
+/**
+ * Performance Optimization: Invalidate all event caches (useful after bulk operations)
+ */
+export function invalidateAllEventCaches(): void {
+  eventCache.clearAll();
+  console.log(`[Cache] Cleared all event caches`);
+}
+
+/**
+ * Performance Optimization: Invalidate specific cache types by prefix
+ */
+export function invalidateCacheByPrefix(prefix: string): void {
+  const apiCount = apiCache.invalidateByPrefix(prefix);
+  const catalogueCount = catalogueCache.invalidateByPrefix(prefix);
+  const eventCount = eventCache.invalidateByPrefix(prefix);
+  const statsCount = statisticsCache.invalidateByPrefix(prefix);
+
+  const total = apiCount + catalogueCount + eventCount + statsCount;
+  console.log(`[Cache] Invalidated ${total} entries with prefix "${prefix}"`);
 }
 
 /**

@@ -1,9 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
+import { applyRateLimit, apiRateLimiter } from '@/lib/rate-limiter';
 
 // Global search API endpoint for searching events across all catalogues
 export async function GET(request: NextRequest) {
   try {
+    // Apply rate limiting (60 requests per minute for search operations)
+    const rateLimitResult = applyRateLimit(request, apiRateLimiter, 60);
+
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        {
+          error: 'Too many search requests. Please try again later.',
+          retryAfter: rateLimitResult.headers['Retry-After'],
+        },
+        {
+          status: 429,
+          headers: rateLimitResult.headers,
+        }
+      );
+    }
+
     const searchParams = request.nextUrl.searchParams;
     const query = searchParams.get('q');
     const limit = parseInt(searchParams.get('limit') || '20');

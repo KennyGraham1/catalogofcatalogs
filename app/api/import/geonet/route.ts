@@ -2,6 +2,7 @@
  * GeoNet Import API Endpoint
  *
  * POST /api/import/geonet - Trigger a GeoNet import
+ * Protected by CSRF token validation
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -9,8 +10,9 @@ import { geonetImportService } from '@/lib/geonet-import-service';
 import { apiCache } from '@/lib/cache';
 import { getSession } from '@/lib/auth';
 import { auditApiAction } from '@/lib/api-middleware';
+import { withCSRF } from '@/lib/csrf';
 
-export async function POST(request: NextRequest) {
+export const POST = withCSRF(async (request: NextRequest) => {
   try {
     const body = await request.json();
 
@@ -155,5 +157,5 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});
 

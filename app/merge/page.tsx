@@ -9,10 +9,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
+import dynamic from 'next/dynamic';
 import { MergeActions } from '@/components/merge/MergeActions';
 import { MergeMetadataForm, MergeMetadata } from '@/components/merge/MergeMetadataForm';
 import { MergeProgressIndicator, MergeStep } from '@/components/merge/MergeProgressIndicator';
 import { useCatalogues } from '@/contexts/CatalogueContext';
+
+// Dynamically import MergePreviewQC to avoid SSR issues with Leaflet
+const MergePreviewQC = dynamic(
+  () => import('@/components/merge/MergePreviewQC').then(mod => mod.MergePreviewQC),
+  { ssr: false }
+);
 import {
   Select,
   SelectContent,
@@ -107,6 +114,8 @@ export default function MergePage() {
     { id: 'bounds', label: 'Calculating geographic bounds', status: 'pending' },
     { id: 'save', label: 'Saving merged catalogue', status: 'pending' }
   ]);
+  const [previewData, setPreviewData] = useState<any>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
 
   // Initialize filtered catalogues with real data from context
   useEffect(() => {
@@ -142,6 +151,79 @@ export default function MergePage() {
       setActiveTab('configure');
     }
   }, [activeTab]);
+
+  const handleGeneratePreview = async () => {
+    if (selectedCatalogues.length < 2) {
+      toast({
+        title: "Not enough catalogues selected",
+        description: "Please select at least two catalogues to merge.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsLoadingPreview(true);
+
+    try {
+      const selectedCatalogueData = getSelectedCatalogues;
+
+      // Transform catalogue data to match validation schema
+      // Keep this in sync with the payload used for the real /api/merge call
+      const sourceCatalogues = selectedCatalogueData.map(cat => ({
+        id: cat.id,
+        name: cat.name,
+        // Prefer exact events count if available, fall back to event_count
+        events: (cat as any).events || (cat as any).event_count || 0,
+        source: (cat as any).source || cat.name || 'unknown',
+      }));
+
+      const requestBody = {
+        // Validation schema requires a "name" field, even for preview
+        name: mergedName || 'Preview Only',
+        sourceCatalogues,
+        config: {
+          timeThreshold,
+          distanceThreshold,
+          mergeStrategy,
+          priority,
+        },
+      };
+
+      console.log('Sending preview request:', requestBody);
+
+      const response = await fetch('/api/merge/preview', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('Preview API error:', errorData);
+        throw new Error(errorData.error || `HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+      setPreviewData(result);
+
+      toast({
+        title: "Preview Generated",
+        description: `Found ${result.statistics.duplicateGroupsCount} duplicate groups`,
+      });
+    } catch (error) {
+      console.error('Preview generation error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      toast({
+        title: "Preview Failed",
+        description: errorMessage,
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoadingPreview(false);
+    }
+  };
 
   const handleStartMerge = async () => {
     if (selectedCatalogues.length < 2) {
@@ -557,8 +639,29 @@ export default function MergePage() {
                     <p className="text-sm text-muted-foreground mb-4">
                       Define how to identify the same event across different catalogues
                     </p>
-                    
+
                     <div className="space-y-6">
+                      {/* Info Alert about Adaptive Thresholds */}
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                        <div className="flex gap-3">
+                          <div className="flex-shrink-0">
+                            <svg className="h-5 w-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                            </svg>
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="text-sm font-medium text-blue-900 mb-1">
+                              🆕 Adaptive Thresholds Active
+                            </h4>
+                            <p className="text-xs text-blue-800 leading-relaxed">
+                              The merge algorithm automatically adjusts matching thresholds based on event magnitude and depth.
+                              Small events (M&lt;4.0) use tighter windows (25 km, 30s), while large events (M&gt;7.0) use wider windows (200 km, 300s).
+                              Deep events (&gt;300 km) get 1.5× larger distance thresholds. Your configured values serve as baselines.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5">
@@ -575,10 +678,10 @@ export default function MergePage() {
                           onValueChange={values => setTimeThreshold(values[0])}
                         />
                         <p className="text-xs text-muted-foreground">
-                          Events within {timeThreshold} seconds of each other may be considered the same event.
+                          Events within {timeThreshold} seconds of each other may be considered the same event. Automatically adjusted by magnitude.
                         </p>
                       </div>
-                      
+
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5">
@@ -595,7 +698,7 @@ export default function MergePage() {
                           onValueChange={values => setDistanceThreshold(values[0])}
                         />
                         <p className="text-xs text-muted-foreground">
-                          Events within {distanceThreshold} km of each other may be considered the same event.
+                          Events within {distanceThreshold} km of each other may be considered the same event. Automatically adjusted by magnitude and depth.
                         </p>
                       </div>
                     </div>
@@ -621,6 +724,7 @@ export default function MergePage() {
                               <SelectValue placeholder="Select strategy" />
                             </SelectTrigger>
                             <SelectContent>
+                              <SelectItem value="quality">🆕 Quality-Based (Recommended)</SelectItem>
                               <SelectItem value="priority">Source Priority</SelectItem>
                               <SelectItem value="average">Average Values</SelectItem>
                               <SelectItem value="newest">Newest Data</SelectItem>
@@ -628,13 +732,14 @@ export default function MergePage() {
                             </SelectContent>
                           </Select>
                           <p className="text-xs text-muted-foreground">
+                            {mergeStrategy === 'quality' && '🆕 Select events with best quality metrics (station count, azimuthal gap, location error, magnitude uncertainty). Uses seismological best practices.'}
                             {mergeStrategy === 'priority' && 'Use data from higher priority sources when conflicts occur.'}
-                            {mergeStrategy === 'average' && 'Average numerical values (magnitude, depth) from all sources.'}
+                            {mergeStrategy === 'average' && 'Average numerical values (magnitude, depth) from all sources. Uses magnitude hierarchy (Mw > Ms > mb > ML).'}
                             {mergeStrategy === 'newest' && 'Prefer the most recently updated event data.'}
                             {mergeStrategy === 'complete' && 'Use the record with the most complete information.'}
                           </p>
                         </div>
-                        
+
                         {mergeStrategy === 'priority' && (
                           <div className="space-y-2">
                             <Label htmlFor="source-priority">Source Priority</Label>
@@ -646,6 +751,7 @@ export default function MergePage() {
                                 <SelectValue placeholder="Select priority" />
                               </SelectTrigger>
                               <SelectContent>
+                                <SelectItem value="quality">🆕 Quality-Based Fallback</SelectItem>
                                 <SelectItem value="newest">Newest First</SelectItem>
                                 <SelectItem value="geonet">GeoNet &gt; Others</SelectItem>
                                 <SelectItem value="gns">GNS &gt; Others</SelectItem>
@@ -653,10 +759,33 @@ export default function MergePage() {
                               </SelectContent>
                             </Select>
                             <p className="text-xs text-muted-foreground">
-                              Define which sources should take precedence when conflicts occur.
+                              Define which sources should take precedence when conflicts occur. Falls back to quality-based selection if priority source not found.
                             </p>
                           </div>
                         )}
+                      </div>
+
+                      {/* Info Alert about Additional Improvements */}
+                      <div className="rounded-lg border border-green-200 bg-green-50 p-4 mt-4">
+                        <div className="flex gap-3">
+                          <div className="flex-shrink-0">
+                            <svg className="h-5 w-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                            </svg>
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="text-sm font-medium text-green-900 mb-1">
+                              🆕 Enhanced Merge Algorithm
+                            </h4>
+                            <ul className="text-xs text-green-800 leading-relaxed space-y-1 list-disc list-inside">
+                              <li><strong>Magnitude Hierarchy:</strong> Uses ISC standard (Mw &gt; Ms &gt; mb &gt; ML) to prevent saturation errors</li>
+                              <li><strong>Date Line Handling:</strong> Correctly matches events across the International Date Line (Pacific region)</li>
+                              <li><strong>Depth Uncertainty:</strong> Selects depths with lower uncertainty and better station coverage</li>
+                              <li><strong>Validation:</strong> Prevents merging physically inconsistent events (e.g., M4.0 with M7.0)</li>
+                              {/* <li><strong>Performance:</strong> 15-30% faster with latitude-aware spatial indexing</li> */}
+                            </ul>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -712,91 +841,113 @@ export default function MergePage() {
               </TabsContent>
 
               <TabsContent value="preview" className="pt-6">
-                <div className="space-y-4">
-                  <div className="bg-muted/30 p-4 rounded-md">
-                    <h3 className="font-medium mb-3">Merge Summary</h3>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Merged Catalogue Name</p>
-                        <p className="font-medium">{mergedName}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">Estimated Events</p>
-                        <p className="font-medium">{estimatedMergedEvents.toLocaleString()}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">Selected Catalogues</p>
-                        <p className="font-medium">{selectedCatalogues.length}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">Merge Strategy</p>
-                        <p className="font-medium capitalize">{mergeStrategy}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">Time Threshold</p>
-                        <p className="font-medium">{timeThreshold} seconds</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">Distance Threshold</p>
-                        <p className="font-medium">{distanceThreshold} km</p>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="border rounded-md overflow-hidden">
-                    <div className="bg-muted/50 px-4 py-2 text-sm font-medium">
-                      Catalogues to be Merged
-                    </div>
-                    <div className="divide-y">
-                      {getSelectedCatalogues.map((catalogue, index) => (
-                        <div key={catalogue.id} className="flex items-center p-4">
-                          <div className="flex-1">
-                            <p className="font-medium">{catalogue.name}</p>
-                            <p className="text-sm text-muted-foreground">
-                              {(catalogue.events || catalogue.event_count || 0).toLocaleString()} events
-                              {catalogue.source && ` • Source: ${catalogue.source}`}
-                            </p>
-                          </div>
-                          {index < getSelectedCatalogues.length - 1 && (
-                            <ArrowRightLeft className="h-5 w-5 text-muted-foreground mx-4" />
-                          )}
+                {!previewData ? (
+                  <div className="space-y-4">
+                    <div className="bg-muted/30 p-4 rounded-md">
+                      <h3 className="font-medium mb-3">Merge Summary</h3>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Merged Catalogue Name</p>
+                          <p className="font-medium">{mergedName}</p>
                         </div>
-                      ))}
+                        <div>
+                          <p className="text-sm text-muted-foreground">Estimated Events</p>
+                          <p className="font-medium">{estimatedMergedEvents.toLocaleString()}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">Selected Catalogues</p>
+                          <p className="font-medium">{selectedCatalogues.length}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">Merge Strategy</p>
+                          <p className="font-medium capitalize">{mergeStrategy}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">Time Threshold</p>
+                          <p className="font-medium">{timeThreshold} seconds</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">Distance Threshold</p>
+                          <p className="font-medium">{distanceThreshold} km</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border rounded-md overflow-hidden">
+                      <div className="bg-muted/50 px-4 py-2 text-sm font-medium">
+                        Catalogues to be Merged
+                      </div>
+                      <div className="divide-y">
+                        {getSelectedCatalogues.map((catalogue, index) => (
+                          <div key={catalogue.id} className="flex items-center p-4">
+                            <div className="flex-1">
+                              <p className="font-medium">{catalogue.name}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {catalogue.event_count?.toLocaleString() || 0} events
+                              </p>
+                            </div>
+                            {index < getSelectedCatalogues.length - 1 && (
+                              <ArrowRightLeft className="h-5 w-5 text-muted-foreground mx-4" />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Generate Preview Button */}
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center">
+                      <h3 className="font-medium text-blue-900 mb-2">Quality Control Preview</h3>
+                      <p className="text-sm text-blue-700 mb-4">
+                        Generate a preview to review duplicate groups and validate the merge before committing to the database.
+                      </p>
+                      <Button
+                        onClick={handleGeneratePreview}
+                        disabled={isLoadingPreview}
+                        size="lg"
+                      >
+                        {isLoadingPreview ? 'Generating Preview...' : 'Generate QC Preview'}
+                      </Button>
                     </div>
                   </div>
+                ) : (
+                  <MergePreviewQC
+                    previewData={previewData}
+                    onProceedWithMerge={handleStartMerge}
+                    onCancel={() => setPreviewData(null)}
+                  />
+                )}
 
-                  {/* Progress Indicator */}
-                  {mergeStatus === 'merging' && (
-                    <MergeProgressIndicator
-                      steps={mergeSteps}
-                      currentStep={mergeSteps.findIndex(s => s.status === 'in-progress')}
-                      progress={mergeProgress}
-                      estimatedTimeRemaining={mergeProgress < 100 ? ((100 - mergeProgress) / 5) * 0.3 : 0}
-                    />
-                  )}
+                {/* Progress Indicator */}
+                {mergeStatus === 'merging' && (
+                  <MergeProgressIndicator
+                    steps={mergeSteps}
+                    currentStep={mergeSteps.findIndex(s => s.status === 'in-progress')}
+                    progress={mergeProgress}
+                    estimatedTimeRemaining={mergeProgress < 100 ? ((100 - mergeProgress) / 5) * 0.3 : 0}
+                  />
+                )}
 
-                  {mergeStatus === 'complete' && (
-                    <MergeActions
-                      events={mergedEvents}
-                      onDownload={() => {}}
-                      catalogueMetadata={{
-                        name: mergedName,
-                        ...mergeMetadata
-                      }}
-                    />
-                  )}
-                  
-                  {mergeStatus !== 'complete' && (
-                    <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 p-3 rounded-md">
-                      <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0" />
-                      <p className="text-sm text-amber-800 dark:text-amber-300">
-                        Merging multiple catalogues may take several minutes depending on the size of the datasets.
-                        The process cannot be interrupted once started.
-                      </p>
-                    </div>
-                  )}
-                </div>
+                {mergeStatus === 'complete' && (
+                  <MergeActions
+                    events={mergedEvents}
+                    onDownload={() => {}}
+                    catalogueMetadata={{
+                      name: mergedName,
+                      ...mergeMetadata
+                    }}
+                  />
+                )}
+
+                {mergeStatus !== 'complete' && !previewData && (
+                  <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 p-3 rounded-md">
+                    <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0" />
+                    <p className="text-sm text-amber-800 dark:text-amber-300">
+                      Merging multiple catalogues may take several minutes depending on the size of the datasets.
+                      The process cannot be interrupted once started.
+                    </p>
+                  </div>
+                )}
               </TabsContent>
             </Tabs>
           </CardContent>

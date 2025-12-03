@@ -1,9 +1,10 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { Logger, NotFoundError, DatabaseError, formatErrorResponse } from '@/lib/errors';
 import { apiCache } from '@/lib/cache';
 import { getSession } from '@/lib/auth';
 import { auditApiAction } from '@/lib/api-middleware';
+import { withCSRF } from '@/lib/csrf';
 
 const logger = new Logger('CatalogueAPI');
 
@@ -32,10 +33,10 @@ export async function GET(
   }
 }
 
-export async function PATCH(
-  request: Request,
+export const PATCH = withCSRF(async (
+  request: NextRequest,
   { params }: { params: { id: string } }
-) {
+) => {
   try {
     logger.info('Updating catalogue', { id: params.id });
 
@@ -90,12 +91,12 @@ export async function PATCH(
       { status: errorResponse.statusCode }
     );
   }
-}
+});
 
-export async function DELETE(
-  request: Request,
+export const DELETE = withCSRF(async (
+  request: NextRequest,
   { params }: { params: { id: string } }
-) {
+) => {
   try {
     logger.info('Deleting catalogue', { id: params.id });
 
@@ -132,4 +133,4 @@ export async function DELETE(
       { status: errorResponse.statusCode }
     );
   }
-}
+});

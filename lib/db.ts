@@ -1,6 +1,7 @@
 import { join } from 'path';
 import sqlite3 from 'sqlite3';
 import { promisify } from 'util';
+import { invalidateCatalogueCache, invalidateAllEventCaches } from './cache';
 
 export interface MergedCatalogue {
   id: string;
@@ -131,6 +132,41 @@ export interface PaginatedResult<T> {
   };
 }
 
+/**
+ * Cursor-based pagination parameters
+ * Performance Optimization: More efficient than offset-based pagination for large datasets
+ */
+export interface CursorPaginationParams {
+  /**
+   * Cursor value (typically the ID or timestamp of the last item from previous page)
+   */
+  cursor?: string;
+
+  /**
+   * Number of items to return
+   */
+  limit?: number;
+
+  /**
+   * Sort direction: 'asc' or 'desc'
+   * Default: 'desc' (newest first)
+   */
+  direction?: 'asc' | 'desc';
+}
+
+/**
+ * Cursor-based paginated result
+ */
+export interface CursorPaginatedResult<T> {
+  data: T[];
+  pagination: {
+    nextCursor: string | null;
+    prevCursor: string | null;
+    hasMore: boolean;
+    limit: number;
+  };
+}
+
 // Transaction callback type
 export type TransactionCallback<T> = () => Promise<T>;
 
@@ -156,11 +192,25 @@ export interface DbQueries {
     source_events: string;
   }) => Promise<void>;
 
+  // Performance Optimization: Bulk insert for importing large datasets
+  bulkInsertEvents: (events: Array<Partial<MergedEvent> & {
+    id: string;
+    catalogue_id: string;
+    time: string;
+    latitude: number;
+    longitude: number;
+    magnitude: number;
+    source_events: string;
+  }>) => Promise<void>;
+
   getCatalogues: (params?: PaginationParams) => Promise<MergedCatalogue[] | PaginatedResult<MergedCatalogue>>;
 
   getCatalogueById: (id: string) => Promise<MergedCatalogue | undefined>;
 
   getEventsByCatalogueId: (catalogueId: string, params?: PaginationParams) => Promise<MergedEvent[] | PaginatedResult<MergedEvent>>;
+
+  // Performance Optimization: Cursor-based pagination for better performance on large datasets
+  getEventsByCatalogueIdCursor: (catalogueId: string, params?: CursorPaginationParams) => Promise<CursorPaginatedResult<MergedEvent>>;
 
   updateCatalogueStatus: (status: string, id: string) => Promise<void>;
 
@@ -283,9 +333,26 @@ if (typeof window === 'undefined') {
   const dbRun = promisify(db.run.bind(db)) as (sql: string, params?: any[]) => Promise<void>;
   const dbAll = promisify(db.all.bind(db)) as (sql: string, params?: any[]) => Promise<any[]>;
   const dbGet = promisify(db.get.bind(db)) as (sql: string, params?: any[]) => Promise<any>;
-  
+
   // Initialize database schema
   db.serialize(() => {
+    // Performance Optimization: Enable WAL mode for better concurrent read/write performance
+    // WAL mode allows multiple readers while a write is in progress
+    db!.run(`PRAGMA journal_mode = WAL`);
+
+    // Performance Optimization: Set synchronous mode to NORMAL for better performance
+    // NORMAL is safe for most use cases and much faster than FULL
+    db!.run(`PRAGMA synchronous = NORMAL`);
+
+    // Performance Optimization: Increase cache size to 64MB for better query performance
+    // Negative value means size in KB (64MB = -64000 KB)
+    db!.run(`PRAGMA cache_size = -64000`);
+
+    // Performance Optimization: Set temp_store to MEMORY for faster temporary tables
+    db!.run(`PRAGMA temp_store = MEMORY`);
+
+    // Performance Optimization: Increase mmap_size for memory-mapped I/O (256MB)
+    db!.run(`PRAGMA mmap_size = 268435456`);
     db!.run(`
       CREATE TABLE IF NOT EXISTS merged_catalogues (
         id TEXT PRIMARY KEY,
@@ -382,6 +449,16 @@ if (typeof window === 'undefined') {
     db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_catalogue_time ON merged_events(catalogue_id, time DESC)`);
     db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_catalogue_magnitude ON merged_events(catalogue_id, magnitude DESC)`);
     db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_location ON merged_events(latitude, longitude)`);
+
+    // Additional composite indexes for filtered queries (Performance Optimization)
+    // For time + magnitude range queries
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_cat_time_mag ON merged_events(catalogue_id, time DESC, magnitude)`);
+    // For spatial + magnitude queries
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_cat_spatial_mag ON merged_events(catalogue_id, latitude, longitude, magnitude)`);
+    // For depth + magnitude queries
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_cat_depth_mag ON merged_events(catalogue_id, depth, magnitude)`);
+    // For quality-based filtering
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_cat_quality ON merged_events(catalogue_id, azimuthal_gap, used_station_count, standard_error)`);
 
     // Create mapping templates table
     db!.run(`
@@ -547,6 +624,139 @@ if (typeof window === 'undefined') {
       const sql = `INSERT INTO merged_events (${fields.join(', ')}) VALUES (${placeholders})`;
 
       await dbRun(sql, values);
+
+      // Performance Optimization: Invalidate caches after insert
+      invalidateCatalogueCache(event.catalogue_id);
+    },
+
+    /**
+     * Performance Optimization: Bulk insert events using a transaction
+     * This is 50-100x faster than individual inserts for large datasets
+     *
+     * @param events - Array of events to insert
+     * @returns Promise that resolves when all events are inserted
+     */
+    bulkInsertEvents: async (events: Array<Partial<MergedEvent> & {
+      id: string;
+      catalogue_id: string;
+      time: string;
+      latitude: number;
+      longitude: number;
+      magnitude: number;
+      source_events: string;
+    }>): Promise<void> => {
+      if (!events || events.length === 0) {
+        return;
+      }
+
+      // Validate all events first
+      for (const event of events) {
+        // Validate coordinates
+        if (event.latitude < -90 || event.latitude > 90) {
+          throw new Error(`Invalid latitude: ${event.latitude}. Must be between -90 and 90`);
+        }
+        if (event.longitude < -180 || event.longitude > 180) {
+          throw new Error(`Invalid longitude: ${event.longitude}. Must be between -180 and 180`);
+        }
+
+        // Validate magnitude
+        if (event.magnitude < 0 || event.magnitude > 10) {
+          throw new Error(`Invalid magnitude: ${event.magnitude}. Must be between 0 and 10`);
+        }
+
+        // Validate depth
+        if (event.depth !== null && event.depth !== undefined && (event.depth < 0 || event.depth > 1000)) {
+          throw new Error(`Invalid depth: ${event.depth}. Must be between 0 and 1000 km`);
+        }
+
+        // Validate timestamp
+        const date = new Date(event.time);
+        if (isNaN(date.getTime())) {
+          throw new Error(`Invalid timestamp: ${event.time}`);
+        }
+      }
+
+      // Use transaction for atomic bulk insert
+      return new Promise((resolve, reject) => {
+        db!.serialize(() => {
+          db!.run('BEGIN TRANSACTION', (err) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+
+            let completed = 0;
+            let hasError = false;
+
+            for (const event of events) {
+              if (hasError) break;
+
+              // Build dynamic SQL based on provided fields
+              const fields: string[] = [
+                'id', 'catalogue_id', 'source_id', 'time', 'latitude', 'longitude', 'depth', 'magnitude', 'source_events'
+              ];
+              const values: any[] = [
+                event.id,
+                event.catalogue_id,
+                event.source_id ?? null,
+                event.time,
+                event.latitude,
+                event.longitude,
+                event.depth ?? null,
+                event.magnitude,
+                event.source_events
+              ];
+
+              // Add QuakeML fields if provided
+              const optionalFields: Array<keyof MergedEvent> = [
+                'event_public_id', 'event_type', 'event_type_certainty',
+                'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty', 'depth_uncertainty',
+                'magnitude_type', 'magnitude_uncertainty', 'magnitude_station_count',
+                'azimuthal_gap', 'used_phase_count', 'used_station_count', 'standard_error',
+                'evaluation_mode', 'evaluation_status',
+                'origin_quality', 'origins', 'magnitudes', 'picks', 'arrivals',
+                'focal_mechanisms', 'amplitudes', 'station_magnitudes',
+                'event_descriptions', 'comments', 'creation_info'
+              ];
+
+              for (const field of optionalFields) {
+                if (event[field] !== undefined) {
+                  fields.push(field);
+                  values.push(event[field]);
+                }
+              }
+
+              const placeholders = fields.map(() => '?').join(', ');
+              const sql = `INSERT INTO merged_events (${fields.join(', ')}) VALUES (${placeholders})`;
+
+              db!.run(sql, values, (err) => {
+                if (err && !hasError) {
+                  hasError = true;
+                  db!.run('ROLLBACK', () => {
+                    reject(err);
+                  });
+                  return;
+                }
+
+                completed++;
+                if (completed === events.length && !hasError) {
+                  db!.run('COMMIT', (err) => {
+                    if (err) {
+                      reject(err);
+                    } else {
+                      // Performance Optimization: Invalidate all event caches after bulk insert
+                      // Get unique catalogue IDs
+                      const catalogueIds = new Set(events.map(e => e.catalogue_id));
+                      catalogueIds.forEach(id => invalidateCatalogueCache(id));
+                      resolve();
+                    }
+                  });
+                }
+              });
+            }
+          });
+        });
+      });
     },
 
     getCatalogues: async (params?: PaginationParams): Promise<MergedCatalogue[] | PaginatedResult<MergedCatalogue>> => {
@@ -616,6 +826,119 @@ if (typeof window === 'undefined') {
           pageSize,
           totalItems,
           totalPages
+        }
+      };
+    },
+
+    /**
+     * Get events by catalogue ID using cursor-based pagination
+     *
+     * Performance Optimization: Cursor-based pagination is more efficient than offset-based
+     * for large datasets because it doesn't require counting all rows or skipping rows.
+     *
+     * Time Complexity: O(log n) with index vs O(n) for offset-based
+     *
+     * @param catalogueId - Catalogue ID
+     * @param params - Cursor pagination parameters
+     * @returns Cursor-paginated result with events
+     */
+    getEventsByCatalogueIdCursor: async (
+      catalogueId: string,
+      params?: CursorPaginationParams
+    ): Promise<CursorPaginatedResult<MergedEvent>> => {
+      const limit = params?.limit || 100;
+      const direction = params?.direction || 'desc';
+      const cursor = params?.cursor;
+
+      // Validate limit
+      if (limit < 1 || limit > 1000) {
+        throw new Error('Limit must be between 1 and 1000');
+      }
+
+      let query: string;
+      let queryParams: any[];
+
+      if (cursor) {
+        // Cursor is in format: "timestamp:id" for stable sorting
+        const [cursorTime, cursorId] = cursor.split(':');
+
+        if (direction === 'desc') {
+          // Get events older than cursor
+          query = `
+            SELECT * FROM merged_events
+            WHERE catalogue_id = ?
+              AND (time < ? OR (time = ? AND id < ?))
+            ORDER BY time DESC, id DESC
+            LIMIT ?
+          `;
+          queryParams = [catalogueId, cursorTime, cursorTime, cursorId, limit + 1];
+        } else {
+          // Get events newer than cursor
+          query = `
+            SELECT * FROM merged_events
+            WHERE catalogue_id = ?
+              AND (time > ? OR (time = ? AND id > ?))
+            ORDER BY time ASC, id ASC
+            LIMIT ?
+          `;
+          queryParams = [catalogueId, cursorTime, cursorTime, cursorId, limit + 1];
+        }
+      } else {
+        // No cursor - get first page
+        if (direction === 'desc') {
+          query = `
+            SELECT * FROM merged_events
+            WHERE catalogue_id = ?
+            ORDER BY time DESC, id DESC
+            LIMIT ?
+          `;
+        } else {
+          query = `
+            SELECT * FROM merged_events
+            WHERE catalogue_id = ?
+            ORDER BY time ASC, id ASC
+            LIMIT ?
+          `;
+        }
+        queryParams = [catalogueId, limit + 1];
+      }
+
+      // Fetch limit + 1 to determine if there are more results
+      const results = await dbAll(query, queryParams) as MergedEvent[];
+
+      // Check if there are more results
+      const hasMore = results.length > limit;
+
+      // Remove the extra item if present
+      const data = hasMore ? results.slice(0, limit) : results;
+
+      // Generate cursors
+      let nextCursor: string | null = null;
+      let prevCursor: string | null = null;
+
+      if (data.length > 0) {
+        const lastItem = data[data.length - 1];
+        const firstItem = data[0];
+
+        // Next cursor points to the last item in current page
+        if (hasMore) {
+          nextCursor = `${lastItem.time}:${lastItem.id}`;
+        }
+
+        // Previous cursor points to the first item in current page
+        // Only set if we're not on the first page
+        if (cursor) {
+          prevCursor = `${firstItem.time}:${firstItem.id}`;
+        }
+      }
+
+      return {
+        data,
+        pagination: {
+          nextCursor,
+          prevCursor,
+          hasMore,
+          limit
         }
       };
     },

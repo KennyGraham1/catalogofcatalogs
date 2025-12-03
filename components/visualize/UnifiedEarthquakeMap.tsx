@@ -218,26 +218,33 @@ export default function UnifiedEarthquakeMap({
           )}
 
           {/* Earthquake markers - No clustering */}
-          {earthquakes.map((eq) => (
-            <Circle
-              key={eq.id}
-              center={[eq.latitude, eq.longitude]}
-              radius={getMagnitudeRadius(eq.magnitude)}
-              pathOptions={{
-                color: getEventColor(eq),
-                fillColor: getEventColor(eq),
-                fillOpacity: mapColors.markerOpacity,
-                weight: 2,
-              }}
-              eventHandlers={{
-                click: () => setSelectedEvent(eq),
-              }}
-            >
-              <Popup>
-                <EventPopup event={eq} qualityScores={qualityScores} />
-              </Popup>
-            </Circle>
-          ))}
+          {earthquakes.map((eq) => {
+            const eventDate = new Date(eq.time).toLocaleDateString();
+            const ariaLabel = `Magnitude ${eq.magnitude} earthquake at ${eq.latitude.toFixed(2)}, ${eq.longitude.toFixed(2)} on ${eventDate}`;
+
+            return (
+              <Circle
+                key={eq.id}
+                center={[eq.latitude, eq.longitude]}
+                radius={getMagnitudeRadius(eq.magnitude)}
+                pathOptions={{
+                  color: getEventColor(eq),
+                  fillColor: getEventColor(eq),
+                  fillOpacity: mapColors.markerOpacity,
+                  weight: 2,
+                  // Add title for accessibility (shows on hover)
+                  title: ariaLabel,
+                } as any}
+                eventHandlers={{
+                  click: () => setSelectedEvent(eq),
+                }}
+              >
+                <Popup>
+                  <EventPopup event={eq} qualityScores={qualityScores} />
+                </Popup>
+              </Circle>
+            );
+          })}
         </MapContainer>
       </div>
 

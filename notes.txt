@@ -1,0 +1,24 @@
+Emily  paper 2024 on Geonet earthquake solution qulity. Try to implement that.
+
+Can you look at this paper https://www.tandfonline.com/doi/full/10.1080/00288306.2024.2421309#abstract and see if you can implement the quality scoring system they describe.
+
+
+Posible homoginising the catalogues. Using a regression equation to standardise the magnitudes. Use MLNZ20
+
+Can we have a visualisation the merger event for QC purposed. This should be doen before the merge is done. Mainly for the identified duplicates or triplicates or quadruplicates ... events 
+
+This will help us to QC the merge before we commit to the database or export the data
+
+
+
+MOve to MongoDB logo
+
+
+
+I want you to be aim to prefessionallly testt the codebase with all the eadge cases and see if you can break it.
+
+
+Please use web search to find authoritative sources on earthquake catalogue merging best practices before making recommendations.
+
+
+Not to load all the data/catalog in the database at once. Just a few to demonstrate the functionality. User can select which ones they want view or play with. Can you cache the dat for the dashboard so that it doesn't have to load it every time. We also need to have option to update the dashboard data when new catalogues are added.

@@ -68,7 +68,7 @@ export type EarthquakeEvent = z.infer<typeof earthquakeEventSchema>;
 export const mergeConfigSchema = z.object({
   timeThreshold: z.number().min(0).max(3600), // Max 1 hour
   distanceThreshold: z.number().min(0).max(1000), // Max 1000 km
-  mergeStrategy: z.enum(['priority', 'average', 'newest', 'complete']),
+  mergeStrategy: z.enum(['priority', 'average', 'newest', 'complete', 'quality']),
   priority: z.string(),
 });
 

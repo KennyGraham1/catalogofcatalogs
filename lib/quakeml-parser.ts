@@ -1,8 +1,12 @@
 /**
  * Comprehensive QuakeML 1.2 Parser
  * Extracts all fields from QuakeML Basic Event Description (BED) format
+ *
+ * Performance Optimization: Added SAX-based streaming parser for large QuakeML files
  */
 
+import * as fs from 'fs';
+import * as sax from 'sax';
 import type {
   QuakeMLEvent,
   Origin,
@@ -402,3 +406,215 @@ export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
   }
 }
 
+/**
+ * Streaming QuakeML Parser Options
+ */
+export interface QuakeMLStreamOptions {
+  /**
+   * Callback function called for each parsed event
+   */
+  onEvent?: (event: QuakeMLEvent) => void | Promise<void>;
+
+  /**
+   * Callback function called for each batch of events
+   */
+  onBatch?: (events: QuakeMLEvent[]) => void | Promise<void>;
+
+  /**
+   * Number of events to accumulate before calling onBatch
+   * Default: 100
+   */
+  batchSize?: number;
+
+  /**
+   * Callback function called when parsing encounters an error
+   */
+  onError?: (error: Error, eventXML?: string) => void;
+}
+
+/**
+ * Streaming QuakeML Parser Result
+ */
+export interface QuakeMLStreamResult {
+  totalEvents: number;
+  successfulEvents: number;
+  errors: Array<{ message: string; eventXML?: string }>;
+}
+
+/**
+ * Parse QuakeML file using SAX streaming parser
+ *
+ * Performance Optimization: Uses SAX parser to process large QuakeML files
+ * with constant memory usage. Processes events one at a time without loading
+ * the entire file into memory.
+ *
+ * @param filePath - Path to QuakeML file
+ * @param options - Streaming options
+ * @returns Promise<QuakeMLStreamResult>
+ *
+ * @example
+ * ```typescript
+ * const result = await parseQuakeMLStream('large-catalog.xml', {
+ *   batchSize: 100,
+ *   onBatch: async (events) => {
+ *     await db.bulkInsertEvents(events);
+ *   },
+ *   onError: (error) => console.error('Parse error:', error)
+ * });
+ * console.log(`Processed ${result.successfulEvents} events`);
+ * ```
+ */
+export async function parseQuakeMLStream(
+  filePath: string,
+  options: QuakeMLStreamOptions = {}
+): Promise<QuakeMLStreamResult> {
+  const {
+    onEvent,
+    onBatch,
+    batchSize = 100,
+    onError
+  } = options;
+
+  return new Promise((resolve, reject) => {
+    const result: QuakeMLStreamResult = {
+      totalEvents: 0,
+      successfulEvents: 0,
+      errors: []
+    };
+
+    let currentEventXML = '';
+    let insideEvent = false;
+    let eventDepth = 0;
+    let eventBatch: QuakeMLEvent[] = [];
+
+    // Create SAX parser (strict mode for valid XML)
+    const parser = sax.createStream(true, {
+      trim: true,
+      normalize: true
+    });
+
+    // Track when we enter/exit <event> tags
+    parser.on('opentag', (node) => {
+      if (node.name === 'event' || node.name === 'q:event' || node.name === 'quakeml:event') {
+        insideEvent = true;
+        eventDepth++;
+        currentEventXML = `<${node.name}`;
+
+        // Add attributes
+        for (const [key, value] of Object.entries(node.attributes)) {
+          currentEventXML += ` ${key}="${value}"`;
+        }
+        currentEventXML += '>';
+      } else if (insideEvent) {
+        currentEventXML += `<${node.name}`;
+
+        // Add attributes
+        for (const [key, value] of Object.entries(node.attributes)) {
+          currentEventXML += ` ${key}="${value}"`;
+        }
+        currentEventXML += '>';
+      }
+    });
+
+    parser.on('text', (text) => {
+      if (insideEvent && text.trim()) {
+        currentEventXML += text;
+      }
+    });
+
+    parser.on('closetag', async (tagName) => {
+      if (insideEvent) {
+        currentEventXML += `</${tagName}>`;
+
+        if (tagName === 'event' || tagName === 'q:event' || tagName === 'quakeml:event') {
+          eventDepth--;
+
+          if (eventDepth === 0) {
+            insideEvent = false;
+            result.totalEvents++;
+
+            // Parse the complete event XML
+            try {
+              const event = parseQuakeMLEvent(currentEventXML);
+
+              if (event) {
+                result.successfulEvents++;
+
+                // Call per-event callback
+                if (onEvent) {
+                  await onEvent(event);
+                }
+
+                // Add to batch
+                if (onBatch) {
+                  eventBatch.push(event);
+
+                  // Process batch if it reaches the batch size
+                  if (eventBatch.length >= batchSize) {
+                    await onBatch(eventBatch);
+                    eventBatch = [];
+                  }
+                }
+              } else {
+                const error = new Error('Failed to parse event');
+                result.errors.push({
+                  message: error.message,
+                  eventXML: currentEventXML.substring(0, 200) + '...'
+                });
+
+                if (onError) {
+                  onError(error, currentEventXML);
+                }
+              }
+            } catch (error) {
+              const err = error as Error;
+              result.errors.push({
+                message: err.message,
+                eventXML: currentEventXML.substring(0, 200) + '...'
+              });
+
+              if (onError) {
+                onError(err, currentEventXML);
+              }
+            }
+
+            // Reset for next event
+            currentEventXML = '';
+          }
+        }
+      }
+    });
+
+    parser.on('error', (error) => {
+      result.errors.push({ message: error.message });
+      if (onError) {
+        onError(error);
+      }
+      // Don't reject - continue parsing
+      parser.resume();
+    });
+
+    parser.on('end', async () => {
+      // Process any remaining events in the batch
+      if (onBatch && eventBatch.length > 0) {
+        try {
+          await onBatch(eventBatch);
+        } catch (error) {
+          const err = error as Error;
+          result.errors.push({ message: `Batch processing error: ${err.message}` });
+        }
+      }
+
+      resolve(result);
+    });
+
+    // Create read stream and pipe to SAX parser
+    const fileStream = fs.createReadStream(filePath, { encoding: 'utf8' });
+
+    fileStream.on('error', (error) => {
+      reject(error);
+    });
+
+    fileStream.pipe(parser);
+  });
+}

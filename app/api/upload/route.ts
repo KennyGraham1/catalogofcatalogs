@@ -1,9 +1,10 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { parseFile } from '@/lib/parsers';
+import { withCSRF } from '@/lib/csrf';
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 
-export async function POST(request: Request) {
+export const POST = withCSRF(async (request: NextRequest) => {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File;
@@ -57,5 +58,5 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
-}
+});
 

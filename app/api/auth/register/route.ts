@@ -1,12 +1,14 @@
 /**
  * User Registration API Route
- * 
+ *
  * Handles user registration with email and password.
+ * Protected by rate limiting to prevent abuse.
  */
 
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createUser, getUserByEmail, createAuditLog } from '@/lib/auth-db';
+import { applyRateLimit, authRateLimiter } from '@/lib/rate-limiter';
 
 /**
  * Registration schema validation
@@ -21,9 +23,27 @@ const registerSchema = z.object({
 /**
  * POST /api/auth/register
  * Register a new user
+ *
+ * Rate limit: 5 requests per minute per IP to prevent abuse
  */
 export async function POST(request: Request) {
   try {
+    // Apply rate limiting (5 requests per minute)
+    const rateLimitResult = applyRateLimit(request, authRateLimiter, 5);
+
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        {
+          error: 'Too many registration attempts. Please try again later.',
+          retryAfter: rateLimitResult.headers['Retry-After'],
+        },
+        {
+          status: 429,
+          headers: rateLimitResult.headers,
+        }
+      );
+    }
+
     const body = await request.json();
 
     // Validate request body

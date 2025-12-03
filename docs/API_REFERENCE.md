@@ -18,9 +18,91 @@ Complete reference for all API endpoints in the Earthquake Catalogue Platform.
 
 ## Authentication
 
-Currently, the API does not require authentication. All endpoints are publicly accessible.
+The API uses NextAuth.js for authentication with session-based authentication.
 
-**Future Enhancement**: User authentication and API keys will be added in a future release.
+### Authentication Endpoints
+
+#### Login
+**Endpoint**: `POST /api/auth/signin`
+
+#### Register
+**Endpoint**: `POST /api/auth/register`
+
+**Request Body**:
+```json
+{
+  "email": "user@example.com",
+  "password": "secure-password",
+  "name": "User Name"
+}
+```
+
+#### Get CSRF Token
+**Endpoint**: `GET /api/auth/csrf`
+
+Returns a CSRF token required for state-changing operations.
+
+**Response**: `200 OK`
+```json
+{
+  "csrfToken": "64-character-hex-token"
+}
+```
+
+### Security Features
+
+#### Rate Limiting
+
+All API endpoints are protected by rate limiting to prevent abuse:
+
+- **Authentication endpoints** (`/api/auth/*`): 5 requests per minute
+- **Read operations** (`GET` requests): 120 requests per minute
+- **Write operations** (`POST/PUT/DELETE/PATCH`): 60 requests per minute
+
+When rate limit is exceeded, the API returns `429 Too Many Requests` with the following headers:
+- `X-RateLimit-Limit`: Maximum requests allowed
+- `X-RateLimit-Remaining`: Remaining requests in current window
+- `X-RateLimit-Reset`: Timestamp when the limit resets
+- `Retry-After`: Seconds to wait before retrying
+
+**Example Rate Limit Response**:
+```json
+{
+  "error": "Too many requests. Please try again later.",
+  "retryAfter": 45
+}
+```
+
+#### CSRF Protection
+
+All state-changing operations (`POST`, `PUT`, `PATCH`, `DELETE`) require a valid CSRF token.
+
+**How to use CSRF protection**:
+
+1. Get a CSRF token from `/api/auth/csrf`
+2. Include the token in the `X-CSRF-Token` header for all state-changing requests
+
+**Example**:
+```bash
+# Get CSRF token
+curl -X GET https://example.com/api/auth/csrf \
+  -H "Cookie: session-token"
+
+# Use CSRF token in request
+curl -X POST https://example.com/api/catalogues \
+  -H "Cookie: session-token" \
+  -H "X-CSRF-Token: your-csrf-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "My Catalogue", "events": [...]}'
+```
+
+**CSRF Error Response**: `403 Forbidden`
+```json
+{
+  "error": "Invalid or missing CSRF token",
+  "code": "CSRF_TOKEN_INVALID"
+}
+```
 
 ---
 
@@ -229,18 +311,28 @@ Get all events for a specific catalogue with pagination.
 
 **Query Parameters**:
 
+The API supports three pagination strategies:
+
+#### 1. Cursor-Based Pagination (Recommended for Large Datasets)
+
+Most efficient for large datasets. Uses stable cursors to navigate through results.
+
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `page` | number | No | 1 | Page number |
-| `pageSize` | number | No | 50 | Items per page |
-| `sortBy` | string | No | 'time' | Sort field (time, magnitude, depth) |
-| `sortOrder` | string | No | 'desc' | Sort order (asc, desc) |
+| `cursor` | string | No | - | Cursor for pagination (format: "timestamp:id") |
+| `limit` | number | No | 100 | Number of items to return (1-1000) |
+| `direction` | string | No | 'desc' | Sort direction ('asc' or 'desc') |
+
+**Example Request**:
+```
+GET /api/catalogues/{id}/events?limit=50&direction=desc
+```
 
 **Response**: `200 OK`
 
 ```json
 {
-  "events": [
+  "data": [
     {
       "id": "event-001",
       "catalogue_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -262,11 +354,70 @@ Get all events for a specific catalogue with pagination.
       "created_at": "2024-10-24T12:35:00.000Z"
     }
   ],
+  "pagination": {
+    "nextCursor": "2024-10-24T12:34:56.789Z:event-001",
+    "prevCursor": null,
+    "hasMore": true,
+    "limit": 50
+  }
+}
+```
+
+**Navigating Pages**:
+
+To get the next page, use the `nextCursor` value:
+```
+GET /api/catalogues/{id}/events?cursor=2024-10-24T12:34:56.789Z:event-001&limit=50&direction=desc
+```
+
+To get the previous page, use the `prevCursor` value with opposite direction:
+```
+GET /api/catalogues/{id}/events?cursor=2024-10-24T12:34:56.789Z:event-001&limit=50&direction=asc
+```
+
+#### 2. Page-Based Pagination
+
+Traditional page-based pagination.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `page` | number | No | 1 | Page number |
+| `pageSize` | number | No | 50 | Items per page (1-1000) |
+
+**Example Request**:
+```
+GET /api/catalogues/{id}/events?page=1&pageSize=50
+```
+
+**Response**: `200 OK`
+
+```json
+{
+  "events": [...],
   "total": 1434,
   "page": 1,
   "pageSize": 50
 }
 ```
+
+#### 3. Limit/Offset Pagination
+
+SQL-style limit/offset pagination.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `limit` | number | No | 100 | Number of items to return (1-1000) |
+| `offset` | number | No | 0 | Number of items to skip |
+
+**Example Request**:
+```
+GET /api/catalogues/{id}/events?limit=50&offset=100
+```
+
+**Performance Notes**:
+- **Cursor-based pagination** is recommended for large datasets (>10,000 events) as it provides consistent O(1) performance
+- **Page-based pagination** is suitable for smaller datasets and UI pagination controls
+- **Limit/offset pagination** is provided for backward compatibility but may be slower on large datasets
 
 ---
 
@@ -587,7 +738,10 @@ All API endpoints follow a consistent error response format.
 | 200 | Success |
 | 201 | Created |
 | 400 | Bad Request - Invalid input |
+| 401 | Unauthorized - Authentication required |
+| 403 | Forbidden - Invalid CSRF token or insufficient permissions |
 | 404 | Not Found - Resource doesn't exist |
+| 429 | Too Many Requests - Rate limit exceeded |
 | 500 | Internal Server Error |
 | 503 | Service Unavailable |
 
@@ -597,6 +751,9 @@ All API endpoints follow a consistent error response format.
 |------|-------------|
 | `INVALID_INPUT` | Request validation failed |
 | `NOT_FOUND` | Resource not found |
+| `UNAUTHORIZED` | Authentication required |
+| `CSRF_TOKEN_INVALID` | Invalid or missing CSRF token |
+| `RATE_LIMIT_EXCEEDED` | Too many requests |
 | `DATABASE_ERROR` | Database operation failed |
 | `PARSE_ERROR` | File parsing failed |
 | `IMPORT_ERROR` | GeoNet import failed |

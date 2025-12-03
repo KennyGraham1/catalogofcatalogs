@@ -1,13 +1,18 @@
 /**
  * Seismological Analysis Library
- * 
+ *
  * Advanced seismological calculations including:
  * - Gutenberg-Richter b-value
  * - Completeness magnitude (Mc)
  * - Temporal analysis
  * - Spatial clustering
  * - Seismic moment calculations
+ *
+ * Performance Optimization: All expensive calculations are memoized using LRU cache
+ * to avoid redundant computations when called with the same data.
  */
+
+import { memoize } from './memoization';
 
 export interface EarthquakeEvent {
   id: number | string;
@@ -347,3 +352,104 @@ export function calculateSeismicMoment(events: EarthquakeEvent[]): SeismicMoment
   };
 }
 
+/**
+ * Performance Optimization: Memoized versions of expensive calculations
+ *
+ * These memoized functions cache results for 10 minutes and can store up to 50 results.
+ * This dramatically improves performance for dashboard views and repeated analyses.
+ *
+ * Usage: Simply replace the function call with the memoized version:
+ * - calculateGutenbergRichter() -> calculateGutenbergRichterMemoized()
+ * - estimateCompleteness() -> estimateCompletenessMemoized()
+ * - analyzeTemporalDistribution() -> analyzeTemporalDistributionMemoized()
+ * - calculateSeismicMoment() -> calculateSeismicMomentMemoized()
+ */
+
+/**
+ * Memoized Gutenberg-Richter calculation
+ * Cache: 50 results, 10 minute TTL
+ */
+export const calculateGutenbergRichterMemoized = memoize(
+  calculateGutenbergRichter,
+  {
+    maxSize: 50,
+    ttl: 10 * 60 * 1000, // 10 minutes
+    keyGenerator: (events, minMagnitude, binWidth) => {
+      // Create efficient cache key from event IDs and parameters
+      const eventIds = events.map(e => e.id).sort().join(',');
+      return `gr_${eventIds}_${minMagnitude ?? 'none'}_${binWidth}`;
+    }
+  }
+);
+
+/**
+ * Memoized completeness estimation
+ * Cache: 50 results, 10 minute TTL
+ */
+export const estimateCompletenessMemoized = memoize(
+  estimateCompletenessMagnitude,
+  {
+    maxSize: 50,
+    ttl: 10 * 60 * 1000,
+    keyGenerator: (events, binWidth) => {
+      const eventIds = events.map(e => e.id).sort().join(',');
+      return `comp_${eventIds}_${binWidth ?? 0.1}`;
+    }
+  }
+);
+
+/**
+ * Memoized temporal analysis
+ * Cache: 30 results, 15 minute TTL (longer because time series are more stable)
+ */
+export const analyzeTemporalPatternMemoized = memoize(
+  analyzeTemporalPattern,
+  {
+    maxSize: 30,
+    ttl: 15 * 60 * 1000, // 15 minutes
+    keyGenerator: (events) => {
+      const eventIds = events.map(e => e.id).sort().join(',');
+      return `temporal_${eventIds}`;
+    }
+  }
+);
+
+/**
+ * Memoized seismic moment calculation
+ * Cache: 50 results, 10 minute TTL
+ */
+export const calculateSeismicMomentMemoized = memoize(
+  calculateSeismicMoment,
+  {
+    maxSize: 50,
+    ttl: 10 * 60 * 1000,
+    keyGenerator: (events) => {
+      const eventIds = events.map(e => e.id).sort().join(',');
+      return `moment_${eventIds}`;
+    }
+  }
+);
+
+/**
+ * Get cache statistics for all memoized functions
+ * Useful for monitoring cache effectiveness
+ */
+export function getSeismologicalCacheStats() {
+  return {
+    gutenbergRichter: calculateGutenbergRichterMemoized.cacheStats(),
+    completeness: estimateCompletenessMemoized.cacheStats(),
+    temporal: analyzeTemporalPatternMemoized.cacheStats(),
+    seismicMoment: calculateSeismicMomentMemoized.cacheStats()
+  };
+}
+
+/**
+ * Clear all seismological analysis caches
+ * Useful when data has been updated
+ */
+export function clearSeismologicalCaches() {
+  calculateGutenbergRichterMemoized.clearCache();
+  estimateCompletenessMemoized.clearCache();
+  analyzeTemporalPatternMemoized.clearCache();
+  calculateSeismicMomentMemoized.clearCache();
+}

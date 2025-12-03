@@ -6,7 +6,7 @@
 
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { auth } from '@/lib/auth';
+import { getSession } from '@/lib/auth';
 import { getUserById, updateUserPassword, createAuditLog } from '@/lib/auth-db';
 import { getDb } from '@/lib/db';
 
@@ -32,7 +32,7 @@ const changePasswordSchema = z.object({
  */
 export async function GET() {
   try {
-    const session = await auth();
+    const session = await getSession();
 
     if (!session?.user) {
       return NextResponse.json(
@@ -77,7 +77,7 @@ export async function GET() {
  */
 export async function PATCH(request: Request) {
   try {
-    const session = await auth();
+    const session = await getSession();
 
     if (!session?.user) {
       return NextResponse.json(
@@ -179,7 +179,7 @@ export async function PATCH(request: Request) {
  */
 export async function POST(request: Request) {
   try {
-    const session = await auth();
+    const session = await getSession();
 
     if (!session?.user) {
       return NextResponse.json(

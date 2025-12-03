@@ -19,19 +19,58 @@ export async function GET(
     const limit = searchParams.get('limit');
     const offset = searchParams.get('offset');
 
+    // Performance Optimization: Cursor-based pagination parameters
+    const cursor = searchParams.get('cursor');
+    const direction = searchParams.get('direction') as 'asc' | 'desc' | null;
+
     logger.info('Fetching events for catalogue', {
       catalogueId,
       page,
       pageSize,
       limit,
-      offset
+      offset,
+      cursor,
+      direction
     });
 
     // Determine pagination strategy
     let events;
     let cacheKey: string;
 
-    if (page && pageSize) {
+    // Performance Optimization: Prefer cursor-based pagination for better performance
+    if (cursor !== null || (limit && !page && !pageSize && !offset)) {
+      // Cursor-based pagination (most efficient for large datasets)
+      const limitNum = limit ? parseInt(limit, 10) : 100;
+
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 1000) {
+        return NextResponse.json(
+          { error: 'Invalid limit. Must be between 1 and 1000' },
+          { status: 400 }
+        );
+      }
+
+      const validDirection = direction === 'asc' || direction === 'desc' ? direction : 'desc';
+
+      cacheKey = generateCacheKey('events-cursor', {
+        catalogueId,
+        cursor: cursor || 'start',
+        limit: limitNum,
+        direction: validDirection
+      });
+
+      // Try cache first
+      const cached = eventCache.get(cacheKey);
+      if (cached) {
+        events = cached;
+      } else {
+        events = await dbQueries.getEventsByCatalogueIdCursor(catalogueId, {
+          cursor: cursor || undefined,
+          limit: limitNum,
+          direction: validDirection
+        });
+        eventCache.set(cacheKey, events);
+      }
+    } else if (page && pageSize) {
       // Page-based pagination
       const pageNum = parseInt(page, 10);
       const pageSizeNum = parseInt(pageSize, 10);

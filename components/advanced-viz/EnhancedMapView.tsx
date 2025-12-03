@@ -193,26 +193,33 @@ export function EnhancedMapView({
           />
 
           {/* Earthquake markers - No clustering */}
-          {events.map((event) => (
-            <Circle
-              key={event.id}
-              center={[event.latitude, event.longitude]}
-              radius={getMagnitudeRadius(event.magnitude)}
-              pathOptions={{
-                color: getEventColor(event),
-                fillColor: getEventColor(event),
-                fillOpacity: mapColors.markerOpacity,
-                weight: 2,
-              }}
-              eventHandlers={{
-                click: () => setSelectedEvent(event),
-              }}
-            >
-              <Popup>
-                <EventPopup event={event} qualityScores={qualityScores} />
-              </Popup>
-            </Circle>
-          ))}
+          {events.map((event) => {
+            const eventDate = new Date(event.time).toLocaleDateString();
+            const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
+
+            return (
+              <Circle
+                key={event.id}
+                center={[event.latitude, event.longitude]}
+                radius={getMagnitudeRadius(event.magnitude)}
+                pathOptions={{
+                  color: getEventColor(event),
+                  fillColor: getEventColor(event),
+                  fillOpacity: mapColors.markerOpacity,
+                  weight: 2,
+                  // Add title for accessibility (shows on hover)
+                  title: ariaLabel,
+                } as any}
+                eventHandlers={{
+                  click: () => setSelectedEvent(event),
+                }}
+              >
+                <Popup>
+                  <EventPopup event={event} qualityScores={qualityScores} />
+                </Popup>
+              </Circle>
+            );
+          })}
 
           {/* Uncertainty ellipses */}
           {showUncertainty && uncertaintyEllipses.map(({ eventId, ellipse }) => (

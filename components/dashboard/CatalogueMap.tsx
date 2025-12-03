@@ -201,23 +201,30 @@ export function CatalogueMap() {
         />
 
         {/* Earthquake markers - No clustering */}
-        {events.map((event) => (
-          <Circle
-            key={event.id}
-            center={[event.latitude, event.longitude]}
-            radius={getMagnitudeRadius(event.magnitude)}
-            pathOptions={{
-              color: getMagnitudeColor(event.magnitude),
-              fillColor: getMagnitudeColor(event.magnitude),
-              fillOpacity: mapColors.markerOpacity,
-              weight: 2,
-            }}
-          >
-            <Popup>
-              <EventPopup event={event} getMagnitudeLabel={getMagnitudeLabel} />
-            </Popup>
-          </Circle>
-        ))}
+        {events.map((event) => {
+          const eventDate = new Date(event.time).toLocaleDateString();
+          const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
+
+          return (
+            <Circle
+              key={event.id}
+              center={[event.latitude, event.longitude]}
+              radius={getMagnitudeRadius(event.magnitude)}
+              pathOptions={{
+                color: getMagnitudeColor(event.magnitude),
+                fillColor: getMagnitudeColor(event.magnitude),
+                fillOpacity: mapColors.markerOpacity,
+                weight: 2,
+                // Add title for accessibility (shows on hover)
+                title: ariaLabel,
+              } as any}
+            >
+              <Popup>
+                <EventPopup event={event} getMagnitudeLabel={getMagnitudeLabel} />
+              </Popup>
+            </Circle>
+          );
+        })}
       </MapContainer>
 
       {/* Legend */}

@@ -1,10 +1,15 @@
 /**
  * File parsers for different earthquake catalogue formats
+ *
+ * Performance Optimization: Includes streaming parsers for memory-efficient
+ * processing of large files (100MB+) with constant memory usage.
  */
 
 import { validateEvent } from './earthquake-utils';
 import { parseQuakeMLEvent } from './quakeml-parser';
 import type { QuakeMLEvent } from './types/quakeml';
+import { createReadStream } from 'fs';
+import { createInterface } from 'readline';
 
 export interface ParsedEvent {
   time: string;
@@ -411,3 +416,228 @@ export function parseFile(content: string, filename: string): ParseResult {
   }
 }
 
+/**
+ * Performance Optimization: Streaming CSV parser for large files
+ *
+ * This parser processes files line-by-line with constant memory usage,
+ * allowing it to handle files of any size (100MB+) without loading
+ * the entire file into memory.
+ *
+ * @param filePath - Path to the CSV file
+ * @param onEvent - Callback function called for each parsed event
+ * @param onBatch - Optional callback for batch processing (called every batchSize events)
+ * @param batchSize - Number of events to accumulate before calling onBatch (default: 100)
+ * @returns Promise with parsing statistics
+ *
+ * @example
+ * ```typescript
+ * const stats = await parseCSVStream('large-catalogue.csv', async (event) => {
+ *   await dbQueries.insertEvent(event);
+ * });
+ * console.log(`Processed ${stats.totalEvents} events with ${stats.errors.length} errors`);
+ * ```
+ */
+export async function parseCSVStream(
+  filePath: string,
+  onEvent?: (event: ParsedEvent, lineNumber: number) => Promise<void> | void,
+  onBatch?: (events: ParsedEvent[], startLine: number, endLine: number) => Promise<void> | void,
+  batchSize: number = 100
+): Promise<{
+  success: boolean;
+  totalEvents: number;
+  errors: Array<{ line: number; message: string }>;
+  warnings: Array<{ line: number; message: string }>;
+  detectedFields: string[];
+}> {
+  const errors: Array<{ line: number; message: string }> = [];
+  const warnings: Array<{ line: number; message: string }> = [];
+  let headers: string[] = [];
+  let detectedFields: string[] = [];
+  let lineNumber = 0;
+  let totalEvents = 0;
+  let batch: ParsedEvent[] = [];
+  let batchStartLine = 0;
+
+  const fileStream = createReadStream(filePath, { encoding: 'utf-8' });
+  const rl = createInterface({
+    input: fileStream,
+    crlfDelay: Infinity // Handle both \n and \r\n
+  });
+
+  for await (const line of rl) {
+    lineNumber++;
+
+    if (!line.trim()) {
+      continue; // Skip empty lines
+    }
+
+    // Parse header
+    if (lineNumber === 1) {
+      headers = line.split(',').map(h => h.trim().toLowerCase());
+      detectedFields = [...headers];
+      batchStartLine = lineNumber + 1;
+      continue;
+    }
+
+    try {
+      const values = parseCSVLine(line);
+
+      if (values.length !== headers.length) {
+        errors.push({
+          line: lineNumber,
+          message: `Column count mismatch: expected ${headers.length}, got ${values.length}`
+        });
+        continue;
+      }
+
+      const event: any = {};
+      headers.forEach((header, index) => {
+        event[header] = values[index];
+      });
+
+      // Map common field names
+      const mappedEvent = mapCommonFields(event);
+
+      // Validate the event
+      const validation = validateEvent(mappedEvent);
+      if (!validation.valid) {
+        errors.push({
+          line: lineNumber,
+          message: `Validation failed: ${validation.errors.join(', ')}`
+        });
+        continue;
+      }
+
+      totalEvents++;
+
+      // Call per-event callback if provided
+      if (onEvent) {
+        await onEvent(mappedEvent, lineNumber);
+      }
+
+      // Accumulate for batch processing
+      if (onBatch) {
+        batch.push(mappedEvent);
+
+        if (batch.length >= batchSize) {
+          await onBatch(batch, batchStartLine, lineNumber);
+          batch = [];
+          batchStartLine = lineNumber + 1;
+        }
+      }
+    } catch (error) {
+      errors.push({
+        line: lineNumber,
+        message: `Parse error: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
+  }
+
+  // Process remaining batch
+  if (onBatch && batch.length > 0) {
+    await onBatch(batch, batchStartLine, lineNumber);
+  }
+
+  return {
+    success: errors.length === 0,
+    totalEvents,
+    errors,
+    warnings,
+    detectedFields
+  };
+}
+
+/**
+ * Performance Optimization: Streaming JSON parser for large NDJSON files
+ *
+ * Processes newline-delimited JSON (NDJSON) files line-by-line with constant memory usage.
+ * Each line should contain a single JSON object representing an event.
+ *
+ * @param filePath - Path to the NDJSON file
+ * @param onEvent - Callback function called for each parsed event
+ * @param onBatch - Optional callback for batch processing
+ * @param batchSize - Number of events to accumulate before calling onBatch (default: 100)
+ * @returns Promise with parsing statistics
+ */
+export async function parseJSONStream(
+  filePath: string,
+  onEvent?: (event: ParsedEvent, lineNumber: number) => Promise<void> | void,
+  onBatch?: (events: ParsedEvent[], startLine: number, endLine: number) => Promise<void> | void,
+  batchSize: number = 100
+): Promise<{
+  success: boolean;
+  totalEvents: number;
+  errors: Array<{ line: number; message: string }>;
+  warnings: Array<{ line: number; message: string }>;
+}> {
+  const errors: Array<{ line: number; message: string }> = [];
+  const warnings: Array<{ line: number; message: string }> = [];
+  let lineNumber = 0;
+  let totalEvents = 0;
+  let batch: ParsedEvent[] = [];
+  let batchStartLine = 1;
+
+  const fileStream = createReadStream(filePath, { encoding: 'utf-8' });
+  const rl = createInterface({
+    input: fileStream,
+    crlfDelay: Infinity
+  });
+
+  for await (const line of rl) {
+    lineNumber++;
+
+    if (!line.trim()) {
+      continue; // Skip empty lines
+    }
+
+    try {
+      const eventData = JSON.parse(line);
+      const mappedEvent = mapCommonFields(eventData);
+
+      // Validate the event
+      const validation = validateEvent(mappedEvent);
+      if (!validation.valid) {
+        errors.push({
+          line: lineNumber,
+          message: `Validation failed: ${validation.errors.join(', ')}`
+        });
+        continue;
+      }
+
+      totalEvents++;
+
+      // Call per-event callback if provided
+      if (onEvent) {
+        await onEvent(mappedEvent, lineNumber);
+      }
+
+      // Accumulate for batch processing
+      if (onBatch) {
+        batch.push(mappedEvent);
+
+        if (batch.length >= batchSize) {
+          await onBatch(batch, batchStartLine, lineNumber);
+          batch = [];
+          batchStartLine = lineNumber + 1;
+        }
+      }
+    } catch (error) {
+      errors.push({
+        line: lineNumber,
+        message: `Parse error: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
+  }
+
+  // Process remaining batch
+  if (onBatch && batch.length > 0) {
+    await onBatch(batch, batchStartLine, lineNumber);
+  }
+
+  return {
+    success: errors.length === 0,
+    totalEvents,
+    errors,
+    warnings
+  };
+}

@@ -10,6 +10,7 @@ import CredentialsProvider from 'next-auth/providers/credentials';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { getUserByEmail, updateLastLogin } from './auth-db';
+import { generateCSRFToken } from './csrf';
 
 /**
  * Login schema validation
@@ -99,6 +100,11 @@ export const authOptions: NextAuthOptions = {
         token.name = user.name;
       }
 
+      // Generate CSRF token if not present
+      if (!token.csrfToken) {
+        token.csrfToken = generateCSRFToken();
+      }
+
       return token;
     },
 
@@ -112,6 +118,9 @@ export const authOptions: NextAuthOptions = {
         session.user.email = token.email as string;
         session.user.name = token.name as string;
       }
+
+      // Add CSRF token to session for client-side access
+      (session as any).csrfToken = token.csrfToken as string;
 
       return session;
     },
