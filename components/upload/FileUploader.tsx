@@ -302,9 +302,14 @@ export function FileUploader({
                   </div>
                   {!uploading && (
                     <Button
+                      type="button"
                       variant="ghost"
                       size="icon"
-                      onClick={() => onFileRemoved(file.name)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onFileRemoved(file.name);
+                      }}
                       className="h-7 w-7"
                     >
                       <X className="h-4 w-4" />

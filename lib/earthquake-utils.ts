@@ -93,7 +93,7 @@ export function validateCoordinates(latitude: number, longitude: number): boolea
  * Validate earthquake magnitude
  */
 export function validateMagnitude(magnitude: number): boolean {
-  return magnitude >= 0 && magnitude <= 10;
+  return magnitude >= -3 && magnitude <= 10;
 }
 
 /**
@@ -378,7 +378,7 @@ export function validateEvent(event: Partial<EarthquakeEvent>): {
   if (event.magnitude === undefined) {
     errors.push('Magnitude is required');
   } else if (!validateMagnitude(event.magnitude)) {
-    errors.push('Invalid magnitude: must be between 0 and 10');
+    errors.push('Invalid magnitude: must be between -3 and 10');
   }
   
   if (event.depth !== undefined && event.depth !== null && !validateDepth(event.depth)) {

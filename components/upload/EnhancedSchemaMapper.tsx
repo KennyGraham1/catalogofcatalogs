@@ -57,7 +57,14 @@ import {
 } from '@/components/ui/accordion';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
-import { FIELD_DEFINITIONS, FIELD_CATEGORIES, getFieldById, getFieldsByCategory } from '@/lib/field-definitions';
+import {
+  FIELD_DEFINITIONS,
+  FIELD_CATEGORIES,
+  getFieldById,
+  getFieldsByCategory,
+  detectAllFieldMappings,
+  checkRequiredFieldsMapped
+} from '@/lib/field-definitions';
 
 interface EnhancedSchemaMapperProps {
   validationResults: any;
@@ -102,86 +109,32 @@ export function EnhancedSchemaMapper({
     loadTemplates();
   }, []);
   
-  // Auto-detect field mappings
+  // Auto-detect field mappings using comprehensive field mapping utility
   useEffect(() => {
     const timer = setTimeout(() => {
       if (validationResults && validationResults.length > 0 && autoMapping) {
-        const detectedMappings: Record<string, string> = {};
         const sampleFields = validationResults[0].fields || [];
-        
-        sampleFields.forEach((field: string) => {
-          const lowerField = field.toLowerCase().replace(/[_\s-]/g, '');
-          
-          // Enhanced auto-mapping logic for all QuakeML fields
-          if (lowerField.includes('eventid') || lowerField === 'id') {
-            detectedMappings[field] = 'id';
-          } else if (lowerField.includes('time') || lowerField.includes('date') || lowerField === 'origintime') {
-            detectedMappings[field] = 'time';
-          } else if (lowerField.includes('lat') && !lowerField.includes('uncertainty')) {
-            detectedMappings[field] = 'latitude';
-          } else if (lowerField.includes('lon') && !lowerField.includes('uncertainty')) {
-            detectedMappings[field] = 'longitude';
-          } else if (lowerField.includes('dep') && !lowerField.includes('uncertainty')) {
-            detectedMappings[field] = 'depth';
-          } else if ((lowerField.includes('mag') || lowerField === 'm') && !lowerField.includes('type') && !lowerField.includes('uncertainty')) {
-            detectedMappings[field] = 'magnitude';
-          } else if (lowerField.includes('magtype') || lowerField.includes('magnitudetype')) {
-            detectedMappings[field] = 'magnitude_type';
-          } else if (lowerField.includes('source') || lowerField.includes('agency')) {
-            detectedMappings[field] = 'source';
-          } else if (lowerField.includes('region') || lowerField.includes('location')) {
-            detectedMappings[field] = 'region';
-          } else if (lowerField.includes('eventtype')) {
-            detectedMappings[field] = 'event_type';
-          } else if (lowerField.includes('publicid')) {
-            detectedMappings[field] = 'event_public_id';
-          } else if (lowerField.includes('timeuncertainty') || lowerField.includes('timeerror')) {
-            detectedMappings[field] = 'time_uncertainty';
-          } else if (lowerField.includes('latuncertainty') || lowerField.includes('laterror')) {
-            detectedMappings[field] = 'latitude_uncertainty';
-          } else if (lowerField.includes('lonuncertainty') || lowerField.includes('lonerror')) {
-            detectedMappings[field] = 'longitude_uncertainty';
-          } else if (lowerField.includes('depthuncertainty') || lowerField.includes('deptherror')) {
-            detectedMappings[field] = 'depth_uncertainty';
-          } else if (lowerField.includes('maguncertainty') || lowerField.includes('magerror')) {
-            detectedMappings[field] = 'magnitude_uncertainty';
-          } else if (lowerField.includes('stationcount') && lowerField.includes('mag')) {
-            detectedMappings[field] = 'magnitude_station_count';
-          } else if (lowerField.includes('azimuthalgap') || lowerField === 'gap') {
-            detectedMappings[field] = 'azimuthal_gap';
-          } else if (lowerField.includes('phasecount') || lowerField.includes('nph')) {
-            detectedMappings[field] = 'used_phase_count';
-          } else if (lowerField.includes('stationcount') || lowerField.includes('nst')) {
-            detectedMappings[field] = 'used_station_count';
-          } else if (lowerField.includes('standarderror') || lowerField === 'rms') {
-            detectedMappings[field] = 'standard_error';
-          } else if (lowerField.includes('evaluationmode')) {
-            detectedMappings[field] = 'evaluation_mode';
-          } else if (lowerField.includes('evaluationstatus') || lowerField.includes('status')) {
-            detectedMappings[field] = 'evaluation_status';
-          }
-        });
-        
+
+        // Use the new comprehensive field mapping utility
+        // This handles all QuakeML 1.2 fields, GeoNet/ISC variations, and fuzzy matching
+        const detectedMappings = detectAllFieldMappings(sampleFields, 0.6);
+
         setFieldMappings(detectedMappings);
       }
-      
+
       setLoading(false);
-      checkRequiredFields();
+      checkRequiredFieldsInternal();
     }, 1000);
-    
+
     return () => clearTimeout(timer);
   }, [validationResults, autoMapping]);
   
-  // Check if required fields are mapped
-  const checkRequiredFields = () => {
-    const requiredFields = FIELD_DEFINITIONS.filter(f => f.required);
-    const isMappingComplete = requiredFields.every(field => {
-      return Object.values(fieldMappings).includes(field.id);
-    });
-    
-    onSchemaReady(isMappingComplete);
+  // Check if required fields are mapped (internal function)
+  const checkRequiredFieldsInternal = () => {
+    const { complete } = checkRequiredFieldsMapped(fieldMappings);
+    onSchemaReady(complete);
   };
-  
+
   // Update field mapping
   const updateMapping = (sourceField: string, targetField: string) => {
     setFieldMappings(prev => {
@@ -193,9 +146,9 @@ export function EnhancedSchemaMapper({
       }
       return updated;
     });
-    
+
     setTimeout(() => {
-      checkRequiredFields();
+      checkRequiredFieldsInternal();
       if (onMappingsChange) {
         onMappingsChange(fieldMappings);
       }
@@ -296,7 +249,7 @@ export function EnhancedSchemaMapper({
       title: 'Template loaded',
       description: `Loaded mapping template "${template.name}"`
     });
-    setTimeout(checkRequiredFields, 0);
+    setTimeout(checkRequiredFieldsInternal, 0);
   };
   
   // Delete a template

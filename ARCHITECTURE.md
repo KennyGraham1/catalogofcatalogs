@@ -22,7 +22,7 @@ This diagram shows the complete application structure including the frontend (Re
 - **Backend**: Next.js API routes for upload, catalogues, events, merge, import, and authentication
 - **Libraries**: Parsers (CSV, JSON, QuakeML), validators, quality checkers
 - **Database**: SQLite with Write-Ahead Logging for concurrent read/write performance
-- **External Services**: GeoNet, USGS, and EMSC APIs for importing earthquake data
+- **External Services**: GeoNet API for importing New Zealand earthquake data
 
 ```mermaid
 flowchart TB
@@ -64,9 +64,7 @@ flowchart TB
     end
     
     subgraph External["🌐 External Services"]
-        GeoNet["GeoNet API"]
-        USGS["USGS API"]
-        EMSC["EMSC API"]
+        GeoNet["GeoNet API<br/>(NZ Earthquakes)"]
     end
     
     UI --> Pages

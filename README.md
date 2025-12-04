@@ -467,7 +467,7 @@ For detailed database management instructions, see [DATABASE_MANAGEMENT.md](DATA
 
 ### Planned Features 🚀
 - [ ] Scheduled automatic imports with background job scheduler
-- [ ] Multi-source import (USGS, IRIS, other FDSN services)
+- [ ] Multi-source import (additional FDSN services)
 - [ ] Enhanced QuakeML support with full picks and arrivals
 - [ ] Advanced data quality validation and anomaly detection
 - [ ] Export to additional formats (GeoJSON, KML)

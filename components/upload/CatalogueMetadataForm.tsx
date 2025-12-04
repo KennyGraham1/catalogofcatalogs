@@ -136,7 +136,7 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
                 <Label htmlFor="data_source">Data Source</Label>
                 <Input
                   id="data_source"
-                  placeholder="e.g., GeoNet, USGS, ISC"
+                  placeholder="e.g., GeoNet, ISC, Local Network"
                   value={metadata.data_source || ''}
                   onChange={(e) => updateField('data_source', e.target.value)}
                 />
@@ -146,7 +146,7 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
                 <Label htmlFor="provider">Provider/Organization</Label>
                 <Input
                   id="provider"
-                  placeholder="e.g., GNS Science, USGS"
+                  placeholder="e.g., GNS Science, University"
                   value={metadata.provider || ''}
                   onChange={(e) => updateField('provider', e.target.value)}
                 />

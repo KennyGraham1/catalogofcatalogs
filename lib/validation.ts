@@ -21,9 +21,10 @@ export const earthquakeEventSchema = z.object({
   latitude: z.number().min(-90, 'Latitude must be >= -90').max(90, 'Latitude must be <= 90'),
   longitude: z.number().min(-180, 'Longitude must be >= -180').max(180, 'Longitude must be <= 180'),
   depth: z.number().min(0, 'Depth must be >= 0 km').max(1000, 'Depth must be <= 1000 km').nullable().optional(),
-  magnitude: z.number().min(-2, 'Magnitude must be >= -2').max(10, 'Magnitude must be <= 10'),
+  magnitude: z.number().min(-3, 'Magnitude must be >= -3').max(10, 'Magnitude must be <= 10'),
   magnitudeType: z.string().max(10).optional(),
   region: z.string().max(255).optional(),
+  location_name: z.string().max(255).optional(),
   source: z.string().max(100).optional(),
   status: z.enum(['automatic', 'reviewed', 'manual']).optional(),
 
@@ -31,8 +32,23 @@ export const earthquakeEventSchema = z.object({
   latitude_uncertainty: z.number().min(0).max(10).optional(),
   longitude_uncertainty: z.number().min(0).max(10).optional(),
   depth_uncertainty: z.number().min(0).max(100).optional(),
+  horizontal_uncertainty: z.number().min(0).max(100).optional(),
   time_uncertainty: z.number().min(0).max(60).optional(),
   magnitude_uncertainty: z.number().min(0).max(5).optional(),
+
+  // Origin metadata (QuakeML/GeoNet/ISC)
+  depth_type: z.string().max(50).optional(),
+  earth_model_id: z.string().max(100).optional(),
+  method_id: z.string().max(100).optional(),
+
+  // Agency/Author information (ISC/QuakeML)
+  agency_id: z.string().max(50).optional(),
+  author: z.string().max(100).optional(),
+
+  // Magnitude details
+  magnitude_method_id: z.string().max(100).optional(),
+  magnitude_evaluation_mode: z.string().max(50).optional(),
+  magnitude_evaluation_status: z.string().max(50).optional(),
 
   // Quality metrics with validation
   azimuthal_gap: z.number().min(0).max(360).optional(),
@@ -40,6 +56,11 @@ export const earthquakeEventSchema = z.object({
   used_station_count: z.number().int().min(0).max(500).optional(),
   standard_error: z.number().min(0).max(100).optional(),
   magnitude_station_count: z.number().int().min(0).max(500).optional(),
+  minimum_distance: z.number().min(0).max(180).optional(), // degrees
+  maximum_distance: z.number().min(0).max(180).optional(), // degrees
+  associated_phase_count: z.number().int().min(0).max(10000).optional(),
+  associated_station_count: z.number().int().min(0).max(5000).optional(),
+  depth_phase_count: z.number().int().min(0).max(1000).optional(),
 }).refine((data) => {
   // Cross-field validation: if depth is very shallow, check magnitude is reasonable
   if (data.depth !== null && data.depth !== undefined && data.depth < 5 && data.magnitude > 8) {
@@ -115,7 +136,7 @@ export const catalogueMetadataSchema = z.object({
 
 export type CatalogueMetadata = z.infer<typeof catalogueMetadataSchema>;
 
-// Field mapping schema - includes all QuakeML 1.2 fields
+// Field mapping schema - includes all QuakeML 1.2 fields and expanded schema fields
 export const fieldMappingSchema = z.object({
   sourceField: z.string(),
   targetField: z.enum([
@@ -130,6 +151,7 @@ export const fieldMappingSchema = z.object({
     // Basic optional fields
     'source',
     'region',
+    'location_name',
 
     // QuakeML 1.2 Event metadata
     'event_public_id',
@@ -141,17 +163,35 @@ export const fieldMappingSchema = z.object({
     'latitude_uncertainty',
     'longitude_uncertainty',
     'depth_uncertainty',
+    'horizontal_uncertainty',
+
+    // Origin metadata (QuakeML/GeoNet/ISC)
+    'depth_type',
+    'earth_model_id',
+    'method_id',
+
+    // Agency/Author information (ISC/QuakeML)
+    'agency_id',
+    'author',
 
     // Magnitude details
     'magnitude_type',
     'magnitude_uncertainty',
     'magnitude_station_count',
+    'magnitude_method_id',
+    'magnitude_evaluation_mode',
+    'magnitude_evaluation_status',
 
     // Origin quality metrics
     'azimuthal_gap',
     'used_phase_count',
     'used_station_count',
     'standard_error',
+    'minimum_distance',
+    'maximum_distance',
+    'associated_phase_count',
+    'associated_station_count',
+    'depth_phase_count',
 
     // Evaluation metadata
     'evaluation_mode',

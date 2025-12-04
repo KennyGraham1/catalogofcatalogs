@@ -216,6 +216,9 @@ function extractOriginQuality(xml: string): OriginQuality | undefined {
   const usedStationCount = extractTagValue(content, 'usedStationCount');
   if (usedStationCount) quality.usedStationCount = parseInt(usedStationCount);
 
+  const depthPhaseCount = extractTagValue(content, 'depthPhaseCount');
+  if (depthPhaseCount) quality.depthPhaseCount = parseInt(depthPhaseCount);
+
   const standardError = extractTagValue(content, 'standardError');
   if (standardError) quality.standardError = parseFloat(standardError);
 
@@ -284,6 +287,16 @@ function extractOrigin(xml: string): Origin | undefined {
   const depthType = extractTagValue(xml, 'depthType');
   if (depthType) origin.depthType = depthType as any;
 
+  // Extract origin metadata (QuakeML/GeoNet/ISC fields)
+  const earthModelID = extractTagValue(xml, 'earthModelID');
+  if (earthModelID) origin.earthModelID = earthModelID;
+
+  const methodID = extractTagValue(xml, 'methodID');
+  if (methodID) origin.methodID = methodID;
+
+  const region = extractTagValue(xml, 'region');
+  if (region) origin.region = region;
+
   const evaluationMode = extractTagValue(xml, 'evaluationMode');
   if (evaluationMode) origin.evaluationMode = evaluationMode as any;
 
@@ -321,6 +334,10 @@ function extractMagnitude(xml: string): Magnitude | undefined {
 
   const type = extractTagValue(xml, 'type');
   if (type) magnitude.type = type;
+
+  // Extract magnitude method ID (QuakeML/GeoNet/ISC field)
+  const methodID = extractTagValue(xml, 'methodID');
+  if (methodID) magnitude.methodID = methodID;
 
   const stationCount = extractTagValue(xml, 'stationCount');
   if (stationCount) magnitude.stationCount = parseInt(stationCount);

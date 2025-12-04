@@ -219,7 +219,7 @@ Test your analysis workflows with actual data:
 ### 3. Data Quality Comparison
 
 Compare data completeness across catalogues:
-- GeoNet (full metadata) vs. USGS (moderate) vs. Historic (basic)
+- GeoNet (full metadata) vs. Other Networks (moderate) vs. Historic (basic)
 - Evaluate pick quality and station coverage
 - Assess location uncertainties
 

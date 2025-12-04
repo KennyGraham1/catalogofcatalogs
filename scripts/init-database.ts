@@ -37,7 +37,7 @@ function initializeDatabase() {
       }
     });
 
-    // Create merged_events table with full QuakeML 1.2 schema
+    // Create merged_events table with full QuakeML 1.2 schema (expanded for GeoNet/ISC)
     db.run(`
       CREATE TABLE IF NOT EXISTS merged_events (
         id TEXT PRIMARY KEY,
@@ -51,6 +51,10 @@ function initializeDatabase() {
         source_events TEXT NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 
+        -- Location information
+        region TEXT,
+        location_name TEXT,
+
         -- QuakeML 1.2 Event metadata
         event_public_id TEXT,
         event_type TEXT,
@@ -61,17 +65,35 @@ function initializeDatabase() {
         latitude_uncertainty REAL,
         longitude_uncertainty REAL,
         depth_uncertainty REAL,
+        horizontal_uncertainty REAL,
+
+        -- Origin metadata (QuakeML/GeoNet/ISC)
+        depth_type TEXT,
+        earth_model_id TEXT,
+        method_id TEXT,
+
+        -- Agency/Author information (ISC/QuakeML)
+        agency_id TEXT,
+        author TEXT,
 
         -- Magnitude details
         magnitude_type TEXT,
         magnitude_uncertainty REAL,
         magnitude_station_count INTEGER,
+        magnitude_method_id TEXT,
+        magnitude_evaluation_mode TEXT,
+        magnitude_evaluation_status TEXT,
 
         -- Origin quality metrics
         azimuthal_gap REAL,
         used_phase_count INTEGER,
         used_station_count INTEGER,
         standard_error REAL,
+        minimum_distance REAL,
+        maximum_distance REAL,
+        associated_phase_count INTEGER,
+        associated_station_count INTEGER,
+        depth_phase_count INTEGER,
 
         -- Evaluation metadata
         evaluation_mode TEXT,

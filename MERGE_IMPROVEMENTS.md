@@ -2,7 +2,7 @@
 
 ## Implementation Summary
 
-This document summarizes the comprehensive improvements made to `lib/merge.ts` based on seismological best practices from ISC-GEM, USGS ANSS, and academic research.
+This document summarizes the comprehensive improvements made to `lib/merge.ts` based on seismological best practices from ISC-GEM, international seismic networks, and academic research.
 
 ---
 
@@ -264,7 +264,7 @@ The improvements are based on authoritative sources:
    - Variable spatial/temporal windows by magnitude
    - Quality metrics: azimuthal gap, station count, standard error
 
-2. **USGS ANSS Practices**
+2. **International Network Practices**
    - Typical thresholds: 100 km, 60 seconds
    - Priority to authoritative regional networks
    - Simple time/space window duplicate detection

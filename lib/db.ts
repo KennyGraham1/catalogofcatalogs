@@ -87,17 +87,35 @@ export interface MergedEvent {
   latitude_uncertainty?: number | null;
   longitude_uncertainty?: number | null;
   depth_uncertainty?: number | null;
+  horizontal_uncertainty?: number | null;  // Horizontal location uncertainty (km)
+
+  // Origin metadata (QuakeML/GeoNet/ISC)
+  depth_type?: string | null;  // How depth was determined (from location, constrained by depth phases, etc.)
+  earth_model_id?: string | null;  // Velocity model used for location (e.g., "nz3d", "iasp91")
+  method_id?: string | null;  // Location method used
+
+  // Agency/Author information (ISC/QuakeML)
+  agency_id?: string | null;  // Contributing agency (e.g., "GNS", "ISC", "USGS")
+  author?: string | null;  // Author of the solution
 
   // Magnitude details
   magnitude_type?: string | null;
   magnitude_uncertainty?: number | null;
   magnitude_station_count?: number | null;
+  magnitude_method_id?: string | null;  // Method used for magnitude calculation
+  magnitude_evaluation_mode?: string | null;  // Manual/automatic for magnitude
+  magnitude_evaluation_status?: string | null;  // Status of magnitude determination
 
   // Origin quality metrics
   azimuthal_gap?: number | null;
   used_phase_count?: number | null;
   used_station_count?: number | null;
   standard_error?: number | null;
+  minimum_distance?: number | null;  // Distance to nearest station (degrees)
+  maximum_distance?: number | null;  // Distance to farthest station (degrees)
+  associated_phase_count?: number | null;  // Total phases associated with event
+  associated_station_count?: number | null;  // Total stations associated
+  depth_phase_count?: number | null;  // Number of depth phases used
 
   // Evaluation metadata
   evaluation_mode?: string | null;
@@ -396,17 +414,35 @@ if (typeof window === 'undefined') {
         latitude_uncertainty REAL,
         longitude_uncertainty REAL,
         depth_uncertainty REAL,
+        horizontal_uncertainty REAL,
+
+        -- Origin metadata (QuakeML/GeoNet/ISC)
+        depth_type TEXT,
+        earth_model_id TEXT,
+        method_id TEXT,
+
+        -- Agency/Author information (ISC/QuakeML)
+        agency_id TEXT,
+        author TEXT,
 
         -- Magnitude details
         magnitude_type TEXT,
         magnitude_uncertainty REAL,
         magnitude_station_count INTEGER,
+        magnitude_method_id TEXT,
+        magnitude_evaluation_mode TEXT,
+        magnitude_evaluation_status TEXT,
 
         -- Origin quality metrics
         azimuthal_gap REAL,
         used_phase_count INTEGER,
         used_station_count INTEGER,
         standard_error REAL,
+        minimum_distance REAL,
+        maximum_distance REAL,
+        associated_phase_count INTEGER,
+        associated_station_count INTEGER,
+        depth_phase_count INTEGER,
 
         -- Evaluation metadata
         evaluation_mode TEXT,
@@ -445,6 +481,12 @@ if (typeof window === 'undefined') {
     db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_used_station_count ON merged_events(used_station_count)`);
     db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_standard_error ON merged_events(standard_error)`);
 
+    // New indexes for expanded schema fields
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_depth_type ON merged_events(depth_type)`);
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_earth_model_id ON merged_events(earth_model_id)`);
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_agency_id ON merged_events(agency_id)`);
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_minimum_distance ON merged_events(minimum_distance)`);
+
     // Composite indexes for common query patterns
     db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_catalogue_time ON merged_events(catalogue_id, time DESC)`);
     db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_catalogue_magnitude ON merged_events(catalogue_id, magnitude DESC)`);
@@ -459,6 +501,8 @@ if (typeof window === 'undefined') {
     db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_cat_depth_mag ON merged_events(catalogue_id, depth, magnitude)`);
     // For quality-based filtering
     db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_cat_quality ON merged_events(catalogue_id, azimuthal_gap, used_station_count, standard_error)`);
+    // For agency-based filtering
+    db!.run(`CREATE INDEX IF NOT EXISTS idx_merged_events_cat_agency ON merged_events(catalogue_id, agency_id)`);
 
     // Create mapping templates table
     db!.run(`
@@ -569,9 +613,9 @@ if (typeof window === 'undefined') {
         throw new Error(`Invalid longitude: ${event.longitude}. Must be between -180 and 180`);
       }
 
-      // Validate magnitude
-      if (event.magnitude < 0 || event.magnitude > 10) {
-        throw new Error(`Invalid magnitude: ${event.magnitude}. Must be between 0 and 10`);
+      // Validate magnitude (allow negative for microquakes)
+      if (event.magnitude < -3 || event.magnitude > 10) {
+        throw new Error(`Invalid magnitude: ${event.magnitude}. Must be between -3 and 10`);
       }
 
       // Validate depth
@@ -603,10 +647,15 @@ if (typeof window === 'undefined') {
 
       // Add QuakeML fields if provided
       const optionalFields: Array<keyof MergedEvent> = [
+        'region', 'location_name',
         'event_public_id', 'event_type', 'event_type_certainty',
         'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty', 'depth_uncertainty',
+        'horizontal_uncertainty', 'depth_type', 'earth_model_id', 'method_id',
+        'agency_id', 'author',
         'magnitude_type', 'magnitude_uncertainty', 'magnitude_station_count',
+        'magnitude_method_id', 'magnitude_evaluation_mode', 'magnitude_evaluation_status',
         'azimuthal_gap', 'used_phase_count', 'used_station_count', 'standard_error',
+        'minimum_distance', 'maximum_distance', 'associated_phase_count', 'associated_station_count', 'depth_phase_count',
         'evaluation_mode', 'evaluation_status',
         'origin_quality', 'origins', 'magnitudes', 'picks', 'arrivals',
         'focal_mechanisms', 'amplitudes', 'station_magnitudes',
@@ -659,9 +708,9 @@ if (typeof window === 'undefined') {
           throw new Error(`Invalid longitude: ${event.longitude}. Must be between -180 and 180`);
         }
 
-        // Validate magnitude
-        if (event.magnitude < 0 || event.magnitude > 10) {
-          throw new Error(`Invalid magnitude: ${event.magnitude}. Must be between 0 and 10`);
+        // Validate magnitude (allow negative for microquakes)
+        if (event.magnitude < -3 || event.magnitude > 10) {
+          throw new Error(`Invalid magnitude: ${event.magnitude}. Must be between -3 and 10`);
         }
 
         // Validate depth
@@ -709,10 +758,15 @@ if (typeof window === 'undefined') {
 
               // Add QuakeML fields if provided
               const optionalFields: Array<keyof MergedEvent> = [
+                'region', 'location_name',
                 'event_public_id', 'event_type', 'event_type_certainty',
                 'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty', 'depth_uncertainty',
+                'horizontal_uncertainty', 'depth_type', 'earth_model_id', 'method_id',
+                'agency_id', 'author',
                 'magnitude_type', 'magnitude_uncertainty', 'magnitude_station_count',
+                'magnitude_method_id', 'magnitude_evaluation_mode', 'magnitude_evaluation_status',
                 'azimuthal_gap', 'used_phase_count', 'used_station_count', 'standard_error',
+                'minimum_distance', 'maximum_distance', 'associated_phase_count', 'associated_station_count', 'depth_phase_count',
                 'evaluation_mode', 'evaluation_status',
                 'origin_quality', 'origins', 'magnitudes', 'picks', 'arrivals',
                 'focal_mechanisms', 'amplitudes', 'station_magnitudes',

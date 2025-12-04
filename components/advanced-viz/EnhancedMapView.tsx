@@ -27,28 +27,46 @@ interface EnhancedEvent {
   depth: number;
   time: string;
   region?: string;
-  
+
   // Uncertainty fields
   latitude_uncertainty?: number | null;
   longitude_uncertainty?: number | null;
   depth_uncertainty?: number | null;
   time_uncertainty?: number | null;
-  
+  horizontal_uncertainty?: number | null;
+
   // Quality metrics
   azimuthal_gap?: number | null;
   used_station_count?: number | null;
   used_phase_count?: number | null;
   standard_error?: number | null;
-  
+  minimum_distance?: number | null;
+  maximum_distance?: number | null;
+  associated_phase_count?: number | null;
+  associated_station_count?: number | null;
+  depth_phase_count?: number | null;
+
   // Magnitude details
   magnitude_uncertainty?: number | null;
   magnitude_station_count?: number | null;
   magnitude_type?: string | null;
-  
+  magnitude_method_id?: string | null;
+  magnitude_evaluation_mode?: string | null;
+  magnitude_evaluation_status?: string | null;
+
   // Evaluation
   evaluation_mode?: string | null;
   evaluation_status?: string | null;
-  
+
+  // Origin metadata
+  depth_type?: string | null;
+  earth_model_id?: string | null;
+  method_id?: string | null;
+
+  // Agency/Author
+  agency_id?: string | null;
+  author?: string | null;
+
   // Complex data
   focal_mechanisms?: string | null;
   picks?: string | null;

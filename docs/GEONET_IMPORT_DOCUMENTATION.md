@@ -316,7 +316,7 @@ CREATE TABLE import_history (
    - Support for picks, arrivals, focal mechanisms
 
 3. **Multi-Source Import**
-   - Support for other FDSN web services (USGS, IRIS, etc.)
+   - Support for additional FDSN web services
    - Unified import interface for multiple sources
    - Source-specific field mapping
 

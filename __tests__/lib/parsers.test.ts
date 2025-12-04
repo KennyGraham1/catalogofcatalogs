@@ -207,5 +207,118 @@ invalid,100,200,-1,2000`;
       expect(result.events).toHaveLength(1);
     });
   });
+
+  describe('mapCommonFields - field name variations', () => {
+    it('should map common latitude variations', () => {
+      const csv = `lat,lon,time,mag
+-41.2865,174.7762,2024-01-01T00:00:00Z,5.0`;
+
+      const result = parseCSV(csv);
+      expect(result.success).toBe(true);
+      expect(result.events[0].latitude).toBe(-41.2865);
+    });
+
+    it('should map GeoNet-style field names (evla, evlo, evdp)', () => {
+      const json = JSON.stringify([{
+        evla: -41.2865,
+        evlo: 174.7762,
+        evdp: 10,
+        time: '2024-01-01T00:00:00Z',
+        mag: 5.0
+      }]);
+
+      const result = parseJSON(json);
+      expect(result.success).toBe(true);
+      expect(result.events[0].latitude).toBe(-41.2865);
+      expect(result.events[0].longitude).toBe(174.7762);
+      expect(result.events[0].depth).toBe(10);
+    });
+
+    it('should map ISC-style quality metrics (nph, nst, rms)', () => {
+      const json = JSON.stringify([{
+        latitude: -41.2865,
+        longitude: 174.7762,
+        time: '2024-01-01T00:00:00Z',
+        magnitude: 5.0,
+        nph: 25,
+        nst: 15,
+        rms: 0.5,
+        azgap: 45
+      }]);
+
+      const result = parseJSON(json);
+      expect(result.success).toBe(true);
+      expect(result.events[0].used_phase_count).toBe(25);
+      expect(result.events[0].used_station_count).toBe(15);
+      expect(result.events[0].standard_error).toBe(0.5);
+      expect(result.events[0].azimuthal_gap).toBe(45);
+    });
+
+    it('should map QuakeML 1.2 uncertainty fields', () => {
+      const json = JSON.stringify([{
+        latitude: -41.2865,
+        longitude: 174.7762,
+        time: '2024-01-01T00:00:00Z',
+        magnitude: 5.0,
+        horiz_unc: 1500,
+        depth_error: 2.5,
+        time_error: 0.3
+      }]);
+
+      const result = parseJSON(json);
+      expect(result.success).toBe(true);
+      expect(result.events[0].horizontal_uncertainty).toBe(1500);
+      expect(result.events[0].depth_uncertainty).toBe(2.5);
+      expect(result.events[0].time_uncertainty).toBe(0.3);
+    });
+
+    it('should map agency and author fields', () => {
+      const json = JSON.stringify([{
+        latitude: -41.2865,
+        longitude: 174.7762,
+        time: '2024-01-01T00:00:00Z',
+        magnitude: 5.0,
+        agency: 'GeoNet',
+        analyst: 'auto'
+      }]);
+
+      const result = parseJSON(json);
+      expect(result.success).toBe(true);
+      expect(result.events[0].agency_id).toBe('GeoNet');
+      expect(result.events[0].author).toBe('auto');
+    });
+
+    it('should map magnitude evaluation fields', () => {
+      const json = JSON.stringify([{
+        latitude: -41.2865,
+        longitude: 174.7762,
+        time: '2024-01-01T00:00:00Z',
+        magnitude: 5.0,
+        mag_eval_mode: 'automatic',
+        mag_eval_status: 'preliminary'
+      }]);
+
+      const result = parseJSON(json);
+      expect(result.success).toBe(true);
+      expect(result.events[0].magnitude_evaluation_mode).toBe('automatic');
+      expect(result.events[0].magnitude_evaluation_status).toBe('preliminary');
+    });
+
+    it('should map distance metrics', () => {
+      const json = JSON.stringify([{
+        latitude: -41.2865,
+        longitude: 174.7762,
+        time: '2024-01-01T00:00:00Z',
+        magnitude: 5.0,
+        mindist: 0.5,
+        maxdist: 10.0
+      }]);
+
+      const result = parseJSON(json);
+      expect(result.success).toBe(true);
+      expect(result.events[0].minimum_distance).toBe(0.5);
+      expect(result.events[0].maximum_distance).toBe(10.0);
+    });
+  });
 });
 

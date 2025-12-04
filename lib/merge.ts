@@ -188,22 +188,45 @@ async function executeMergeOperation(
         dbEvent.event_type = quakeml.type;
         dbEvent.event_type_certainty = quakeml.typeCertainty;
 
-        // Add origin uncertainties
+        // Add origin data
         if (preferredOrigin) {
+          // Origin uncertainties
           dbEvent.time_uncertainty = preferredOrigin.time.uncertainty;
           dbEvent.latitude_uncertainty = preferredOrigin.latitude.uncertainty;
           dbEvent.longitude_uncertainty = preferredOrigin.longitude.uncertainty;
           dbEvent.depth_uncertainty = preferredOrigin.depth?.uncertainty;
 
-          // Add origin quality metrics
+          // Horizontal uncertainty from originUncertainty
+          if (preferredOrigin.uncertainty?.horizontalUncertainty) {
+            dbEvent.horizontal_uncertainty = preferredOrigin.uncertainty.horizontalUncertainty;
+          }
+
+          // Origin metadata (QuakeML/GeoNet/ISC fields)
+          dbEvent.depth_type = preferredOrigin.depthType;
+          dbEvent.earth_model_id = preferredOrigin.earthModelID;
+          dbEvent.method_id = preferredOrigin.methodID;
+          dbEvent.region = preferredOrigin.region;
+
+          // Agency/Author from creationInfo
+          if (preferredOrigin.creationInfo) {
+            dbEvent.agency_id = preferredOrigin.creationInfo.agencyID;
+            dbEvent.author = preferredOrigin.creationInfo.author;
+          }
+
+          // Origin quality metrics
           if (preferredOrigin.quality) {
             dbEvent.azimuthal_gap = preferredOrigin.quality.azimuthalGap;
             dbEvent.used_phase_count = preferredOrigin.quality.usedPhaseCount;
             dbEvent.used_station_count = preferredOrigin.quality.usedStationCount;
             dbEvent.standard_error = preferredOrigin.quality.standardError;
+            dbEvent.minimum_distance = preferredOrigin.quality.minimumDistance;
+            dbEvent.maximum_distance = preferredOrigin.quality.maximumDistance;
+            dbEvent.associated_phase_count = preferredOrigin.quality.associatedPhaseCount;
+            dbEvent.associated_station_count = preferredOrigin.quality.associatedStationCount;
+            dbEvent.depth_phase_count = preferredOrigin.quality.depthPhaseCount;
           }
 
-          // Add evaluation metadata
+          // Evaluation metadata
           dbEvent.evaluation_mode = preferredOrigin.evaluationMode;
           dbEvent.evaluation_status = preferredOrigin.evaluationStatus;
 
@@ -218,6 +241,9 @@ async function executeMergeOperation(
           dbEvent.magnitude_type = preferredMagnitude.type;
           dbEvent.magnitude_uncertainty = preferredMagnitude.mag.uncertainty;
           dbEvent.magnitude_station_count = preferredMagnitude.stationCount;
+          dbEvent.magnitude_method_id = preferredMagnitude.methodID;
+          dbEvent.magnitude_evaluation_mode = preferredMagnitude.evaluationMode;
+          dbEvent.magnitude_evaluation_status = preferredMagnitude.evaluationStatus;
         }
 
         // Store complex nested data as JSON
@@ -457,7 +483,7 @@ function getAdaptiveDistanceThreshold(magnitude: number, depth: number | null | 
  * Get adaptive time threshold based on magnitude
  *
  * IMPROVEMENT (Issue #2): Magnitude-dependent temporal thresholds
- * Based on ISC-GEM and USGS ANSS practices:
+ * Based on ISC-GEM and international seismic network practices:
  * - Small events (M < 4.0): 30 seconds - local events reported quickly
  * - Medium events (M 4.0-5.5): 60 seconds - regional events
  * - Large events (M 5.5-7.0): 120 seconds - teleseismic events

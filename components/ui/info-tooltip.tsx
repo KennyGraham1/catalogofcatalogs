@@ -106,7 +106,7 @@ export const TECHNICAL_TERMS = {
   },
   eventId: {
     term: 'Event ID',
-    definition: 'Unique identifier assigned to each earthquake by the reporting agency. Format varies by source (e.g., GeoNet, USGS).'
+    definition: 'Unique identifier assigned to each earthquake by the reporting agency. Format varies by source (e.g., GeoNet, ISC).'
   },
   publicId: {
     term: 'Public ID',

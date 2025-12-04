@@ -29,6 +29,13 @@ interface Event {
   azimuthal_gap?: number | null;
   used_station_count?: number | null;
   public_id?: string | null;
+  // Extended QuakeML 1.2 fields
+  horizontal_uncertainty?: number | null;
+  depth_type?: string | null;
+  agency_id?: string | null;
+  author?: string | null;
+  evaluation_mode?: string | null;
+  evaluation_status?: string | null;
 }
 
 type SortField = 'time' | 'magnitude' | 'depth' | 'quality' | 'latitude' | 'longitude';

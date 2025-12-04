@@ -26,7 +26,7 @@ interface Earthquake {
   time: string;
   region?: string;
   catalogue?: string;
-  
+
   // Quality metrics
   azimuthal_gap?: number | null;
   used_station_count?: number | null;
@@ -40,6 +40,22 @@ interface Earthquake {
   focal_mechanisms?: string | null;
   picks?: string | null;
   arrivals?: string | null;
+
+  // Extended QuakeML 1.2 fields (GeoNet/ISC)
+  horizontal_uncertainty?: number | null;
+  depth_type?: string | null;
+  earth_model_id?: string | null;
+  method_id?: string | null;
+  agency_id?: string | null;
+  author?: string | null;
+  minimum_distance?: number | null;
+  maximum_distance?: number | null;
+  associated_phase_count?: number | null;
+  associated_station_count?: number | null;
+  depth_phase_count?: number | null;
+  magnitude_method_id?: string | null;
+  magnitude_evaluation_mode?: string | null;
+  magnitude_evaluation_status?: string | null;
 }
 
 interface UnifiedEarthquakeMapProps {

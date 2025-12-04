@@ -386,13 +386,16 @@ export function parseQuakeML(content: string): ParseResult {
 
 /**
  * Map common field name variations to standard names
+ * Supports QuakeML 1.2, GeoNet, ISC, and common CSV/JSON field variations
  */
 function mapCommonFields(event: any): ParsedEvent {
   const mapped: any = { ...event };
 
+  // === Basic Fields ===
   // Map time variations
   if (!mapped.time) {
-    mapped.time = event.datetime || event.date || event.origin_time || event.origintime;
+    mapped.time = event.datetime || event.date || event.origin_time || event.origintime ||
+                  event.ot || event.otime || event.timestamp;
   }
 
   // Normalize timestamp to ISO 8601 format
@@ -406,20 +409,152 @@ function mapCommonFields(event: any): ParsedEvent {
 
   // Map latitude variations
   if (mapped.lat !== undefined) mapped.latitude = parseFloat(mapped.lat);
+  if (mapped.evla !== undefined) mapped.latitude = parseFloat(mapped.evla);
   if (mapped.latitude !== undefined) mapped.latitude = parseFloat(mapped.latitude);
 
   // Map longitude variations
   if (mapped.lon !== undefined) mapped.longitude = parseFloat(mapped.lon);
   if (mapped.lng !== undefined) mapped.longitude = parseFloat(mapped.lng);
+  if (mapped.long !== undefined) mapped.longitude = parseFloat(mapped.long);
+  if (mapped.evlo !== undefined) mapped.longitude = parseFloat(mapped.evlo);
   if (mapped.longitude !== undefined) mapped.longitude = parseFloat(mapped.longitude);
 
   // Map depth variations
   if (mapped.dep !== undefined) mapped.depth = parseFloat(mapped.dep);
+  if (mapped.evdp !== undefined) mapped.depth = parseFloat(mapped.evdp);
+  if (mapped.depth_km !== undefined) mapped.depth = parseFloat(mapped.depth_km);
   if (mapped.depth !== undefined) mapped.depth = parseFloat(mapped.depth);
 
   // Map magnitude variations
   if (mapped.mag !== undefined) mapped.magnitude = parseFloat(mapped.mag);
+  if (mapped.m !== undefined && mapped.magnitude === undefined) mapped.magnitude = parseFloat(mapped.m);
   if (mapped.magnitude !== undefined) mapped.magnitude = parseFloat(mapped.magnitude);
+
+  // Map magnitude type variations
+  if (!mapped.magnitude_type) {
+    mapped.magnitude_type = event.magtype || event.mag_type || event.mtype || event.magnitudeType;
+  }
+
+  // === Uncertainty Fields ===
+  if (!mapped.horizontal_uncertainty) {
+    mapped.horizontal_uncertainty = event.horiz_unc || event.h_uncertainty || event.herr ||
+                                    event.horizontal_error || event.seh || event.horizontalUncertainty;
+  }
+  if (!mapped.depth_uncertainty) {
+    mapped.depth_uncertainty = event.deptherror || event.depth_error || event.sdepth ||
+                               event.sdep || event.z_error || event.depthUncertainty;
+  }
+  if (!mapped.time_uncertainty) {
+    mapped.time_uncertainty = event.timeerror || event.time_error || event.oterror ||
+                              event.stime || event.timeUncertainty;
+  }
+  if (!mapped.latitude_uncertainty) {
+    mapped.latitude_uncertainty = event.laterror || event.lat_error || event.slat || event.latitudeUncertainty;
+  }
+  if (!mapped.longitude_uncertainty) {
+    mapped.longitude_uncertainty = event.lonerror || event.lon_error || event.slon || event.longitudeUncertainty;
+  }
+
+  // === Origin Metadata ===
+  if (!mapped.depth_type) {
+    mapped.depth_type = event.depthtype || event.depth_method || event.depthflag || event.depthType;
+  }
+  if (!mapped.earth_model_id) {
+    mapped.earth_model_id = event.earthmodelid || event.velocity_model || event.earth_model ||
+                            event.velmodel || event.vmodel || event.earthModelID;
+  }
+  if (!mapped.method_id) {
+    mapped.method_id = event.methodid || event.location_method || event.locmethod ||
+                       event.algorithm || event.methodID;
+  }
+
+  // === Agency/Author ===
+  if (!mapped.agency_id) {
+    mapped.agency_id = event.agencyid || event.agency || event.source_agency ||
+                       event.contributor || event.source || event.network || event.agencyID;
+  }
+  if (!mapped.author) {
+    mapped.author = event.analyst || event.created_by || event.createdby || event.reporter;
+  }
+
+  // === Magnitude Details ===
+  if (!mapped.magnitude_uncertainty) {
+    mapped.magnitude_uncertainty = event.magerror || event.mag_error || event.smag ||
+                                   event.magnitude_error || event.magnitudeUncertainty;
+  }
+  if (!mapped.magnitude_station_count) {
+    mapped.magnitude_station_count = event.magstationcount || event.mag_nst || event.nstmag ||
+                                     event.magnitudeStationCount;
+  }
+  if (!mapped.magnitude_method_id) {
+    mapped.magnitude_method_id = event.magmethod || event.mag_method || event.magnitude_method ||
+                                 event.magnitudeMethodID;
+  }
+  if (!mapped.magnitude_evaluation_mode) {
+    mapped.magnitude_evaluation_mode = event.magevalmode || event.mag_eval_mode ||
+                                       event.magnitude_mode || event.magnitudeEvaluationMode;
+  }
+  if (!mapped.magnitude_evaluation_status) {
+    mapped.magnitude_evaluation_status = event.magevalstatus || event.mag_eval_status ||
+                                         event.magnitude_status || event.magnitudeEvaluationStatus;
+  }
+
+  // === Quality Metrics ===
+  if (!mapped.azimuthal_gap) {
+    mapped.azimuthal_gap = event.azgap || event.az_gap || event.gap || event.azimuthalGap;
+  }
+  if (!mapped.used_phase_count) {
+    mapped.used_phase_count = event.nph || event.ndef || event.phases_used ||
+                              event.usedphases || event.phasecount || event.usedPhaseCount;
+  }
+  if (!mapped.used_station_count) {
+    mapped.used_station_count = event.nst || event.nsta || event.stations_used ||
+                                event.usedstations || event.stationcount || event.usedStationCount;
+  }
+  if (!mapped.standard_error) {
+    mapped.standard_error = event.rms || event.rmserror || event.rms_error ||
+                            event.residual || event.standardError;
+  }
+  if (!mapped.minimum_distance) {
+    mapped.minimum_distance = event.mindist || event.min_dist || event.dmin ||
+                              event.nearest_station || event.minimumDistance;
+  }
+  if (!mapped.maximum_distance) {
+    mapped.maximum_distance = event.maxdist || event.max_dist || event.dmax ||
+                              event.farthest_station || event.maximumDistance;
+  }
+  if (!mapped.associated_phase_count) {
+    mapped.associated_phase_count = event.associatedphasecount || event.phase_count ||
+                                    event.nass || event.total_phases || event.associatedPhaseCount;
+  }
+  if (!mapped.associated_station_count) {
+    mapped.associated_station_count = event.associatedstationcount || event.station_count ||
+                                      event.total_stations || event.associatedStationCount;
+  }
+  if (!mapped.depth_phase_count) {
+    mapped.depth_phase_count = event.depthphasecount || event.depth_phases ||
+                               event.ndepthphases || event.depthPhaseCount;
+  }
+
+  // === Evaluation Metadata ===
+  if (!mapped.evaluation_mode) {
+    mapped.evaluation_mode = event.evalmode || event.eval_mode || event.mode ||
+                             event.analysismode || event.evaluationMode;
+  }
+  if (!mapped.evaluation_status) {
+    mapped.evaluation_status = event.evalstatus || event.eval_status || event.status ||
+                               event.reviewstatus || event.evaluationStatus;
+  }
+
+  // === Region/Location ===
+  if (!mapped.region) {
+    mapped.region = event.flinnengdahl || event.flinn_engdahl || event.fe_region ||
+                    event.geo_region || event.area;
+  }
+  if (!mapped.location_name) {
+    mapped.location_name = event.locationname || event.place || event.placename ||
+                           event.description || event.event_description;
+  }
 
   return mapped as ParsedEvent;
 }

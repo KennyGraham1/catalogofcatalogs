@@ -44,20 +44,18 @@ import {
 import { toast } from '@/hooks/use-toast';
 import { GeographicSearchPanel, GeographicBounds } from '@/components/catalogues/GeographicSearchPanel';
 
-// NOTE: mockCatalogues removed - now using real data from CatalogueContext
-
 type CatalogueStatus = 'all' | 'complete' | 'processing' | 'incomplete';
 type SortField = 'name' | 'date' | 'events' | 'source';
 type SortDirection = 'asc' | 'desc';
 type MergeStatus = 'idle' | 'merging' | 'complete' | 'error';
 
-// Type that supports both mock data and real API data
+// Type that supports API data with optional legacy field names
 type CatalogueItem = {
   id: number | string;
   name: string;
-  events?: number;      // Mock data field
-  event_count?: number; // Real API data field
-  source?: string;      // Mock data field
+  events?: number;      // Legacy field name
+  event_count?: number; // API field name
+  source?: string;
 };
 
 // Status labels for merge status

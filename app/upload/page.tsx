@@ -50,6 +50,29 @@ export default function UploadPage() {
     setFiles(files.filter(file => file.name !== fileName));
   };
 
+  const handleCancel = () => {
+    // Reset all upload state
+    setFiles([]);
+    setValidationResults(null);
+    setQualityCheckResult(null);
+    setCrossFieldValidation(null);
+    setParsedEvents([]);
+    setIsSchemaReady(false);
+    setCatalogueName('');
+    setMetadata({});
+    setProcessingReport(null);
+    setUploadStatus('idle');
+    setUploadProgress({
+      stage: 'idle',
+      progress: 0,
+      bytesUploaded: 0,
+      totalBytes: 0,
+      filesCompleted: 0,
+      totalFiles: 0
+    });
+    setActiveTab('upload');
+  };
+
   const handleUpload = async () => {
     if (files.length === 0) {
       toast({
@@ -507,7 +530,9 @@ export default function UploadPage() {
           </CardContent>
           <CardFooter className="flex justify-between border-t bg-muted/20 px-6 py-4">
             <Button
+              type="button"
               variant="ghost"
+              onClick={handleCancel}
               disabled={uploadStatus === 'uploading' || uploadStatus === 'validating' || uploadStatus === 'processing'}
             >
               Cancel

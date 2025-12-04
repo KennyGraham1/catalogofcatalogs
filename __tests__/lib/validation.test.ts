@@ -357,3 +357,161 @@ describe('Data Quality Assessment', () => {
   });
 });
 
+// Import field mapping utilities
+import {
+  detectFieldMapping,
+  detectAllFieldMappings,
+  normalizeFieldName,
+  calculateSimilarity,
+  checkRequiredFieldsMapped,
+  FIELD_ALIASES,
+} from '@/lib/field-definitions';
+
+describe('Field Mapping Auto-Detection', () => {
+  describe('normalizeFieldName', () => {
+    it('should normalize camelCase to lowercase', () => {
+      expect(normalizeFieldName('magnitudeType')).toBe('magnitudetype');
+      expect(normalizeFieldName('eventPublicId')).toBe('eventpublicid');
+    });
+
+    it('should remove underscores and hyphens', () => {
+      expect(normalizeFieldName('magnitude_type')).toBe('magnitudetype');
+      expect(normalizeFieldName('event-type')).toBe('eventtype');
+    });
+
+    it('should handle mixed formats', () => {
+      expect(normalizeFieldName('Magnitude_Type')).toBe('magnitudetype');
+      expect(normalizeFieldName('LATITUDE')).toBe('latitude');
+    });
+  });
+
+  describe('calculateSimilarity', () => {
+    it('should return 1 for identical strings', () => {
+      expect(calculateSimilarity('latitude', 'latitude')).toBe(1);
+    });
+
+    it('should return high similarity for similar strings', () => {
+      const similarity = calculateSimilarity('lat', 'latitude');
+      expect(similarity).toBeGreaterThan(0.3);
+    });
+
+    it('should return lower similarity for different strings', () => {
+      const similarity = calculateSimilarity('latitude', 'magnitude');
+      // These strings share some characters so similarity is moderate
+      expect(similarity).toBeLessThan(0.8);
+      expect(similarity).toBeGreaterThan(0.5);
+    });
+  });
+
+  describe('detectFieldMapping', () => {
+    it('should detect exact matches with high confidence', () => {
+      const result = detectFieldMapping('latitude');
+      expect(result.targetField).toBe('latitude');
+      expect(result.confidence).toBeGreaterThanOrEqual(0.98);
+      expect(result.matchType).toBe('exact');
+    });
+
+    it('should detect common aliases', () => {
+      const result = detectFieldMapping('lat');
+      expect(result.targetField).toBe('latitude');
+      expect(result.confidence).toBeGreaterThanOrEqual(0.9);
+    });
+
+    it('should detect GeoNet-style field names', () => {
+      expect(detectFieldMapping('evla').targetField).toBe('latitude');
+      expect(detectFieldMapping('evlo').targetField).toBe('longitude');
+      expect(detectFieldMapping('evdp').targetField).toBe('depth');
+    });
+
+    it('should detect ISC-style quality metrics', () => {
+      expect(detectFieldMapping('nph').targetField).toBe('used_phase_count');
+      expect(detectFieldMapping('nst').targetField).toBe('used_station_count');
+      expect(detectFieldMapping('rms').targetField).toBe('standard_error');
+    });
+
+    it('should detect QuakeML 1.2 uncertainty fields', () => {
+      expect(detectFieldMapping('horiz_unc').targetField).toBe('horizontal_uncertainty');
+      expect(detectFieldMapping('depth_error').targetField).toBe('depth_uncertainty');
+    });
+
+    it('should detect magnitude evaluation fields', () => {
+      expect(detectFieldMapping('mag_eval_mode').targetField).toBe('magnitude_evaluation_mode');
+      expect(detectFieldMapping('mag_eval_status').targetField).toBe('magnitude_evaluation_status');
+    });
+
+    it('should detect agency and author fields', () => {
+      expect(detectFieldMapping('agency').targetField).toBe('agency_id');
+      expect(detectFieldMapping('analyst').targetField).toBe('author');
+    });
+
+    it('should detect distance metrics', () => {
+      expect(detectFieldMapping('mindist').targetField).toBe('minimum_distance');
+      expect(detectFieldMapping('maxdist').targetField).toBe('maximum_distance');
+    });
+
+    it('should return low confidence for unrecognized fields', () => {
+      const result = detectFieldMapping('zzz_completely_random_xyz');
+      // Fuzzy matching may still find a match but with low confidence
+      expect(result.confidence).toBeLessThan(0.7);
+    });
+  });
+
+  describe('detectAllFieldMappings', () => {
+    it('should map multiple fields at once', () => {
+      const sourceFields = ['lat', 'lon', 'time', 'mag', 'dep'];
+      const mappings = detectAllFieldMappings(sourceFields);
+
+      expect(mappings['lat']).toBe('latitude');
+      expect(mappings['lon']).toBe('longitude');
+      expect(mappings['time']).toBe('time');
+      expect(mappings['mag']).toBe('magnitude');
+      expect(mappings['dep']).toBe('depth');
+    });
+
+    it('should avoid duplicate target mappings', () => {
+      const sourceFields = ['lat', 'latitude', 'evla'];
+      const mappings = detectAllFieldMappings(sourceFields);
+
+      // Only one should be mapped to latitude
+      const latMappings = Object.entries(mappings).filter(([_, v]) => v === 'latitude');
+      expect(latMappings.length).toBe(1);
+    });
+
+    it('should respect minimum confidence threshold', () => {
+      const sourceFields = ['latitude', 'xyz_unknown'];
+      const mappings = detectAllFieldMappings(sourceFields, 0.6);
+
+      expect(mappings['latitude']).toBe('latitude');
+      expect(mappings['xyz_unknown']).toBeUndefined();
+    });
+  });
+
+  describe('checkRequiredFieldsMapped', () => {
+    it('should return complete when all required fields are mapped', () => {
+      const mappings = {
+        'time_col': 'time',
+        'lat_col': 'latitude',
+        'lon_col': 'longitude',
+        'mag_col': 'magnitude',
+        'id_col': 'id',
+      };
+
+      const result = checkRequiredFieldsMapped(mappings);
+      expect(result.complete).toBe(true);
+      expect(result.missing).toHaveLength(0);
+    });
+
+    it('should return missing fields when incomplete', () => {
+      const mappings = {
+        'lat_col': 'latitude',
+        'lon_col': 'longitude',
+      };
+
+      const result = checkRequiredFieldsMapped(mappings);
+      expect(result.complete).toBe(false);
+      expect(result.missing).toContain('time');
+      expect(result.missing).toContain('magnitude');
+    });
+  });
+});
+

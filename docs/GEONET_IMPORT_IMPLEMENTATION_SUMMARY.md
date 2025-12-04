@@ -265,7 +265,7 @@ Comprehensive user guide covering:
 
 - ⏳ **Scheduled automatic imports** - Background job scheduler (optional)
 - ⏳ **Enhanced QuakeML support** - Full XML parsing with all metadata (optional)
-- ⏳ **Multi-source import** - Support for USGS, IRIS, etc. (optional)
+- ⏳ **Multi-source import** - Support for additional FDSN services (optional)
 
 ---
 

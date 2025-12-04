@@ -140,9 +140,17 @@ describe('earthquake-utils', () => {
       expect(validateMagnitude(10)).toBe(true);
     });
 
-    it('should reject invalid magnitudes', () => {
-      expect(validateMagnitude(-1)).toBe(false);
+    it('should validate negative magnitudes for microquakes', () => {
+      expect(validateMagnitude(-1)).toBe(true);
+      expect(validateMagnitude(-2.5)).toBe(true);
+      expect(validateMagnitude(-3)).toBe(true);
+    });
+
+    it('should reject magnitudes outside valid range (-3 to 10)', () => {
+      expect(validateMagnitude(-4)).toBe(false);
+      expect(validateMagnitude(-3.1)).toBe(false);
       expect(validateMagnitude(11)).toBe(false);
+      expect(validateMagnitude(10.1)).toBe(false);
     });
   });
 
