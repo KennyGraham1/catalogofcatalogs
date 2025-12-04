@@ -1,39 +1,101 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Upload, X, File, FileSpreadsheet, FileJson, FilePlus } from 'lucide-react';
+import { Upload, X, File, FileSpreadsheet, FileJson, FilePlus, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+
+export type UploadStage = 'idle' | 'uploading' | 'parsing' | 'validating' | 'saving' | 'complete' | 'error';
+
+export interface UploadProgressInfo {
+  stage: UploadStage;
+  progress: number;
+  bytesUploaded: number;
+  totalBytes: number;
+  currentFile?: string;
+  filesCompleted: number;
+  totalFiles: number;
+  startTime?: number;
+  message?: string;
+}
 
 interface FileUploaderProps {
   files: File[];
   onFilesAdded: (files: File[]) => void;
   onFileRemoved: (fileName: string) => void;
   uploading?: boolean;
+  progressInfo?: UploadProgressInfo;
 }
 
-export function FileUploader({ files, onFilesAdded, onFileRemoved, uploading = false }: FileUploaderProps) {
+const stageLabels: Record<UploadStage, string> = {
+  idle: 'Ready',
+  uploading: 'Uploading files...',
+  parsing: 'Parsing catalogue data...',
+  validating: 'Validating events...',
+  saving: 'Saving to database...',
+  complete: 'Complete',
+  error: 'Error'
+};
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function formatTimeRemaining(seconds: number): string {
+  if (seconds < 60) return `${Math.ceil(seconds)}s remaining`;
+  if (seconds < 3600) return `${Math.ceil(seconds / 60)}m remaining`;
+  return `${Math.ceil(seconds / 3600)}h remaining`;
+}
+
+export function FileUploader({
+  files,
+  onFilesAdded,
+  onFileRemoved,
+  uploading = false,
+  progressInfo
+}: FileUploaderProps) {
   const [isDragging, setIsDragging] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const [simulatedProgress, setSimulatedProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Simulate progress during upload with proper cleanup
+  // Calculate total file size
+  const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
+
+  // Simulate progress during upload when no progressInfo is provided
   useEffect(() => {
-    if (!uploading) {
-      setUploadProgress(0);
+    if (!uploading || progressInfo) {
+      setSimulatedProgress(0);
       return;
     }
 
-    if (uploadProgress >= 100) {
+    if (simulatedProgress >= 100) {
       return;
     }
 
     const timer = setTimeout(() => {
-      setUploadProgress(prev => Math.min(prev + 5, 100));
+      setSimulatedProgress(prev => Math.min(prev + 5, 100));
     }, 150);
 
     return () => clearTimeout(timer);
-  }, [uploading, uploadProgress]);
+  }, [uploading, simulatedProgress, progressInfo]);
+
+  // Calculate ETA based on progress info
+  const getETA = (): string | null => {
+    if (!progressInfo?.startTime || progressInfo.progress <= 0) return null;
+    const elapsed = (Date.now() - progressInfo.startTime) / 1000;
+    const rate = progressInfo.progress / elapsed;
+    if (rate <= 0) return null;
+    const remaining = (100 - progressInfo.progress) / rate;
+    return formatTimeRemaining(remaining);
+  };
+
+  // Determine actual progress to display
+  const displayProgress = progressInfo?.progress ?? simulatedProgress;
+  const isActive = uploading || (progressInfo && progressInfo.stage !== 'idle' && progressInfo.stage !== 'complete');
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -127,13 +189,95 @@ export function FileUploader({ files, onFilesAdded, onFileRemoved, uploading = f
         </div>
       </div>
 
-      {uploading && (
-        <div className="space-y-2">
-          <div className="flex justify-between text-sm">
-            <span>Uploading...</span>
-            <span>{uploadProgress}%</span>
+      {/* Enhanced Progress Indicator */}
+      {isActive && (
+        <div className="border rounded-lg p-4 bg-muted/30 space-y-3">
+          {/* Stage indicator */}
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+            <span className="font-medium text-sm">
+              {progressInfo ? stageLabels[progressInfo.stage] : 'Processing...'}
+            </span>
+            {progressInfo?.message && (
+              <span className="text-xs text-muted-foreground ml-2">
+                {progressInfo.message}
+              </span>
+            )}
           </div>
-          <Progress value={uploadProgress} />
+
+          {/* Progress bar */}
+          <Progress value={displayProgress} className="h-2" />
+
+          {/* Progress details */}
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <div className="flex gap-4">
+              {/* Bytes uploaded / total */}
+              {progressInfo && progressInfo.totalBytes > 0 ? (
+                <span>
+                  {formatBytes(progressInfo.bytesUploaded)} / {formatBytes(progressInfo.totalBytes)}
+                </span>
+              ) : totalBytes > 0 ? (
+                <span>Total: {formatBytes(totalBytes)}</span>
+              ) : null}
+
+              {/* Files progress */}
+              {progressInfo && progressInfo.totalFiles > 1 && (
+                <span>
+                  File {progressInfo.filesCompleted + 1} of {progressInfo.totalFiles}
+                  {progressInfo.currentFile && `: ${progressInfo.currentFile}`}
+                </span>
+              )}
+            </div>
+
+            <div className="flex gap-4">
+              {/* ETA */}
+              {getETA() && <span>{getETA()}</span>}
+
+              {/* Percentage */}
+              <span className="font-medium">{Math.round(displayProgress)}%</span>
+            </div>
+          </div>
+
+          {/* Stage indicators */}
+          {progressInfo && (
+            <div className="flex items-center gap-1 pt-1">
+              {(['uploading', 'parsing', 'validating', 'saving'] as UploadStage[]).map((stage, idx) => {
+                const stages: UploadStage[] = ['uploading', 'parsing', 'validating', 'saving'];
+                const currentIdx = stages.indexOf(progressInfo.stage);
+                const stageIdx = stages.indexOf(stage);
+                const isComplete = stageIdx < currentIdx || progressInfo.stage === 'complete';
+                const isCurrent = stageIdx === currentIdx;
+
+                return (
+                  <div key={stage} className="flex items-center">
+                    <div
+                      className={`h-2 w-2 rounded-full ${
+                        isComplete
+                          ? 'bg-green-500'
+                          : isCurrent
+                          ? 'bg-primary animate-pulse'
+                          : 'bg-muted-foreground/30'
+                      }`}
+                    />
+                    <span
+                      className={`text-[10px] mx-1 ${
+                        isComplete || isCurrent ? 'text-foreground' : 'text-muted-foreground/50'
+                      }`}
+                    >
+                      {stage.charAt(0).toUpperCase() + stage.slice(1)}
+                    </span>
+                    {idx < 3 && (
+                      <div
+                        className={`w-4 h-0.5 ${
+                          isComplete ? 'bg-green-500' : 'bg-muted-foreground/30'
+                        }`}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

@@ -105,11 +105,231 @@ export function validateDepth(depth: number | null): boolean {
 }
 
 /**
+ * Normalize timestamp to ISO 8601 format
+ * Supports multiple input formats:
+ * - ISO 8601: 2024-01-15T10:30:00.000Z, 2024-01-15T10:30:00Z, 2024-01-15 10:30:00
+ * - Unix timestamp (seconds): 1705318200
+ * - Unix timestamp (milliseconds): 1705318200000
+ * - Common date formats: DD/MM/YYYY, MM/DD/YYYY, DD.MM.YYYY, YYYY/MM/DD
+ * - Space-separated: YYYY-MM-DD HH:MM:SS, YYYY-MM-DD HH:MM:SS.sss
+ * - Seismological formats: YYYYMMDD HHMMSS, YYYY DDD HH:MM:SS (Julian day)
+ */
+export function normalizeTimestamp(time: string | number): string | null {
+  if (typeof time === 'number') {
+    // Unix timestamp - detect if it's in seconds or milliseconds
+    const timestamp = time < 10000000000 ? time * 1000 : time;
+    const date = new Date(timestamp);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+    return null;
+  }
+
+  if (typeof time !== 'string') {
+    return null;
+  }
+
+  const trimmed = time.trim();
+
+  // Try parsing as-is first (handles ISO 8601 and other standard formats)
+  let date = new Date(trimmed);
+  if (!isNaN(date.getTime()) && date.getTime() > 0) {
+    return date.toISOString();
+  }
+
+  let match: RegExpMatchArray | null;
+
+  // YYYY-MM-DD HH:MM:SS format (space-separated ISO without T)
+  const yyyymmddSpace = /^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
+  match = trimmed.match(yyyymmddSpace);
+  if (match) {
+    const [, year, month, day, hour, minute, second, ms] = match;
+    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
+    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${millis}Z`;
+    date = new Date(isoString);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+
+  // DD/MM/YYYY HH:MM:SS format (common in NZ/AU/UK)
+  const ddmmyyyySlash = /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
+  match = trimmed.match(ddmmyyyySlash);
+  if (match) {
+    const [, day, month, year, hour, minute, second, ms] = match;
+    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
+    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${millis}Z`;
+    date = new Date(isoString);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+
+  // DD-MM-YYYY HH:MM:SS format
+  const ddmmyyyyDash = /^(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
+  match = trimmed.match(ddmmyyyyDash);
+  if (match) {
+    const [, day, month, year, hour, minute, second, ms] = match;
+    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
+    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${millis}Z`;
+    date = new Date(isoString);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+
+  // DD.MM.YYYY HH:MM:SS format (European with dots)
+  const ddmmyyyyDot = /^(\d{1,2})\.(\d{1,2})\.(\d{4})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
+  match = trimmed.match(ddmmyyyyDot);
+  if (match) {
+    const [, day, month, year, hour, minute, second, ms] = match;
+    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
+    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${millis}Z`;
+    date = new Date(isoString);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+
+  // DD.MM.YYYY format (European with dots, date only)
+  const ddmmyyyyDotDateOnly = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/;
+  match = trimmed.match(ddmmyyyyDotDateOnly);
+  if (match) {
+    const [, day, month, year] = match;
+    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T00:00:00.000Z`;
+    date = new Date(isoString);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+
+  // YYYY/MM/DD HH:MM:SS format
+  const yyyymmddSlash = /^(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
+  match = trimmed.match(yyyymmddSlash);
+  if (match) {
+    const [, year, month, day, hour, minute, second, ms] = match;
+    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
+    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${millis}Z`;
+    date = new Date(isoString);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+
+  // DD/MM/YYYY format (date only)
+  const ddmmyyyyDateOnly = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+  match = trimmed.match(ddmmyyyyDateOnly);
+  if (match) {
+    const [, day, month, year] = match;
+    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T00:00:00.000Z`;
+    date = new Date(isoString);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+
+  // MM/DD/YYYY HH:MM:SS format (US format - only when day > 12)
+  const mmddyyyySlash = /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
+  match = trimmed.match(mmddyyyySlash);
+  if (match) {
+    const [, month, day, year, hour, minute, second, ms] = match;
+    // Only try US format if the month value is valid (1-12) and day > 12
+    if (parseInt(month) <= 12 && parseInt(day) > 12) {
+      const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
+      const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${millis}Z`;
+      date = new Date(isoString);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString();
+      }
+    }
+  }
+
+  // YYYYMMDD HHMMSS format (compact seismological format)
+  const compactFormat = /^(\d{4})(\d{2})(\d{2})\s+(\d{2})(\d{2})(\d{2})(?:\.(\d{1,6}))?$/;
+  match = trimmed.match(compactFormat);
+  if (match) {
+    const [, year, month, day, hour, minute, second, ms] = match;
+    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
+    const isoString = `${year}-${month}-${day}T${hour}:${minute}:${second}.${millis}Z`;
+    date = new Date(isoString);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+
+  // YYYYMMDDHHMMSS format (no separator compact format)
+  const compactNoSpace = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\.(\d{1,6}))?$/;
+  match = trimmed.match(compactNoSpace);
+  if (match) {
+    const [, year, month, day, hour, minute, second, ms] = match;
+    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
+    const isoString = `${year}-${month}-${day}T${hour}:${minute}:${second}.${millis}Z`;
+    date = new Date(isoString);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+
+  // YYYY DDD HH:MM:SS format (Julian day / day of year - used in seismology)
+  const julianDayFormat = /^(\d{4})\s+(\d{1,3})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
+  match = trimmed.match(julianDayFormat);
+  if (match) {
+    const [, year, dayOfYear, hour, minute, second, ms] = match;
+    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
+    // Convert day of year to month and day
+    const baseDate = new Date(parseInt(year), 0, 1); // January 1st of the year
+    baseDate.setDate(parseInt(dayOfYear));
+    const month = String(baseDate.getMonth() + 1).padStart(2, '0');
+    const day = String(baseDate.getDate()).padStart(2, '0');
+    const isoString = `${year}-${month}-${day}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${millis}Z`;
+    date = new Date(isoString);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+
+  // YYYY-DDD HH:MM:SS format (Julian day with dash)
+  const julianDayDashFormat = /^(\d{4})-(\d{1,3})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
+  match = trimmed.match(julianDayDashFormat);
+  if (match) {
+    const [, year, dayOfYear, hour, minute, second, ms] = match;
+    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
+    const baseDate = new Date(parseInt(year), 0, 1);
+    baseDate.setDate(parseInt(dayOfYear));
+    const month = String(baseDate.getMonth() + 1).padStart(2, '0');
+    const day = String(baseDate.getDate()).padStart(2, '0');
+    const isoString = `${year}-${month}-${day}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${millis}Z`;
+    date = new Date(isoString);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+
+  // YYYYDDDHHMMSS format (compact Julian day format)
+  const compactJulian = /^(\d{4})(\d{3})(\d{2})(\d{2})(\d{2})(?:\.(\d{1,6}))?$/;
+  match = trimmed.match(compactJulian);
+  if (match) {
+    const [, year, dayOfYear, hour, minute, second, ms] = match;
+    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
+    const baseDate = new Date(parseInt(year), 0, 1);
+    baseDate.setDate(parseInt(dayOfYear));
+    const month = String(baseDate.getMonth() + 1).padStart(2, '0');
+    const day = String(baseDate.getDate()).padStart(2, '0');
+    const isoString = `${year}-${month}-${day}T${hour}:${minute}:${second}.${millis}Z`;
+    date = new Date(isoString);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+
+  return null;
+}
+
+/**
  * Validate earthquake timestamp
  */
-export function validateTimestamp(time: string): boolean {
-  const date = new Date(time);
-  return !isNaN(date.getTime()) && date.getTime() > 0;
+export function validateTimestamp(time: string | number): boolean {
+  return normalizeTimestamp(time) !== null;
 }
 
 /**

@@ -132,8 +132,12 @@ describe('File Upload Security Tests', () => {
       ];
 
       // These should be rejected at the API level
+      // Test that we can detect path traversal patterns
       for (const name of maliciousNames) {
-        expect(name).toContain('..');
+        const hasPathTraversal = name.includes('..') ||
+                                  name.startsWith('/') ||
+                                  /^[A-Za-z]:\\/.test(name);
+        expect(hasPathTraversal).toBe(true);
       }
     });
   });

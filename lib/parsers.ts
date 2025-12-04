@@ -144,14 +144,19 @@ export function parseJSON(content: string): ParseResult {
 
   try {
     const data = JSON.parse(content);
-    
+
     // Handle different JSON structures
     let eventArray: any[] = [];
-    
+
     if (Array.isArray(data)) {
+      // Plain array of events
       eventArray = data;
     } else if (data.events && Array.isArray(data.events)) {
+      // { events: [...] } structure
       eventArray = data.events;
+    } else if (data.data && Array.isArray(data.data)) {
+      // { data: [...] } structure (common export format)
+      eventArray = data.data;
     } else if (data.features && Array.isArray(data.features)) {
       // GeoJSON format
       eventArray = data.features.map((f: any) => ({
@@ -160,14 +165,36 @@ export function parseJSON(content: string): ParseResult {
         longitude: f.geometry?.coordinates?.[0],
         depth: f.geometry?.coordinates?.[2]
       }));
+    } else if (data.earthquakes && Array.isArray(data.earthquakes)) {
+      // { earthquakes: [...] } structure
+      eventArray = data.earthquakes;
+    } else if (data.results && Array.isArray(data.results)) {
+      // { results: [...] } structure (API response format)
+      eventArray = data.results;
     } else {
-      return {
-        success: false,
-        events: [],
-        errors: [{ line: 0, message: 'Unrecognized JSON structure' }],
-        warnings: [],
-        detectedFields: []
-      };
+      // Try to find any array property in the object
+      const arrayProps = Object.keys(data).filter(key => Array.isArray(data[key]));
+      if (arrayProps.length === 1) {
+        // If there's exactly one array property, use it
+        eventArray = data[arrayProps[0]];
+        console.log(`[Parser] Auto-detected array property: ${arrayProps[0]}`);
+      } else if (arrayProps.length > 1) {
+        return {
+          success: false,
+          events: [],
+          errors: [{ line: 0, message: `Multiple array properties found: ${arrayProps.join(', ')}. Please use one of: events, data, features, earthquakes, results` }],
+          warnings: [],
+          detectedFields: []
+        };
+      } else {
+        return {
+          success: false,
+          events: [],
+          errors: [{ line: 0, message: 'Unrecognized JSON structure. Expected an array or object with events/data/features property' }],
+          warnings: [],
+          detectedFields: []
+        };
+      }
     }
 
     // Detect fields from first event
@@ -368,6 +395,15 @@ function mapCommonFields(event: any): ParsedEvent {
     mapped.time = event.datetime || event.date || event.origin_time || event.origintime;
   }
 
+  // Normalize timestamp to ISO 8601 format
+  if (mapped.time) {
+    const { normalizeTimestamp } = require('./earthquake-utils');
+    const normalized = normalizeTimestamp(mapped.time);
+    if (normalized) {
+      mapped.time = normalized;
+    }
+  }
+
   // Map latitude variations
   if (mapped.lat !== undefined) mapped.latitude = parseFloat(mapped.lat);
   if (mapped.latitude !== undefined) mapped.latitude = parseFloat(mapped.latitude);
@@ -394,23 +430,31 @@ function mapCommonFields(event: any): ParsedEvent {
 export function parseFile(content: string, filename: string): ParseResult {
   const extension = filename.split('.').pop()?.toLowerCase();
 
+  // Explicit extension-based routing (takes precedence)
   switch (extension) {
     case 'csv':
     case 'txt':
+      console.log(`[Parser] Parsing ${filename} as CSV based on extension`);
       return parseCSV(content);
     case 'json':
+      console.log(`[Parser] Parsing ${filename} as JSON based on extension`);
       return parseJSON(content);
     case 'xml':
     case 'qml':
+      console.log(`[Parser] Parsing ${filename} as QuakeML based on extension`);
       return parseQuakeML(content);
     default:
-      // Try to auto-detect
+      // Try to auto-detect based on content
+      console.log(`[Parser] Auto-detecting format for ${filename}`);
       const trimmed = content.trim();
       if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        console.log(`[Parser] Auto-detected JSON format`);
         return parseJSON(content);
       } else if (trimmed.startsWith('<')) {
+        console.log(`[Parser] Auto-detected XML/QuakeML format`);
         return parseQuakeML(content);
       } else {
+        console.log(`[Parser] Defaulting to CSV format`);
         return parseCSV(content);
       }
   }

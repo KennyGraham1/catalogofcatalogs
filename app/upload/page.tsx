@@ -1,13 +1,14 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { FileUploader } from '@/components/upload/FileUploader';
+import { FileUploader, UploadProgressInfo } from '@/components/upload/FileUploader';
 import { EnhancedSchemaMapper } from '@/components/upload/EnhancedSchemaMapper';
 import { ValidationResults } from '@/components/upload/ValidationResults';
 import { DataQualityReport } from '@/components/upload/DataQualityReport';
@@ -20,6 +21,7 @@ import { validateEventsCrossFields } from '@/lib/cross-field-validation';
 type UploadStatus = 'idle' | 'uploading' | 'validating' | 'mapping' | 'metadata' | 'processing' | 'complete' | 'error';
 
 export default function UploadPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState('upload');
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
   const [files, setFiles] = useState<File[]>([]);
@@ -30,6 +32,15 @@ export default function UploadPage() {
   const [isSchemaReady, setIsSchemaReady] = useState(false);
   const [catalogueName, setCatalogueName] = useState('');
   const [metadata, setMetadata] = useState<CatalogueMetadata>({});
+  const [processingReport, setProcessingReport] = useState<any | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgressInfo>({
+    stage: 'idle',
+    progress: 0,
+    bytesUploaded: 0,
+    totalBytes: 0,
+    filesCompleted: 0,
+    totalFiles: 0
+  });
 
   const handleFilesAdded = (newFiles: File[]) => {
     setFiles([...files, ...newFiles]);
@@ -39,7 +50,7 @@ export default function UploadPage() {
     setFiles(files.filter(file => file.name !== fileName));
   };
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     if (files.length === 0) {
       toast({
         title: "No files selected",
@@ -49,69 +60,142 @@ export default function UploadPage() {
       return;
     }
 
+    const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
+    const startTime = Date.now();
+
+    // Initialize progress
+    setUploadProgress({
+      stage: 'uploading',
+      progress: 0,
+      bytesUploaded: 0,
+      totalBytes,
+      filesCompleted: 0,
+      totalFiles: files.length,
+      startTime,
+      message: `Starting upload of ${files.length} file(s)...`
+    });
     setUploadStatus('uploading');
-    
-    // Simulate upload process
-    setTimeout(() => {
-      setUploadStatus('validating');
-      
-      // Simulate validation
-      setTimeout(() => {
-        // Generate mock validation results
-        const results = files.map(file => {
-          const isValid = Math.random() > 0.3;
 
-          return {
-            fileName: file.name,
-            isValid,
-            errors: isValid ? [] : [
-              { line: 42, message: "Missing required field 'magnitude'" },
-              { line: 156, message: "Invalid timestamp format" }
-            ],
-            warnings: Math.random() > 0.5 ? [] : [
-              { line: 103, message: "Missing optional field 'depth'" }
-            ],
-            format: file.name.split('.').pop()?.toUpperCase() || 'UNKNOWN',
-            eventCount: Math.floor(Math.random() * 5000) + 100,
-            fields: ['time', 'latitude', 'longitude', 'depth', 'magnitude', 'source', 'eventId']
-          };
-        });
+    try {
+      const uploadResults: any[] = [];
+      let bytesCompleted = 0;
 
-        // Generate mock parsed events for quality assessment
-        const mockEvents = Array.from({ length: 100 }, (_, i) => ({
-          time: new Date(Date.now() - Math.random() * 365 * 24 * 60 * 60 * 1000).toISOString(),
-          latitude: -41.5 + (Math.random() - 0.5) * 10,
-          longitude: 174.0 + (Math.random() - 0.5) * 10,
-          depth: Math.random() * 100,
-          magnitude: 2 + Math.random() * 5,
-          latitude_uncertainty: Math.random() > 0.5 ? Math.random() * 0.1 : undefined,
-          longitude_uncertainty: Math.random() > 0.5 ? Math.random() * 0.1 : undefined,
-          depth_uncertainty: Math.random() > 0.5 ? Math.random() * 5 : undefined,
-          azimuthal_gap: Math.random() > 0.5 ? Math.random() * 180 : undefined,
-          used_phase_count: Math.random() > 0.5 ? Math.floor(Math.random() * 50) + 10 : undefined,
-          used_station_count: Math.random() > 0.5 ? Math.floor(Math.random() * 20) + 5 : undefined,
+      // Upload files sequentially to track progress accurately
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+
+        setUploadProgress(prev => ({
+          ...prev,
+          stage: 'uploading',
+          currentFile: file.name,
+          message: `Uploading ${file.name}...`,
+          progress: Math.round((bytesCompleted / totalBytes) * 40) // 0-40% for upload
         }));
 
-        setParsedEvents(mockEvents);
+        const formData = new FormData();
+        formData.append('file', file);
 
-        // Perform quality check
-        const qualityResult = performQualityCheck(mockEvents);
-        setQualityCheckResult(qualityResult);
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        });
 
-        // Perform cross-field validation
-        const crossFieldResult = validateEventsCrossFields(mockEvents);
-        setCrossFieldValidation(crossFieldResult);
-
-        setValidationResults(results);
-        setUploadStatus(results.some(r => !r.isValid) ? 'error' : 'mapping');
-
-        if (!results.some(r => !r.isValid)) {
-          setTimeout(() => {
-            setActiveTab('schema');
-          }, 500);
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Upload failed');
         }
-      }, 1500);
-    }, 1500);
+
+        const result = await response.json();
+        uploadResults.push(result);
+        bytesCompleted += file.size;
+
+        setUploadProgress(prev => ({
+          ...prev,
+          bytesUploaded: bytesCompleted,
+          filesCompleted: i + 1,
+          progress: Math.round((bytesCompleted / totalBytes) * 40) // 0-40% for upload
+        }));
+      }
+
+      // Parsing stage (40-60%)
+      setUploadProgress(prev => ({
+        ...prev,
+        stage: 'parsing',
+        progress: 50,
+        message: 'Parsing catalogue data...'
+      }));
+
+      await new Promise(resolve => setTimeout(resolve, 300)); // Brief pause for UI update
+
+      // Validating stage (60-80%)
+      setUploadProgress(prev => ({
+        ...prev,
+        stage: 'validating',
+        progress: 70,
+        message: 'Validating events...'
+      }));
+      setUploadStatus('validating');
+
+      // Process validation results
+      const results = uploadResults.map(result => ({
+        fileName: result.fileName,
+        isValid: result.isValid !== false && (!result.errors || result.errors.length === 0),
+        errors: result.errors || [],
+        warnings: result.warnings || [],
+        format: result.format || 'UNKNOWN',
+        eventCount: result.events?.length || 0,
+        fields: result.detectedFields || ['time', 'latitude', 'longitude', 'depth', 'magnitude']
+      }));
+
+      // Combine all events from all files
+      const allEvents = uploadResults.flatMap(result => result.events || []);
+      setParsedEvents(allEvents);
+
+      // Update progress
+      setUploadProgress(prev => ({
+        ...prev,
+        progress: 85,
+        message: `Validating ${allEvents.length} events...`
+      }));
+
+      // Perform quality check
+      const qualityResult = performQualityCheck(allEvents);
+      setQualityCheckResult(qualityResult);
+
+      // Perform cross-field validation
+      const crossFieldResult = validateEventsCrossFields(allEvents);
+      setCrossFieldValidation(crossFieldResult);
+
+      // Complete
+      setUploadProgress(prev => ({
+        ...prev,
+        stage: 'complete',
+        progress: 100,
+        message: `Successfully processed ${allEvents.length} events`
+      }));
+
+      setValidationResults(results);
+      setUploadStatus(results.some(r => !r.isValid) ? 'error' : 'mapping');
+
+      if (!results.some(r => !r.isValid)) {
+        setTimeout(() => {
+          setActiveTab('schema');
+        }, 500);
+      }
+    } catch (error) {
+      console.error('Upload error:', error);
+      setUploadProgress(prev => ({
+        ...prev,
+        stage: 'error',
+        message: error instanceof Error ? error.message : 'Upload failed'
+      }));
+      setUploadStatus('error');
+      toast({
+        title: "Upload failed",
+        description: error instanceof Error ? error.message : "Failed to upload files",
+        variant: "destructive"
+      });
+    }
   };
 
   const handleSchemaSubmit = () => {
@@ -119,7 +203,7 @@ export default function UploadPage() {
     setActiveTab('metadata');
   };
 
-  const handleMetadataSubmit = () => {
+  const handleMetadataSubmit = async () => {
     if (!catalogueName.trim()) {
       toast({
         title: "Catalogue name required",
@@ -130,16 +214,111 @@ export default function UploadPage() {
     }
 
     setUploadStatus('processing');
-    
-    // Simulate processing
-    setTimeout(() => {
+
+    try {
+      // Create catalogue in database
+      const response = await fetch('/api/catalogues', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: catalogueName.trim(),
+          events: parsedEvents,
+          metadata: metadata
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to create catalogue');
+      }
+
+      const createdCatalogue = await response.json();
+
+      // Generate processing report
+      const report = {
+        catalogueId: createdCatalogue.id,
+        catalogueName,
+        processedAt: new Date().toISOString(),
+        filesProcessed: files.map(f => ({
+          name: f.name,
+          size: f.size,
+          format: f.name.split('.').pop()?.toUpperCase() || 'UNKNOWN'
+        })),
+        totalEvents: parsedEvents.length,
+        qualityScore: qualityCheckResult?.overallScore || 0,
+        validationResults,
+        metadata
+      };
+      setProcessingReport(report);
       setUploadStatus('complete');
+
+      // Auto-navigate to Results tab after successful processing
+      setActiveTab('results');
+
       toast({
         title: "Processing complete",
-        description: `Successfully processed ${files.length} catalogue${files.length > 1 ? 's' : ''}!`,
+        description: `Successfully created catalogue "${catalogueName}" with ${parsedEvents.length} events!`,
         variant: "default"
       });
-    }, 2000);
+    } catch (error) {
+      console.error('Catalogue creation error:', error);
+      setUploadStatus('error');
+      toast({
+        title: "Failed to create catalogue",
+        description: error instanceof Error ? error.message : "An error occurred while saving the catalogue",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleViewCatalogues = () => {
+    router.push('/catalogues');
+  };
+
+  const handleDownloadReport = () => {
+    if (!processingReport) {
+      toast({
+        title: "No report available",
+        description: "Please complete the upload process first.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Generate report content
+    const reportContent = {
+      title: "Catalogue Processing Report",
+      generatedAt: new Date().toISOString(),
+      catalogue: {
+        name: processingReport.catalogueName,
+        processedAt: processingReport.processedAt,
+      },
+      files: processingReport.filesProcessed,
+      summary: {
+        totalEvents: processingReport.totalEvents,
+        qualityScore: processingReport.qualityScore,
+      },
+      validation: processingReport.validationResults,
+      metadata: processingReport.metadata
+    };
+
+    // Create and download JSON report
+    const blob = new Blob([JSON.stringify(reportContent, null, 2)], { type: 'application/json' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${processingReport.catalogueName.replace(/\s+/g, '_')}_report.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+
+    toast({
+      title: "Report downloaded",
+      description: "Processing report has been downloaded.",
+    });
   };
 
   const statusLabels: Record<UploadStatus, string> = {
@@ -212,7 +391,8 @@ export default function UploadPage() {
                   files={files}
                   onFilesAdded={handleFilesAdded}
                   onFileRemoved={handleFileRemoved}
-                  uploading={uploadStatus === 'uploading'}
+                  uploading={uploadStatus === 'uploading' || uploadStatus === 'validating'}
+                  progressInfo={uploadProgress}
                 />
 
                 {validationResults && (
@@ -318,8 +498,8 @@ export default function UploadPage() {
                     Your catalogue files have been successfully processed and are now available in your collections.
                   </p>
                   <div className="flex gap-4">
-                    <Button variant="default">View Catalogues</Button>
-                    <Button variant="outline">Download Report</Button>
+                    <Button variant="default" onClick={handleViewCatalogues}>View Catalogues</Button>
+                    <Button variant="outline" onClick={handleDownloadReport}>Download Report</Button>
                   </div>
                 </div>
               </TabsContent>
