@@ -331,7 +331,7 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
                   polyline: false,
                 }}
                 edit={{
-                  edit: true,
+                  edit: {},
                   remove: true,
                 }}
               />

@@ -3,7 +3,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { dbQueries } from '@/lib/db';
+import { dbQueries, MergedEvent } from '@/lib/db';
 import { eventsToQuakeMLDocument } from '@/lib/quakeml-exporter';
 import { generateExportFilename, createDownloadHeaders } from '@/lib/export-utils';
 
@@ -12,8 +12,15 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    if (!dbQueries) {
+      return NextResponse.json(
+        { error: 'Database not available' },
+        { status: 500 }
+      );
+    }
+
     const catalogueId = params.id;
-    
+
     // Get catalogue info
     const catalogue = await dbQueries.getCatalogueById(catalogueId);
     if (!catalogue) {
@@ -22,17 +29,18 @@ export async function GET(
         { status: 404 }
       );
     }
-    
+
     // Get all events for this catalogue
-    const events = await dbQueries.getEventsByCatalogueId(catalogueId);
-    
+    const eventsResult = await dbQueries.getEventsByCatalogueId(catalogueId);
+    const events: MergedEvent[] = Array.isArray(eventsResult) ? eventsResult : eventsResult.data;
+
     if (events.length === 0) {
       return NextResponse.json(
         { error: 'No events found in catalogue' },
         { status: 404 }
       );
     }
-    
+
     // Convert to QuakeML
     const quakemlXml = eventsToQuakeMLDocument(events, catalogue.name);
 
@@ -52,4 +60,3 @@ export async function GET(
     );
   }
 }
-

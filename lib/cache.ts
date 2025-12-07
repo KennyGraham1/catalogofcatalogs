@@ -116,11 +116,11 @@ class Cache {
    */
   cleanup(): void {
     const now = Date.now();
-    for (const [key, entry] of this.cache.entries()) {
+    this.cache.forEach((entry, key) => {
       if (now - entry.timestamp > this.defaultTTL) {
         this.cache.delete(key);
       }
-    }
+    });
   }
 
   /**
@@ -163,7 +163,9 @@ class Cache {
    */
   invalidatePattern(pattern: RegExp): number {
     let count = 0;
-    for (const key of this.cache.keys()) {
+    const keys = Array.from(this.cache.keys());
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
       if (pattern.test(key)) {
         this.cache.delete(key);
         count++;
@@ -178,7 +180,9 @@ class Cache {
    */
   invalidateByPrefix(prefix: string): number {
     let count = 0;
-    for (const key of this.cache.keys()) {
+    const keys = Array.from(this.cache.keys());
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
       if (key.startsWith(prefix)) {
         this.cache.delete(key);
         count++;
@@ -192,7 +196,9 @@ class Cache {
    */
   invalidateBySubstring(substring: string): number {
     let count = 0;
-    for (const key of this.cache.keys()) {
+    const keys = Array.from(this.cache.keys());
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
       if (key.includes(substring)) {
         this.cache.delete(key);
         count++;

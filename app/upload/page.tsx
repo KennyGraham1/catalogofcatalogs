@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { FileUploader, UploadProgressInfo } from '@/components/upload/FileUploader';
+import { DelimiterSelector, type DelimiterOption } from '@/components/upload/DelimiterSelector';
+import { DateFormatSelector, type DateFormatOption } from '@/components/upload/DateFormatSelector';
 import { EnhancedSchemaMapper } from '@/components/upload/EnhancedSchemaMapper';
 import { ValidationResults } from '@/components/upload/ValidationResults';
 import { DataQualityReport } from '@/components/upload/DataQualityReport';
@@ -25,6 +27,8 @@ export default function UploadPage() {
   const [activeTab, setActiveTab] = useState('upload');
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
   const [files, setFiles] = useState<File[]>([]);
+  const [delimiter, setDelimiter] = useState<DelimiterOption>('auto');
+  const [dateFormat, setDateFormat] = useState<DateFormatOption>('auto');
   const [validationResults, setValidationResults] = useState<any | null>(null);
   const [qualityCheckResult, setQualityCheckResult] = useState<any | null>(null);
   const [crossFieldValidation, setCrossFieldValidation] = useState<any | null>(null);
@@ -117,6 +121,16 @@ export default function UploadPage() {
 
         const formData = new FormData();
         formData.append('file', file);
+
+        // Add delimiter parameter if not auto-detect
+        if (delimiter !== 'auto') {
+          formData.append('delimiter', delimiter);
+        }
+
+        // Add date format parameter if not auto-detect
+        if (dateFormat !== 'auto') {
+          formData.append('dateFormat', dateFormat);
+        }
 
         const response = await fetch('/api/upload', {
           method: 'POST',
@@ -410,13 +424,29 @@ export default function UploadPage() {
               </TabsList>
               
               <TabsContent value="upload" className="pt-6">
-                <FileUploader
-                  files={files}
-                  onFilesAdded={handleFilesAdded}
-                  onFileRemoved={handleFileRemoved}
-                  uploading={uploadStatus === 'uploading' || uploadStatus === 'validating'}
-                  progressInfo={uploadProgress}
-                />
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <DelimiterSelector
+                      value={delimiter}
+                      onChange={setDelimiter}
+                      disabled={uploadStatus === 'uploading' || uploadStatus === 'validating'}
+                    />
+
+                    <DateFormatSelector
+                      value={dateFormat}
+                      onChange={setDateFormat}
+                      disabled={uploadStatus === 'uploading' || uploadStatus === 'validating'}
+                    />
+                  </div>
+
+                  <FileUploader
+                    files={files}
+                    onFilesAdded={handleFilesAdded}
+                    onFileRemoved={handleFileRemoved}
+                    uploading={uploadStatus === 'uploading' || uploadStatus === 'validating'}
+                    progressInfo={uploadProgress}
+                  />
+                </div>
 
                 {validationResults && (
                   <div className="mt-6 space-y-6">

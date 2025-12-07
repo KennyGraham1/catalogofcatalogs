@@ -1,24 +1,30 @@
 import { NextResponse } from 'next/server';
+import { getConnectionStats, isConnected } from '@/lib/mongodb';
 
 /**
  * GET /api/admin/pool/stats
- * Returns database connection pool statistics
- * 
- * Note: This endpoint is a placeholder for when connection pooling is enabled.
- * Currently, the application uses a single SQLite connection which is appropriate
- * for most use cases.
+ * Returns MongoDB connection pool statistics
  */
 export async function GET() {
   try {
-    // For now, return basic info about the current setup
+    const stats = getConnectionStats();
+    const connected = await isConnected();
+
     return NextResponse.json({
       timestamp: new Date().toISOString(),
+      database: 'mongodb',
+      connected,
       pooling: {
-        enabled: false,
-        type: 'single-connection',
-        note: 'SQLite uses a single connection with WAL mode for concurrency',
+        enabled: true,
+        type: 'mongodb-native',
+        note: 'MongoDB uses built-in connection pooling with configurable pool size',
       },
-      recommendation: 'Connection pooling can be enabled by switching to DatabasePool in lib/db-pool.ts',
+      stats: {
+        totalConnections: stats.totalConnections,
+        activeConnections: stats.activeConnections,
+        errors: stats.errors,
+        lastConnected: stats.lastConnected,
+      },
     });
   } catch (error) {
     console.error('Failed to get pool stats:', error);
@@ -28,4 +34,3 @@ export async function GET() {
     );
   }
 }
-

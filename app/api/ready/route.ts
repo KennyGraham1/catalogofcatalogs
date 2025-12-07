@@ -13,7 +13,8 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getDb, dbQueries } from '@/lib/db';
+import { isConnected, getDb } from '@/lib/mongodb';
+import { dbQueries } from '@/lib/db';
 import { geonetClient } from '@/lib/geonet-client';
 
 interface ReadinessCheck {
@@ -31,14 +32,16 @@ export async function GET() {
   // 1. Check database connectivity
   try {
     const dbStartTime = Date.now();
-    const db = getDb();
 
-    if (!db) {
-      throw new Error('Database not initialized');
+    if (!isConnected()) {
+      // Try to connect
+      await getDb();
     }
 
     // Try a simple query
-    await dbQueries.getCatalogues({ page: 1, pageSize: 1 });
+    if (dbQueries) {
+      await dbQueries.getCatalogues({ page: 1, pageSize: 1 });
+    }
 
     checks.push({
       name: 'database',

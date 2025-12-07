@@ -113,8 +113,11 @@ export function validateDepth(depth: number | null): boolean {
  * - Common date formats: DD/MM/YYYY, MM/DD/YYYY, DD.MM.YYYY, YYYY/MM/DD
  * - Space-separated: YYYY-MM-DD HH:MM:SS, YYYY-MM-DD HH:MM:SS.sss
  * - Seismological formats: YYYYMMDD HHMMSS, YYYY DDD HH:MM:SS (Julian day)
+ *
+ * @param time - The timestamp to normalize
+ * @param dateFormat - Optional date format hint ('US' or 'International') for ambiguous dates
  */
-export function normalizeTimestamp(time: string | number): string | null {
+export function normalizeTimestamp(time: string | number, dateFormat?: 'US' | 'International'): string | null {
   if (typeof time === 'number') {
     // Unix timestamp - detect if it's in seconds or milliseconds
     const timestamp = time < 10000000000 ? time * 1000 : time;
@@ -152,26 +155,86 @@ export function normalizeTimestamp(time: string | number): string | null {
     }
   }
 
-  // DD/MM/YYYY HH:MM:SS format (common in NZ/AU/UK)
-  const ddmmyyyySlash = /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
-  match = trimmed.match(ddmmyyyySlash);
+  // DD/MM/YYYY or MM/DD/YYYY HH:MM:SS format (ambiguous - use dateFormat hint)
+  const ambiguousSlash = /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
+  match = trimmed.match(ambiguousSlash);
   if (match) {
-    const [, day, month, year, hour, minute, second, ms] = match;
+    const [, first, second, year, hour, minute, second_time, ms] = match;
+    const firstNum = parseInt(first);
+    const secondNum = parseInt(second);
+
+    let day: string;
+    let month: string;
+
+    // Determine format based on values and hint
+    if (firstNum > 12 && secondNum <= 12) {
+      // Unambiguous: first must be day (DD/MM/YYYY)
+      day = first;
+      month = second;
+    } else if (firstNum <= 12 && secondNum > 12) {
+      // Unambiguous: second must be day (MM/DD/YYYY)
+      month = first;
+      day = second;
+    } else if (firstNum <= 12 && secondNum <= 12) {
+      // Ambiguous: use dateFormat hint
+      if (dateFormat === 'US') {
+        month = first;
+        day = second;
+      } else {
+        // Default to International (DD/MM/YYYY)
+        day = first;
+        month = second;
+      }
+    } else {
+      // Both > 12, invalid date
+      return null;
+    }
+
     const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
-    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${millis}Z`;
+    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second_time.padStart(2, '0')}.${millis}Z`;
     date = new Date(isoString);
     if (!isNaN(date.getTime())) {
       return date.toISOString();
     }
   }
 
-  // DD-MM-YYYY HH:MM:SS format
-  const ddmmyyyyDash = /^(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
-  match = trimmed.match(ddmmyyyyDash);
+  // DD-MM-YYYY or MM-DD-YYYY HH:MM:SS format (ambiguous - use dateFormat hint)
+  const ambiguousDash = /^(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
+  match = trimmed.match(ambiguousDash);
   if (match) {
-    const [, day, month, year, hour, minute, second, ms] = match;
+    const [, first, second, year, hour, minute, second_time, ms] = match;
+    const firstNum = parseInt(first);
+    const secondNum = parseInt(second);
+
+    let day: string;
+    let month: string;
+
+    // Determine format based on values and hint
+    if (firstNum > 12 && secondNum <= 12) {
+      // Unambiguous: first must be day (DD-MM-YYYY)
+      day = first;
+      month = second;
+    } else if (firstNum <= 12 && secondNum > 12) {
+      // Unambiguous: second must be day (MM-DD-YYYY)
+      month = first;
+      day = second;
+    } else if (firstNum <= 12 && secondNum <= 12) {
+      // Ambiguous: use dateFormat hint
+      if (dateFormat === 'US') {
+        month = first;
+        day = second;
+      } else {
+        // Default to International (DD-MM-YYYY)
+        day = first;
+        month = second;
+      }
+    } else {
+      // Both > 12, invalid date
+      return null;
+    }
+
     const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
-    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${millis}Z`;
+    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second_time.padStart(2, '0')}.${millis}Z`;
     date = new Date(isoString);
     if (!isNaN(date.getTime())) {
       return date.toISOString();
@@ -216,31 +279,45 @@ export function normalizeTimestamp(time: string | number): string | null {
     }
   }
 
-  // DD/MM/YYYY format (date only)
-  const ddmmyyyyDateOnly = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
-  match = trimmed.match(ddmmyyyyDateOnly);
+  // DD/MM/YYYY or MM/DD/YYYY format (date only - ambiguous)
+  const ambiguousDateOnly = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+  match = trimmed.match(ambiguousDateOnly);
   if (match) {
-    const [, day, month, year] = match;
+    const [, first, second, year] = match;
+    const firstNum = parseInt(first);
+    const secondNum = parseInt(second);
+
+    let day: string;
+    let month: string;
+
+    // Determine format based on values and hint
+    if (firstNum > 12 && secondNum <= 12) {
+      // Unambiguous: first must be day (DD/MM/YYYY)
+      day = first;
+      month = second;
+    } else if (firstNum <= 12 && secondNum > 12) {
+      // Unambiguous: second must be day (MM/DD/YYYY)
+      month = first;
+      day = second;
+    } else if (firstNum <= 12 && secondNum <= 12) {
+      // Ambiguous: use dateFormat hint
+      if (dateFormat === 'US') {
+        month = first;
+        day = second;
+      } else {
+        // Default to International (DD/MM/YYYY)
+        day = first;
+        month = second;
+      }
+    } else {
+      // Both > 12, invalid date
+      return null;
+    }
+
     const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T00:00:00.000Z`;
     date = new Date(isoString);
     if (!isNaN(date.getTime())) {
       return date.toISOString();
-    }
-  }
-
-  // MM/DD/YYYY HH:MM:SS format (US format - only when day > 12)
-  const mmddyyyySlash = /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
-  match = trimmed.match(mmddyyyySlash);
-  if (match) {
-    const [, month, day, year, hour, minute, second, ms] = match;
-    // Only try US format if the month value is valid (1-12) and day > 12
-    if (parseInt(month) <= 12 && parseInt(day) > 12) {
-      const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
-      const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${millis}Z`;
-      date = new Date(isoString);
-      if (!isNaN(date.getTime())) {
-        return date.toISOString();
-      }
     }
   }
 

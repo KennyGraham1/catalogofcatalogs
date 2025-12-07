@@ -69,6 +69,7 @@
     "leaflet-draw": "^1.0.4",
     "lru-cache": "^11.2.2",
     "lucide-react": "^0.446.0",
+    "mongodb": "^7.0.0",
     "nanoid": "^5.0.4",
     "next": "^13.5.11",
     "next-auth": "^4.24.5",

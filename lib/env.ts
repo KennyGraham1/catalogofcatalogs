@@ -20,7 +20,8 @@ const REQUIRED_ENV_VARS = [
  * Optional environment variables with defaults
  */
 const OPTIONAL_ENV_VARS = {
-  DATABASE_PATH: './merged_catalogues.db',
+  MONGODB_URI: 'mongodb://localhost:27017',
+  MONGODB_DATABASE: 'earthquake_catalogue',
   NODE_ENV: 'development',
 } as const;
 
@@ -148,11 +149,12 @@ export const env = {
   // Required variables (validated on startup)
   NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET!,
   NEXTAUTH_URL: process.env.NEXTAUTH_URL!,
-  
+
   // Optional variables with defaults
-  DATABASE_PATH: process.env.DATABASE_PATH || OPTIONAL_ENV_VARS.DATABASE_PATH,
+  MONGODB_URI: process.env.MONGODB_URI || OPTIONAL_ENV_VARS.MONGODB_URI,
+  MONGODB_DATABASE: process.env.MONGODB_DATABASE || OPTIONAL_ENV_VARS.MONGODB_DATABASE,
   NODE_ENV: (process.env.NODE_ENV || OPTIONAL_ENV_VARS.NODE_ENV) as 'development' | 'production' | 'test',
-  
+
   // Computed values
   IS_PRODUCTION: process.env.NODE_ENV === 'production',
   IS_DEVELOPMENT: process.env.NODE_ENV === 'development',

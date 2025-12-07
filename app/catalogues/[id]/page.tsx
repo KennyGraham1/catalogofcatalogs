@@ -165,7 +165,7 @@ export default function CatalogueDetailPage() {
       <div className="container mx-auto py-6">
         <Card className="border-destructive">
           <CardContent className="pt-6">
-            <p className="text-destructive">{error || 'Catalogue not found'}</p>
+            <p className="text-destructive">{error?.message || 'Catalogue not found'}</p>
             <Button onClick={() => router.push('/catalogues')} className="mt-4">
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back to Catalogues

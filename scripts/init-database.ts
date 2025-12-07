@@ -1,227 +1,178 @@
 /**
- * Initialize Database Schema
- * Creates all tables from scratch
+ * Initialize MongoDB Database
+ * Creates all collections and indexes
  */
 
-import sqlite3 from 'sqlite3';
-import path from 'path';
+import { MongoClient } from 'mongodb';
 
-const dbPath = path.join(process.cwd(), 'merged_catalogues.db');
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+const DATABASE_NAME = process.env.MONGODB_DATABASE || 'earthquake_catalogue';
 
-function initializeDatabase() {
-  const db = new sqlite3.Database(dbPath);
+// Collection names
+const COLLECTIONS = {
+  CATALOGUES: 'merged_catalogues',
+  EVENTS: 'merged_events',
+  MAPPING_TEMPLATES: 'mapping_templates',
+  IMPORT_HISTORY: 'import_history',
+  SAVED_FILTERS: 'saved_filters',
+  USERS: 'users',
+  SESSIONS: 'sessions',
+  API_KEYS: 'api_keys',
+  AUDIT_LOGS: 'audit_logs',
+};
 
-  console.log('🔧 Initializing database schema...\n');
+async function initializeDatabase() {
+  console.log('🔧 Initializing MongoDB database...\n');
+  console.log(`   URI: ${MONGODB_URI}`);
+  console.log(`   Database: ${DATABASE_NAME}\n`);
 
-  db.serialize(() => {
-    // Create merged_catalogues table
-    db.run(`
-      CREATE TABLE IF NOT EXISTS merged_catalogues (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        source_catalogues TEXT NOT NULL,
-        merge_config TEXT NOT NULL,
-        event_count INTEGER NOT NULL DEFAULT 0,
-        status TEXT NOT NULL DEFAULT 'processing',
-        min_latitude REAL,
-        max_latitude REAL,
-        min_longitude REAL,
-        max_longitude REAL
-      )
-    `, (err) => {
-      if (err) {
-        console.error('❌ Error creating merged_catalogues table:', err.message);
-      } else {
-        console.log('✓ Created merged_catalogues table');
+  const client = new MongoClient(MONGODB_URI);
+
+  try {
+    await client.connect();
+    console.log('✓ Connected to MongoDB\n');
+
+    const db = client.db(DATABASE_NAME);
+
+    // Create collections (MongoDB creates them automatically, but we can be explicit)
+    console.log('📦 Creating collections...');
+    for (const [name, collectionName] of Object.entries(COLLECTIONS)) {
+      try {
+        await db.createCollection(collectionName);
+        console.log(`✓ Created collection: ${collectionName}`);
+      } catch (err: any) {
+        if (err.code === 48) {
+          // Collection already exists
+          console.log(`  Collection already exists: ${collectionName}`);
+        } else {
+          console.error(`❌ Error creating collection ${collectionName}:`, err.message);
+        }
       }
-    });
-
-    // Create merged_events table with full QuakeML 1.2 schema (expanded for GeoNet/ISC)
-    db.run(`
-      CREATE TABLE IF NOT EXISTS merged_events (
-        id TEXT PRIMARY KEY,
-        catalogue_id TEXT NOT NULL,
-        source_id TEXT,
-        time DATETIME NOT NULL,
-        latitude REAL NOT NULL,
-        longitude REAL NOT NULL,
-        depth REAL,
-        magnitude REAL NOT NULL,
-        source_events TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-
-        -- Location information
-        region TEXT,
-        location_name TEXT,
-
-        -- QuakeML 1.2 Event metadata
-        event_public_id TEXT,
-        event_type TEXT,
-        event_type_certainty TEXT,
-
-        -- Origin uncertainties
-        time_uncertainty REAL,
-        latitude_uncertainty REAL,
-        longitude_uncertainty REAL,
-        depth_uncertainty REAL,
-        horizontal_uncertainty REAL,
-
-        -- Origin metadata (QuakeML/GeoNet/ISC)
-        depth_type TEXT,
-        earth_model_id TEXT,
-        method_id TEXT,
-
-        -- Agency/Author information (ISC/QuakeML)
-        agency_id TEXT,
-        author TEXT,
-
-        -- Magnitude details
-        magnitude_type TEXT,
-        magnitude_uncertainty REAL,
-        magnitude_station_count INTEGER,
-        magnitude_method_id TEXT,
-        magnitude_evaluation_mode TEXT,
-        magnitude_evaluation_status TEXT,
-
-        -- Origin quality metrics
-        azimuthal_gap REAL,
-        used_phase_count INTEGER,
-        used_station_count INTEGER,
-        standard_error REAL,
-        minimum_distance REAL,
-        maximum_distance REAL,
-        associated_phase_count INTEGER,
-        associated_station_count INTEGER,
-        depth_phase_count INTEGER,
-
-        -- Evaluation metadata
-        evaluation_mode TEXT,
-        evaluation_status TEXT,
-
-        -- Complex nested data as JSON
-        origin_quality TEXT,
-        origins TEXT,
-        magnitudes TEXT,
-        picks TEXT,
-        arrivals TEXT,
-        focal_mechanisms TEXT,
-        amplitudes TEXT,
-        station_magnitudes TEXT,
-        event_descriptions TEXT,
-        comments TEXT,
-        creation_info TEXT,
-
-        FOREIGN KEY (catalogue_id) REFERENCES merged_catalogues(id) ON DELETE CASCADE
-      )
-    `, (err) => {
-      if (err) {
-        console.error('❌ Error creating merged_events table:', err.message);
-      } else {
-        console.log('✓ Created merged_events table');
-      }
-    });
-
-    // Create mapping_templates table
-    db.run(`
-      CREATE TABLE IF NOT EXISTS mapping_templates (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        description TEXT,
-        mappings TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `, (err) => {
-      if (err) {
-        console.error('❌ Error creating mapping_templates table:', err.message);
-      } else {
-        console.log('✓ Created mapping_templates table');
-      }
-    });
-
-    // Create import_history table
-    db.run(`
-      CREATE TABLE IF NOT EXISTS import_history (
-        id TEXT PRIMARY KEY,
-        catalogue_id TEXT NOT NULL,
-        start_time TEXT NOT NULL,
-        end_time TEXT NOT NULL,
-        total_fetched INTEGER NOT NULL,
-        new_events INTEGER NOT NULL,
-        updated_events INTEGER NOT NULL,
-        skipped_events INTEGER NOT NULL,
-        errors TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (catalogue_id) REFERENCES merged_catalogues(id) ON DELETE CASCADE
-      )
-    `, (err) => {
-      if (err) {
-        console.error('❌ Error creating import_history table:', err.message);
-      } else {
-        console.log('✓ Created import_history table');
-      }
-    });
+    }
 
     // Create indexes
     console.log('\n🔍 Creating indexes...');
+    let indexCount = 0;
 
-    const indexes = [
-      // Single column indexes
-      'CREATE INDEX IF NOT EXISTS idx_merged_events_catalogue_id ON merged_events(catalogue_id)',
-      'CREATE INDEX IF NOT EXISTS idx_merged_events_source_id ON merged_events(source_id)',
-      'CREATE INDEX IF NOT EXISTS idx_merged_events_time ON merged_events(time)',
-      'CREATE INDEX IF NOT EXISTS idx_merged_events_magnitude ON merged_events(magnitude)',
-      'CREATE INDEX IF NOT EXISTS idx_merged_events_depth ON merged_events(depth)',
-      'CREATE INDEX IF NOT EXISTS idx_merged_events_latitude ON merged_events(latitude)',
-      'CREATE INDEX IF NOT EXISTS idx_merged_events_longitude ON merged_events(longitude)',
-      'CREATE INDEX IF NOT EXISTS idx_merged_events_event_type ON merged_events(event_type)',
-      'CREATE INDEX IF NOT EXISTS idx_merged_events_magnitude_type ON merged_events(magnitude_type)',
-      'CREATE INDEX IF NOT EXISTS idx_merged_events_evaluation_status ON merged_events(evaluation_status)',
-      'CREATE INDEX IF NOT EXISTS idx_merged_events_azimuthal_gap ON merged_events(azimuthal_gap)',
-      'CREATE INDEX IF NOT EXISTS idx_merged_events_used_station_count ON merged_events(used_station_count)',
-      'CREATE INDEX IF NOT EXISTS idx_merged_events_standard_error ON merged_events(standard_error)',
-
-      // Composite indexes for common query patterns
-      'CREATE INDEX IF NOT EXISTS idx_merged_events_catalogue_time ON merged_events(catalogue_id, time DESC)',
-      'CREATE INDEX IF NOT EXISTS idx_merged_events_catalogue_magnitude ON merged_events(catalogue_id, magnitude DESC)',
-      'CREATE INDEX IF NOT EXISTS idx_merged_events_location ON merged_events(latitude, longitude)',
-
-      // Other table indexes
-      'CREATE INDEX IF NOT EXISTS idx_mapping_templates_name ON mapping_templates(name)',
-      'CREATE INDEX IF NOT EXISTS idx_import_history_catalogue_id ON import_history(catalogue_id)',
-      'CREATE INDEX IF NOT EXISTS idx_import_history_created_at ON import_history(created_at)'
+    // Events collection indexes
+    const eventsCollection = db.collection(COLLECTIONS.EVENTS);
+    const eventIndexes: Array<{ key: Record<string, 1 | -1>; name: string; unique?: boolean }> = [
+      { key: { id: 1 }, name: 'idx_id', unique: true },
+      { key: { catalogue_id: 1 }, name: 'idx_catalogue_id' },
+      { key: { source_id: 1 }, name: 'idx_source_id' },
+      { key: { time: -1 }, name: 'idx_time' },
+      { key: { magnitude: -1 }, name: 'idx_magnitude' },
+      { key: { depth: 1 }, name: 'idx_depth' },
+      { key: { latitude: 1, longitude: 1 }, name: 'idx_location' },
+      { key: { event_type: 1 }, name: 'idx_event_type' },
+      { key: { magnitude_type: 1 }, name: 'idx_magnitude_type' },
+      { key: { evaluation_status: 1 }, name: 'idx_evaluation_status' },
+      { key: { azimuthal_gap: 1 }, name: 'idx_azimuthal_gap' },
+      { key: { used_station_count: 1 }, name: 'idx_used_station_count' },
+      { key: { standard_error: 1 }, name: 'idx_standard_error' },
+      { key: { catalogue_id: 1, time: -1 }, name: 'idx_catalogue_time' },
+      { key: { catalogue_id: 1, magnitude: -1 }, name: 'idx_catalogue_magnitude' },
     ];
 
-    let indexCount = 0;
-    indexes.forEach((indexSql) => {
-      db.run(indexSql, (err) => {
-        if (err) {
-          console.error(`❌ Error creating index: ${err.message}`);
+    for (const idx of eventIndexes) {
+      try {
+        await eventsCollection.createIndex(idx.key, { name: idx.name, unique: idx.unique ?? false });
+        console.log(`✓ Created index: ${COLLECTIONS.EVENTS}.${idx.name}`);
+        indexCount++;
+      } catch (err: any) {
+        if (err.code === 85 || err.code === 86) {
+          console.log(`  Index already exists: ${COLLECTIONS.EVENTS}.${idx.name}`);
         } else {
-          indexCount++;
-          const indexName = indexSql.match(/idx_\w+/)?.[0];
-          console.log(`✓ Created index: ${indexName}`);
+          console.error(`❌ Error creating index ${idx.name}:`, err.message);
         }
+      }
+    }
 
-        if (indexCount === indexes.length) {
-          db.close((err) => {
-            if (err) {
-              console.error('❌ Error closing database:', err.message);
-              process.exit(1);
-            }
+    // Catalogues collection indexes
+    const cataloguesCollection = db.collection(COLLECTIONS.CATALOGUES);
+    await cataloguesCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
+    console.log(`✓ Created index: ${COLLECTIONS.CATALOGUES}.idx_id`);
+    indexCount++;
 
-            console.log('\n✅ Database schema initialized successfully!');
-            console.log(`   Tables created: 4`);
-            console.log(`   Indexes created: ${indexes.length}\n`);
-            process.exit(0);
-          });
-        }
-      });
-    });
-  });
+    // Mapping templates collection indexes
+    const templatesCollection = db.collection(COLLECTIONS.MAPPING_TEMPLATES);
+    await templatesCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
+    await templatesCollection.createIndex({ name: 1 }, { name: 'idx_name' });
+    console.log(`✓ Created index: ${COLLECTIONS.MAPPING_TEMPLATES}.idx_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.MAPPING_TEMPLATES}.idx_name`);
+    indexCount += 2;
+
+    // Import history collection indexes
+    const historyCollection = db.collection(COLLECTIONS.IMPORT_HISTORY);
+    await historyCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
+    await historyCollection.createIndex({ catalogue_id: 1 }, { name: 'idx_catalogue_id' });
+    await historyCollection.createIndex({ created_at: -1 }, { name: 'idx_created_at' });
+    console.log(`✓ Created index: ${COLLECTIONS.IMPORT_HISTORY}.idx_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.IMPORT_HISTORY}.idx_catalogue_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.IMPORT_HISTORY}.idx_created_at`);
+    indexCount += 3;
+
+    // Saved filters collection indexes
+    const filtersCollection = db.collection(COLLECTIONS.SAVED_FILTERS);
+    await filtersCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
+    await filtersCollection.createIndex({ catalogue_id: 1 }, { name: 'idx_catalogue_id' });
+    console.log(`✓ Created index: ${COLLECTIONS.SAVED_FILTERS}.idx_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.SAVED_FILTERS}.idx_catalogue_id`);
+    indexCount += 2;
+
+    // Users collection indexes
+    const usersCollection = db.collection(COLLECTIONS.USERS);
+    await usersCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
+    await usersCollection.createIndex({ email: 1 }, { name: 'idx_email', unique: true });
+    console.log(`✓ Created index: ${COLLECTIONS.USERS}.idx_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.USERS}.idx_email`);
+    indexCount += 2;
+
+    // Sessions collection indexes
+    const sessionsCollection = db.collection(COLLECTIONS.SESSIONS);
+    await sessionsCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
+    await sessionsCollection.createIndex({ user_id: 1 }, { name: 'idx_user_id' });
+    await sessionsCollection.createIndex({ token: 1 }, { name: 'idx_token' });
+    await sessionsCollection.createIndex({ expires_at: 1 }, { name: 'idx_expires_at', expireAfterSeconds: 0 });
+    console.log(`✓ Created index: ${COLLECTIONS.SESSIONS}.idx_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.SESSIONS}.idx_user_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.SESSIONS}.idx_token`);
+    console.log(`✓ Created index: ${COLLECTIONS.SESSIONS}.idx_expires_at (TTL)`);
+    indexCount += 4;
+
+    // API keys collection indexes
+    const apiKeysCollection = db.collection(COLLECTIONS.API_KEYS);
+    await apiKeysCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
+    await apiKeysCollection.createIndex({ user_id: 1 }, { name: 'idx_user_id' });
+    await apiKeysCollection.createIndex({ key_prefix: 1 }, { name: 'idx_key_prefix' });
+    console.log(`✓ Created index: ${COLLECTIONS.API_KEYS}.idx_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.API_KEYS}.idx_user_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.API_KEYS}.idx_key_prefix`);
+    indexCount += 3;
+
+    // Audit logs collection indexes
+    const auditLogsCollection = db.collection(COLLECTIONS.AUDIT_LOGS);
+    await auditLogsCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
+    await auditLogsCollection.createIndex({ user_id: 1 }, { name: 'idx_user_id' });
+    await auditLogsCollection.createIndex({ created_at: -1 }, { name: 'idx_created_at' });
+    console.log(`✓ Created index: ${COLLECTIONS.AUDIT_LOGS}.idx_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.AUDIT_LOGS}.idx_user_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.AUDIT_LOGS}.idx_created_at`);
+    indexCount += 3;
+
+    console.log('\n✅ MongoDB database initialized successfully!');
+    console.log(`   Collections created: ${Object.keys(COLLECTIONS).length}`);
+    console.log(`   Indexes created: ${indexCount}\n`);
+
+  } catch (error) {
+    console.error('❌ Failed to initialize database:', error);
+    process.exit(1);
+  } finally {
+    await client.close();
+    console.log('✓ Disconnected from MongoDB');
+    process.exit(0);
+  }
 }
 
 // Run initialization
 initializeDatabase();
-

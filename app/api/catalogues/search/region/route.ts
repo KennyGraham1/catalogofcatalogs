@@ -11,8 +11,12 @@ const logger = new Logger('CatalogueRegionSearchAPI');
 
 export async function GET(request: NextRequest) {
   try {
+    if (!dbQueries) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+    }
+
     const searchParams = request.nextUrl.searchParams;
-    
+
     // Extract bounding box parameters
     const minLat = searchParams.get('minLat');
     const maxLat = searchParams.get('maxLat');

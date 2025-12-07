@@ -13,6 +13,10 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    if (!dbQueries) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+    }
+
     const filter = await dbQueries.getSavedFilterById(params.id);
 
     if (!filter) {
@@ -49,6 +53,10 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
+    if (!dbQueries) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+    }
+
     const body = await request.json();
     const { name, description, filterConfig } = body;
 
@@ -86,6 +94,10 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    if (!dbQueries) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+    }
+
     await dbQueries.deleteSavedFilter(params.id);
 
     logger.info('Saved filter deleted', { id: params.id });

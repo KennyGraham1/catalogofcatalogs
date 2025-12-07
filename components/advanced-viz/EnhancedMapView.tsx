@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { MapContainer, TileLayer, Circle, Popup, Polyline } from 'react-leaflet';
+import MarkerClusterGroup from 'react-leaflet-cluster';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -210,34 +211,54 @@ export function EnhancedMapView({
             url={mapTheme.tileLayerUrl}
           />
 
-          {/* Earthquake markers - No clustering */}
-          {events.map((event) => {
-            const eventDate = new Date(event.time).toLocaleDateString();
-            const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
+          {/* Earthquake markers with clustering for performance */}
+          <MarkerClusterGroup
+            chunkedLoading
+            maxClusterRadius={50}
+            spiderfyOnMaxZoom={true}
+            showCoverageOnHover={false}
+            zoomToBoundsOnClick={true}
+            iconCreateFunction={(cluster: any) => {
+              const count = cluster.getChildCount();
+              let size = 'small';
+              if (count > 100) size = 'large';
+              else if (count > 10) size = 'medium';
 
-            return (
-              <Circle
-                key={event.id}
-                center={[event.latitude, event.longitude]}
-                radius={getMagnitudeRadius(event.magnitude)}
-                pathOptions={{
-                  color: getEventColor(event),
-                  fillColor: getEventColor(event),
-                  fillOpacity: mapColors.markerOpacity,
-                  weight: 2,
-                  // Add title for accessibility (shows on hover)
-                  title: ariaLabel,
-                } as any}
-                eventHandlers={{
-                  click: () => setSelectedEvent(event),
-                }}
-              >
-                <Popup>
-                  <EventPopup event={event} qualityScores={qualityScores} />
-                </Popup>
-              </Circle>
-            );
-          })}
+              return L.divIcon({
+                html: `<div><span>${count}</span></div>`,
+                className: `marker-cluster marker-cluster-${size}`,
+                iconSize: L.point(40, 40),
+              });
+            }}
+          >
+            {events.map((event) => {
+              const eventDate = new Date(event.time).toLocaleDateString();
+              const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
+
+              return (
+                <Circle
+                  key={event.id}
+                  center={[event.latitude, event.longitude]}
+                  radius={getMagnitudeRadius(event.magnitude)}
+                  pathOptions={{
+                    color: getEventColor(event),
+                    fillColor: getEventColor(event),
+                    fillOpacity: mapColors.markerOpacity,
+                    weight: 2,
+                    // Add title for accessibility (shows on hover)
+                    title: ariaLabel,
+                  } as any}
+                  eventHandlers={{
+                    click: () => setSelectedEvent(event),
+                  }}
+                >
+                  <Popup>
+                    <EventPopup event={event} qualityScores={qualityScores} />
+                  </Popup>
+                </Circle>
+              );
+            })}
+          </MarkerClusterGroup>
 
           {/* Uncertainty ellipses */}
           {showUncertainty && uncertaintyEllipses.map(({ eventId, ellipse }) => (

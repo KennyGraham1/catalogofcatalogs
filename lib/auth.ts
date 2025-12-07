@@ -97,7 +97,9 @@ export const authOptions: NextAuthOptions = {
         token.id = user.id;
         token.role = (user as any).role;
         token.email = user.email;
-        token.name = user.name;
+        if (user.name) {
+          token.name = user.name;
+        }
       }
 
       // Generate CSRF token if not present

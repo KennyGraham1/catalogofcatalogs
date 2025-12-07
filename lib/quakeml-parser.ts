@@ -155,9 +155,10 @@ function extractCreationInfo(xml: string, excludeNested: boolean = false): Creat
 function extractComments(xml: string): Comment[] | undefined {
   const comments: Comment[] = [];
   const regex = /<comment[^>]*>(.*?)<\/comment>/gs;
-  const matches = xml.matchAll(regex);
+  const matchesArray = Array.from(xml.matchAll(regex));
 
-  for (const match of matches) {
+  for (let i = 0; i < matchesArray.length; i++) {
+    const match = matchesArray[i];
     const content = match[1];
     const text = extractTagValue(content, 'text');
     if (text) {
@@ -177,9 +178,10 @@ function extractComments(xml: string): Comment[] | undefined {
 function extractEventDescriptions(xml: string): EventDescription[] | undefined {
   const descriptions: EventDescription[] = [];
   const regex = /<description[^>]*>(.*?)<\/description>/gs;
-  const matches = xml.matchAll(regex);
+  const matchesArray = Array.from(xml.matchAll(regex));
 
-  for (const match of matches) {
+  for (let i = 0; i < matchesArray.length; i++) {
+    const match = matchesArray[i];
     const content = match[1];
     const text = extractTagValue(content, 'text');
     if (text) {
@@ -397,9 +399,10 @@ export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
     if (preferredMagnitudeID) event.preferredMagnitudeID = preferredMagnitudeID;
 
     // Extract origins
-    const originMatches = eventXML.matchAll(/<origin[^>]*publicID="[^"]*"[^>]*>(.*?)<\/origin>/gs);
+    const originMatchesArray = Array.from(eventXML.matchAll(/<origin[^>]*publicID="[^"]*"[^>]*>(.*?)<\/origin>/gs));
     const origins: Origin[] = [];
-    for (const match of originMatches) {
+    for (let j = 0; j < originMatchesArray.length; j++) {
+      const match = originMatchesArray[j];
       const originXML = match[0];
       const origin = extractOrigin(originXML);
       if (origin) origins.push(origin);
@@ -407,9 +410,10 @@ export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
     if (origins.length > 0) event.origins = origins;
 
     // Extract magnitudes
-    const magnitudeMatches = eventXML.matchAll(/<magnitude[^>]*publicID="[^"]*"[^>]*>(.*?)<\/magnitude>/gs);
+    const magnitudeMatchesArray = Array.from(eventXML.matchAll(/<magnitude[^>]*publicID="[^"]*"[^>]*>(.*?)<\/magnitude>/gs));
     const magnitudes: Magnitude[] = [];
-    for (const match of magnitudeMatches) {
+    for (let j = 0; j < magnitudeMatchesArray.length; j++) {
+      const match = magnitudeMatchesArray[j];
       const magnitudeXML = match[0];
       const magnitude = extractMagnitude(magnitudeXML);
       if (magnitude) magnitudes.push(magnitude);

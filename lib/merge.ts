@@ -609,7 +609,9 @@ function performMerge(
     }
 
     // Find all matching events within the candidate set
-    for (const j of candidateIndices) {
+    const candidateArray = Array.from(candidateIndices);
+    for (let k = 0; k < candidateArray.length; k++) {
+      const j = candidateArray[k];
       const candidateEvent = sortedEvents[j];
 
       // IMPROVEMENT (Issues #1, #2): Use adaptive thresholds based on magnitude and depth
@@ -1207,7 +1209,9 @@ function performMergeWithGroups(
       });
     }
 
-    for (const j of candidateIndices) {
+    const candidateArray = Array.from(candidateIndices);
+    for (let k = 0; k < candidateArray.length; k++) {
+      const j = candidateArray[k];
       const candidateEvent = sortedEvents[j];
 
       if (eventsMatchAdaptive(

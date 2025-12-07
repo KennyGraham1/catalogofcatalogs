@@ -25,6 +25,9 @@ const customJestConfig = {
     '!**/.next/**',
   ],
   maxWorkers: 1, // Workaround for Node version compatibility
+  transformIgnorePatterns: [
+    '/node_modules/(?!(mongodb|bson)/)',
+  ],
 }
 
 // createJestConfig is exported this way to ensure that next/jest can load the Next.js config which is async

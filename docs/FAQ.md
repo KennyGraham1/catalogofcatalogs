@@ -60,7 +60,7 @@ See the [User Guide](USER_GUIDE.md#importing-from-geonet) for detailed instructi
 
 ### What is the maximum file size I can upload?
 
-The default maximum file size is 50 MB. This can be configured in the Next.js configuration if needed.
+The maximum file size is 500 MB. This limit is configured to accommodate large earthquake catalogue files.
 
 ### Can I upload multiple files at once?
 

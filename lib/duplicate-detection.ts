@@ -266,35 +266,35 @@ export function groupDuplicates(
   const adjacency = new Map<string, Set<string>>();
   const eventMap = new Map<string, any>();
   
-  for (const event of events) {
+  events.forEach(event => {
     const id = event.id || event.event_public_id;
     eventMap.set(id, event);
     adjacency.set(id, new Set());
-  }
-  
-  for (const pair of duplicatePairs) {
+  });
+
+  duplicatePairs.forEach(pair => {
     adjacency.get(pair.event1Id)?.add(pair.event2Id);
     adjacency.get(pair.event2Id)?.add(pair.event1Id);
-  }
-  
+  });
+
   // Find connected components using DFS
   const visited = new Set<string>();
   const groups: DuplicateGroup[] = [];
-  
+
   function dfs(nodeId: string, group: Set<string>) {
     if (visited.has(nodeId)) return;
     visited.add(nodeId);
     group.add(nodeId);
-    
+
     const neighbors = adjacency.get(nodeId);
     if (neighbors) {
-      for (const neighbor of neighbors) {
+      Array.from(neighbors).forEach(neighbor => {
         dfs(neighbor, group);
-      }
+      });
     }
   }
-  
-  for (const eventId of adjacency.keys()) {
+
+  Array.from(adjacency.keys()).forEach(eventId => {
     if (!visited.has(eventId)) {
       const group = new Set<string>();
       dfs(eventId, group);
@@ -316,8 +316,8 @@ export function groupDuplicates(
         });
       }
     }
-  }
-  
+  });
+
   return groups;
 }
 
@@ -333,32 +333,33 @@ function selectRepresentativeEvent(events: any[]): any {
   
   let bestEvent = events[0];
   let bestScore = 0;
-  
-  for (const event of events) {
+
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i];
     let score = 0;
-    
+
     // Evaluation status
     if (event.evaluation_status === 'reviewed') score += 100;
     else if (event.evaluation_status === 'manual') score += 50;
-    
+
     // Station count
     if (event.used_station_count) score += event.used_station_count;
-    
+
     // Azimuthal gap (lower is better)
     if (event.azimuthal_gap) score += (360 - event.azimuthal_gap) / 10;
-    
+
     // Data completeness
-    const fields = ['depth', 'magnitude_type', 'event_type', 'azimuthal_gap', 
+    const fields = ['depth', 'magnitude_type', 'event_type', 'azimuthal_gap',
                     'used_phase_count', 'used_station_count'];
     const completeness = fields.filter(f => event[f] !== null && event[f] !== undefined).length;
     score += completeness * 5;
-    
+
     if (score > bestScore) {
       bestScore = score;
       bestEvent = event;
     }
   }
-  
+
   return bestEvent;
 }
 

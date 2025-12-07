@@ -7,8 +7,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSession } from '@/lib/auth';
-import { getUserById, updateUserPassword, createAuditLog } from '@/lib/auth-db';
-import { getDb } from '@/lib/db';
+import { getUserById, updateUserPassword, updateUserProfile, createAuditLog } from '@/lib/auth-db';
 
 /**
  * Update profile schema
@@ -102,43 +101,16 @@ export async function PATCH(request: Request) {
     }
 
     const { name, email } = validatedFields.data;
-    const db = await getDb();
 
-    // Build update query
-    const updates: string[] = [];
-    const values: any[] = [];
-
-    if (name !== undefined) {
-      updates.push('name = ?');
-      values.push(name);
-    }
-
-    if (email !== undefined) {
-      updates.push('email = ?');
-      values.push(email);
-    }
-
-    if (updates.length === 0) {
+    if (name === undefined && email === undefined) {
       return NextResponse.json(
         { error: 'No fields to update' },
         { status: 400 }
       );
     }
 
-    updates.push('updated_at = CURRENT_TIMESTAMP');
-    values.push(session.user.id);
-
-    // Update user
-    await new Promise((resolve, reject) => {
-      db.run(
-        `UPDATE users SET ${updates.join(', ')} WHERE id = ?`,
-        values,
-        (err) => {
-          if (err) reject(err);
-          else resolve(null);
-        }
-      );
-    });
+    // Update user profile
+    await updateUserProfile(session.user.id, { name, email });
 
     // Create audit log
     await createAuditLog({

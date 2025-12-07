@@ -233,7 +233,7 @@ export function applyRateLimit(
   const result = limiter.check(limit, ip);
 
   // Create standard rate limit headers
-  const headers = {
+  const headers: Record<string, string> = {
     'X-RateLimit-Limit': limit.toString(),
     'X-RateLimit-Remaining': result.remaining.toString(),
     'X-RateLimit-Reset': new Date(result.reset).toISOString(),

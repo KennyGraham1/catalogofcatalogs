@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { dbQueries } from '@/lib/db';
+import { dbQueries, MergedEvent } from '@/lib/db';
 import { Logger, NotFoundError, formatErrorResponse, safeJSONParse } from '@/lib/errors';
 import { generateExportFilename, createDownloadHeaders } from '@/lib/export-utils';
 
@@ -12,13 +12,18 @@ export async function GET(
   try {
     logger.info('Downloading catalogue', { id: params.id });
 
+    if (!dbQueries) {
+      throw new Error('Database not available');
+    }
+
     // Get catalogue info for better filename
     const catalogue = await dbQueries.getCatalogueById(params.id);
     if (!catalogue) {
       throw new NotFoundError('Catalogue');
     }
 
-    const events = await dbQueries.getEventsByCatalogueId(params.id);
+    const eventsResult = await dbQueries.getEventsByCatalogueId(params.id);
+    const events: MergedEvent[] = Array.isArray(eventsResult) ? eventsResult : eventsResult.data;
 
     if (!events || events.length === 0) {
       throw new NotFoundError('Events for catalogue');
@@ -68,8 +73,8 @@ export async function GET(
     const csvContent = [
       ...metadataLines,
       headers.join(','),
-      ...events.map(event => {
-        const sourceEvents = safeJSONParse(event.source_events, []);
+      ...events.map((event: MergedEvent) => {
+        const sourceEvents = safeJSONParse(event.source_events || '[]', []) as Array<{ source?: string }>;
         const source = sourceEvents[0]?.source || 'unknown';
 
         return [

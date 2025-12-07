@@ -10,6 +10,13 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    if (!dbQueries) {
+      return NextResponse.json(
+        { error: 'Database not available' },
+        { status: 500 }
+      );
+    }
+
     const catalogueId = params.id;
     const { searchParams } = new URL(request.url);
 
@@ -153,7 +160,7 @@ export async function GET(
 
     logger.info('Events fetched successfully', {
       catalogueId,
-      count: Array.isArray(events) ? events.length : events.data?.length || 0
+      count: Array.isArray(events) ? events.length : (events && typeof events === 'object' && 'data' in events ? (events as { data?: unknown[] }).data?.length : 0) || 0
     });
 
     return NextResponse.json(events);

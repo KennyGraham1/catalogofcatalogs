@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { MapContainer, TileLayer, Circle, Popup } from 'react-leaflet';
+import MarkerClusterGroup from 'react-leaflet-cluster';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Activity, Ruler, Calendar } from 'lucide-react';
@@ -50,25 +51,44 @@ export default function MapComponent({ events }: MapComponentProps) {
           url={mapTheme.tileLayerUrl}
         />
 
-        {/* Earthquake Markers */}
-        {events.map((event, index) => {
-          const eventDate = new Date(event.time).toLocaleDateString();
-          const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
+        {/* Earthquake Markers with clustering for performance */}
+        <MarkerClusterGroup
+          chunkedLoading
+          maxClusterRadius={50}
+          spiderfyOnMaxZoom={true}
+          showCoverageOnHover={false}
+          zoomToBoundsOnClick={true}
+          iconCreateFunction={(cluster: any) => {
+            const count = cluster.getChildCount();
+            let size = 'small';
+            if (count > 100) size = 'large';
+            else if (count > 10) size = 'medium';
 
-          return (
-            <Circle
-              key={event.id || index}
-              center={[event.latitude, event.longitude]}
-              radius={getMagnitudeRadius(event.magnitude)}
-              pathOptions={{
-                color: getMagnitudeColor(event.magnitude),
-                fillColor: getMagnitudeColor(event.magnitude),
-                fillOpacity: mapColors.markerOpacity,
-                weight: 2,
-                // Add title for accessibility (shows on hover)
-                title: ariaLabel,
-              } as any}
-          >
+            return L.divIcon({
+              html: `<div><span>${count}</span></div>`,
+              className: `marker-cluster marker-cluster-${size}`,
+              iconSize: L.point(40, 40),
+            });
+          }}
+        >
+          {events.map((event, index) => {
+            const eventDate = new Date(event.time).toLocaleDateString();
+            const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
+
+            return (
+              <Circle
+                key={event.id || index}
+                center={[event.latitude, event.longitude]}
+                radius={getMagnitudeRadius(event.magnitude)}
+                pathOptions={{
+                  color: getMagnitudeColor(event.magnitude),
+                  fillColor: getMagnitudeColor(event.magnitude),
+                  fillOpacity: mapColors.markerOpacity,
+                  weight: 2,
+                  // Add title for accessibility (shows on hover)
+                  title: ariaLabel,
+                } as any}
+            >
             <Popup>
               <div className="p-2 min-w-[250px]">
                 <div className="flex items-center justify-between mb-3">
@@ -116,8 +136,9 @@ export default function MapComponent({ events }: MapComponentProps) {
               </div>
             </Popup>
           </Circle>
-          )
+          );
         })}
+        </MarkerClusterGroup>
       </MapContainer>
 
       {/* Legend */}

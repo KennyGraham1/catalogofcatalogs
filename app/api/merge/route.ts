@@ -39,7 +39,7 @@ export const POST = withCSRF(async (request: NextRequest) => {
 
     // Create audit log if user is authenticated and not export-only
     if (userId && !exportOnly) {
-      await auditApiAction(request as any, 'merge_catalogues', 'catalogue', result.catalogueId, {
+      await auditApiAction(request as any, 'merge_catalogues', 'catalogue', result.catalogueId ?? undefined, {
         name,
         sourceCatalogues: sourceCatalogues.map((c: any) => c.id),
         config,

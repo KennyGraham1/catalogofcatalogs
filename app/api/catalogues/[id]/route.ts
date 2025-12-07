@@ -13,6 +13,13 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    if (!dbQueries) {
+      return NextResponse.json(
+        { error: 'Database not available' },
+        { status: 500 }
+      );
+    }
+
     logger.info('Fetching catalogue', { id: params.id });
 
     const catalogue = await dbQueries.getCatalogueById(params.id);

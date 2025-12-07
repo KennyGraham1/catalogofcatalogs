@@ -233,6 +233,7 @@ export function FilterPanel({ onFiltersChange, onSaveFilter, onClearFilters }: F
           </div>
         </div>
       </div>
+    </div>
 
       <AlertDialog open={showClearDialog} onOpenChange={setShowClearDialog}>
         <AlertDialogContent>

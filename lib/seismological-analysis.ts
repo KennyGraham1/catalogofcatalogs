@@ -374,9 +374,9 @@ export const calculateGutenbergRichterMemoized = memoize(
   {
     maxSize: 50,
     ttl: 10 * 60 * 1000, // 10 minutes
-    keyGenerator: (events, minMagnitude, binWidth) => {
+    keyGenerator: (events: EarthquakeEvent[], minMagnitude: number | undefined, binWidth: number | undefined) => {
       // Create efficient cache key from event IDs and parameters
-      const eventIds = events.map(e => e.id).sort().join(',');
+      const eventIds = events.map((e: EarthquakeEvent) => e.id).sort().join(',');
       return `gr_${eventIds}_${minMagnitude ?? 'none'}_${binWidth}`;
     }
   }
@@ -391,8 +391,8 @@ export const estimateCompletenessMemoized = memoize(
   {
     maxSize: 50,
     ttl: 10 * 60 * 1000,
-    keyGenerator: (events, binWidth) => {
-      const eventIds = events.map(e => e.id).sort().join(',');
+    keyGenerator: (events: EarthquakeEvent[], binWidth: number | undefined) => {
+      const eventIds = events.map((e: EarthquakeEvent) => e.id).sort().join(',');
       return `comp_${eventIds}_${binWidth ?? 0.1}`;
     }
   }
@@ -407,8 +407,8 @@ export const analyzeTemporalPatternMemoized = memoize(
   {
     maxSize: 30,
     ttl: 15 * 60 * 1000, // 15 minutes
-    keyGenerator: (events) => {
-      const eventIds = events.map(e => e.id).sort().join(',');
+    keyGenerator: (events: EarthquakeEvent[]) => {
+      const eventIds = events.map((e: EarthquakeEvent) => e.id).sort().join(',');
       return `temporal_${eventIds}`;
     }
   }
@@ -423,8 +423,8 @@ export const calculateSeismicMomentMemoized = memoize(
   {
     maxSize: 50,
     ttl: 10 * 60 * 1000,
-    keyGenerator: (events) => {
-      const eventIds = events.map(e => e.id).sort().join(',');
+    keyGenerator: (events: EarthquakeEvent[]) => {
+      const eventIds = events.map((e: EarthquakeEvent) => e.id).sort().join(',');
       return `moment_${eventIds}`;
     }
   }

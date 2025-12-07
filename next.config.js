@@ -5,6 +5,7 @@ const nextConfig = {
   },
   // Enable standalone output for Docker deployment
   output: 'standalone',
+  // API route configuration - body size limit is handled in API routes via bodyParser config
   // Security headers
   async headers() {
     return [
@@ -43,7 +44,7 @@ const nextConfig = {
       }
     ];
   },
-  webpack: (config, { isServer }) => {
+  webpack: (config, { isServer, dev }) => {
     if (!isServer) {
       // Don't attempt to load these modules on the client side
       config.resolve.fallback = {
@@ -54,8 +55,58 @@ const nextConfig = {
         'better-sqlite3': false
       };
     }
-    // Disable webpack cache to prevent ENOENT errors
-    config.cache = false;
+
+    // Performance optimizations for production builds
+    if (!dev) {
+      // Enable webpack cache for faster builds (only in production)
+      config.cache = {
+        type: 'filesystem',
+        buildDependencies: {
+          config: [__filename],
+        },
+      };
+
+      // Optimize chunks for better caching
+      config.optimization = {
+        ...config.optimization,
+        moduleIds: 'deterministic',
+        runtimeChunk: 'single',
+        splitChunks: {
+          chunks: 'all',
+          cacheGroups: {
+            default: false,
+            vendors: false,
+            // Vendor chunk for node_modules
+            vendor: {
+              name: 'vendor',
+              chunks: 'all',
+              test: /node_modules/,
+              priority: 20
+            },
+            // Common chunk for shared code
+            common: {
+              name: 'common',
+              minChunks: 2,
+              chunks: 'all',
+              priority: 10,
+              reuseExistingChunk: true,
+              enforce: true
+            },
+            // Leaflet and map libraries in separate chunk
+            maps: {
+              name: 'maps',
+              test: /[\\/]node_modules[\\/](leaflet|react-leaflet|react-leaflet-cluster)[\\/]/,
+              chunks: 'all',
+              priority: 30
+            }
+          }
+        }
+      };
+    } else {
+      // Disable cache in development to prevent ENOENT errors
+      config.cache = false;
+    }
+
     return config;
   },
 };

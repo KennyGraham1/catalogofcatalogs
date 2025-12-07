@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useMemo, useRef, useEffect } from 'react';
-import { List, useListRef } from 'react-window';
+import { useState, useMemo } from 'react';
+import { List } from 'react-window';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -62,7 +62,6 @@ export function VirtualizedEventTable({
 }: VirtualizedEventTableProps) {
   const [sortField, setSortField] = useState<SortField>(defaultSortField);
   const [sortDirection, setSortDirection] = useState<SortDirection>(defaultSortDirection);
-  const listRef = useListRef();
 
   // Sort events
   const sortedEvents = useMemo(() => {
@@ -148,7 +147,7 @@ export function VirtualizedEventTable({
     return 'text-gray-600 dark:text-gray-400';
   };
 
-  const getQualityBadge = (score: number | null) => {
+  const getQualityBadge = (score: number | null | undefined) => {
     if (score === null || score === undefined) {
       return <Badge variant="outline" className="text-xs">N/A</Badge>;
     }
@@ -314,8 +313,7 @@ export function VirtualizedEventTable({
       </div>
 
       {/* Virtualized List */}
-      <List
-        listRef={listRef}
+      <List<Record<string, never>>
         style={{ height }}
         rowCount={sortedEvents.length}
         rowHeight={rowHeight}

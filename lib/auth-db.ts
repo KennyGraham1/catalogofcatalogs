@@ -1,11 +1,13 @@
 /**
  * Authentication Database Utilities
- * 
+ *
  * This file contains database operations for user authentication,
  * sessions, API keys, and audit logging.
+ *
+ * Migrated from SQLite to MongoDB.
  */
 
-import { getDb } from './db';
+import { getCollection, COLLECTIONS } from './mongodb';
 import bcrypt from 'bcryptjs';
 import { nanoid } from 'nanoid';
 
@@ -70,45 +72,30 @@ export interface AuditLog {
 }
 
 /**
+ * Helper function to convert MongoDB document to plain object
+ */
+function toPlainObject<T>(doc: any): T | null {
+  if (!doc) return null;
+  const { _id, ...rest } = doc;
+  return rest as T;
+}
+
+/**
  * Get user by email
  */
 export async function getUserByEmail(email: string): Promise<User | null> {
-  const db = await getDb();
-  
-  return new Promise((resolve, reject) => {
-    db.get(
-      'SELECT * FROM users WHERE email = ? LIMIT 1',
-      [email],
-      (err, row: User | undefined) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(row || null);
-        }
-      }
-    );
-  });
+  const collection = await getCollection(COLLECTIONS.USERS);
+  const doc = await collection.findOne({ email });
+  return toPlainObject<User>(doc);
 }
 
 /**
  * Get user by ID
  */
 export async function getUserById(id: string): Promise<User | null> {
-  const db = await getDb();
-  
-  return new Promise((resolve, reject) => {
-    db.get(
-      'SELECT * FROM users WHERE id = ? LIMIT 1',
-      [id],
-      (err, row: User | undefined) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(row || null);
-        }
-      }
-    );
-  });
+  const collection = await getCollection(COLLECTIONS.USERS);
+  const doc = await collection.findOne({ id });
+  return toPlainObject<User>(doc);
 }
 
 /**
@@ -120,15 +107,16 @@ export async function createUser(data: {
   name?: string;
   role?: 'admin' | 'editor' | 'viewer';
 }): Promise<User> {
-  const db = await getDb();
-  
+  const collection = await getCollection(COLLECTIONS.USERS);
+
   // Hash password
   const password_hash = await bcrypt.hash(data.password, 10);
-  
+
   // Generate user ID
   const id = nanoid();
-  
-  const user = {
+  const now = new Date().toISOString();
+
+  const user: User = {
     id,
     email: data.email,
     password_hash,
@@ -136,78 +124,63 @@ export async function createUser(data: {
     role: data.role || 'viewer',
     is_active: true,
     email_verified: false,
+    created_at: now,
+    updated_at: now,
+    last_login: null,
   };
 
-  return new Promise((resolve, reject) => {
-    db.run(
-      `INSERT INTO users (id, email, password_hash, name, role, is_active, email_verified)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [user.id, user.email, user.password_hash, user.name, user.role, user.is_active ? 1 : 0, user.email_verified ? 1 : 0],
-      function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          // Fetch the created user
-          db.get(
-            'SELECT * FROM users WHERE id = ?',
-            [user.id],
-            (err, row: User | undefined) => {
-              if (err) {
-                reject(err);
-              } else {
-                resolve(row as User);
-              }
-            }
-          );
-        }
-      }
-    );
-  });
+  await collection.insertOne(user as any);
+  return user;
 }
 
 /**
  * Update user's last login time
  */
 export async function updateLastLogin(userId: string): Promise<void> {
-  const db = await getDb();
-  
-  return new Promise((resolve, reject) => {
-    db.run(
-      'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?',
-      [userId],
-      (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      }
-    );
-  });
+  const collection = await getCollection(COLLECTIONS.USERS);
+  await collection.updateOne(
+    { id: userId },
+    { $set: { last_login: new Date().toISOString() } }
+  );
 }
 
 /**
  * Update user password
  */
 export async function updateUserPassword(userId: string, newPassword: string): Promise<void> {
-  const db = await getDb();
-  
+  const collection = await getCollection(COLLECTIONS.USERS);
+
   // Hash new password
   const password_hash = await bcrypt.hash(newPassword, 10);
-  
-  return new Promise((resolve, reject) => {
-    db.run(
-      'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [password_hash, userId],
-      (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      }
-    );
-  });
+
+  await collection.updateOne(
+    { id: userId },
+    { $set: { password_hash, updated_at: new Date().toISOString() } }
+  );
+}
+
+/**
+ * Update user profile (name, email)
+ */
+export async function updateUserProfile(userId: string, updates: { name?: string; email?: string }): Promise<void> {
+  const collection = await getCollection(COLLECTIONS.USERS);
+
+  const updateFields: Record<string, any> = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (updates.name !== undefined) {
+    updateFields.name = updates.name;
+  }
+
+  if (updates.email !== undefined) {
+    updateFields.email = updates.email;
+  }
+
+  await collection.updateOne(
+    { id: userId },
+    { $set: updateFields }
+  );
 }
 
 /**
@@ -222,118 +195,64 @@ export async function createAuditLog(data: {
   ip_address?: string;
   user_agent?: string;
 }): Promise<void> {
-  const db = await getDb();
-  
+  const collection = await getCollection(COLLECTIONS.AUDIT_LOGS);
+
   const id = nanoid();
   const details = data.details ? JSON.stringify(data.details) : null;
 
-  return new Promise((resolve, reject) => {
-    db.run(
-      `INSERT INTO audit_logs (id, user_id, action, resource_type, resource_id, details, ip_address, user_agent)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        data.user_id || null,
-        data.action,
-        data.resource_type,
-        data.resource_id || null,
-        details,
-        data.ip_address || null,
-        data.user_agent || null,
-      ],
-      (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      }
-    );
-  });
+  await collection.insertOne({
+    id,
+    user_id: data.user_id || null,
+    action: data.action,
+    resource_type: data.resource_type,
+    resource_id: data.resource_id || null,
+    details,
+    ip_address: data.ip_address || null,
+    user_agent: data.user_agent || null,
+    created_at: new Date().toISOString(),
+  } as any);
 }
 
 /**
  * Get all users (admin only)
  */
 export async function getAllUsers(): Promise<User[]> {
-  const db = await getDb();
-  
-  return new Promise((resolve, reject) => {
-    db.all(
-      'SELECT * FROM users ORDER BY created_at DESC',
-      [],
-      (err, rows: User[]) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(rows || []);
-        }
-      }
-    );
-  });
+  const collection = await getCollection(COLLECTIONS.USERS);
+  const docs = await collection.find({}).sort({ created_at: -1 }).toArray();
+  return docs.map(doc => toPlainObject<User>(doc)!);
 }
 
 /**
  * Update user role (admin only)
  */
 export async function updateUserRole(userId: string, role: 'admin' | 'editor' | 'viewer'): Promise<void> {
-  const db = await getDb();
-  
-  return new Promise((resolve, reject) => {
-    db.run(
-      'UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [role, userId],
-      (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      }
-    );
-  });
+  const collection = await getCollection(COLLECTIONS.USERS);
+  await collection.updateOne(
+    { id: userId },
+    { $set: { role, updated_at: new Date().toISOString() } }
+  );
 }
 
 /**
  * Deactivate user (admin only)
  */
 export async function deactivateUser(userId: string): Promise<void> {
-  const db = await getDb();
-
-  return new Promise((resolve, reject) => {
-    db.run(
-      'UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [userId],
-      (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      }
-    );
-  });
+  const collection = await getCollection(COLLECTIONS.USERS);
+  await collection.updateOne(
+    { id: userId },
+    { $set: { is_active: false, updated_at: new Date().toISOString() } }
+  );
 }
 
 /**
  * Activate user (admin only)
  */
 export async function activateUser(userId: string): Promise<void> {
-  const db = await getDb();
-
-  return new Promise((resolve, reject) => {
-    db.run(
-      'UPDATE users SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [userId],
-      (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      }
-    );
-  });
+  const collection = await getCollection(COLLECTIONS.USERS);
+  await collection.updateOne(
+    { id: userId },
+    { $set: { is_active: true, updated_at: new Date().toISOString() } }
+  );
 }
 
 /**
@@ -341,42 +260,25 @@ export async function activateUser(userId: string): Promise<void> {
  * Note: This will cascade delete sessions and API keys
  */
 export async function deleteUser(userId: string): Promise<void> {
-  const db = await getDb();
+  const usersCollection = await getCollection(COLLECTIONS.USERS);
+  const sessionsCollection = await getCollection(COLLECTIONS.SESSIONS);
+  const apiKeysCollection = await getCollection(COLLECTIONS.API_KEYS);
 
-  return new Promise((resolve, reject) => {
-    db.run(
-      'DELETE FROM users WHERE id = ?',
-      [userId],
-      (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      }
-    );
-  });
+  // Delete related sessions and API keys first
+  await sessionsCollection.deleteMany({ user_id: userId });
+  await apiKeysCollection.deleteMany({ user_id: userId });
+  await usersCollection.deleteOne({ id: userId });
 }
 
 /**
  * Verify user email
  */
 export async function verifyUserEmail(userId: string): Promise<void> {
-  const db = await getDb();
-
-  return new Promise((resolve, reject) => {
-    db.run(
-      'UPDATE users SET email_verified = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [userId],
-      (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      }
-    );
-  });
+  const collection = await getCollection(COLLECTIONS.USERS);
+  await collection.updateOne(
+    { id: userId },
+    { $set: { email_verified: true, updated_at: new Date().toISOString() } }
+  );
 }
 
 /**
@@ -390,77 +292,44 @@ export async function getUserStats(): Promise<{
   editors: number;
   viewers: number;
 }> {
-  const db = await getDb();
+  const collection = await getCollection(COLLECTIONS.USERS);
 
-  return new Promise((resolve, reject) => {
-    db.get(
-      `SELECT
-        COUNT(*) as total,
-        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active,
-        SUM(CASE WHEN is_active = 0 THEN 1 ELSE 0 END) as inactive,
-        SUM(CASE WHEN role = 'admin' THEN 1 ELSE 0 END) as admins,
-        SUM(CASE WHEN role = 'editor' THEN 1 ELSE 0 END) as editors,
-        SUM(CASE WHEN role = 'viewer' THEN 1 ELSE 0 END) as viewers
-       FROM users`,
-      [],
-      (err, row: any) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve({
-            total: row.total || 0,
-            active: row.active || 0,
-            inactive: row.inactive || 0,
-            admins: row.admins || 0,
-            editors: row.editors || 0,
-            viewers: row.viewers || 0,
-          });
-        }
-      }
-    );
-  });
+  const [total, active, inactive, admins, editors, viewers] = await Promise.all([
+    collection.countDocuments({}),
+    collection.countDocuments({ is_active: true }),
+    collection.countDocuments({ is_active: false }),
+    collection.countDocuments({ role: 'admin' }),
+    collection.countDocuments({ role: 'editor' }),
+    collection.countDocuments({ role: 'viewer' }),
+  ]);
+
+  return { total, active, inactive, admins, editors, viewers };
 }
 
 /**
  * Get audit logs for a user
  */
 export async function getUserAuditLogs(userId: string, limit: number = 50): Promise<AuditLog[]> {
-  const db = await getDb();
-
-  return new Promise((resolve, reject) => {
-    db.all(
-      'SELECT * FROM audit_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
-      [userId, limit],
-      (err, rows: AuditLog[]) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(rows || []);
-        }
-      }
-    );
-  });
+  const collection = await getCollection(COLLECTIONS.AUDIT_LOGS);
+  const docs = await collection
+    .find({ user_id: userId })
+    .sort({ created_at: -1 })
+    .limit(limit)
+    .toArray();
+  return docs.map(doc => toPlainObject<AuditLog>(doc)!);
 }
 
 /**
  * Get all audit logs (admin only)
  */
 export async function getAllAuditLogs(limit: number = 100): Promise<AuditLog[]> {
-  const db = await getDb();
-
-  return new Promise((resolve, reject) => {
-    db.all(
-      'SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ?',
-      [limit],
-      (err, rows: AuditLog[]) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(rows || []);
-        }
-      }
-    );
-  });
+  const collection = await getCollection(COLLECTIONS.AUDIT_LOGS);
+  const docs = await collection
+    .find({})
+    .sort({ created_at: -1 })
+    .limit(limit)
+    .toArray();
+  return docs.map(doc => toPlainObject<AuditLog>(doc)!);
 }
 
 /**
@@ -472,7 +341,7 @@ export async function createApiKey(data: {
   scopes?: string[];
   expires_at?: string;
 }): Promise<{ apiKey: ApiKey; plainKey: string }> {
-  const db = await getDb();
+  const collection = await getCollection(COLLECTIONS.API_KEYS);
 
   // Generate API key
   const plainKey = `eck_${nanoid(32)}`; // eck = earthquake catalogue key
@@ -483,108 +352,58 @@ export async function createApiKey(data: {
 
   const id = nanoid();
   const scopes = data.scopes ? data.scopes.join(',') : 'read';
+  const now = new Date().toISOString();
 
-  return new Promise((resolve, reject) => {
-    db.run(
-      `INSERT INTO api_keys (id, user_id, name, key_hash, key_prefix, scopes, is_active, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        data.user_id,
-        data.name,
-        key_hash,
-        keyPrefix,
-        scopes,
-        1,
-        data.expires_at || null,
-      ],
-      function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          // Fetch the created API key
-          db.get(
-            'SELECT * FROM api_keys WHERE id = ?',
-            [id],
-            (err, row: ApiKey | undefined) => {
-              if (err) {
-                reject(err);
-              } else {
-                resolve({
-                  apiKey: row as ApiKey,
-                  plainKey, // Return plain key only once
-                });
-              }
-            }
-          );
-        }
-      }
-    );
-  });
+  const apiKey: ApiKey = {
+    id,
+    user_id: data.user_id,
+    name: data.name,
+    key_hash,
+    key_prefix: keyPrefix,
+    scopes,
+    is_active: true,
+    expires_at: data.expires_at || null,
+    last_used_at: null,
+    created_at: now,
+  };
+
+  await collection.insertOne(apiKey as any);
+  return { apiKey, plainKey };
 }
 
 /**
  * Get API keys for a user
  */
 export async function getUserApiKeys(userId: string): Promise<ApiKey[]> {
-  const db = await getDb();
-
-  return new Promise((resolve, reject) => {
-    db.all(
-      'SELECT * FROM api_keys WHERE user_id = ? ORDER BY created_at DESC',
-      [userId],
-      (err, rows: ApiKey[]) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(rows || []);
-        }
-      }
-    );
-  });
+  const collection = await getCollection(COLLECTIONS.API_KEYS);
+  const docs = await collection
+    .find({ user_id: userId })
+    .sort({ created_at: -1 })
+    .toArray();
+  return docs.map(doc => toPlainObject<ApiKey>(doc)!);
 }
 
 /**
  * Get API key by ID
  */
 export async function getApiKeyById(id: string): Promise<ApiKey | null> {
-  const db = await getDb();
-
-  return new Promise((resolve, reject) => {
-    db.get(
-      'SELECT * FROM api_keys WHERE id = ? LIMIT 1',
-      [id],
-      (err, row: ApiKey | undefined) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(row || null);
-        }
-      }
-    );
-  });
+  const collection = await getCollection(COLLECTIONS.API_KEYS);
+  const doc = await collection.findOne({ id });
+  return toPlainObject<ApiKey>(doc);
 }
 
 /**
  * Validate API key
  */
 export async function validateApiKey(plainKey: string): Promise<{ valid: boolean; apiKey?: ApiKey; user?: User }> {
-  const db = await getDb();
+  const collection = await getCollection(COLLECTIONS.API_KEYS);
 
   // Extract key prefix
   const keyPrefix = plainKey.substring(0, 12);
 
   // Find API key by prefix
-  const apiKey: ApiKey | undefined = await new Promise((resolve, reject) => {
-    db.get(
-      'SELECT * FROM api_keys WHERE key_prefix = ? AND is_active = 1 LIMIT 1',
-      [keyPrefix],
-      (err, row: ApiKey | undefined) => {
-        if (err) reject(err);
-        else resolve(row);
-      }
-    );
-  });
+  const doc = await collection.findOne({ key_prefix: keyPrefix, is_active: true });
+  const apiKey = toPlainObject<ApiKey>(doc);
 
   if (!apiKey) {
     return { valid: false };
@@ -606,16 +425,10 @@ export async function validateApiKey(plainKey: string): Promise<{ valid: boolean
   }
 
   // Update last used timestamp
-  await new Promise<void>((resolve, reject) => {
-    db.run(
-      'UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [apiKey.id],
-      (err) => {
-        if (err) reject(err);
-        else resolve();
-      }
-    );
-  });
+  await collection.updateOne(
+    { id: apiKey.id },
+    { $set: { last_used_at: new Date().toISOString() } }
+  );
 
   // Get user
   const user = await getUserById(apiKey.user_id);
@@ -631,41 +444,17 @@ export async function validateApiKey(plainKey: string): Promise<{ valid: boolean
  * Revoke API key
  */
 export async function revokeApiKey(id: string): Promise<void> {
-  const db = await getDb();
-
-  return new Promise((resolve, reject) => {
-    db.run(
-      'UPDATE api_keys SET is_active = 0 WHERE id = ?',
-      [id],
-      (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      }
-    );
-  });
+  const collection = await getCollection(COLLECTIONS.API_KEYS);
+  await collection.updateOne(
+    { id },
+    { $set: { is_active: false } }
+  );
 }
 
 /**
  * Delete API key
  */
 export async function deleteApiKey(id: string): Promise<void> {
-  const db = await getDb();
-
-  return new Promise((resolve, reject) => {
-    db.run(
-      'DELETE FROM api_keys WHERE id = ?',
-      [id],
-      (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      }
-    );
-  });
+  const collection = await getCollection(COLLECTIONS.API_KEYS);
+  await collection.deleteOne({ id });
 }
-

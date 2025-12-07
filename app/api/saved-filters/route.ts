@@ -11,6 +11,9 @@ const logger = new Logger('SavedFiltersAPI');
  */
 export async function GET() {
   try {
+    if (!dbQueries) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+    }
     const filters = await dbQueries.getSavedFilters();
     return NextResponse.json(filters);
   } catch (error) {
@@ -38,6 +41,10 @@ export async function POST(request: NextRequest) {
         { error: 'Missing required fields: name and filterConfig' },
         { status: 400 }
       );
+    }
+
+    if (!dbQueries) {
+      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
     const id = uuidv4();

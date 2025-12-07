@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, memo, useCallback } from 'react';
 import L from 'leaflet';
-import { MapContainer, TileLayer, GeoJSON, FeatureGroup, Circle, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, GeoJSON, FeatureGroup, Circle, Popup, Marker } from 'react-leaflet';
 import { EditControl } from 'react-leaflet-draw';
+import MarkerClusterGroup from 'react-leaflet-cluster';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -35,7 +36,8 @@ interface MapViewProps {
   onShapeDrawn?: (shape: any) => void;
 }
 
-export function MapView({ catalogueId, events: propEvents, onBoundsChange, onShapeDrawn }: MapViewProps) {
+// Memoized MapView component for better performance
+export const MapView = memo(function MapView({ catalogueId, events: propEvents, onBoundsChange, onShapeDrawn }: MapViewProps) {
   const mapRef = useRef<L.Map>(null);
   const [showActiveFaults, setShowActiveFaults] = useState(true);
   const [colorMode, setColorMode] = useState<'magnitude' | 'depth' | 'quality'>('magnitude');
@@ -77,7 +79,7 @@ export function MapView({ catalogueId, events: propEvents, onBoundsChange, onSha
     });
   }, []);
 
-  // Calculate quality scores
+  // Calculate quality scores (memoized for performance)
   const qualityScores = useMemo(() => {
     return events.map(event => ({
       eventId: event.id,
@@ -85,41 +87,58 @@ export function MapView({ catalogueId, events: propEvents, onBoundsChange, onSha
     }));
   }, [events]);
 
-  const getDepthColor = (depth: number): string => {
+  // Memoize quality score lookup map for O(1) access
+  const qualityScoreMap = useMemo(() => {
+    const map = new Map();
+    qualityScores.forEach(qs => map.set(qs.eventId, qs.score));
+    return map;
+  }, [qualityScores]);
+
+  // Memoize color functions for better performance
+  const getDepthColor = useMemo(() => (depth: number): string => {
     if (depth >= 40) return '#000080'; // Navy
     if (depth >= 30) return '#0000FF'; // Blue
     if (depth >= 20) return '#4169E1'; // Royal blue
     if (depth >= 10) return '#87CEEB'; // Sky blue
     return '#ADD8E6'; // Light blue
-  };
+  }, []);
 
-  // Get event color based on selected mode
-  const getEventColor = (event: any) => {
+  // Get event color based on selected mode (optimized with Map lookup)
+  const getEventColor = useMemo(() => (event: any) => {
     if (colorMode === 'quality') {
-      const quality = qualityScores.find(q => q.eventId === event.id);
-      return quality ? getQualityColor(quality.score.overall) : getMagnitudeColor(event.magnitude);
+      const quality = qualityScoreMap.get(event.id);
+      return quality ? getQualityColor(quality.overall) : getMagnitudeColor(event.magnitude);
     } else if (colorMode === 'depth') {
       return getDepthColor(event.depth);
     }
     return getMagnitudeColor(event.magnitude);
-  };
+  }, [colorMode, qualityScoreMap, getDepthColor]);
 
-  const getMagnitudeLabel = (magnitude: number): string => {
+  const getMagnitudeLabel = useMemo(() => (magnitude: number): string => {
     if (magnitude >= 6.0) return 'Major';
     if (magnitude >= 5.0) return 'Moderate';
     if (magnitude >= 4.0) return 'Light';
     if (magnitude >= 3.0) return 'Minor';
     return 'Micro';
-  };
+  }, []);
 
+  // Debounced bounds change handler for better performance
   useEffect(() => {
     if (mapRef.current && onBoundsChange) {
       const map = mapRef.current;
+      let timeoutId: NodeJS.Timeout;
+
       const updateBounds = () => {
-        onBoundsChange(map.getBounds());
+        // Debounce bounds updates to avoid excessive calls during panning/zooming
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          onBoundsChange(map.getBounds());
+        }, 300); // 300ms debounce
       };
+
       map.on('moveend', updateBounds);
       return () => {
+        clearTimeout(timeoutId);
         map.off('moveend', updateBounds);
       };
     }
@@ -242,31 +261,51 @@ export function MapView({ catalogueId, events: propEvents, onBoundsChange, onSha
           />
         </FeatureGroup>
 
-        {/* Earthquake markers - No clustering */}
-        {events.map((event) => {
-          const eventDate = new Date(event.time).toLocaleDateString();
-          const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
+        {/* Earthquake markers with clustering for performance */}
+        <MarkerClusterGroup
+          chunkedLoading
+          maxClusterRadius={50}
+          spiderfyOnMaxZoom={true}
+          showCoverageOnHover={false}
+          zoomToBoundsOnClick={true}
+          iconCreateFunction={(cluster: any) => {
+            const count = cluster.getChildCount();
+            let size = 'small';
+            if (count > 100) size = 'large';
+            else if (count > 10) size = 'medium';
 
-          return (
-            <Circle
-              key={event.id}
-              center={[event.latitude, event.longitude]}
-              radius={getMagnitudeRadius(event.magnitude)}
-              pathOptions={{
-                color: getEventColor(event),
-                fillColor: getEventColor(event),
-                fillOpacity: mapColors.markerOpacity,
-                weight: 2,
-                // Add title for accessibility (shows on hover)
-                title: ariaLabel,
-              } as any}
-            >
-              <Popup>
-                <EventPopupWithFaults event={event} qualityScores={qualityScores} />
-              </Popup>
-            </Circle>
-          );
-        })}
+            return L.divIcon({
+              html: `<div><span>${count}</span></div>`,
+              className: `marker-cluster marker-cluster-${size}`,
+              iconSize: L.point(40, 40),
+            });
+          }}
+        >
+          {events.map((event) => {
+            const eventDate = new Date(event.time).toLocaleDateString();
+            const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
+
+            return (
+              <Circle
+                key={event.id}
+                center={[event.latitude, event.longitude]}
+                radius={getMagnitudeRadius(event.magnitude)}
+                pathOptions={{
+                  color: getEventColor(event),
+                  fillColor: getEventColor(event),
+                  fillOpacity: mapColors.markerOpacity,
+                  weight: 2,
+                  // Add title for accessibility (shows on hover)
+                  title: ariaLabel,
+                } as any}
+              >
+                <Popup>
+                  <EventPopupWithFaults event={event} qualityScores={qualityScores} />
+                </Popup>
+              </Circle>
+            );
+          })}
+        </MarkerClusterGroup>
       </MapContainer>
 
       {/* Legend */}
@@ -277,10 +316,10 @@ export function MapView({ catalogueId, events: propEvents, onBoundsChange, onSha
       />
     </div>
   );
-}
+});
 
-// Legend panel component
-function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string; showFaults: boolean; faultCount?: number }) {
+// Legend panel component (memoized)
+const LegendPanel = memo(function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string; showFaults: boolean; faultCount?: number }) {
   return (
     <Card className="absolute bottom-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[220px]">
       <h4 className="font-semibold text-sm mb-3">
@@ -362,10 +401,10 @@ function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string;
       )}
     </Card>
   );
-}
+});
 
-// Event popup component with nearby faults
-function EventPopupWithFaults({ event, qualityScores }: { event: any; qualityScores: any[] }) {
+// Event popup component with nearby faults (memoized)
+const EventPopupWithFaults = memo(function EventPopupWithFaults({ event, qualityScores }: { event: any; qualityScores: any[] }) {
   const quality = qualityScores.find(q => q.eventId === event.id);
 
   // Fetch nearby faults for this event
@@ -468,4 +507,4 @@ function EventPopupWithFaults({ event, qualityScores }: { event: any; qualitySco
       </div>
     </div>
   );
-}
+});

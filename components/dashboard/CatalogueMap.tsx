@@ -1,15 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useCallback, memo } from 'react';
 import L from 'leaflet';
 import { MapContainer, TileLayer, Circle, Popup } from 'react-leaflet';
+import MarkerClusterGroup from 'react-leaflet-cluster';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Activity, Calendar, Ruler, MapPin, Filter } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getMagnitudeColor, getMagnitudeRadius } from '@/lib/earthquake-utils';
-import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
+import { useMapTheme } from '@/hooks/use-map-theme';
 import 'leaflet/dist/leaflet.css';
 
 interface EarthquakeEvent {
@@ -31,7 +32,8 @@ interface Catalogue {
   event_count: number;
 }
 
-export function CatalogueMap() {
+// Memoized CatalogueMap component for better performance
+export const CatalogueMap = memo(function CatalogueMap() {
   const [events, setEvents] = useState<EarthquakeEvent[]>([]);
   const [catalogues, setCatalogues] = useState<Catalogue[]>([]);
   const [selectedCatalogue, setSelectedCatalogue] = useState<string>('');
@@ -40,7 +42,6 @@ export function CatalogueMap() {
 
   // Dark mode support
   const mapTheme = useMapTheme();
-  const mapColors = useMapColors();
 
   // Fetch catalogues list
   useEffect(() => {
@@ -65,40 +66,41 @@ export function CatalogueMap() {
     fetchCatalogues();
   }, []);
 
-  // Fetch events based on selected catalogue
-  useEffect(() => {
-    async function fetchEvents() {
-      if (!selectedCatalogue) {
-        return;
-      }
-
-      try {
-        setLoading(true);
-        setError(null);
-
-        // Fetch events from specific catalogue only
-        const response = await fetch(`/api/catalogues/${selectedCatalogue}/events`);
-
-        if (!response.ok) {
-          throw new Error('Failed to fetch events');
-        }
-
-        const data = await response.json();
-
-        // Handle different response formats
-        const eventsList: EarthquakeEvent[] = Array.isArray(data) ? data : (data.data || []);
-
-        setEvents(eventsList);
-      } catch (err) {
-        console.error('Error fetching events:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load events');
-      } finally {
-        setLoading(false);
-      }
+  // Memoized fetch function for better performance
+  const fetchEvents = useCallback(async () => {
+    if (!selectedCatalogue) {
+      return;
     }
 
-    fetchEvents();
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Fetch events from specific catalogue only
+      const response = await fetch(`/api/catalogues/${selectedCatalogue}/events`);
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch events');
+      }
+
+      const data = await response.json();
+
+      // Handle different response formats
+      const eventsList: EarthquakeEvent[] = Array.isArray(data) ? data : (data.data || []);
+
+      setEvents(eventsList);
+    } catch (err) {
+      console.error('Error fetching events:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load events');
+    } finally {
+      setLoading(false);
+    }
   }, [selectedCatalogue]);
+
+  // Fetch events based on selected catalogue
+  useEffect(() => {
+    fetchEvents();
+  }, [fetchEvents]);
 
   // Fix for Leaflet icons in Next.js
   useEffect(() => {
@@ -157,13 +159,66 @@ export function CatalogueMap() {
     );
   }
 
-  const getMagnitudeLabel = (magnitude: number): string => {
+  // Memoize helper functions for better performance
+  const getMagnitudeLabel = useMemo(() => (magnitude: number): string => {
     if (magnitude >= 6.0) return 'Major';
     if (magnitude >= 5.0) return 'Moderate';
     if (magnitude >= 4.0) return 'Light';
     if (magnitude >= 3.0) return 'Minor';
     return 'Micro';
-  };
+  }, []);
+
+  // Memoize event markers to avoid unnecessary re-renders
+  const eventMarkers = useMemo(() => {
+    return events.map((event) => (
+      <Circle
+        key={event.id}
+        center={[event.latitude, event.longitude]}
+        radius={getMagnitudeRadius(event.magnitude) * 1000}
+        pathOptions={{
+          fillColor: getMagnitudeColor(event.magnitude),
+          fillOpacity: 0.6,
+          color: getMagnitudeColor(event.magnitude),
+          weight: 1,
+        }}
+      >
+        <Popup>
+          <div className="p-2 min-w-[200px]">
+            <div className="flex items-center justify-between mb-2">
+              <Badge variant="outline" className="text-xs">
+                {getMagnitudeLabel(event.magnitude)}
+              </Badge>
+              <span className="text-sm font-semibold">M {event.magnitude.toFixed(1)}</span>
+            </div>
+            <div className="space-y-1 text-sm">
+              <div className="flex items-center gap-2">
+                <Calendar className="h-3 w-3 text-muted-foreground" />
+                <span>{new Date(event.time).toLocaleString()}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <MapPin className="h-3 w-3 text-muted-foreground" />
+                <span>
+                  {event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°
+                </span>
+              </div>
+              {event.depth !== null && (
+                <div className="flex items-center gap-2">
+                  <Ruler className="h-3 w-3 text-muted-foreground" />
+                  <span>{event.depth.toFixed(1)} km depth</span>
+                </div>
+              )}
+              {event.magnitude_type && (
+                <div className="flex items-center gap-2">
+                  <Activity className="h-3 w-3 text-muted-foreground" />
+                  <span>Type: {event.magnitude_type}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </Popup>
+      </Circle>
+    ));
+  }, [events, getMagnitudeLabel]);
 
   return (
     <div className="h-[600px] w-full relative">
@@ -200,31 +255,28 @@ export function CatalogueMap() {
           url={mapTheme.tileLayerUrl}
         />
 
-        {/* Earthquake markers - No clustering */}
-        {events.map((event) => {
-          const eventDate = new Date(event.time).toLocaleDateString();
-          const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
+        {/* Earthquake markers with clustering for performance */}
+        <MarkerClusterGroup
+          chunkedLoading
+          maxClusterRadius={50}
+          spiderfyOnMaxZoom={true}
+          showCoverageOnHover={false}
+          zoomToBoundsOnClick={true}
+          iconCreateFunction={(cluster: any) => {
+            const count = cluster.getChildCount();
+            let size = 'small';
+            if (count > 100) size = 'large';
+            else if (count > 10) size = 'medium';
 
-          return (
-            <Circle
-              key={event.id}
-              center={[event.latitude, event.longitude]}
-              radius={getMagnitudeRadius(event.magnitude)}
-              pathOptions={{
-                color: getMagnitudeColor(event.magnitude),
-                fillColor: getMagnitudeColor(event.magnitude),
-                fillOpacity: mapColors.markerOpacity,
-                weight: 2,
-                // Add title for accessibility (shows on hover)
-                title: ariaLabel,
-              } as any}
-            >
-              <Popup>
-                <EventPopup event={event} getMagnitudeLabel={getMagnitudeLabel} />
-              </Popup>
-            </Circle>
-          );
-        })}
+            return L.divIcon({
+              html: `<div><span>${count}</span></div>`,
+              className: `marker-cluster marker-cluster-${size}`,
+              iconSize: L.point(40, 40),
+            });
+          }}
+        >
+          {eventMarkers}
+        </MarkerClusterGroup>
       </MapContainer>
 
       {/* Legend */}
@@ -253,10 +305,10 @@ export function CatalogueMap() {
       </Card>
     </div>
   );
-}
+});
 
-// Event popup component
-function EventPopup({ event, getMagnitudeLabel }: { event: EarthquakeEvent; getMagnitudeLabel: (mag: number) => string }) {
+// Event popup component (memoized)
+const EventPopup = memo(function EventPopup({ event, getMagnitudeLabel }: { event: EarthquakeEvent; getMagnitudeLabel: (mag: number) => string }) {
   return (
     <div className="p-3 min-w-[250px]">
       <div className="flex items-center justify-between mb-3">
@@ -293,4 +345,4 @@ function EventPopup({ event, getMagnitudeLabel }: { event: EarthquakeEvent; getM
       </div>
     </div>
   );
-}
+});

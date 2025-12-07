@@ -10,6 +10,9 @@ import { parseQuakeMLEvent } from './quakeml-parser';
 import type { QuakeMLEvent } from './types/quakeml';
 import { createReadStream } from 'fs';
 import { createInterface } from 'readline';
+import { detectDelimiter, parseLine, parseWithDelimiter, type Delimiter } from './delimiter-detector';
+import { parseGeoJSON } from './geojson-parser';
+import { detectDateFormat, type DateFormat } from './date-format-detector';
 
 export interface ParsedEvent {
   time: string;
@@ -36,15 +39,17 @@ export interface ParseResult {
 }
 
 /**
- * Parse CSV format earthquake catalogue
+ * Parse CSV/delimited text format earthquake catalogue
+ * Supports multiple delimiters: comma, tab, semicolon, pipe, space
+ * Auto-detects delimiter if not specified
+ * Auto-detects date format (US vs International) if not specified
  */
-export function parseCSV(content: string): ParseResult {
-  const lines = content.split('\n').filter(line => line.trim());
+export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: DateFormat): ParseResult {
   const errors: Array<{ line: number; message: string }> = [];
   const warnings: Array<{ line: number; message: string }> = [];
   const events: ParsedEvent[] = [];
 
-  if (lines.length === 0) {
+  if (!content || content.trim().length === 0) {
     return {
       success: false,
       events: [],
@@ -54,18 +59,79 @@ export function parseCSV(content: string): ParseResult {
     };
   }
 
-  // Parse header
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+  // Auto-detect delimiter if not specified
+  let actualDelimiter = delimiter;
+  if (!actualDelimiter) {
+    const detection = detectDelimiter(content);
+    actualDelimiter = detection.delimiter;
+
+    if (detection.confidence < 0.5) {
+      warnings.push({
+        line: 0,
+        message: `Low confidence delimiter detection (${Math.round(detection.confidence * 100)}%). Detected: ${actualDelimiter === '\t' ? 'tab' : actualDelimiter}`
+      });
+    }
+  }
+
+  // Parse with detected/specified delimiter
+  const { headers, rows } = parseWithDelimiter(content, actualDelimiter);
   const detectedFields = [...headers];
 
+  // Auto-detect date format if not specified
+  let actualDateFormat = dateFormat;
+  if (!actualDateFormat || actualDateFormat === 'Unknown') {
+    // Find time column
+    const timeColumnIndex = headers.findIndex(h =>
+      h.toLowerCase() === 'time' ||
+      h.toLowerCase() === 'datetime' ||
+      h.toLowerCase() === 'date' ||
+      h.toLowerCase() === 'origin_time' ||
+      h.toLowerCase() === 'origintime'
+    );
+
+    if (timeColumnIndex >= 0) {
+      // Extract date strings from time column
+      const dateStrings = rows
+        .map(row => row[timeColumnIndex])
+        .filter(val => val && val.trim().length > 0)
+        .slice(0, 50); // Sample first 50 dates
+
+      if (dateStrings.length > 0) {
+        const detection = detectDateFormat(dateStrings);
+        actualDateFormat = detection.format;
+
+        if (detection.confidence < 0.5) {
+          warnings.push({
+            line: 0,
+            message: `Low confidence date format detection (${Math.round(detection.confidence * 100)}%). ${detection.reasoning}`
+          });
+        } else if (detection.format !== 'ISO' && detection.format !== 'Unknown') {
+          warnings.push({
+            line: 0,
+            message: `Detected ${detection.format} date format. ${detection.reasoning}`
+          });
+        }
+      }
+    }
+  }
+
+  if (headers.length === 0) {
+    return {
+      success: false,
+      events: [],
+      errors: [{ line: 0, message: 'No headers found in file' }],
+      warnings: [],
+      detectedFields: []
+    };
+  }
+
   // Parse data rows
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i];
-    const values = parseCSVLine(line);
+  for (let i = 0; i < rows.length; i++) {
+    const values = rows[i];
 
     if (values.length !== headers.length) {
       errors.push({
-        line: i + 1,
+        line: i + 2, // +2 because line 1 is header, and i is 0-based
         message: `Column count mismatch: expected ${headers.length}, got ${values.length}`
       });
       continue;
@@ -77,14 +143,14 @@ export function parseCSV(content: string): ParseResult {
         event[header] = values[index];
       });
 
-      // Map common field names
-      const mappedEvent = mapCommonFields(event);
-      
+      // Map common field names with date format hint
+      const mappedEvent = mapCommonFields(event, actualDateFormat);
+
       // Validate the event
       const validation = validateEvent(mappedEvent);
       if (!validation.valid) {
         errors.push({
-          line: i + 1,
+          line: i + 2,
           message: validation.errors.join('; ')
         });
         continue;
@@ -93,7 +159,7 @@ export function parseCSV(content: string): ParseResult {
       events.push(mappedEvent);
     } catch (error) {
       errors.push({
-        line: i + 1,
+        line: i + 2,
         message: error instanceof Error ? error.message : 'Parse error'
       });
     }
@@ -110,33 +176,19 @@ export function parseCSV(content: string): ParseResult {
 
 /**
  * Parse a single CSV line handling quoted values
+ * @deprecated Use parseLine from delimiter-detector instead
  */
 function parseCSVLine(line: string): string[] {
-  const values: string[] = [];
-  let current = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-
-    if (char === '"') {
-      inQuotes = !inQuotes;
-    } else if (char === ',' && !inQuotes) {
-      values.push(current.trim());
-      current = '';
-    } else {
-      current += char;
-    }
-  }
-
-  values.push(current.trim());
-  return values;
+  return parseLine(line, ',');
 }
 
 /**
  * Parse JSON format earthquake catalogue
+ * Automatically detects and handles GeoJSON format
+ * @param content - The JSON content to parse
+ * @param dateFormat - Optional date format hint for ambiguous dates
  */
-export function parseJSON(content: string): ParseResult {
+export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult {
   const errors: Array<{ line: number; message: string }> = [];
   const warnings: Array<{ line: number; message: string }> = [];
   const events: ParsedEvent[] = [];
@@ -144,6 +196,12 @@ export function parseJSON(content: string): ParseResult {
 
   try {
     const data = JSON.parse(content);
+
+    // Check if this is GeoJSON format
+    if (data.type === 'FeatureCollection' || data.type === 'Feature') {
+      console.log('[Parser] Detected GeoJSON format, using specialized parser');
+      return parseGeoJSON(content);
+    }
 
     // Handle different JSON structures
     let eventArray: any[] = [];
@@ -158,13 +216,9 @@ export function parseJSON(content: string): ParseResult {
       // { data: [...] } structure (common export format)
       eventArray = data.data;
     } else if (data.features && Array.isArray(data.features)) {
-      // GeoJSON format
-      eventArray = data.features.map((f: any) => ({
-        ...f.properties,
-        latitude: f.geometry?.coordinates?.[1],
-        longitude: f.geometry?.coordinates?.[0],
-        depth: f.geometry?.coordinates?.[2]
-      }));
+      // GeoJSON-like format without type field - use GeoJSON parser
+      console.log('[Parser] Detected features array, attempting GeoJSON parsing');
+      return parseGeoJSON(content);
     } else if (data.earthquakes && Array.isArray(data.earthquakes)) {
       // { earthquakes: [...] } structure
       eventArray = data.earthquakes;
@@ -205,9 +259,9 @@ export function parseJSON(content: string): ParseResult {
     // Parse each event
     eventArray.forEach((item, index) => {
       try {
-        const mappedEvent = mapCommonFields(item);
+        const mappedEvent = mapCommonFields(item, dateFormat);
         const validation = validateEvent(mappedEvent);
-        
+
         if (!validation.valid) {
           errors.push({
             line: index + 1,
@@ -387,8 +441,10 @@ export function parseQuakeML(content: string): ParseResult {
 /**
  * Map common field name variations to standard names
  * Supports QuakeML 1.2, GeoNet, ISC, and common CSV/JSON field variations
+ * @param event - The event object to map
+ * @param dateFormat - Optional date format hint for ambiguous dates
  */
-function mapCommonFields(event: any): ParsedEvent {
+function mapCommonFields(event: any, dateFormat?: DateFormat): ParsedEvent {
   const mapped: any = { ...event };
 
   // === Basic Fields ===
@@ -398,10 +454,12 @@ function mapCommonFields(event: any): ParsedEvent {
                   event.ot || event.otime || event.timestamp;
   }
 
-  // Normalize timestamp to ISO 8601 format
+  // Normalize timestamp to ISO 8601 format with date format hint
   if (mapped.time) {
     const { normalizeTimestamp } = require('./earthquake-utils');
-    const normalized = normalizeTimestamp(mapped.time);
+    // Convert DateFormat to the format expected by normalizeTimestamp
+    const formatHint = dateFormat === 'US' ? 'US' : dateFormat === 'International' ? 'International' : undefined;
+    const normalized = normalizeTimestamp(mapped.time, formatHint);
     if (normalized) {
       mapped.time = normalized;
     }
@@ -561,19 +619,23 @@ function mapCommonFields(event: any): ParsedEvent {
 
 /**
  * Auto-detect file format and parse accordingly
+ * Supports optional delimiter and date format specification for text files
  */
-export function parseFile(content: string, filename: string): ParseResult {
+export function parseFile(content: string, filename: string, delimiter?: Delimiter, dateFormat?: DateFormat): ParseResult {
   const extension = filename.split('.').pop()?.toLowerCase();
 
   // Explicit extension-based routing (takes precedence)
   switch (extension) {
     case 'csv':
     case 'txt':
-      console.log(`[Parser] Parsing ${filename} as CSV based on extension`);
-      return parseCSV(content);
+      console.log(`[Parser] Parsing ${filename} as delimited text based on extension`);
+      return parseCSV(content, delimiter, dateFormat);
     case 'json':
       console.log(`[Parser] Parsing ${filename} as JSON based on extension`);
-      return parseJSON(content);
+      return parseJSON(content, dateFormat);
+    case 'geojson':
+      console.log(`[Parser] Parsing ${filename} as GeoJSON based on extension`);
+      return parseGeoJSON(content);
     case 'xml':
     case 'qml':
       console.log(`[Parser] Parsing ${filename} as QuakeML based on extension`);
@@ -584,13 +646,13 @@ export function parseFile(content: string, filename: string): ParseResult {
       const trimmed = content.trim();
       if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
         console.log(`[Parser] Auto-detected JSON format`);
-        return parseJSON(content);
+        return parseJSON(content, dateFormat);
       } else if (trimmed.startsWith('<')) {
         console.log(`[Parser] Auto-detected XML/QuakeML format`);
         return parseQuakeML(content);
       } else {
-        console.log(`[Parser] Defaulting to CSV format`);
-        return parseCSV(content);
+        console.log(`[Parser] Defaulting to delimited text format`);
+        return parseCSV(content, delimiter, dateFormat);
       }
   }
 }
@@ -620,7 +682,8 @@ export async function parseCSVStream(
   filePath: string,
   onEvent?: (event: ParsedEvent, lineNumber: number) => Promise<void> | void,
   onBatch?: (events: ParsedEvent[], startLine: number, endLine: number) => Promise<void> | void,
-  batchSize: number = 100
+  batchSize: number = 100,
+  delimiter?: Delimiter
 ): Promise<{
   success: boolean;
   totalEvents: number;
@@ -636,6 +699,7 @@ export async function parseCSVStream(
   let totalEvents = 0;
   let batch: ParsedEvent[] = [];
   let batchStartLine = 0;
+  let actualDelimiter = delimiter || ','; // Default to comma if not specified
 
   const fileStream = createReadStream(filePath, { encoding: 'utf-8' });
   const rl = createInterface({
@@ -652,14 +716,26 @@ export async function parseCSVStream(
 
     // Parse header
     if (lineNumber === 1) {
-      headers = line.split(',').map(h => h.trim().toLowerCase());
+      // Auto-detect delimiter from header if not specified
+      if (!delimiter) {
+        const detection = detectDelimiter(line);
+        actualDelimiter = detection.delimiter;
+        if (detection.confidence < 0.5) {
+          warnings.push({
+            line: 1,
+            message: `Low confidence delimiter detection (${Math.round(detection.confidence * 100)}%). Using: ${actualDelimiter === '\t' ? 'tab' : actualDelimiter}`
+          });
+        }
+      }
+
+      headers = parseLine(line, actualDelimiter).map(h => h.trim().toLowerCase());
       detectedFields = [...headers];
       batchStartLine = lineNumber + 1;
       continue;
     }
 
     try {
-      const values = parseCSVLine(line);
+      const values = parseLine(line, actualDelimiter);
 
       if (values.length !== headers.length) {
         errors.push({

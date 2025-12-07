@@ -1,20 +1,23 @@
 /**
  * Health Check Endpoint
- * 
+ *
  * GET /api/health - Basic health check for monitoring
- * 
+ *
  * Returns:
  * - 200 OK if the application is running
  * - Includes basic system information
  */
 
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { isConnected } from '@/lib/mongodb';
 
 export async function GET() {
   const startTime = Date.now();
 
   try {
+    // Check database connection
+    const dbConnected = await isConnected();
+
     // Basic health check - just verify the API is responding
     const health = {
       status: 'healthy',
@@ -22,6 +25,7 @@ export async function GET() {
       uptime: process.uptime(),
       environment: process.env.NODE_ENV || 'development',
       version: process.env.npm_package_version || '1.0.0',
+      database: dbConnected ? 'connected' : 'disconnected',
     };
 
     const responseTime = Date.now() - startTime;
@@ -43,4 +47,3 @@ export async function GET() {
     );
   }
 }
-

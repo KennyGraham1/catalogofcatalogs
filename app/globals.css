@@ -216,6 +216,57 @@
   background-color: rgba(248, 113, 113, 0.9); /* red-400 */
 }
 
+/* react-leaflet-cluster marker styles */
+.marker-cluster {
+  background-clip: padding-box;
+  border-radius: 50%;
+}
+
+.marker-cluster div {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  color: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s ease;
+}
+
+.marker-cluster div:hover {
+  transform: scale(1.1);
+}
+
+.marker-cluster-small div {
+  background-color: rgba(59, 130, 246, 0.8); /* blue-500 */
+  font-size: 12px;
+}
+
+.marker-cluster-medium div {
+  background-color: rgba(251, 146, 60, 0.8); /* orange-400 */
+  font-size: 14px;
+}
+
+.marker-cluster-large div {
+  background-color: rgba(239, 68, 68, 0.8); /* red-500 */
+  font-size: 16px;
+}
+
+/* Dark mode marker-cluster styles */
+.dark .marker-cluster-small div {
+  background-color: rgba(96, 165, 250, 0.9); /* blue-400 */
+}
+
+.dark .marker-cluster-medium div {
+  background-color: rgba(251, 191, 36, 0.9); /* amber-400 */
+}
+
+.dark .marker-cluster-large div {
+  background-color: rgba(248, 113, 113, 0.9); /* red-400 */
+}
+
 /* Scrollbar styles for virtualized lists */
 .scrollbar-thin {
   scrollbar-width: thin;

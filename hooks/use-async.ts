@@ -20,7 +20,7 @@ export function useAsync<T>(
 ) {
   const [state, setState] = useState<AsyncState<T>>({
     data: null,
-    loading: options.immediate,
+    loading: options.immediate ?? true,
     error: null
   });
 

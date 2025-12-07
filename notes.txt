@@ -13,12 +13,30 @@ This will help us to QC the merge before we commit to the database or export the
 
 MOve to MongoDB logo
 
+I want you to migrate the database to MongoDB you will need to make the necessary changes to the codebase and be very careful and delegent
+
+There seem to be file size limit of 100MB can you increase that?
+
+The visualisation is vert slow for large catalogues. Can you make it more efficient and higher performace and optimise it?
 
 
-I want you to be aim to prefessionallly testt the codebase with all the eadge cases and see if you can break it.
+Not to load all the data/catalog in the database at once. Just a few to demonstrate the functionality. User can select which ones they want view or play with. Can you cache the data for the dashboard so that it doesn't have to load it every time. We also need to have option to update the dashboard data when new catalogues are added.
 
 
-Please use web search to find authoritative sources on earthquake catalogue merging best practices before making recommendations.
 
 
-Not to load all the data/catalog in the database at once. Just a few to demonstrate the functionality. User can select which ones they want view or play with. Can you cache the dat for the dashboard so that it doesn't have to load it every time. We also need to have option to update the dashboard data when new catalogues are added.
+There are some mock data in the codebase. Please remove them and use the real data. and 
+
+
+
+Load balacne when we are hit by more users beside vertical scaling. 
+
+How big will it become globally?? Can we go that route?
+
+Scaleability??
+
+mcp? app database and so on 
+
+Application and databace separated 
+
+10K for 

@@ -117,8 +117,8 @@ export type MergeRequest = z.infer<typeof mergeRequestSchema>;
 // File upload schema
 export const fileUploadSchema = z.object({
   fileName: z.string().min(1),
-  fileSize: z.number().max(100 * 1024 * 1024), // Max 100MB
-  fileType: z.enum(['csv', 'txt', 'json', 'xml', 'qml']),
+  fileSize: z.number().max(500 * 1024 * 1024), // Max 500MB
+  fileType: z.enum(['csv', 'txt', 'json', 'geojson', 'xml', 'qml']),
 });
 
 export type FileUpload = z.infer<typeof fileUploadSchema>;

@@ -89,7 +89,7 @@ export default function Home() {
             Ready to Streamline Your Earthquake Data Management?
           </h2>
           <p className="text-lg mb-8 opacity-90 max-w-[700px] mx-auto">
-            Join researchers and agencies worldwide using our platform for efficient earthquake catalogue integration.
+            Join researchers and agencies in New Zealand using our platform for efficient earthquake catalogue integration.
           </p>
           <Button asChild size="lg" variant="secondary">
             <Link href="/upload">

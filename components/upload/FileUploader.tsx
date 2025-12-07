@@ -129,12 +129,13 @@ export function FileUploader({
 
   const getFileIcon = (fileName: string) => {
     const extension = fileName.split('.').pop()?.toLowerCase() || '';
-    
+
     switch (extension) {
       case 'csv':
       case 'txt':
         return FileSpreadsheet;
       case 'json':
+      case 'geojson':
       case 'xml':
       case 'qml':
         return FileJson;
@@ -161,13 +162,13 @@ export function FileUploader({
           <div>
             <h3 className="font-semibold text-lg mb-1">Upload Earthquake Catalogues</h3>
             <p className="text-muted-foreground max-w-md mx-auto">
-              Drag and drop your catalogue files here, or click to browse. 
-              Supported formats: CSV, TXT, QML, JSON, XML.
+              Drag and drop your catalogue files here, or click to browse.
+              Supported formats: CSV, TXT, QML, JSON, GeoJSON, XML.
             </p>
           </div>
-          
-          <Button 
-            type="button" 
+
+          <Button
+            type="button"
             onClick={openFileDialog}
             disabled={uploading}
             variant="outline"
@@ -176,14 +177,14 @@ export function FileUploader({
             <FilePlus className="mr-2 h-4 w-4" />
             Select Files
           </Button>
-          
+
           <input
             type="file"
             ref={fileInputRef}
             onChange={handleFileInputChange}
             style={{ display: 'none' }}
             multiple
-            accept=".csv,.txt,.qml,.json,.xml"
+            accept=".csv,.txt,.qml,.json,.geojson,.xml"
             disabled={uploading}
           />
         </div>

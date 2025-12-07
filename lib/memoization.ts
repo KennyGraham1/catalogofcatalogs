@@ -83,7 +83,7 @@ function defaultKeyGenerator(...args: any[]): string {
  * console.log(expensiveCalculation.cacheStats());
  * ```
  */
-export function memoize<TArgs extends any[], TResult>(
+export function memoize<TArgs extends any[], TResult extends {}>(
   fn: (...args: TArgs) => TResult,
   options: MemoizeOptions = {}
 ): ((...args: TArgs) => TResult) & {

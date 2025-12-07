@@ -3,7 +3,10 @@
  * Supports GeoJSON, KML, CSV, JSON, and QuakeML formats
  */
 
-import type { MergedEvent, Catalogue } from './db';
+import type { MergedEvent, MergedCatalogue } from './db';
+
+// Alias for backward compatibility
+type Catalogue = MergedCatalogue;
 
 export interface ExportMetadata {
   catalogueName?: string;
@@ -196,10 +199,10 @@ export function eventsToKML(
         kml += `            <tr><td><b>Depth:</b></td><td>${event.depth !== null ? event.depth.toFixed(1) + ' km' : 'Unknown'}</td></tr>\n`;
         kml += `            <tr><td><b>Location:</b></td><td>${event.latitude.toFixed(4)}°, ${event.longitude.toFixed(4)}°</td></tr>\n`;
         
-        if (event.azimuthal_gap !== null) {
+        if (event.azimuthal_gap != null) {
           kml += `            <tr><td><b>Azimuthal Gap:</b></td><td>${event.azimuthal_gap.toFixed(0)}°</td></tr>\n`;
         }
-        if (event.used_station_count !== null) {
+        if (event.used_station_count != null) {
           kml += `            <tr><td><b>Stations:</b></td><td>${event.used_station_count}</td></tr>\n`;
         }
         if (event.evaluation_status) {

@@ -16,6 +16,16 @@ import { parseStringPromise } from 'xml2js';
 import pLimit from 'p-limit';
 
 /**
+ * Helper to ensure dbQueries is available
+ */
+function getDbQueries() {
+  if (!dbQueries) {
+    throw new Error('Database not available');
+  }
+  return dbQueries;
+}
+
+/**
  * Import configuration options
  */
 export interface ImportOptions {
@@ -83,9 +93,10 @@ function extractFocalMechanismFromXML(xml: string): any | null {
   try {
     // Look for focalMechanism elements
     const focalMechRegex = /<focalMechanism[^>]*>(.*?)<\/focalMechanism>/gs;
-    const focalMechMatches = xml.matchAll(focalMechRegex);
+    const focalMechMatches = Array.from(xml.matchAll(focalMechRegex));
 
-    for (const match of focalMechMatches) {
+    for (let i = 0; i < focalMechMatches.length; i++) {
+      const match = focalMechMatches[i];
       const fmXML = match[1];
 
       // Extract nodalPlanes
@@ -204,11 +215,11 @@ export class GeoNetImportService {
       // 4. Update geographic bounds for the catalogue
       if (newEvents > 0 || updatedEvents > 0) {
         try {
-          const catalogueEvents = await dbQueries.getEventsByCatalogueId(catalogueId);
+          const catalogueEvents = await getDbQueries().getEventsByCatalogueId(catalogueId);
           const eventsArray = Array.isArray(catalogueEvents) ? catalogueEvents : catalogueEvents.data;
           const bounds = extractBoundsFromMergedEvents(eventsArray);
           if (bounds) {
-            await dbQueries.updateCatalogueGeoBounds(
+            await getDbQueries().updateCatalogueGeoBounds(
               catalogueId,
               bounds.minLatitude,
               bounds.maxLatitude,
@@ -315,7 +326,7 @@ export class GeoNetImportService {
   private async getOrCreateCatalogue(catalogueId?: string, catalogueName?: string, userId?: string): Promise<string> {
     if (catalogueId) {
       // Check if catalogue exists
-      const catalogue = await dbQueries.getCatalogueById(catalogueId);
+      const catalogue = await getDbQueries().getCatalogueById(catalogueId);
       if (catalogue) {
         return catalogueId;
       }
@@ -325,7 +336,7 @@ export class GeoNetImportService {
     const newId = uuidv4();
     const name = catalogueName || GeoNetImportService.DEFAULT_CATALOGUE_NAME;
 
-    await dbQueries.insertCatalogue(
+    await getDbQueries().insertCatalogue(
       newId,
       name,
       JSON.stringify([{ source: 'GeoNet', description: GeoNetImportService.DEFAULT_CATALOGUE_DESCRIPTION }]),
@@ -352,7 +363,7 @@ export class GeoNetImportService {
     updateExisting: boolean
   ): Promise<'new' | 'updated' | 'skipped'> {
     // Check if event already exists
-    const existingEvent = await dbQueries.getEventBySourceId(catalogueId, event.EventID);
+    const existingEvent = await getDbQueries().getEventBySourceId(catalogueId, event.EventID);
 
     if (existingEvent) {
       if (updateExisting) {
@@ -397,7 +408,7 @@ export class GeoNetImportService {
 
     for (const eventId of eventIds) {
       try {
-        const existing = await dbQueries.getEventBySourceId(catalogueId, eventId);
+        const existing = await getDbQueries().getEventBySourceId(catalogueId, eventId);
         if (existing) {
           existingEventsMap.set(eventId, existing.id);
         }
@@ -466,7 +477,7 @@ export class GeoNetImportService {
     if (newEventsList.length > 0) {
       try {
         const eventsToInsert = newEventsList.map(event => this.convertToMergedEvent(event, catalogueId, focalMechanismsMap));
-        await dbQueries.bulkInsertEvents(eventsToInsert);
+        await getDbQueries().bulkInsertEvents(eventsToInsert);
         newEventsCount = newEventsList.length;
         console.log(`[GeoNetImportService] Bulk inserted ${newEventsCount} new events`);
       } catch (error) {
@@ -564,7 +575,7 @@ export class GeoNetImportService {
       }
     }
 
-    await dbQueries.insertEvent({
+    await getDbQueries().insertEvent({
       id: eventId,
       catalogue_id: catalogueId,
       source_id: event.EventID,
@@ -621,7 +632,7 @@ export class GeoNetImportService {
       }
     }
 
-    await dbQueries.updateEvent(eventId, {
+    await getDbQueries().updateEvent(eventId, {
       time: event.Time,
       latitude: event.Latitude,
       longitude: event.Longitude,
@@ -648,7 +659,7 @@ export class GeoNetImportService {
   }): Promise<void> {
     const historyId = uuidv4();
     
-    await dbQueries.insertImportHistory(
+    await getDbQueries().insertImportHistory(
       historyId,
       data.catalogueId,
       data.startTime.toISOString(),
@@ -665,7 +676,7 @@ export class GeoNetImportService {
    * Get import history for a catalogue
    */
   async getImportHistory(catalogueId: string, limit: number = 10): Promise<ImportHistory[]> {
-    return await dbQueries.getImportHistory(catalogueId, limit);
+    return await getDbQueries().getImportHistory(catalogueId, limit);
   }
   
   /**

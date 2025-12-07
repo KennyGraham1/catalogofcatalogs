@@ -257,8 +257,8 @@ export default function MergePage() {
       const sourceCatalogues = selectedCatalogueData.map(cat => ({
         id: cat.id,
         name: cat.name,
-        events: cat.event_count || cat.events || 0,
-        source: cat.source || cat.name || 'unknown'
+        events: cat.event_count || 0,
+        source: cat.name || 'unknown'
       }));
 
       // Update step 1
@@ -368,7 +368,7 @@ export default function MergePage() {
   // Memoized total events calculation
   const getTotalSelectedEvents = useMemo(() => {
     return getSelectedCatalogues.reduce((total, catalogue) => {
-      const eventCount = catalogue.events || catalogue.event_count || 0;
+      const eventCount = catalogue.event_count || 0;
       return total + eventCount;
     }, 0);
   }, [getSelectedCatalogues]);
@@ -378,7 +378,7 @@ export default function MergePage() {
     const selected = getSelectedCatalogues;
     if (selected.length === 0) return 0;
     if (selected.length === 1) {
-      const eventCount = selected[0].events || selected[0].event_count || 0;
+      const eventCount = selected[0].event_count || 0;
       return eventCount;
     }
 

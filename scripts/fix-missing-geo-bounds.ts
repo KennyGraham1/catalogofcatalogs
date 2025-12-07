@@ -13,6 +13,11 @@ import { extractBoundsFromMergedEvents } from '../lib/geo-bounds-utils';
 async function fixMissingGeoBounds() {
   console.log('Starting geographic bounds fix...\n');
 
+  if (!dbQueries) {
+    console.error('Database not available');
+    process.exit(1);
+  }
+
   try {
     // Get all catalogues
     const catalogues = await dbQueries.getCatalogues();

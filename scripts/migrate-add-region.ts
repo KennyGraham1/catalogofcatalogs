@@ -1,90 +1,70 @@
 /**
- * Migration script to add region and location_name fields to merged_events table
- * Run this script to update existing databases
+ * Migration script to add region index to merged_events collection
+ *
+ * Note: MongoDB is schemaless, so we don't need to add columns.
+ * This script ensures the proper index exists for region queries.
  */
 
-import sqlite3 from 'sqlite3';
-import path from 'path';
+import { MongoClient } from 'mongodb';
 
-const DB_PATH = path.join(process.cwd(), 'merged_catalogues.db');
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+const DATABASE_NAME = process.env.MONGODB_DATABASE || 'earthquake_catalogue';
 
-function runMigration() {
-  const db = new sqlite3.Database(DB_PATH, (err) => {
-    if (err) {
-      console.error('Error opening database:', err);
-      process.exit(1);
+async function runMigration() {
+  console.log('Starting migration: Add region index\n');
+  console.log(`   URI: ${MONGODB_URI}`);
+  console.log(`   Database: ${DATABASE_NAME}\n`);
+
+  const client = new MongoClient(MONGODB_URI);
+
+  try {
+    await client.connect();
+    console.log('✓ Connected to MongoDB\n');
+
+    const db = client.db(DATABASE_NAME);
+    const eventsCollection = db.collection('merged_events');
+
+    // Create index for region field
+    console.log('Creating index for region field...');
+
+    try {
+      await eventsCollection.createIndex({ region: 1 }, { name: 'idx_region' });
+      console.log('✓ Created index: idx_region');
+    } catch (err: any) {
+      if (err.code === 85 || err.code === 86) {
+        console.log('  Index already exists: idx_region');
+      } else {
+        console.error('❌ Error creating index:', err.message);
+      }
     }
-    console.log('Connected to database');
-  });
 
-  db.serialize(() => {
-    // Check if columns already exist
-    db.all("PRAGMA table_info(merged_events)", (err, columns: any[]) => {
-      if (err) {
-        console.error('Error checking table schema:', err);
-        db.close();
-        process.exit(1);
+    // Create index for location_name field
+    try {
+      await eventsCollection.createIndex({ location_name: 1 }, { name: 'idx_location_name' });
+      console.log('✓ Created index: idx_location_name');
+    } catch (err: any) {
+      if (err.code === 85 || err.code === 86) {
+        console.log('  Index already exists: idx_location_name');
+      } else {
+        console.error('❌ Error creating index:', err.message);
       }
+    }
 
-      const hasRegion = columns.some(col => col.name === 'region');
-      const hasLocationName = columns.some(col => col.name === 'location_name');
+    console.log('\n✅ Migration completed successfully!');
 
-      if (hasRegion && hasLocationName) {
-        console.log('✓ Columns already exist, no migration needed');
-        db.close();
-        return;
-      }
-
-      console.log('Adding new columns to merged_events table...');
-
-      // Add region column if it doesn't exist
-      if (!hasRegion) {
-        db.run('ALTER TABLE merged_events ADD COLUMN region TEXT', (err) => {
-          if (err) {
-            console.error('Error adding region column:', err);
-          } else {
-            console.log('✓ Added region column');
-          }
-        });
-      }
-
-      // Add location_name column if it doesn't exist
-      if (!hasLocationName) {
-        db.run('ALTER TABLE merged_events ADD COLUMN location_name TEXT', (err) => {
-          if (err) {
-            console.error('Error adding location_name column:', err);
-          } else {
-            console.log('✓ Added location_name column');
-          }
-        });
-      }
-
-      // Create index for region
-      if (!hasRegion) {
-        db.run('CREATE INDEX IF NOT EXISTS idx_merged_events_region ON merged_events(region)', (err) => {
-          if (err) {
-            console.error('Error creating region index:', err);
-          } else {
-            console.log('✓ Created index on region column');
-          }
-        });
-      }
-
-      // Close database after all operations
-      setTimeout(() => {
-        db.close((err) => {
-          if (err) {
-            console.error('Error closing database:', err);
-          } else {
-            console.log('\n✓ Migration completed successfully');
-          }
-        });
-      }, 1000);
-    });
-  });
+  } catch (error) {
+    console.error('\n❌ Migration failed:', error);
+    process.exit(1);
+  } finally {
+    await client.close();
+    console.log('\n✓ Disconnected from MongoDB');
+  }
 }
 
 // Run migration
-console.log('Starting migration: Add region and location_name fields\n');
-runMigration();
-
+runMigration()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error('Migration failed:', error);
+    process.exit(1);
+  });

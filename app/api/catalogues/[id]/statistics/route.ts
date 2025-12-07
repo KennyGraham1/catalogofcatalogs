@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { dbQueries } from '@/lib/db';
+import { dbQueries, MergedEvent } from '@/lib/db';
 import { Logger, NotFoundError, formatErrorResponse } from '@/lib/errors';
 
 const logger = new Logger('CatalogueStatisticsAPI');
@@ -45,6 +45,13 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    if (!dbQueries) {
+      return NextResponse.json(
+        { error: 'Database not available' },
+        { status: 500 }
+      );
+    }
+
     const catalogueId = params.id;
     logger.info('Fetching catalogue statistics', { catalogueId });
 
@@ -55,7 +62,8 @@ export async function GET(
     }
 
     // Get all events for this catalogue
-    const events = await dbQueries.getEventsByCatalogueId(catalogueId);
+    const eventsResult = await dbQueries.getEventsByCatalogueId(catalogueId);
+    const events: MergedEvent[] = Array.isArray(eventsResult) ? eventsResult : eventsResult.data;
 
     if (!events || events.length === 0) {
       return NextResponse.json({
@@ -83,7 +91,7 @@ export async function GET(
       : 0;
 
     // Calculate depth statistics
-    const depths = events.map(e => e.depth).filter(d => d !== null && d !== undefined);
+    const depths = events.map(e => e.depth).filter((d): d is number => d !== null && d !== undefined);
 
     // Count magnitude types
     const magnitudeTypeCounts = events.reduce((acc, event) => {
@@ -99,18 +107,18 @@ export async function GET(
     // Calculate quality metrics
     const azimuthalGaps = events
       .map(e => e.azimuthal_gap)
-      .filter(g => g !== null && g !== undefined);
-    
+      .filter((g): g is number => g !== null && g !== undefined);
+
     const stationCounts = events
       .map(e => e.used_station_count)
-      .filter(c => c !== null && c !== undefined);
+      .filter((c): c is number => c !== null && c !== undefined);
 
     const eventsWithUncertainty = events.filter(e =>
       e.latitude_uncertainty !== null || e.longitude_uncertainty !== null
     ).length;
 
     const eventsWithFocalMechanism = events.filter(e =>
-      e.focal_mechanism !== null && e.focal_mechanism !== undefined
+      e.focal_mechanisms !== null && e.focal_mechanisms !== undefined
     ).length;
 
     const statistics: CatalogueStatistics = {
