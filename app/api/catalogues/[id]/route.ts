@@ -44,10 +44,6 @@ export async function PATCH(
   try {
     logger.info('Updating catalogue', { id: params.id });
 
-    // Get authenticated user
-    // Auth removed - user is anonymous
-    const userId = null;
-
     const body = await request.json();
     const { name } = body;
 
@@ -67,7 +63,7 @@ export async function PATCH(
 
     await dbQueries.updateCatalogueName(name, params.id);
 
-    logger.info('Catalogue updated successfully', { id: params.id, userId });
+    logger.info('Catalogue updated successfully', { id: params.id });
 
     // Clear cache since catalogue was updated
     apiCache.clearAll();
@@ -91,10 +87,6 @@ export async function DELETE(
   try {
     logger.info('Deleting catalogue', { id: params.id });
 
-    // Get authenticated user
-    // Auth removed - user is anonymous
-    const userId = null;
-
     if (!dbQueries) {
       return NextResponse.json(
         { error: 'Database not initialized' },
@@ -104,7 +96,7 @@ export async function DELETE(
 
     await dbQueries.deleteCatalogue(params.id);
 
-    logger.info('Catalogue deleted successfully', { id: params.id, userId });
+    logger.info('Catalogue deleted successfully', { id: params.id });
 
     // Clear cache since catalogue was deleted
     apiCache.clearAll();

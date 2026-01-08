@@ -92,7 +92,6 @@ git commit --no-verify -m "message"
 - **Overall**: 70%+ code coverage
 - **Critical Paths**: 90%+ coverage
   - Data import/export
-  - Authentication & authorization
   - Data validation
   - Database operations
 - **UI Components**: 60%+ coverage
@@ -304,7 +303,7 @@ Edit `.github/workflows/test.yml`:
   run: npm test -- --coverage --maxWorkers=2
   env:
     NODE_ENV: test
-    DATABASE_PATH: ./test.db
+    MONGODB_URI: mongodb://localhost:27017/test_catalogue
 ```
 
 ### Adding Deployment Target

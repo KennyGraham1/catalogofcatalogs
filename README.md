@@ -257,7 +257,6 @@ catalogofcatalogs/
 
 - **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation
 - **[Architecture](docs/ARCHITECTURE.md)** - System architecture diagrams
-- **[Authentication](docs/AUTHENTICATION.md)** - Authentication system documentation
 - **[Data Validation Guide](docs/DATA_VALIDATION_GUIDE.md)** - Data quality and validation
 
 ### 📋 Feature-Specific Documentation
@@ -426,7 +425,6 @@ For detailed database management instructions, see [DATABASE_MANAGEMENT.md](DATA
 - [ ] Enhanced QuakeML support with full picks and arrivals
 - [ ] Advanced data quality validation and anomaly detection
 - [ ] Export to additional formats (GeoJSON, KML)
-- [ ] User authentication and authorization
 - [ ] Collaborative features (sharing, comments, annotations)
 - [ ] Performance optimization for large datasets (>100k events)
 - [ ] Real-time event notifications

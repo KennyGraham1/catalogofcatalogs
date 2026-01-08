@@ -18,7 +18,6 @@ flowchart LR
             EventsAPI["/api/events"]
             MergeAPI["/api/merge"]
             ImportAPI["/api/import"]
-            AuthAPI["/api/auth"]
         end
         
         subgraph Libraries["Core Libraries"]
@@ -30,10 +29,10 @@ flowchart LR
         end
     end
     
-    subgraph Database["💾 SQLite Database (WAL Mode)"]
-        DB[(merged_catalogues.db)]
-        WAL[("WAL File<br/>Write-Ahead Log")]
-        SHM[("SHM File<br/>Shared Memory")]
+    subgraph Database["💾 MongoDB Database"]
+        DB[(earthquake_catalogue)]
+        Collections[("Collections<br/>catalogues, events")]
+        Indexes[("Indexes")]
     end
     
     subgraph External["🌐 External Services"]
@@ -49,8 +48,8 @@ flowchart LR
     
     Backend --> Libraries
     Libraries --> DB
-    DB --> WAL
-    WAL --> SHM
+    DB --> Collections
+    Collections --> Indexes
     
     ImportAPI --> External
     
@@ -60,6 +59,6 @@ flowchart LR
     classDef external fill:#8b5cf6,stroke:#7c3aed,color:#fff
     
     class UI,State,Maps,Pages,Components,Hooks frontend
-    class UploadAPI,CataloguesAPI,EventsAPI,MergeAPI,ImportAPI,AuthAPI backend
-    class DB,WAL,SHM db
+    class UploadAPI,CataloguesAPI,EventsAPI,MergeAPI,ImportAPI backend
+    class DB,Collections,Indexes db
     class GeoNet external

@@ -16,9 +16,6 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    // UserId is now null as auth is removed
-    const userId = undefined;
-
     // Parse and validate request body
     const {
       startDate,
@@ -124,7 +121,6 @@ export async function POST(request: NextRequest) {
       updateExisting: updateExisting ?? false,
       catalogueId,
       catalogueName,
-      userId, // Pass undefined user ID to import service
     });
 
     console.log('[API] Import completed:', result);

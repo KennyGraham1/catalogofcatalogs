@@ -3,7 +3,6 @@
  * 
  * Tests for API vulnerabilities including:
  * - Input validation
- * - Authentication bypass
  * - Authorization issues
  * - Rate limiting
  * - CSRF protection
@@ -43,7 +42,7 @@ describe('API Endpoint Security Tests', () => {
     it('should reject excessively long input strings', async () => {
       const longString = 'a'.repeat(100000);
       const body = { name: longString };
-      
+
       expect(body.name.length).toBeGreaterThan(10000);
     });
   });
@@ -80,7 +79,7 @@ describe('API Endpoint Security Tests', () => {
   describe('HTTP Method Validation', () => {
     it('should reject unsupported HTTP methods', () => {
       const unsupportedMethods = ['PUT', 'TRACE', 'OPTIONS', 'HEAD'];
-      
+
       for (const method of unsupportedMethods) {
         expect(method).toBeDefined();
       }
@@ -188,7 +187,7 @@ describe('API Endpoint Security Tests', () => {
       ];
 
       const errorMessage = 'Invalid request';
-      
+
       for (const pattern of sensitivePatterns) {
         expect(pattern.test(errorMessage)).toBe(false);
       }

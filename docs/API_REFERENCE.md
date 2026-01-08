@@ -4,58 +4,23 @@ Complete reference for all API endpoints in the Earthquake Catalogue Platform.
 
 ## Table of Contents
 
-1. [Authentication](#authentication)
-2. [Catalogues API](#catalogues-api)
-3. [Events API](#events-api)
-4. [Import API](#import-api)
-5. [Upload API](#upload-api)
-6. [Merge API](#merge-api)
-7. [Export API](#export-api)
-8. [Health Check API](#health-check-api)
-9. [Error Responses](#error-responses)
+1. [Catalogues API](#catalogues-api)
+2. [Events API](#events-api)
+3. [Import API](#import-api)
+4. [Upload API](#upload-api)
+5. [Merge API](#merge-api)
+6. [Export API](#export-api)
+7. [Health Check API](#health-check-api)
+8. [Error Responses](#error-responses)
 
 ---
 
-## Authentication
+## Security Features
 
-The API uses NextAuth.js for authentication with session-based authentication.
-
-### Authentication Endpoints
-
-#### Login
-**Endpoint**: `POST /api/auth/signin`
-
-#### Register
-**Endpoint**: `POST /api/auth/register`
-
-**Request Body**:
-```json
-{
-  "email": "user@example.com",
-  "password": "secure-password",
-  "name": "User Name"
-}
-```
-
-#### Get CSRF Token
-**Endpoint**: `GET /api/auth/csrf`
-
-Returns a CSRF token required for state-changing operations.
-
-**Response**: `200 OK`
-```json
-{
-  "csrfToken": "64-character-hex-token"
-}
-```
-
-### Security Features
-
-#### Rate Limiting
+### Rate Limiting
 
 All API endpoints are protected by rate limiting to prevent abuse:
 
-- **Authentication endpoints** (`/api/auth/*`): 5 requests per minute
 - **Read operations** (`GET` requests): 120 requests per minute
 - **Write operations** (`POST/PUT/DELETE/PATCH`): 60 requests per minute
 
@@ -70,37 +35,6 @@ When rate limit is exceeded, the API returns `429 Too Many Requests` with the fo
 {
   "error": "Too many requests. Please try again later.",
   "retryAfter": 45
-}
-```
-
-#### CSRF Protection
-
-All state-changing operations (`POST`, `PUT`, `PATCH`, `DELETE`) require a valid CSRF token.
-
-**How to use CSRF protection**:
-
-1. Get a CSRF token from `/api/auth/csrf`
-2. Include the token in the `X-CSRF-Token` header for all state-changing requests
-
-**Example**:
-```bash
-# Get CSRF token
-curl -X GET https://example.com/api/auth/csrf \
-  -H "Cookie: session-token"
-
-# Use CSRF token in request
-curl -X POST https://example.com/api/catalogues \
-  -H "Cookie: session-token" \
-  -H "X-CSRF-Token: your-csrf-token-here" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "My Catalogue", "events": [...]}'
-```
-
-**CSRF Error Response**: `403 Forbidden`
-```json
-{
-  "error": "Invalid or missing CSRF token",
-  "code": "CSRF_TOKEN_INVALID"
 }
 ```
 
@@ -738,8 +672,7 @@ All API endpoints follow a consistent error response format.
 | 200 | Success |
 | 201 | Created |
 | 400 | Bad Request - Invalid input |
-| 401 | Unauthorized - Authentication required |
-| 403 | Forbidden - Invalid CSRF token or insufficient permissions |
+| 403 | Forbidden - Access denied |
 | 404 | Not Found - Resource doesn't exist |
 | 429 | Too Many Requests - Rate limit exceeded |
 | 500 | Internal Server Error |
@@ -751,8 +684,6 @@ All API endpoints follow a consistent error response format.
 |------|-------------|
 | `INVALID_INPUT` | Request validation failed |
 | `NOT_FOUND` | Resource not found |
-| `UNAUTHORIZED` | Authentication required |
-| `CSRF_TOKEN_INVALID` | Invalid or missing CSRF token |
 | `RATE_LIMIT_EXCEEDED` | Too many requests |
 | `DATABASE_ERROR` | Database operation failed |
 | `PARSE_ERROR` | File parsing failed |

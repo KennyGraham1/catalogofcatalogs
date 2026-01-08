@@ -63,23 +63,6 @@ describe('Catalogues API', () => {
       // Error: 'Catalogue with this name already exists'
       expect(true).toBe(true);
     });
-
-    it('should require authentication', async () => {
-      // POST without authentication
-      // Expected: 401 Unauthorized
-      expect(true).toBe(true);
-    });
-
-    it('should require editor or admin role', async () => {
-      // POST with viewer role
-      // Expected: 403 Forbidden
-      expect(true).toBe(true);
-    });
-
-    it('should track creator in created_by field', async () => {
-      // Verify created_by is set to authenticated user ID
-      expect(true).toBe(true);
-    });
   });
 
   describe('GET /api/catalogues/[id]', () => {
@@ -114,18 +97,6 @@ describe('Catalogues API', () => {
       expect(true).toBe(true);
     });
 
-    it('should require authentication', async () => {
-      // PUT without auth
-      // Expected: 401 Unauthorized
-      expect(true).toBe(true);
-    });
-
-    it('should require editor or admin role', async () => {
-      // PUT with viewer role
-      // Expected: 403 Forbidden
-      expect(true).toBe(true);
-    });
-
     it('should update updated_at timestamp', async () => {
       // Verify updated_at is set to current time
       expect(true).toBe(true);
@@ -147,18 +118,6 @@ describe('Catalogues API', () => {
     it('should return 404 when deleting non-existent catalogue', async () => {
       // DELETE /api/catalogues/999
       // Expected: 404 Not Found
-      expect(true).toBe(true);
-    });
-
-    it('should require authentication', async () => {
-      // DELETE without auth
-      // Expected: 401 Unauthorized
-      expect(true).toBe(true);
-    });
-
-    it('should require editor or admin role', async () => {
-      // DELETE with viewer role
-      // Expected: 403 Forbidden
       expect(true).toBe(true);
     });
   });

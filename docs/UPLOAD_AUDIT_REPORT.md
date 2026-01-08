@@ -52,7 +52,6 @@
   - Depth range validation
   - Geographic bounds validation
 - ✅ Error handling: Proper try-catch with detailed error messages
-- ✅ Authentication: User session tracking for audit logs
 - ✅ Audit logging: All imports logged via `auditApiAction()`
 - ✅ Cache invalidation: Properly invalidates catalogue cache after import
 - ⚠️ No file size limit (not applicable - API import, not file upload)
@@ -74,7 +73,6 @@
 - ✅ Input validation: catalogueId required, limit parameter validated
 - ✅ Error handling: Proper try-catch with error messages
 - ✅ Parameter validation: Limit must be positive number
-- ⚠️ No authentication check (consider adding if sensitive)
 - ⚠️ No CSRF protection (not required for GET requests)
 
 ---
@@ -182,11 +180,6 @@ export const fileUploadSchema = z.object({
 - `/api/upload` - ✅ Protected
 - `/api/import/geonet` - ✅ Protected
 
-### Authentication
-✅ User tracking implemented:
-- `/api/import/geonet` - Tracks user ID for audit logs
-- `/api/upload` - No authentication required (consider adding)
-
 ### Input Sanitization
 ✅ All inputs validated before processing:
 - File type validation
@@ -202,20 +195,12 @@ export const fileUploadSchema = z.object({
 None - all critical issues addressed
 
 ### Medium Priority
-1. **Consider adding authentication to `/api/upload`**
-   - Currently allows unauthenticated file uploads
-   - May want to track who uploads what for audit purposes
-
-2. **Consider rate limiting on upload endpoints**
+1. **Consider rate limiting on upload endpoints**
    - Prevent abuse of large file uploads
-   - Implement per-user or per-IP rate limits
+   - Implement per-IP rate limits
 
 ### Low Priority
-1. **Add authentication check to `/api/import/history`**
-   - Currently allows anyone to view import history
-   - Consider restricting to authenticated users or catalogue owners
-
-2. **Add file content validation**
+1. **Add file content validation**
    - Scan for malicious content in uploaded files
    - Implement virus scanning for production environments
 

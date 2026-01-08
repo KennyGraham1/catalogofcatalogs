@@ -19,7 +19,7 @@ This diagram shows the complete application structure including the frontend (Re
 
 **Key Components:**
 - **Frontend**: React components with App Router, state management, and Leaflet map visualizations
-- **Backend**: Next.js API routes for upload, catalogues, events, merge, import, and authentication
+- **Backend**: Next.js API routes for upload, catalogues, events, merge, and import
 - **Libraries**: Parsers (CSV, JSON, QuakeML), validators, quality checkers
 - **Database**: MongoDB with connection pooling for scalable read/write performance
 - **External Services**: GeoNet API for importing New Zealand earthquake data
@@ -45,7 +45,6 @@ flowchart TB
             EventsAPI["/api/events"]
             MergeAPI["/api/merge"]
             ImportAPI["/api/import"]
-            AuthAPI["/api/auth"]
         end
         
         subgraph Libraries["Core Libraries"]

@@ -69,7 +69,6 @@ Technical documentation for developers working on the platform.
 Complete REST API documentation.
 
 **Contents:**
-- Authentication
 - Catalogues API
 - Events API
 - Import API

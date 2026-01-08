@@ -3,7 +3,7 @@
  * 
  * Implements token bucket rate limiting using LRU cache to prevent:
  * - DDoS attacks
- * - Brute force attacks on authentication endpoints
+ * - Brute force attacks
  * - API abuse
  * 
  * Uses LRU cache with TTL to automatically expire old entries and prevent memory leaks.
@@ -198,10 +198,10 @@ export function getClientIp(request: Request): string {
  * @example
  * ```typescript
  * import { NextResponse } from 'next/server';
- * import { applyRateLimit, authRateLimiter } from '@/lib/rate-limiter';
+ * import { applyRateLimit, apiRateLimiter } from '@/lib/rate-limiter';
  *
  * export async function POST(request: Request) {
- *   const rateLimitResult = applyRateLimit(request, authRateLimiter, 5);
+ *   const rateLimitResult = applyRateLimit(request, apiRateLimiter, 60);
  *
  *   if (!rateLimitResult.success) {
  *     return NextResponse.json(

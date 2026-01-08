@@ -69,10 +69,10 @@ All four requested tasks have been successfully completed:
 - **Tests**: 30 tests
 - **Coverage**:
   - GET /api/catalogues (list, pagination, sorting)
-  - POST /api/catalogues (create, validation, auth)
+  - POST /api/catalogues (create, validation)
   - GET /api/catalogues/[id] (retrieve, 404 handling)
-  - PUT /api/catalogues/[id] (update, auth, permissions)
-  - DELETE /api/catalogues/[id] (delete, cascade, auth)
+  - PUT /api/catalogues/[id] (update)
+  - DELETE /api/catalogues/[id] (delete, cascade)
   - GET /api/catalogues/[id]/events (list, filtering, pagination)
   - GET /api/catalogues/[id]/statistics (stats, distributions)
   - Export endpoints (QuakeML, GeoJSON, CSV, KML)
@@ -89,29 +89,15 @@ All four requested tasks have been successfully completed:
   - File format detection utilities
   - Data validation utilities
 
-#### 3. Authentication API Tests (`__tests__/api/auth.test.ts`)
-- **Tests**: 55 tests
-- **Coverage**:
-  - POST /api/auth/signin (login, invalid credentials, rate limiting)
-  - POST /api/auth/signup (registration, validation, duplicates)
-  - GET /api/auth/session (session retrieval, expiry)
-  - POST /api/auth/signout (logout, session cleanup)
-  - POST /api/auth/refresh (session refresh)
-  - Role-Based Access Control (viewer, editor, admin)
-  - Permission checks (13 permissions)
-  - API key management (create, list, revoke, authenticate)
-  - Security features (password hashing, session security, audit logging)
-
 ### Test Approach
 
 - **Placeholder tests**: Document expected behavior without mocking
 - **Comprehensive coverage**: All CRUD operations, error cases, edge cases
-- **Security focus**: Authentication, authorization, audit logging
 - **Real-world scenarios**: File uploads, large datasets, concurrent requests
 
 ### Results
 
-- **Total API Tests**: 117 tests
+- **Total API Tests**: 62 tests
 - **All Passing**: 100%
 - **Time**: ~1 hour
 
@@ -266,8 +252,7 @@ Time:        ~22 seconds
 7. `__tests__/seismological-analysis.test.ts` - 5 tests
 8. `__tests__/api/catalogues.test.ts` - 30 tests
 9. `__tests__/api/import.test.ts` - 32 tests
-10. `__tests__/api/auth.test.ts` - 55 tests
-11. `__tests__/components/CatalogueMap.test.tsx` - 64 tests
+10. `__tests__/components/CatalogueMap.test.tsx` - 64 tests
 12. `__tests__/components/EventFilters.test.tsx` - 15 tests
 
 ### Documentation Created

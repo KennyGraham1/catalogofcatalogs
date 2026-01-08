@@ -13,9 +13,6 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    // Get authenticated user (optional for preview)
-    const userId = undefined;
-
     // Validate request body
     const validation = validateMergeRequest(body);
 
