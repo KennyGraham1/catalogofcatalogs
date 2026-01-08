@@ -44,7 +44,7 @@ This will create a catalogue called **"GeoNet - Real Data (Baseline)"** with:
    ```
 
 2. **Navigate to the Import page**:
-   - Open http://localhost:3001/import
+   - Open http://localhost:3000/import
    - The Import link is now in the main navigation menu
 
 3. **Configure your import**:
@@ -308,6 +308,6 @@ You now have access to real New Zealand earthquake data through the GeoNet impor
 
 **Next Steps**:
 - Run `npx tsx scripts/populate-geonet-baseline.ts` to create your baseline catalogue
-- Visit http://localhost:3001/import to explore the import interface
+- Visit http://localhost:3000/import to explore the import interface
 - Compare real GeoNet data with your synthetic catalogues
 

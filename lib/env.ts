@@ -11,10 +11,7 @@
 /**
  * Required environment variables
  */
-const REQUIRED_ENV_VARS = [
-  'NEXTAUTH_SECRET',
-  'NEXTAUTH_URL',
-] as const;
+const REQUIRED_ENV_VARS = [] as const;
 
 /**
  * Optional environment variables with defaults
@@ -46,35 +43,6 @@ function validateEnvVar(name: string, value: string | undefined): {
 
   // Specific validations
   switch (name) {
-    case 'NEXTAUTH_SECRET':
-      // Should be at least 32 characters for security
-      if (value.length < 32) {
-        return {
-          valid: false,
-          error: `${name} should be at least 32 characters long for security. Generate with: openssl rand -base64 32`,
-        };
-      }
-      // Warn if using default/example value
-      if (value === 'your-secret-key-here' || value === 'change-me') {
-        return {
-          valid: false,
-          error: `${name} is set to a default value. Please generate a secure secret with: openssl rand -base64 32`,
-        };
-      }
-      break;
-
-    case 'NEXTAUTH_URL':
-      // Should be a valid URL
-      try {
-        new URL(value);
-      } catch {
-        return {
-          valid: false,
-          error: `${name} must be a valid URL (e.g., http://localhost:3000 or https://example.com)`,
-        };
-      }
-      break;
-
     case 'NODE_ENV':
       // Should be one of the standard values
       const validEnvs = ['development', 'production', 'test'];
@@ -112,7 +80,7 @@ export function validateEnvironment(): void {
   // Validate optional variables if they are set
   for (const [varName, defaultValue] of Object.entries(OPTIONAL_ENV_VARS)) {
     const value = process.env[varName];
-    
+
     if (value) {
       const result = validateEnvVar(varName, value);
       if (!result.valid) {
@@ -146,9 +114,7 @@ export function validateEnvironment(): void {
  * Provides type-safe access to environment variables with defaults
  */
 export const env = {
-  // Required variables (validated on startup)
-  NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET!,
-  NEXTAUTH_URL: process.env.NEXTAUTH_URL!,
+
 
   // Optional variables with defaults
   MONGODB_URI: process.env.MONGODB_URI || OPTIONAL_ENV_VARS.MONGODB_URI,

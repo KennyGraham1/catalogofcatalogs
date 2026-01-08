@@ -44,13 +44,13 @@ A comprehensive web application for managing, analyzing, and visualizing earthqu
 
 - **Node.js**: Version 18.x or higher
 - **npm**: Version 9.x or higher
-- **SQLite3**: For database storage
+- **MongoDB**: For database storage (local or Atlas)
 
 ### Installation
 
 1. **Clone the repository**
    ```bash
-   git clone https://git.gns.cri.nz/earthquake/catalogofcatalogs.git
+   git clone https://github.com/KennyGraham1/catalogofcatalogs.git
    cd catalogofcatalogs
    ```
 
@@ -59,14 +59,11 @@ A comprehensive web application for managing, analyzing, and visualizing earthqu
    npm install
    ```
 
-3. **Set up the database**
+3. **Set up MongoDB**
    ```bash
-   # Initialize database with schema
-   npm run tsx scripts/init-database.ts
-
-   # Run database migrations
-   node scripts/migrate-add-source-id.js
-   node scripts/migrate-add-geo-bounds.js
+   # Start MongoDB locally or configure MONGODB_URI in .env
+   # Initialize database with collections and indexes
+   npx tsx scripts/init-database.ts
    ```
 
 4. **Start the development server**
@@ -137,20 +134,17 @@ For detailed instructions, see [GEONET_IMPORT_DOCUMENTATION.md](GEONET_IMPORT_DO
 
 ### Visualizing Data
 
-1. Navigate to the **Visualize** page to see basic map visualization
-2. Navigate to the **Analytics** page for advanced features:
-   - Enhanced map with uncertainty ellipses
-   - Focal mechanism beach ball diagrams
-   - Station coverage visualization
-   - Quality score analysis
-   - Event detail cards with comprehensive metadata
-3. Navigate to the **Advanced Analytics** page for seismological analysis:
-   - Gutenberg-Richter b-value calculation
-   - Completeness magnitude (Mc) estimation
-   - Temporal pattern analysis and cluster detection
-   - Seismic moment and energy release calculations
-
-For detailed information, see [ADVANCED_ANALYTICS_DOCUMENTATION.md](ADVANCED_ANALYTICS_DOCUMENTATION.md)
+Navigate to the **Analytics** page for visualization and analysis features:
+- Interactive map with event clustering
+- Enhanced map with uncertainty ellipses
+- Focal mechanism beach ball diagrams
+- Station coverage visualization
+- Quality score analysis
+- Event detail cards with comprehensive metadata
+- Gutenberg-Richter b-value calculation
+- Completeness magnitude (Mc) estimation
+- Temporal pattern analysis and cluster detection
+- Seismic moment and energy release calculations
 
 ### Exporting Data
 
@@ -248,7 +242,7 @@ catalogofcatalogs/
 
 ### Backend
 - **Next.js API Routes**: Serverless API endpoints
-- **SQLite3**: Lightweight database with full QuakeML 1.2 schema
+- **MongoDB**: Scalable NoSQL database with full QuakeML 1.2 schema
 - **xml2js**: XML parsing for QuakeML
 - **uuid**: Unique identifier generation
 
@@ -259,57 +253,18 @@ catalogofcatalogs/
 
 ## 📚 Documentation
 
-### 📖 User Documentation
-
-- **[User Guide](docs/USER_GUIDE.md)** - Complete guide for end users
-  - Getting started and navigation
-  - Managing catalogues
-  - Uploading and importing data
-  - Visualization and analytics
-  - Exporting data
-  - Advanced features and best practices
-
-- **[FAQ](docs/FAQ.md)** - Frequently asked questions
-  - Common issues and solutions
-  - Best practices
-  - Troubleshooting guide
-
-### 🔧 Technical Documentation
-
-- **[Developer Guide](docs/DEVELOPER_GUIDE.md)** - Technical documentation for developers
-  - Architecture overview
-  - Technology stack and project structure
-  - Development workflow
-  - Testing and deployment
-  - Contributing guidelines
+### � Technical Documentation
 
 - **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation
-  - All endpoints with examples
-  - Request/response formats
-  - Error handling
-  - Authentication (future)
-
-- **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)** - Production deployment instructions
-  - Environment setup
-  - Docker deployment
-  - Manual deployment with systemd
-  - Reverse proxy configuration
-  - Security hardening
-  - Monitoring and backup strategies
-
+- **[Architecture](docs/ARCHITECTURE.md)** - System architecture diagrams
+- **[Authentication](docs/AUTHENTICATION.md)** - Authentication system documentation
 - **[Data Validation Guide](docs/DATA_VALIDATION_GUIDE.md)** - Data quality and validation
-  - Validation rules and constraints
-  - Quality metrics and scoring
-  - Best practices for data quality
 
 ### 📋 Feature-Specific Documentation
 
-- **[GeoNet Import Documentation](docs/GEONET_IMPORT_DOCUMENTATION.md)** - Complete guide to the GeoNet automatic import feature
 - **[GeoNet Baseline Setup](docs/GEONET_BASELINE_SETUP.md)** - Setting up baseline GeoNet data
 - **[GeoNet Implementation Summary](docs/GEONET_IMPORT_IMPLEMENTATION_SUMMARY.md)** - Technical implementation details
 - **[QuakeML Schema Design](docs/QUAKEML_SCHEMA_DESIGN.md)** - Database schema for QuakeML 1.2 support
-- **[QuakeML Testing Report](docs/QUAKEML_TESTING_REPORT.md)** - Comprehensive testing results
-- **[Database Management](docs/DATABASE_MANAGEMENT.md)** - Database storage, backups, and maintenance
 - **[Quick Test Guide](docs/QUICK_TEST_GUIDE.md)** - Quick reference for testing features
 
 ## 🔌 API Endpoints
@@ -350,7 +305,7 @@ catalogofcatalogs/
 
 ## 🗄 Database Schema
 
-The application uses SQLite with the following main tables:
+The application uses MongoDB with the following main collections:
 
 ### `merged_catalogues`
 Stores catalogue metadata:

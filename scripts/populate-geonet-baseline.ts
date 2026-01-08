@@ -60,7 +60,7 @@ async function populateGeoNetBaseline() {
     console.log('   and serves as a baseline/reference for New Zealand seismic activity.');
     console.log('');
     console.log('🔄 To update this catalogue with new data, visit:');
-    console.log('   http://localhost:3001/import');
+    console.log('   http://localhost:3000/import');
     console.log('');
 
     process.exit(result.success ? 0 : 1);
@@ -70,7 +70,7 @@ async function populateGeoNetBaseline() {
     console.error('Error:', error instanceof Error ? error.message : String(error));
     console.error('');
     console.error('This is not critical - you can manually import GeoNet data later');
-    console.error('by visiting: http://localhost:3001/import');
+    console.error('by visiting: http://localhost:3000/import');
     console.error('');
     
     process.exit(1);

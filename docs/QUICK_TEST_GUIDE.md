@@ -16,7 +16,7 @@
 ### 1. View Catalogues
 
 ```
-http://localhost:3001/catalogues
+http://localhost:3000/catalogues
 ```
 
 Look for:
@@ -28,17 +28,17 @@ Look for:
 
 **New Zealand - North Island:**
 ```bash
-curl "http://localhost:3001/api/catalogues/1935d106-6271-4d1b-b5e4-f33d37fe5100/events/filtered?minLatitude=-42.0&maxLatitude=-34.0&minLongitude=166.0&maxLongitude=179.0"
+curl "http://localhost:3000/api/catalogues/1935d106-6271-4d1b-b5e4-f33d37fe5100/events/filtered?minLatitude=-42.0&maxLatitude=-34.0&minLongitude=166.0&maxLongitude=179.0"
 ```
 
 **California - Southern California:**
 ```bash
-curl "http://localhost:3001/api/catalogues/e4ad0871-a6ff-45a3-8b9d-266426e782e8/events/filtered?minLatitude=32.5&maxLatitude=36.0&minLongitude=-121.0&maxLongitude=-114.0"
+curl "http://localhost:3000/api/catalogues/e4ad0871-a6ff-45a3-8b9d-266426e782e8/events/filtered?minLatitude=32.5&maxLatitude=36.0&minLongitude=-121.0&maxLongitude=-114.0"
 ```
 
 **Japan - Honshu Island:**
 ```bash
-curl "http://localhost:3001/api/catalogues/a98800b3-b424-4598-9f3c-2729c6619637/events/filtered?minLatitude=35.0&maxLatitude=41.0&minLongitude=138.0&maxLongitude=142.0"
+curl "http://localhost:3000/api/catalogues/a98800b3-b424-4598-9f3c-2729c6619637/events/filtered?minLatitude=35.0&maxLatitude=41.0&minLongitude=138.0&maxLongitude=142.0"
 ```
 
 ### 3. Test Focal Mechanisms

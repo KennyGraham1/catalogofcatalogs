@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
-import { Logger, formatErrorResponse } from '@/lib/errors';
-import { catalogueCache, generateCacheKey, invalidateCacheByPrefix } from '@/lib/cache';
+import { Logger, DatabaseError, formatErrorResponse } from '@/lib/errors';
+import { apiCache, generateCacheKey, catalogueCache, invalidateCacheByPrefix } from '@/lib/cache';
 import { applyRateLimit, readRateLimiter, apiRateLimiter } from '@/lib/rate-limiter';
-import { withCSRF } from '@/lib/csrf';
 import { v4 as uuidv4 } from 'uuid';
 
 const logger = new Logger('CataloguesAPI');
@@ -59,7 +58,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export const POST = withCSRF(async (request: NextRequest) => {
+export async function POST(request: NextRequest) {
   try {
     // Apply rate limiting (30 requests per minute for write operations)
     const rateLimitResult = applyRateLimit(request, apiRateLimiter, 30);
@@ -219,5 +218,5 @@ export const POST = withCSRF(async (request: NextRequest) => {
       { status: errorResponse.statusCode }
     );
   }
-});
+}
 

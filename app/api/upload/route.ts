@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseFile } from '@/lib/parsers';
-import { withCSRF } from '@/lib/csrf';
 import { type Delimiter } from '@/lib/delimiter-detector';
 import { type DateFormat } from '@/lib/date-format-detector';
+import { apiCache } from '@/lib/cache';
 
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
 
-export const POST = withCSRF(async (request: NextRequest) => {
+export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File;
@@ -87,5 +87,5 @@ export const POST = withCSRF(async (request: NextRequest) => {
       { status: 500 }
     );
   }
-});
+}
 

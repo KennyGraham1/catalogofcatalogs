@@ -2,7 +2,6 @@
  * MongoDB Database Module
  *
  * Provides database operations for the earthquake catalogue application.
- * Migrated from SQLite to MongoDB for better scalability.
  */
 
 import { getDb, getCollection, COLLECTIONS } from './mongodb';

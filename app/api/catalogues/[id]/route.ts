@@ -2,9 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { Logger, NotFoundError, DatabaseError, formatErrorResponse } from '@/lib/errors';
 import { apiCache } from '@/lib/cache';
-import { getSession } from '@/lib/auth';
-import { auditApiAction } from '@/lib/api-middleware';
-import { withCSRF } from '@/lib/csrf';
 
 const logger = new Logger('CatalogueAPI');
 
@@ -40,16 +37,16 @@ export async function GET(
   }
 }
 
-export const PATCH = withCSRF(async (
+export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } }
-) => {
+) {
   try {
     logger.info('Updating catalogue', { id: params.id });
 
     // Get authenticated user
-    const session = await getSession();
-    const userId = session?.user?.id;
+    // Auth removed - user is anonymous
+    const userId = null;
 
     const body = await request.json();
     const { name } = body;
@@ -70,19 +67,6 @@ export const PATCH = withCSRF(async (
 
     await dbQueries.updateCatalogueName(name, params.id);
 
-    // Update modified_by and modified_at if user is authenticated
-    if (userId) {
-      await dbQueries.updateCatalogueMetadata(params.id, {
-        modified_by: userId,
-        modified_at: new Date().toISOString(),
-      });
-
-      // Create audit log
-      await auditApiAction(request as any, 'update_catalogue', 'catalogue', params.id, {
-        name,
-      });
-    }
-
     logger.info('Catalogue updated successfully', { id: params.id, userId });
 
     // Clear cache since catalogue was updated
@@ -98,18 +82,18 @@ export const PATCH = withCSRF(async (
       { status: errorResponse.statusCode }
     );
   }
-});
+}
 
-export const DELETE = withCSRF(async (
+export async function DELETE(
   request: NextRequest,
   { params }: { params: { id: string } }
-) => {
+) {
   try {
     logger.info('Deleting catalogue', { id: params.id });
 
     // Get authenticated user
-    const session = await getSession();
-    const userId = session?.user?.id;
+    // Auth removed - user is anonymous
+    const userId = null;
 
     if (!dbQueries) {
       return NextResponse.json(
@@ -119,11 +103,6 @@ export const DELETE = withCSRF(async (
     }
 
     await dbQueries.deleteCatalogue(params.id);
-
-    // Create audit log if user is authenticated
-    if (userId) {
-      await auditApiAction(request as any, 'delete_catalogue', 'catalogue', params.id);
-    }
 
     logger.info('Catalogue deleted successfully', { id: params.id, userId });
 
@@ -140,4 +119,4 @@ export const DELETE = withCSRF(async (
       { status: errorResponse.statusCode }
     );
   }
-});
+}

@@ -18,7 +18,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '../theme/ThemeToggle';
-import { UserMenu } from '@/components/auth/UserMenu';
+
 
 interface HeaderProps {
   onShowShortcuts?: () => void;
@@ -33,7 +33,7 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 10);
     };
-    
+
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
@@ -92,13 +92,13 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
             </Button>
           )}
           <ThemeToggle />
-          <UserMenu />
+
         </nav>
 
         {/* Mobile Menu Button */}
         <div className="flex md:hidden items-center gap-4">
           <ThemeToggle />
-          <UserMenu />
+
           <Button
             variant="ghost"
             size="icon"
@@ -120,8 +120,8 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
           <div className="container py-4">
             <nav className="flex flex-col gap-4">
               {navItems.map((item) => (
-                <Link 
-                  key={item.href} 
+                <Link
+                  key={item.href}
                   href={item.href}
                   className="flex items-center gap-3 p-2 hover:bg-muted rounded-md transition-colors"
                   onClick={() => setMobileMenuOpen(false)}

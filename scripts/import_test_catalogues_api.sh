@@ -1,10 +1,10 @@
 #!/bin/bash
 # Import test catalogues using the application's API
-# Make sure the application is running on http://localhost:3001
+# Make sure the application is running on http://localhost:3000
 
 set -e
 
-API_URL="http://localhost:3001/api"
+API_URL="http://localhost:3000/api"
 TEST_DATA_DIR="test-data"
 
 echo "============================================================"
@@ -14,7 +14,7 @@ echo ""
 
 # Check if server is running
 if ! curl -s "${API_URL}/catalogues" > /dev/null 2>&1; then
-    echo "❌ Error: Application is not running on http://localhost:3001"
+    echo "❌ Error: Application is not running on http://localhost:3000"
     echo "Please start the application first:"
     echo "  npm run dev"
     exit 1
@@ -102,7 +102,7 @@ echo ""
 echo "✓ All catalogues imported successfully!"
 echo ""
 echo "You can now:"
-echo "  1. View catalogues at: http://localhost:3001/catalogues"
+echo "  1. View catalogues at: http://localhost:3000/catalogues"
 echo "  2. Test geographic filtering with the bounds from each region"
 echo "  3. View focal mechanisms for M≥5.0 events on the map"
 echo "============================================================"

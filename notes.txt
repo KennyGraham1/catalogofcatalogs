@@ -47,3 +47,7 @@ mcp? app database and so on
 Application and databace separated 
 
 10K for 
+
+Instead of rendering all the data at once, we can use pagination or infinite scroll to load data as needed. or perhapd plot random samples of the data say 2000 events out of XXX and also show the total number of events that were selected. this will help with performance and scalability and also transparancy 
+
+there are some empty folders in the codebase. Please check them if they are needed or not and decide what to do with them. 

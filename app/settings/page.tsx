@@ -16,9 +16,6 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { UserProfileForm } from '@/components/auth/UserProfileForm';
-import { ChangePasswordForm } from '@/components/auth/ChangePasswordForm';
-import { ApiKeyManagement } from '@/components/auth/ApiKeyManagement';
 import {
   Settings,
   Database,
@@ -38,21 +35,15 @@ export default function SettingsPage() {
           </p>
         </div>
 
-        <Tabs defaultValue="account" className="space-y-4">
+        <Tabs defaultValue="general" className="space-y-4">
           <TabsList>
-            <TabsTrigger value="account">Account</TabsTrigger>
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="schema">Schema Mapping</TabsTrigger>
             <TabsTrigger value="visualization">Visualization</TabsTrigger>
             <TabsTrigger value="advanced">Advanced</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="account" className="space-y-4">
-            <UserProfileForm />
-            <ChangePasswordForm />
-            <ApiKeyManagement />
-          </TabsContent>
-          
+
           <TabsContent value="general" className="space-y-4">
             <Card className="shadow-sm">
               <CardHeader className="pb-3">
@@ -67,7 +58,7 @@ export default function SettingsPage() {
               <CardContent className="space-y-6">
                 <div className="space-y-4">
                   <h3 className="text-lg font-medium">Interface</h3>
-                  
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <Label htmlFor="language">Language</Label>
@@ -84,7 +75,7 @@ export default function SettingsPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    
+
                     <div className="space-y-2">
                       <Label>Theme</Label>
                       <div className="flex items-center gap-2">
@@ -95,7 +86,7 @@ export default function SettingsPage() {
                       </div>
                     </div>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label htmlFor="notifications" className="text-base">
@@ -108,12 +99,12 @@ export default function SettingsPage() {
                     </p>
                   </div>
                 </div>
-                
+
                 <Separator />
-                
+
                 <div className="space-y-4">
                   <h3 className="text-lg font-medium">Default File Formats</h3>
-                  
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <Label htmlFor="import-format">Default Import Format</Label>
@@ -130,7 +121,7 @@ export default function SettingsPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    
+
                     <div className="space-y-2">
                       <Label htmlFor="export-format">Default Export Format</Label>
                       <Select defaultValue="csv">
@@ -148,7 +139,7 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 </div>
-                
+
                 <div className="flex justify-end">
                   <Button>
                     <Save className="mr-2 h-4 w-4" />
@@ -158,7 +149,7 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
           </TabsContent>
-          
+
           <TabsContent value="schema" className="space-y-4">
             <Card className="shadow-sm">
               <CardHeader className="pb-3">
@@ -176,7 +167,7 @@ export default function SettingsPage() {
                   <p className="text-sm text-muted-foreground">
                     Configure how fields from different formats map to standardized schema
                   </p>
-                  
+
                   <Tabs defaultValue="csv" className="w-full">
                     <TabsList className="w-full justify-start">
                       <TabsTrigger value="csv">CSV</TabsTrigger>
@@ -184,7 +175,7 @@ export default function SettingsPage() {
                       <TabsTrigger value="json">GeoJSON</TabsTrigger>
                       <TabsTrigger value="xml">XML</TabsTrigger>
                     </TabsList>
-                    
+
                     <TabsContent value="csv" className="space-y-4 mt-4">
                       <div className="space-y-4">
                         <div className="grid grid-cols-5 gap-4">
@@ -198,7 +189,7 @@ export default function SettingsPage() {
                             <Label className="text-muted-foreground">Target Field (Standard)</Label>
                           </div>
                         </div>
-                        
+
                         {[
                           { source: 'time', target: 'time' },
                           { source: 'latitude', target: 'latitude' },
@@ -234,26 +225,26 @@ export default function SettingsPage() {
                           </div>
                         ))}
                       </div>
-                      
+
                       <Button variant="outline" size="sm">
                         Add Field Mapping
                       </Button>
                     </TabsContent>
-                    
+
                     <TabsContent value="qml" className="space-y-4 mt-4">
                       {/* Similar content for QuakeML mappings */}
                       <div className="text-center text-muted-foreground py-4">
                         QuakeML mapping configuration
                       </div>
                     </TabsContent>
-                    
+
                     <TabsContent value="json" className="space-y-4 mt-4">
                       {/* Similar content for GeoJSON mappings */}
                       <div className="text-center text-muted-foreground py-4">
                         GeoJSON mapping configuration
                       </div>
                     </TabsContent>
-                    
+
                     <TabsContent value="xml" className="space-y-4 mt-4">
                       {/* Similar content for XML mappings */}
                       <div className="text-center text-muted-foreground py-4">
@@ -262,12 +253,12 @@ export default function SettingsPage() {
                     </TabsContent>
                   </Tabs>
                 </div>
-                
+
                 <Separator />
-                
+
                 <div className="space-y-4">
                   <h3 className="text-lg font-medium">Advanced Schema Settings</h3>
-                  
+
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label htmlFor="auto-detect" className="text-base">
@@ -279,7 +270,7 @@ export default function SettingsPage() {
                       Automatically detect and map fields based on common naming patterns
                     </p>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label htmlFor="strict-validation" className="text-base">
@@ -292,7 +283,7 @@ export default function SettingsPage() {
                     </p>
                   </div>
                 </div>
-                
+
                 <div className="flex justify-end">
                   <Button>
                     <Save className="mr-2 h-4 w-4" />
@@ -302,7 +293,7 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
           </TabsContent>
-          
+
           <TabsContent value="visualization" className="space-y-4">
             <Card className="shadow-sm">
               <CardHeader className="pb-3">
@@ -317,7 +308,7 @@ export default function SettingsPage() {
               <CardContent className="space-y-6">
                 <div className="space-y-4">
                   <h3 className="text-lg font-medium">Map Configuration</h3>
-                  
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <Label htmlFor="map-provider">Map Provider</Label>
@@ -332,7 +323,7 @@ export default function SettingsPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    
+
                     <div className="space-y-2">
                       <Label htmlFor="default-view">Default Map View</Label>
                       <Select defaultValue="global">
@@ -348,7 +339,7 @@ export default function SettingsPage() {
                       </Select>
                     </div>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="api-key">Map API Key (if applicable)</Label>
                     <Input id="api-key" type="password" placeholder="Enter your API key" />
@@ -356,7 +347,7 @@ export default function SettingsPage() {
                       Required for some map providers like Mapbox or Google Maps
                     </p>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label htmlFor="cluster-events" className="text-base">
@@ -369,12 +360,12 @@ export default function SettingsPage() {
                     </p>
                   </div>
                 </div>
-                
+
                 <Separator />
-                
+
                 <div className="space-y-4">
                   <h3 className="text-lg font-medium">Event Visualization</h3>
-                  
+
                   <div className="space-y-2">
                     <Label>Magnitude Color Scale</Label>
                     <div className="grid grid-cols-5 gap-2 mt-2">
@@ -395,7 +386,7 @@ export default function SettingsPage() {
                       </div>
                     </div>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="depth-scale">Depth Visualization Scale</Label>
                     <Select defaultValue="rainbow">
@@ -409,7 +400,7 @@ export default function SettingsPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="symbol-size">Symbol Size Based On</Label>
                     <Select defaultValue="magnitude">
@@ -424,7 +415,7 @@ export default function SettingsPage() {
                     </Select>
                   </div>
                 </div>
-                
+
                 <div className="flex justify-end">
                   <Button>
                     <Save className="mr-2 h-4 w-4" />
@@ -434,7 +425,7 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
           </TabsContent>
-          
+
           <TabsContent value="advanced" className="space-y-4">
             <Card className="shadow-sm">
               <CardHeader className="pb-3">
@@ -449,7 +440,7 @@ export default function SettingsPage() {
               <CardContent className="space-y-6">
                 <div className="space-y-4">
                   <h3 className="text-lg font-medium">Performance</h3>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="batch-size">Processing Batch Size</Label>
                     <Select defaultValue="1000">
@@ -467,7 +458,7 @@ export default function SettingsPage() {
                       Number of events processed in each batch
                     </p>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="cache-limit">Cache Limit</Label>
                     <Select defaultValue="256">
@@ -485,7 +476,7 @@ export default function SettingsPage() {
                       Maximum memory used for caching data
                     </p>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label htmlFor="parallel-processing" className="text-base">
@@ -498,23 +489,23 @@ export default function SettingsPage() {
                     </p>
                   </div>
                 </div>
-                
+
                 <Separator />
-                
+
                 <div className="space-y-4">
                   <h3 className="text-lg font-medium">Integration</h3>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="api-endpoint">API Endpoint URL</Label>
-                    <Input 
-                      id="api-endpoint" 
-                      defaultValue="https://api.example.com/earthquake-service" 
+                    <Input
+                      id="api-endpoint"
+                      defaultValue="https://api.example.com/earthquake-service"
                     />
                     <p className="text-xs text-muted-foreground">
                       URL for the backend API service
                     </p>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="external-fetch">External Data Fetch Interval</Label>
                     <Select defaultValue="12">
@@ -534,16 +525,16 @@ export default function SettingsPage() {
                     </p>
                   </div>
                 </div>
-                
+
                 <Separator />
-                
+
                 <div className="space-y-4">
                   <h3 className="text-lg font-medium">Custom Script</h3>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="custom-script">Post-Processing Script</Label>
-                    <Textarea 
-                      id="custom-script" 
+                    <Textarea
+                      id="custom-script"
                       placeholder="Enter custom processing script (Python)"
                       className="font-mono h-32"
                     />
@@ -552,7 +543,7 @@ export default function SettingsPage() {
                     </p>
                   </div>
                 </div>
-                
+
                 <div className="flex justify-end">
                   <Button>
                     <Save className="mr-2 h-4 w-4" />

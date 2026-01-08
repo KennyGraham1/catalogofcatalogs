@@ -51,8 +51,6 @@ const nextConfig = {
         ...config.resolve.fallback,
         fs: false,
         path: false,
-        sqlite3: false,
-        'better-sqlite3': false
       };
     }
 

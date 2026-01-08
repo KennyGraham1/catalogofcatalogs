@@ -2,7 +2,6 @@
  * MongoDB Connection Module
  * 
  * Provides MongoDB client singleton with connection pooling and health checks.
- * Replaces the SQLite database connection for the earthquake catalogue application.
  */
 
 import { MongoClient, Db, Collection, MongoClientOptions } from 'mongodb';

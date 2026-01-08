@@ -1,7 +1,5 @@
 /**
  * Query optimization utilities for analyzing and improving database performance
- *
- * Migrated from SQLite to MongoDB.
  */
 
 import { Db, Collection } from 'mongodb';

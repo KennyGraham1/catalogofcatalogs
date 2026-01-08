@@ -49,6 +49,6 @@ console.log('');
 console.log('To import GeoNet data now, run:');
 console.log('  npx tsx scripts/populate-geonet-baseline.ts');
 console.log('');
-console.log('Or visit http://localhost:3001/import to import data manually.');
+console.log('Or visit http://localhost:3000/import to import data manually.');
 console.log('');
 

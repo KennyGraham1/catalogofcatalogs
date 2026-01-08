@@ -20,7 +20,7 @@ export interface RateLimitConfig {
    * @default 60000 (1 minute)
    */
   interval: number;
-  
+
   /**
    * Maximum number of unique tokens (IPs) to track
    * @default 500
@@ -36,17 +36,17 @@ export interface RateLimitResult {
    * Whether the request is allowed (not rate limited)
    */
   success: boolean;
-  
+
   /**
    * Maximum number of requests allowed in the interval
    */
   limit: number;
-  
+
   /**
    * Number of requests remaining in the current interval
    */
   remaining: number;
-  
+
   /**
    * Timestamp when the rate limit will reset (milliseconds since epoch)
    */
@@ -93,18 +93,18 @@ export function rateLimit(config: RateLimitConfig) {
     check: (limit: number, token: string): RateLimitResult => {
       // Get current request count for this token, or initialize to [0]
       const tokenCount = tokenCache.get(token) || [0];
-      
+
       // If this is a new token, add it to the cache
       if (tokenCount[0] === 0) {
         tokenCache.set(token, tokenCount);
       }
-      
+
       // Increment request count
       tokenCount[0] += 1;
-      
+
       const currentUsage = tokenCount[0];
       const isRateLimited = currentUsage > limit;
-      
+
       return {
         success: !isRateLimited,
         limit,
@@ -112,7 +112,7 @@ export function rateLimit(config: RateLimitConfig) {
         reset: Date.now() + config.interval,
       };
     },
-    
+
     /**
      * Reset rate limit for a specific token
      * Useful for testing or manual intervention
@@ -122,7 +122,7 @@ export function rateLimit(config: RateLimitConfig) {
     reset: (token: string): void => {
       tokenCache.delete(token);
     },
-    
+
     /**
      * Get current usage for a token without incrementing
      * 
@@ -140,14 +140,7 @@ export function rateLimit(config: RateLimitConfig) {
  * Pre-configured rate limiters for common use cases
  */
 
-/**
- * Strict rate limiter for authentication endpoints
- * 5 requests per minute to prevent brute force attacks
- */
-export const authRateLimiter = rateLimit({
-  interval: 60 * 1000, // 1 minute
-  uniqueTokenPerInterval: 500,
-});
+
 
 /**
  * Standard rate limiter for API endpoints

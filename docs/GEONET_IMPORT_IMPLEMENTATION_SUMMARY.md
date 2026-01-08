@@ -273,7 +273,7 @@ Comprehensive user guide covering:
 
 ### 1. Access the Import Page
 
-Navigate to: **http://localhost:3001/import**
+Navigate to: **http://localhost:3000/import**
 
 ### 2. Configure Import
 

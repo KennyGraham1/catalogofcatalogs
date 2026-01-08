@@ -45,7 +45,6 @@ WORKDIR /app
 # Install runtime dependencies
 RUN apk add --no-cache \
     libc6-compat \
-    sqlite \
     curl
 
 # Create non-root user
@@ -63,7 +62,7 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
-# Create data directory for SQLite database
+# Create data directory for application
 RUN mkdir -p /app/data && \
     chown -R nextjs:nodejs /app/data
 

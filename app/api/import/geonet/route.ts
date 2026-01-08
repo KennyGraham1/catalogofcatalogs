@@ -7,18 +7,17 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { geonetImportService } from '@/lib/geonet-import-service';
+import { Logger } from '@/lib/errors';
 import { apiCache } from '@/lib/cache';
-import { getSession } from '@/lib/auth';
-import { auditApiAction } from '@/lib/api-middleware';
-import { withCSRF } from '@/lib/csrf';
 
-export const POST = withCSRF(async (request: NextRequest) => {
+const logger = new Logger('GeoNetImport');
+
+export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    // Get authenticated user
-    const session = await getSession();
-    const userId = session?.user?.id;
+    // UserId is now null as auth is removed
+    const userId = undefined;
 
     // Parse and validate request body
     const {
@@ -37,11 +36,11 @@ export const POST = withCSRF(async (request: NextRequest) => {
       catalogueId,
       catalogueName,
     } = body;
-    
+
     // Validate date range
     let parsedStartDate: Date | undefined;
     let parsedEndDate: Date | undefined;
-    
+
     if (startDate) {
       parsedStartDate = new Date(startDate);
       if (isNaN(parsedStartDate.getTime())) {
@@ -51,7 +50,7 @@ export const POST = withCSRF(async (request: NextRequest) => {
         );
       }
     }
-    
+
     if (endDate) {
       parsedEndDate = new Date(endDate);
       if (isNaN(parsedEndDate.getTime())) {
@@ -61,7 +60,7 @@ export const POST = withCSRF(async (request: NextRequest) => {
         );
       }
     }
-    
+
     // Validate hours
     if (hours !== undefined && (typeof hours !== 'number' || hours <= 0)) {
       return NextResponse.json(
@@ -69,7 +68,7 @@ export const POST = withCSRF(async (request: NextRequest) => {
         { status: 400 }
       );
     }
-    
+
     // Validate magnitude range
     if (minMagnitude !== undefined && (typeof minMagnitude !== 'number' || minMagnitude < 0)) {
       return NextResponse.json(
@@ -77,21 +76,21 @@ export const POST = withCSRF(async (request: NextRequest) => {
         { status: 400 }
       );
     }
-    
+
     if (maxMagnitude !== undefined && (typeof maxMagnitude !== 'number' || maxMagnitude < 0)) {
       return NextResponse.json(
         { error: 'Maximum magnitude must be a non-negative number' },
         { status: 400 }
       );
     }
-    
+
     if (minMagnitude !== undefined && maxMagnitude !== undefined && minMagnitude > maxMagnitude) {
       return NextResponse.json(
         { error: 'Minimum magnitude cannot be greater than maximum magnitude' },
         { status: 400 }
       );
     }
-    
+
     // Trigger import
     console.log('[API] Starting GeoNet import with options:', {
       startDate: parsedStartDate?.toISOString(),
@@ -109,7 +108,7 @@ export const POST = withCSRF(async (request: NextRequest) => {
       catalogueId,
       catalogueName,
     });
-    
+
     const result = await geonetImportService.importEvents({
       startDate: parsedStartDate,
       endDate: parsedEndDate,
@@ -125,22 +124,10 @@ export const POST = withCSRF(async (request: NextRequest) => {
       updateExisting: updateExisting ?? false,
       catalogueId,
       catalogueName,
-      userId, // Pass user ID to import service
+      userId, // Pass undefined user ID to import service
     });
 
     console.log('[API] Import completed:', result);
-
-    // Create audit log if user is authenticated
-    if (userId) {
-      await auditApiAction(request, 'import_geonet', 'catalogue', result.catalogueId, {
-        startDate: parsedStartDate?.toISOString(),
-        endDate: parsedEndDate?.toISOString(),
-        hours,
-        totalFetched: result.totalFetched,
-        newEvents: result.newEvents,
-        updatedEvents: result.updatedEvents,
-      });
-    }
 
     // Clear cache since new events were imported
     apiCache.clearAll();
@@ -148,7 +135,7 @@ export const POST = withCSRF(async (request: NextRequest) => {
     return NextResponse.json(result);
   } catch (error) {
     console.error('[API] Import error:', error);
-    
+
     return NextResponse.json(
       {
         error: 'Import failed',
@@ -157,5 +144,5 @@ export const POST = withCSRF(async (request: NextRequest) => {
       { status: 500 }
     );
   }
-});
+}
 

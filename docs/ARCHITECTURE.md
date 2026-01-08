@@ -15,13 +15,13 @@ This document provides comprehensive architecture diagrams for the Earthquake Ca
 
 ## 1. System Architecture Overview
 
-This diagram shows the complete application structure including the frontend (React/Next.js), backend (API routes), database (SQLite with WAL mode), core libraries, and external seismic data services.
+This diagram shows the complete application structure including the frontend (React/Next.js), backend (API routes), database (MongoDB), core libraries, and external seismic data services.
 
 **Key Components:**
 - **Frontend**: React components with App Router, state management, and Leaflet map visualizations
 - **Backend**: Next.js API routes for upload, catalogues, events, merge, import, and authentication
 - **Libraries**: Parsers (CSV, JSON, QuakeML), validators, quality checkers
-- **Database**: SQLite with Write-Ahead Logging for concurrent read/write performance
+- **Database**: MongoDB with connection pooling for scalable read/write performance
 - **External Services**: GeoNet API for importing New Zealand earthquake data
 
 ```mermaid
@@ -57,10 +57,10 @@ flowchart TB
         end
     end
     
-    subgraph Database["💾 SQLite Database (WAL Mode)"]
-        DB[(merged_catalogues.db)]
-        WAL[("WAL File<br/>Write-Ahead Log")]
-        SHM[("SHM File<br/>Shared Memory")]
+    subgraph Database["💾 MongoDB Database"]
+        DB[(earthquake_catalogue)]
+        Collections[("Collections")]
+        Indexes[("Indexes")]
     end
     
     subgraph External["🌐 External Services"]
@@ -76,8 +76,8 @@ flowchart TB
     
     Backend --> Libraries
     Libraries --> DB
-    DB --> WAL
-    WAL --> SHM
+    DB --> Collections
+    Collections --> Indexes
     
     ImportAPI --> External
 ```
@@ -94,7 +94,7 @@ This diagram illustrates the complete 7-stage upload process from file selection
 3. **Validation**: Event validation, quality checks, and cross-field validation
 4. **Schema Mapping**: Map source fields to target schema with reusable templates
 5. **Metadata**: Collect catalogue name, description, and source information
-6. **Storage**: Batch insert to SQLite database with index updates
+6. **Storage**: Batch insert to MongoDB database with index updates
 7. **Results**: Display processing report with auto-navigation to Results tab
 
 ```mermaid
@@ -598,7 +598,7 @@ mmdc -i ARCHITECTURE.md -o architecture.png
 | **UI Components** | shadcn/ui, Tailwind CSS, Radix UI |
 | **Maps** | Leaflet, react-leaflet |
 | **Backend** | Next.js API Routes |
-| **Database** | SQLite 3 with WAL mode |
+| **Database** | MongoDB |
 | **Parsing** | Custom parsers (CSV, JSON, QuakeML) |
 | **Validation** | Zod, custom validators |
 | **Testing** | Jest, React Testing Library |

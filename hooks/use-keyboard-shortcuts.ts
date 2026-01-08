@@ -37,12 +37,14 @@ export function useKeyboardShortcuts({ shortcuts, enabled = true }: UseKeyboardS
 
       // Don't trigger shortcuts when typing in input fields
       const target = event.target as HTMLElement;
-      const isInputField = 
+      const isInputField =
         target.tagName === 'INPUT' ||
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable;
 
       for (const shortcut of shortcuts) {
+        // Guard against undefined event.key
+        if (!event.key) continue;
         const keyMatches = event.key.toLowerCase() === shortcut.key.toLowerCase();
         const ctrlMatches = shortcut.ctrl ? event.ctrlKey || event.metaKey : !event.ctrlKey && !event.metaKey;
         const shiftMatches = shortcut.shift ? event.shiftKey : !event.shiftKey;
@@ -57,7 +59,7 @@ export function useKeyboardShortcuts({ shortcuts, enabled = true }: UseKeyboardS
           if (shortcut.preventDefault !== false) {
             event.preventDefault();
           }
-          
+
           shortcut.action();
           break;
         }
@@ -81,9 +83,9 @@ export function useKeyboardShortcuts({ shortcuts, enabled = true }: UseKeyboardS
  */
 export function formatShortcut(shortcut: Omit<KeyboardShortcut, 'action' | 'description'>): string {
   const parts: string[] = [];
-  
+
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-  
+
   if (shortcut.ctrl || shortcut.meta) {
     parts.push(isMac ? '⌘' : 'Ctrl');
   }
@@ -93,11 +95,11 @@ export function formatShortcut(shortcut: Omit<KeyboardShortcut, 'action' | 'desc
   if (shortcut.alt) {
     parts.push(isMac ? '⌥' : 'Alt');
   }
-  
+
   // Capitalize first letter of key
   const key = shortcut.key.charAt(0).toUpperCase() + shortcut.key.slice(1);
   parts.push(key);
-  
+
   return parts.join('+');
 }
 
