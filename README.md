@@ -1,13 +1,13 @@
 # Earthquake Catalogue Platform
 
-A comprehensive web application for managing, analyzing, and visualizing earthquake catalogue data with support for multiple data formats, automated imports, and advanced merging capabilities.
+A web application for managing, analyzing, and visualizing earthquake catalogue data with support for multiple data formats, automated imports, and flexible merging capabilities.
 
 ## 🌟 Features
 
 ### 📊 Data Management
 - **Multi-format Upload**: Support for CSV, TXT, QuakeML (XML), JSON formats
 - **Schema Normalization**: Automatic field mapping and validation
-- **Catalogue Merging**: Advanced merging with configurable matching rules
+- **Catalogue Merging**: Flexible merging with configurable matching rules
 - **QuakeML 1.2 Support**: Full implementation of QuakeML Basic Event Description (BED) specification
 
 ### 🌏 GeoNet Integration
@@ -18,10 +18,10 @@ A comprehensive web application for managing, analyzing, and visualizing earthqu
 
 ### 📈 Visualization & Analysis
 - **Interactive Maps**: Leaflet-based map visualization with event clustering
-- **Enhanced Map View**: Advanced visualization with uncertainty ellipses, focal mechanisms, and station coverage
+- **Enhanced Map View**: Visualization with uncertainty ellipses, focal mechanisms, and station coverage
 - **Charts & Graphs**: Statistical analysis with Recharts
 - **Quality Metrics**: Comprehensive quality scoring and filtering with A+ to F grading system
-- **Event Filtering**: Advanced filtering by multiple criteria
+- **Event Filtering**: Filtering by multiple criteria
 - **Analytics Dashboard**: Dedicated analytics page with quality distribution and detailed event analysis
 - **Advanced Seismological Analytics**:
   - Gutenberg-Richter b-value analysis
@@ -29,7 +29,7 @@ A comprehensive web application for managing, analyzing, and visualizing earthqu
   - Temporal pattern analysis and cluster detection
   - Seismic moment calculations and energy release analysis
 
-### 🔧 Advanced Features
+### 🔧 Additional Features
 - **QuakeML Export**: Export catalogues to QuakeML 1.2 XML format
 - **Quality-based Filtering**: Filter events by quality metrics (azimuthal gap, phase counts, uncertainties)
 - **Uncertainty Tracking**: Full support for time, location, depth, and magnitude uncertainties
@@ -77,20 +77,13 @@ A comprehensive web application for managing, analyzing, and visualizing earthqu
 ## 🎯 Key Capabilities
 
 ### Quality Assessment System
-The platform includes a comprehensive quality scoring system that evaluates earthquake locations based on:
+The platform includes a quality scoring system that evaluates earthquake locations based on:
 - **Location Quality**: Horizontal and vertical uncertainties
 - **Network Geometry**: Azimuthal gap and station distribution
 - **Solution Quality**: Phase counts, standard error, and residuals
 - **Magnitude Quality**: Station count and uncertainty
 
 Events are graded from **A+** (excellent) to **F** (poor) based on weighted scoring across these components.
-
-### Advanced Visualization Features
-- **Uncertainty Ellipses**: Visual representation of location uncertainties on maps
-- **Focal Mechanisms**: Beach ball diagrams showing fault plane solutions
-- **Station Coverage**: Seismic network geometry and azimuthal gap visualization
-- **Quality Color Coding**: Events colored by quality grade
-- **Interactive Filtering**: Real-time filtering by magnitude, depth, quality, and time
 
 ### Data Integration
 - **Duplicate Detection**: Intelligent matching of events across catalogues using time, location, and magnitude
@@ -140,7 +133,7 @@ Navigate to the **Analytics** page for visualization and analysis features:
 - Focal mechanism beach ball diagrams
 - Station coverage visualization
 - Quality score analysis
-- Event detail cards with comprehensive metadata
+- Event detail cards with detailed metadata
 - Gutenberg-Richter b-value calculation
 - Completeness magnitude (Mc) estimation
 - Temporal pattern analysis and cluster detection
@@ -178,7 +171,7 @@ catalogofcatalogs/
 │   │   ├── import/       # GeoNet import endpoints
 │   │   ├── merge/        # Catalogue merging
 │   │   └── upload/       # File upload handling
-│   ├── advanced-analytics/ # Advanced seismological analytics
+│   ├── analytics/ # Seismological analytics
 │   ├── analytics/         # Quality analytics page
 │   ├── catalogues/        # Catalogue management pages
 │   ├── dashboard/         # Dashboard page
@@ -188,7 +181,7 @@ catalogofcatalogs/
 │   ├── upload/            # Data upload page
 │   └── visualize/         # Visualization pages
 ├── components/            # React components
-│   ├── advanced-viz/      # Advanced visualization components
+│   ├── viz/      # Visualization components
 │   │   ├── BeachBallMarker.tsx        # Focal mechanism markers
 │   │   ├── EnhancedMapView.tsx        # Enhanced map with all features
 │   │   ├── FocalMechanismCard.tsx     # Focal mechanism display
@@ -214,7 +207,7 @@ catalogofcatalogs/
 │   ├── quality-scoring.ts            # Quality assessment algorithms
 │   ├── quakeml-exporter.ts           # QuakeML export
 │   ├── quakeml-parser.ts             # QuakeML import
-│   ├── seismological-analysis.ts     # Advanced seismological analytics
+│   ├── seismological-analysis.ts     # Seismological analytics
 │   ├── station-coverage-utils.ts     # Station coverage analysis
 │   ├── uncertainty-utils.ts          # Uncertainty calculations
 │   └── types/                        # TypeScript type definitions
@@ -253,7 +246,7 @@ catalogofcatalogs/
 
 ## 📚 Documentation
 
-### � Technical Documentation
+### 📖 Technical Documentation
 
 - **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation
 - **[Architecture](docs/ARCHITECTURE.md)** - System architecture diagrams
@@ -308,13 +301,13 @@ The application uses MongoDB with the following main collections:
 
 ### `merged_catalogues`
 Stores catalogue metadata:
-- `id` (TEXT PRIMARY KEY)
-- `name` (TEXT)
-- `created_at` (DATETIME)
-- `source_catalogues` (TEXT/JSON)
-- `merge_config` (TEXT/JSON)
-- `event_count` (INTEGER)
-- `status` (TEXT)
+- `id` (string)
+- `name` (string)
+- `created_at` (Date)
+- `source_catalogues` (JSON array)
+- `merge_config` (JSON object)
+- `event_count` (number)
+- `status` (string)
 - Geographic bounds: `min_latitude`, `max_latitude`, `min_longitude`, `max_longitude`
 
 ### `merged_events`
@@ -332,8 +325,8 @@ Stores earthquake events with full QuakeML 1.2 support:
 Tracks all GeoNet imports:
 - `id`, `catalogue_id`, `start_time`, `end_time`
 - Statistics: `total_fetched`, `new_events`, `updated_events`, `skipped_events`
-- `errors` (TEXT/JSON)
-- `created_at` (DATETIME)
+- `errors` (JSON array)
+- `created_at` (Date)
 
 ### `mapping_templates`
 Stores reusable field mapping templates for data uploads
@@ -397,14 +390,14 @@ For detailed database management instructions, see [DATABASE_MANAGEMENT.md](DATA
 
 - Kenny Graham - GNS Science
 
-## � Acknowledgments
+## 🙏 Acknowledgments
 
 - **GeoNet**: For providing real-time earthquake data via FDSN web services
 - **QuakeML**: For the standardized earthquake data format specification
 - **shadcn/ui**: For the beautiful UI component library
 - **Next.js Team**: For the excellent React framework
 
-## �🗺 Roadmap
+## 🗺️ Roadmap
 
 ### Completed Features ✅
 - [x] Multi-format data upload (CSV, TXT, QuakeML, JSON)
@@ -412,7 +405,7 @@ For detailed database management instructions, see [DATABASE_MANAGEMENT.md](DATA
 - [x] Catalogue merging with configurable rules
 - [x] QuakeML 1.2 BED specification support
 - [x] Interactive map visualization
-- [x] Advanced visualization (uncertainty ellipses, focal mechanisms, station coverage)
+- [x] Visualization (uncertainty ellipses, focal mechanisms, station coverage)
 - [x] Quality scoring and filtering (A+ to F grading)
 - [x] Analytics dashboard
 - [x] QuakeML export
@@ -423,7 +416,7 @@ For detailed database management instructions, see [DATABASE_MANAGEMENT.md](DATA
 - [ ] Scheduled automatic imports with background job scheduler
 - [ ] Multi-source import (additional FDSN services)
 - [ ] Enhanced QuakeML support with full picks and arrivals
-- [ ] Advanced data quality validation and anomaly detection
+- [ ] Data quality validation and anomaly detection
 - [ ] Export to additional formats (GeoJSON, KML)
 - [ ] Collaborative features (sharing, comments, annotations)
 - [ ] Performance optimization for large datasets (>100k events)
@@ -434,18 +427,18 @@ For detailed database management instructions, see [DATABASE_MANAGEMENT.md](DATA
 
 **Status**: ✅ Production Ready
 
-The application is fully functional with comprehensive features for earthquake catalogue management, including:
+The application is fully functional with features for earthquake catalogue management, including:
 - ✅ Data upload and parsing
 - ✅ GeoNet automatic import
 - ✅ Catalogue merging
 - ✅ QuakeML 1.2 support
 - ✅ Interactive visualization
-- ✅ Advanced analytics
+- ✅ Analytics
 - ✅ Quality-based filtering
 - ✅ Complete test coverage
 - ✅ Full documentation
 
 ---
 
-**Last Updated**: October 29, 2025
+**Last Updated**: January 2026
 
