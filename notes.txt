@@ -5,6 +5,14 @@ Can you look at this paper https://www.tandfonline.com/doi/full/10.1080/00288306
 
 Posible homoginising the catalogues. Using a regression equation to standardise the magnitudes. Use MLNZ20
 
+
+Line 0: No events found in QuakeML file
+
+
+Avoid crea
+
+tin documents unless you have been told to do se
+
 Can we have a visualisation the merger event for QC purposed. This should be doen before the merge is done. Mainly for the identified duplicates or triplicates or quadruplicates ... events 
 
 This will help us to QC the merge before we commit to the database or export the data
@@ -18,7 +26,6 @@ I want you to migrate the database to MongoDB you will need to make the necessar
 There seem to be file size limit of 100MB can you increase that?
 
 The visualisation is vert slow for large catalogues. Can you make it more efficient and higher performace and optimise it?
-
 
 Not to load all the data/catalog in the database at once. Just a few to demonstrate the functionality. User can select which ones they want view or play with. Can you cache the data for the dashboard so that it doesn't have to load it every time. We also need to have option to update the dashboard data when new catalogues are added.
 
