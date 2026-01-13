@@ -5,10 +5,13 @@ A web application for managing, analyzing, and visualizing earthquake catalogue 
 ## 🌟 Features
 
 ### 📊 Data Management
-- **Multi-format Upload**: Support for CSV, TXT, QuakeML (XML), JSON formats
+- **Multi-format Upload**: Support for CSV, TXT, QuakeML (XML), JSON, and GeoJSON formats
+- **Smart Delimiter Detection**: Auto-detects comma, tab, semicolon, pipe, or space delimiters
+- **Intelligent Date Parsing**: Auto-detects US (MM/DD/YYYY) vs International (DD/MM/YYYY) date formats
 - **Schema Normalization**: Automatic field mapping and validation
 - **Catalogue Merging**: Flexible merging with configurable matching rules
 - **QuakeML 1.2 Support**: Full implementation of QuakeML Basic Event Description (BED) specification
+- **Large File Support**: Upload files up to 500MB with streaming parser for efficient processing
 
 ### 🌏 GeoNet Integration
 - **Automatic Data Import**: Real-time earthquake data from GeoNet FDSN Event Web Service
@@ -44,7 +47,7 @@ A web application for managing, analyzing, and visualizing earthquake catalogue 
 
 - **Node.js**: Version 18.x or higher
 - **npm**: Version 9.x or higher
-- **MongoDB**: For database storage (local or Atlas)
+- **MongoDB**: Version 6.x or higher (local installation or MongoDB Atlas)
 
 ### Installation
 
@@ -59,20 +62,68 @@ A web application for managing, analyzing, and visualizing earthquake catalogue 
    npm install
    ```
 
-3. **Set up MongoDB**
+3. **Configure environment variables**
    ```bash
-   # Start MongoDB locally or configure MONGODB_URI in .env
+   # Copy the example environment file
+   cp .env.example .env
+
+   # Edit .env with your configuration (see Environment Configuration below)
+   ```
+
+4. **Set up MongoDB**
+   ```bash
    # Initialize database with collections and indexes
    npx tsx scripts/init-database.ts
    ```
 
-4. **Start the development server**
+5. **Start the development server**
    ```bash
    npm run dev
    ```
 
-5. **Open your browser**
+6. **Open your browser**
    Navigate to [http://localhost:3000](http://localhost:3000)
+
+### Environment Configuration
+
+Create a `.env` file in the project root (this file is gitignored and will not be committed):
+
+```bash
+# MongoDB Connection
+# For local MongoDB:
+MONGODB_URI=mongodb://localhost:27017/earthquake_catalogue
+
+# For MongoDB Atlas:
+# MONGODB_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/earthquake_catalogue
+
+# Optional: Override database name (otherwise extracted from URI)
+MONGODB_DATABASE=earthquake_catalogue
+
+# Application
+NODE_ENV=development
+
+# NextAuth (required for authentication)
+# Generate secret with: openssl rand -base64 32
+NEXTAUTH_SECRET=your-generated-secret-here
+NEXTAUTH_URL=http://localhost:3000
+```
+
+#### MongoDB Atlas Setup
+
+If using MongoDB Atlas:
+
+1. Create a cluster at [MongoDB Atlas](https://www.mongodb.com/atlas)
+2. Create a database user with read/write permissions
+3. Add your IP address to the Network Access list (or allow all IPs for development)
+4. Copy the connection string from: **Clusters → Connect → Drivers → Node.js**
+5. Replace the placeholder values in your `.env` file
+
+The application automatically detects Atlas connections (`mongodb+srv://`) and applies optimized settings:
+- Retry logic with exponential backoff (up to 5 retries)
+- Longer timeouts for network latency
+- Connection pooling (up to 50 connections)
+- Automatic retry for reads and writes
+- zlib compression for faster data transfer
 
 ## 🎯 Key Capabilities
 
@@ -96,9 +147,21 @@ Events are graded from **A+** (excellent) to **F** (poor) based on weighted scor
 ### Uploading Data
 
 1. Navigate to the **Upload** page
-2. Select your data file (CSV, TXT, QuakeML, JSON)
-3. Map fields to the standard schema
-4. Upload and create a new catalogue
+2. Configure parsing options (optional):
+   - **Delimiter**: Auto-detect or select (comma, tab, semicolon, pipe, space)
+   - **Date Format**: Auto-detect or select (US MM/DD/YYYY, International DD/MM/YYYY, ISO)
+3. Select your data file (CSV, TXT, QuakeML, JSON, GeoJSON)
+4. Map fields to the standard schema
+5. Upload and create a new catalogue
+
+#### Supported File Formats
+
+| Format | Extensions | Description |
+|--------|------------|-------------|
+| CSV/TXT | `.csv`, `.txt` | Delimited text with auto-detection |
+| JSON | `.json` | Array of events or `{events: [...]}` structure |
+| GeoJSON | `.geojson`, `.json` | FeatureCollection with Point geometries |
+| QuakeML | `.xml`, `.qml` | QuakeML 1.2 BED format |
 
 ### Importing from GeoNet
 
@@ -196,14 +259,17 @@ catalogofcatalogs/
 │   ├── ui/                # Reusable UI components (shadcn/ui)
 │   └── upload/            # Upload form components
 ├── lib/                   # Core library code
-│   ├── db.ts              # Database queries and schema
+│   ├── mongodb.ts                    # MongoDB client (Atlas-optimized)
+│   ├── db.ts                         # Database queries and schema
+│   ├── parsers.ts                    # Multi-format file parsers
+│   ├── delimiter-detector.ts         # Smart delimiter detection
+│   ├── date-format-detector.ts       # US/International date detection
 │   ├── earthquake-utils.ts           # Earthquake calculations
 │   ├── focal-mechanism-utils.ts      # Focal mechanism parsing
 │   ├── geo-bounds-utils.ts           # Geographic bounds utilities
 │   ├── geonet-client.ts              # GeoNet API client
 │   ├── geonet-import-service.ts      # Import service
 │   ├── merge.ts                      # Catalogue merging logic
-│   ├── parsers.ts                    # Data format parsers
 │   ├── quality-scoring.ts            # Quality assessment algorithms
 │   ├── quakeml-exporter.ts           # QuakeML export
 │   ├── quakeml-parser.ts             # QuakeML import
@@ -278,8 +344,11 @@ catalogofcatalogs/
 
 ### Upload
 - `POST /api/upload` - Upload and parse data file
-  - Supports CSV, TXT, QuakeML (XML), JSON formats
+  - Supports CSV, TXT, QuakeML (XML), JSON, GeoJSON formats
+  - Optional `delimiter` parameter: `comma`, `tab`, `semicolon`, `pipe`, `space`
+  - Optional `dateFormat` parameter: `US`, `International`, `ISO`
   - Returns parsed data and suggested field mappings
+  - Maximum file size: 500MB
 
 ### Merge
 - `POST /api/merge` - Merge multiple catalogues
@@ -332,6 +401,34 @@ Tracks all GeoNet imports:
 Stores reusable field mapping templates for data uploads
 
 For complete schema details, see [QUAKEML_SCHEMA_DESIGN.md](QUAKEML_SCHEMA_DESIGN.md)
+
+## 🔒 Security
+
+### Environment Variables
+
+Sensitive credentials are managed through environment variables:
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `MONGODB_URI` | MongoDB connection string | Yes |
+| `MONGODB_DATABASE` | Database name (optional, extracted from URI) | No |
+| `NEXTAUTH_SECRET` | Authentication secret | Yes |
+| `NEXTAUTH_URL` | Application URL | Yes |
+
+**Important**:
+- The `.env` file is gitignored and will never be committed
+- Use `.env.example` as a template (committed without real values)
+- For production, use your hosting platform's environment variable management
+
+### Deployment Environment Variables
+
+| Platform | Where to Configure |
+|----------|-------------------|
+| **Vercel** | Project Settings → Environment Variables |
+| **Railway** | Project → Variables |
+| **Fly.io** | `fly secrets set MONGODB_URI=...` |
+| **Heroku** | Settings → Config Vars |
+| **GitHub Actions** | Repository Settings → Secrets |
 
 ## 🚧 Development
 
@@ -400,17 +497,22 @@ For detailed database management instructions, see [DATABASE_MANAGEMENT.md](DATA
 ## 🗺️ Roadmap
 
 ### Completed Features ✅
-- [x] Multi-format data upload (CSV, TXT, QuakeML, JSON)
+- [x] Multi-format data upload (CSV, TXT, QuakeML, JSON, GeoJSON)
+- [x] Smart delimiter auto-detection (comma, tab, semicolon, pipe, space)
+- [x] Intelligent date format detection (US vs International)
+- [x] Large file support (up to 500MB)
 - [x] GeoNet automatic import with duplicate detection
 - [x] Catalogue merging with configurable rules
 - [x] QuakeML 1.2 BED specification support
-- [x] Interactive map visualization
+- [x] Interactive map visualization with marker clustering
 - [x] Visualization (uncertainty ellipses, focal mechanisms, station coverage)
 - [x] Quality scoring and filtering (A+ to F grading)
-- [x] Analytics dashboard
+- [x] Analytics dashboard with seismological analysis
 - [x] QuakeML export
 - [x] Import history tracking
 - [x] Geographic bounds filtering
+- [x] MongoDB Atlas support with auto-reconnect
+- [x] Performance optimizations (memoization, virtualized tables)
 
 ### Planned Features 🚀
 - [ ] Scheduled automatic imports with background job scheduler
@@ -419,7 +521,6 @@ For detailed database management instructions, see [DATABASE_MANAGEMENT.md](DATA
 - [ ] Data quality validation and anomaly detection
 - [ ] Export to additional formats (GeoJSON, KML)
 - [ ] Collaborative features (sharing, comments, annotations)
-- [ ] Performance optimization for large datasets (>100k events)
 - [ ] Real-time event notifications
 - [ ] Custom quality scoring algorithms
 
@@ -428,14 +529,16 @@ For detailed database management instructions, see [DATABASE_MANAGEMENT.md](DATA
 **Status**: ✅ Production Ready
 
 The application is fully functional with features for earthquake catalogue management, including:
-- ✅ Data upload and parsing
+- ✅ Data upload and parsing (CSV, TXT, JSON, GeoJSON, QuakeML)
+- ✅ Smart format detection (delimiters, date formats)
 - ✅ GeoNet automatic import
 - ✅ Catalogue merging
 - ✅ QuakeML 1.2 support
-- ✅ Interactive visualization
-- ✅ Analytics
+- ✅ Interactive visualization with clustering
+- ✅ Seismological analytics
 - ✅ Quality-based filtering
-- ✅ Complete test coverage
+- ✅ MongoDB Atlas integration
+- ✅ 400+ automated tests
 - ✅ Full documentation
 
 ---

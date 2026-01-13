@@ -3,7 +3,11 @@
  * Creates all collections and indexes
  */
 
+import { config } from 'dotenv';
 import { MongoClient } from 'mongodb';
+
+// Load environment variables from .env file
+config();
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 const DATABASE_NAME = process.env.MONGODB_DATABASE || 'earthquake_catalogue';

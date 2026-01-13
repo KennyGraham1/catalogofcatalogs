@@ -1,65 +1,200 @@
 /**
  * MongoDB Connection Module
- * 
+ *
  * Provides MongoDB client singleton with connection pooling and health checks.
+ * Optimized for MongoDB Atlas with retry logic and resilient connections.
  */
 
 import { MongoClient, Db, Collection, MongoClientOptions } from 'mongodb';
 
 // MongoDB connection URI from environment variable
+// Supports both local MongoDB and Atlas connection strings:
+//   - mongodb://localhost:27017
+//   - mongodb+srv://user:pass@cluster.mongodb.net/dbname
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
-const DATABASE_NAME = process.env.MONGODB_DATABASE || 'earthquake_catalogue';
 
-// MongoDB client options for connection pooling
+// Detect if using Atlas (mongodb+srv://)
+const IS_ATLAS = MONGODB_URI.startsWith('mongodb+srv://');
+
+// Extract database name from connection string or use environment variable
+function extractDatabaseName(uri: string): string {
+  // Check environment variable first
+  if (process.env.MONGODB_DATABASE) {
+    return process.env.MONGODB_DATABASE;
+  }
+
+  try {
+    // Parse database name from URI path (e.g., mongodb+srv://...mongodb.net/mydb?options)
+    const url = new URL(uri);
+    const pathname = url.pathname;
+    if (pathname && pathname.length > 1) {
+      // Remove leading slash and any query params
+      return pathname.slice(1).split('?')[0];
+    }
+  } catch {
+    // URL parsing failed, try regex for non-standard URIs
+    const match = uri.match(/\/([^/?]+)(\?|$)/);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+
+  // Default database name
+  return 'earthquake_catalogue';
+}
+
+const DATABASE_NAME = extractDatabaseName(MONGODB_URI);
+
+// MongoDB client options optimized for Atlas
 const clientOptions: MongoClientOptions = {
-  maxPoolSize: 10,
-  minPoolSize: 2,
+  // Connection pooling
+  maxPoolSize: IS_ATLAS ? 50 : 10,  // Atlas can handle more connections
+  minPoolSize: IS_ATLAS ? 5 : 2,
   maxIdleTimeMS: 30000,
-  waitQueueTimeoutMS: 5000,
-  serverSelectionTimeoutMS: 5000,
-  connectTimeoutMS: 10000,
+
+  // Timeouts - longer for Atlas due to network latency
+  waitQueueTimeoutMS: IS_ATLAS ? 10000 : 5000,
+  serverSelectionTimeoutMS: IS_ATLAS ? 10000 : 5000,
+  connectTimeoutMS: IS_ATLAS ? 20000 : 10000,
+  socketTimeoutMS: IS_ATLAS ? 45000 : 30000,
+
+  // Atlas-specific options
+  retryWrites: true,      // Automatically retry failed writes
+  retryReads: true,       // Automatically retry failed reads
+  w: 'majority',          // Write concern for data durability
+
+  // Compression for better performance over network
+  compressors: ['zlib'],
 };
 
 // Global MongoDB client instance (singleton pattern for connection reuse)
 let client: MongoClient | null = null;
 let clientPromise: Promise<MongoClient> | null = null;
 
+// Retry configuration for Atlas connections
+const RETRY_CONFIG = {
+  maxRetries: IS_ATLAS ? 5 : 3,
+  initialDelayMs: 1000,
+  maxDelayMs: 30000,
+  backoffMultiplier: 2,
+};
+
 // Connection stats for monitoring
 const connectionStats = {
   totalConnections: 0,
   activeConnections: 0,
   errors: 0,
+  retries: 0,
   lastConnected: null as Date | null,
+  lastError: null as string | null,
 };
 
 /**
+ * Sleep for a specified duration
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Connect to MongoDB with retry logic
+ */
+async function connectWithRetry(retryCount = 0): Promise<MongoClient> {
+  try {
+    const connectedClient = await MongoClient.connect(MONGODB_URI, clientOptions);
+
+    // Log connection info (mask password for security)
+    const maskedUri = MONGODB_URI.replace(/:([^@]+)@/, ':****@');
+    console.log(`[MongoDB] Connected successfully to ${IS_ATLAS ? 'Atlas' : 'local'}`);
+    console.log(`[MongoDB] Database: ${DATABASE_NAME}`);
+    if (IS_ATLAS) {
+      console.log(`[MongoDB] URI: ${maskedUri.split('@')[1]?.split('/')[0] || 'cluster'}`);
+    }
+
+    return connectedClient;
+  } catch (error) {
+    connectionStats.errors++;
+    connectionStats.lastError = error instanceof Error ? error.message : 'Unknown error';
+
+    if (retryCount < RETRY_CONFIG.maxRetries) {
+      const delay = Math.min(
+        RETRY_CONFIG.initialDelayMs * Math.pow(RETRY_CONFIG.backoffMultiplier, retryCount),
+        RETRY_CONFIG.maxDelayMs
+      );
+
+      connectionStats.retries++;
+      console.warn(`[MongoDB] Connection failed, retrying in ${delay}ms (attempt ${retryCount + 1}/${RETRY_CONFIG.maxRetries})...`);
+      console.warn(`[MongoDB] Error: ${connectionStats.lastError}`);
+
+      await sleep(delay);
+      return connectWithRetry(retryCount + 1);
+    }
+
+    console.error(`[MongoDB] All ${RETRY_CONFIG.maxRetries} connection attempts failed`);
+    throw error;
+  }
+}
+
+/**
  * Get the MongoDB client instance (creates one if not exists)
+ * Uses retry logic for resilient Atlas connections
  */
 export async function getMongoClient(): Promise<MongoClient> {
   if (typeof window !== 'undefined') {
     throw new Error('MongoDB client cannot be used on the client side');
   }
 
+  // Return existing client if connected
   if (client) {
-    return client;
+    // Verify connection is still alive for Atlas
+    if (IS_ATLAS) {
+      try {
+        await client.db(DATABASE_NAME).command({ ping: 1 });
+        return client;
+      } catch {
+        // Connection lost, reconnect
+        console.warn('[MongoDB] Connection lost, reconnecting...');
+        client = null;
+        clientPromise = null;
+      }
+    } else {
+      return client;
+    }
   }
 
+  // Return pending connection promise if exists
   if (clientPromise) {
     return clientPromise;
   }
 
-  clientPromise = MongoClient.connect(MONGODB_URI, clientOptions)
+  // Create new connection with retry logic
+  clientPromise = connectWithRetry()
     .then((connectedClient) => {
       client = connectedClient;
       connectionStats.totalConnections++;
       connectionStats.activeConnections++;
       connectionStats.lastConnected = new Date();
-      console.log('[MongoDB] Connected successfully');
+
+      // Set up connection monitoring for Atlas
+      if (IS_ATLAS) {
+        connectedClient.on('close', () => {
+          console.warn('[MongoDB] Connection closed');
+          connectionStats.activeConnections = 0;
+        });
+
+        connectedClient.on('error', (err) => {
+          console.error('[MongoDB] Connection error:', err.message);
+          connectionStats.errors++;
+        });
+
+        connectedClient.on('timeout', () => {
+          console.warn('[MongoDB] Connection timeout');
+        });
+      }
+
       return client;
     })
     .catch((error) => {
-      connectionStats.errors++;
-      console.error('[MongoDB] Connection failed:', error);
       clientPromise = null;
       throw error;
     });
