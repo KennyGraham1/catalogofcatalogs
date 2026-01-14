@@ -2,18 +2,18 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { MapContainer, TileLayer, Circle, Popup, GeoJSON } from 'react-leaflet';
-import MarkerClusterGroup from 'react-leaflet-cluster';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Activity, Ruler, Calendar, MapPin, Layers, Target, Radio, Zap } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Activity, Ruler, Calendar, MapPin, Layers, Target, Radio, Zap, Info } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
 import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
 import { calculateQualityScore, QualityMetrics, getQualityColor } from '@/lib/quality-scoring';
-import { getMagnitudeRadius, getMagnitudeColor } from '@/lib/earthquake-utils';
+import { getMagnitudeRadius, getMagnitudeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 import { useNearbyFaults } from '@/hooks/use-nearby-faults';
 import { loadFaultData, getFaultsInBounds, simplifyFaultsForZoom, FaultCollection, FaultFeature } from '@/lib/fault-data';
 import type { PathOptions } from 'leaflet';
@@ -82,10 +82,17 @@ export default function UnifiedEarthquakeMap({
   const [showFaults, setShowFaults] = useState(showFaultLines);
   const [colorMode, setColorMode] = useState<'magnitude' | 'depth' | 'quality'>(colorBy);
   const [faultData, setFaultData] = useState<FaultCollection | null>(null);
+  const [sampleSize, setSampleSize] = useState<number>(1000);
 
   // Dark mode support
   const mapTheme = useMapTheme();
   const mapColors = useMapColors();
+
+  // Sample earthquakes for performance
+  const { sampled: sampledEarthquakes, total, displayCount, isSampled } = useMemo(
+    () => sampleEarthquakeEvents(earthquakes, sampleSize),
+    [earthquakes, sampleSize]
+  );
 
   // Update color mode when colorBy prop changes
   useEffect(() => {
@@ -109,13 +116,13 @@ export default function UnifiedEarthquakeMap({
     });
   }, []);
 
-  // Calculate quality scores
+  // Calculate quality scores (use sampled earthquakes)
   const qualityScores = useMemo(() => {
-    return earthquakes.map(event => ({
+    return sampledEarthquakes.map(event => ({
       eventId: event.id,
       score: calculateQualityScore(event as QualityMetrics)
     }));
-  }, [earthquakes]);
+  }, [sampledEarthquakes]);
 
   const getDepthColor = (depth: number): string => {
     if (depth >= 40) return '#000080'; // Navy
@@ -147,13 +154,13 @@ export default function UnifiedEarthquakeMap({
   return (
     <div className="relative">
       {/* Control Panel */}
-      <Card className="absolute top-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[240px]">
+      <Card className="absolute top-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[280px]">
         <div className="space-y-3">
           <h3 className="font-semibold text-sm flex items-center gap-2">
             <Layers className="h-4 w-4" />
             Map Options
           </h3>
-          
+
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor="faults" className="text-xs cursor-pointer">
               NZ Active Faults
@@ -203,8 +210,38 @@ export default function UnifiedEarthquakeMap({
               </div>
             </div>
           </div>
+
+          <div className="pt-2 border-t">
+            <Label htmlFor="sampleSize" className="text-xs font-medium mb-2 block">
+              Max Events to Display
+            </Label>
+            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(Number(value))}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="500">500</SelectItem>
+                <SelectItem value="1000">1,000</SelectItem>
+                <SelectItem value="2000">2,000</SelectItem>
+                <SelectItem value="5000">5,000</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </Card>
+
+      {/* Sampling Info Badge */}
+      {isSampled && (
+        <Card className="absolute top-4 left-4 z-[1000] p-3 bg-background/95 backdrop-blur-sm shadow-lg">
+          <div className="flex items-center gap-2 text-sm">
+            <Info className="h-4 w-4 text-blue-500" />
+            <span>
+              Displaying <strong>{displayCount.toLocaleString()}</strong> of{' '}
+              <strong>{total.toLocaleString()}</strong> events
+            </span>
+          </div>
+        </Card>
+      )}
 
       {/* Map */}
       <div className="h-[600px] w-full rounded-lg overflow-hidden border shadow-sm">
@@ -234,54 +271,34 @@ export default function UnifiedEarthquakeMap({
             />
           )}
 
-          {/* Earthquake markers with clustering for performance */}
-          <MarkerClusterGroup
-            chunkedLoading
-            maxClusterRadius={50}
-            spiderfyOnMaxZoom={true}
-            showCoverageOnHover={false}
-            zoomToBoundsOnClick={true}
-            iconCreateFunction={(cluster: any) => {
-              const count = cluster.getChildCount();
-              let size = 'small';
-              if (count > 100) size = 'large';
-              else if (count > 10) size = 'medium';
+          {/* Earthquake markers - using intelligent sampling for performance */}
+          {sampledEarthquakes.map((eq) => {
+            const eventDate = new Date(eq.time).toLocaleDateString();
+            const ariaLabel = `Magnitude ${eq.magnitude} earthquake at ${eq.latitude.toFixed(2)}, ${eq.longitude.toFixed(2)} on ${eventDate}`;
 
-              return L.divIcon({
-                html: `<div><span>${count}</span></div>`,
-                className: `marker-cluster marker-cluster-${size}`,
-                iconSize: L.point(40, 40),
-              });
-            }}
-          >
-            {earthquakes.map((eq) => {
-              const eventDate = new Date(eq.time).toLocaleDateString();
-              const ariaLabel = `Magnitude ${eq.magnitude} earthquake at ${eq.latitude.toFixed(2)}, ${eq.longitude.toFixed(2)} on ${eventDate}`;
-
-              return (
-                <Circle
-                  key={eq.id}
-                  center={[eq.latitude, eq.longitude]}
-                  radius={getMagnitudeRadius(eq.magnitude)}
-                  pathOptions={{
-                    color: getEventColor(eq),
-                    fillColor: getEventColor(eq),
-                    fillOpacity: mapColors.markerOpacity,
-                    weight: 2,
-                    // Add title for accessibility (shows on hover)
-                    title: ariaLabel,
-                  } as any}
-                  eventHandlers={{
-                    click: () => setSelectedEvent(eq),
-                  }}
-                >
-                  <Popup>
-                    <EventPopup event={eq} qualityScores={qualityScores} />
-                  </Popup>
-                </Circle>
-              );
-            })}
-          </MarkerClusterGroup>
+            return (
+              <Circle
+                key={eq.id}
+                center={[eq.latitude, eq.longitude]}
+                radius={getMagnitudeRadius(eq.magnitude)}
+                pathOptions={{
+                  color: getEventColor(eq),
+                  fillColor: getEventColor(eq),
+                  fillOpacity: mapColors.markerOpacity,
+                  weight: 2,
+                  // Add title for accessibility (shows on hover)
+                  title: ariaLabel,
+                } as any}
+                eventHandlers={{
+                  click: () => setSelectedEvent(eq),
+                }}
+              >
+                <Popup>
+                  <EventPopup event={eq} qualityScores={qualityScores} />
+                </Popup>
+              </Circle>
+            );
+          })}
         </MapContainer>
       </div>
 

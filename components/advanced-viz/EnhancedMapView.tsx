@@ -2,12 +2,12 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { MapContainer, TileLayer, Circle, Popup, Polyline } from 'react-leaflet';
-import MarkerClusterGroup from 'react-leaflet-cluster';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Activity, Ruler, Calendar, MapPin, Layers, Target, Radio } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Activity, Ruler, Calendar, MapPin, Layers, Target, Radio, Info } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { UncertaintyEllipse } from './UncertaintyEllipse';
@@ -18,7 +18,7 @@ import { calculateUncertaintyEllipse, UncertaintyData } from '@/lib/uncertainty-
 import { parseFocalMechanism } from '@/lib/focal-mechanism-utils';
 import { calculateDistance } from '@/lib/station-coverage-utils';
 import { calculateQualityScore, QualityMetrics, getQualityColor } from '@/lib/quality-scoring';
-import { getMagnitudeColor, getMagnitudeRadius } from '@/lib/earthquake-utils';
+import { getMagnitudeColor, getMagnitudeRadius, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 
 interface EnhancedEvent {
   id: number | string;
@@ -90,10 +90,17 @@ export function EnhancedMapView({
   const [showFocalMechanisms, setShowFocalMechanisms] = useState(true);
   const [showStations, setShowStations] = useState(false);
   const [showQualityColors, setShowQualityColors] = useState(false);
+  const [sampleSize, setSampleSize] = useState<number>(1000);
 
   // Dark mode support
   const mapTheme = useMapTheme();
   const mapColors = useMapColors();
+
+  // Sample events for performance
+  const { sampled: sampledEvents, total, displayCount, isSampled } = useMemo(
+    () => sampleEarthquakeEvents(events, sampleSize),
+    [events, sampleSize]
+  );
 
   // Fix Leaflet icons
   useEffect(() => {
@@ -105,30 +112,30 @@ export function EnhancedMapView({
     });
   }, []);
 
-  // Calculate uncertainty ellipses
+  // Calculate uncertainty ellipses (use sampled events)
   const uncertaintyEllipses = useMemo(() => {
-    return events.map(event => ({
+    return sampledEvents.map(event => ({
       eventId: event.id,
       ellipse: calculateUncertaintyEllipse(event as UncertaintyData)
     })).filter(item => item.ellipse !== null);
-  }, [events]);
+  }, [sampledEvents]);
 
-  // Parse focal mechanisms
+  // Parse focal mechanisms (use sampled events)
   const focalMechanisms = useMemo(() => {
-    return events.map(event => ({
+    return sampledEvents.map(event => ({
       eventId: event.id,
       position: [event.latitude, event.longitude] as [number, number],
       mechanism: parseFocalMechanism(event.focal_mechanisms)
     })).filter(item => item.mechanism !== null);
-  }, [events]);
+  }, [sampledEvents]);
 
-  // Calculate quality scores
+  // Calculate quality scores (use sampled events)
   const qualityScores = useMemo(() => {
-    return events.map(event => ({
+    return sampledEvents.map(event => ({
       eventId: event.id,
       score: calculateQualityScore(event as QualityMetrics)
     }));
-  }, [events]);
+  }, [sampledEvents]);
 
   // Get event color based on quality or magnitude
   const getEventColor = (event: EnhancedEvent) => {
@@ -145,13 +152,13 @@ export function EnhancedMapView({
   return (
     <div className="relative">
       {/* Control Panel */}
-      <Card className="absolute top-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg">
+      <Card className="absolute top-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[280px]">
         <div className="space-y-3">
           <h3 className="font-semibold text-sm flex items-center gap-2">
             <Layers className="h-4 w-4" />
             Visualization Options
           </h3>
-          
+
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor="uncertainty" className="text-sm cursor-pointer">
               Uncertainty Ellipses
@@ -162,7 +169,7 @@ export function EnhancedMapView({
               onCheckedChange={setShowUncertainty}
             />
           </div>
-          
+
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor="focal" className="text-sm cursor-pointer">
               Focal Mechanisms
@@ -173,7 +180,7 @@ export function EnhancedMapView({
               onCheckedChange={setShowFocalMechanisms}
             />
           </div>
-          
+
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor="stations" className="text-sm cursor-pointer">
               Station Coverage
@@ -184,7 +191,7 @@ export function EnhancedMapView({
               onCheckedChange={setShowStations}
             />
           </div>
-          
+
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor="quality" className="text-sm cursor-pointer">
               Quality Colors
@@ -195,8 +202,38 @@ export function EnhancedMapView({
               onCheckedChange={setShowQualityColors}
             />
           </div>
+
+          <div className="pt-2 border-t">
+            <Label htmlFor="sampleSize" className="text-sm font-medium mb-2 block">
+              Max Events to Display
+            </Label>
+            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(Number(value))}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="500">500</SelectItem>
+                <SelectItem value="1000">1,000</SelectItem>
+                <SelectItem value="2000">2,000</SelectItem>
+                <SelectItem value="5000">5,000</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </Card>
+
+      {/* Sampling Info Badge */}
+      {isSampled && (
+        <Card className="absolute top-4 left-4 z-[1000] p-3 bg-background/95 backdrop-blur-sm shadow-lg">
+          <div className="flex items-center gap-2 text-sm">
+            <Info className="h-4 w-4 text-blue-500" />
+            <span>
+              Displaying <strong>{displayCount.toLocaleString()}</strong> of{' '}
+              <strong>{total.toLocaleString()}</strong> events
+            </span>
+          </div>
+        </Card>
+      )}
 
       {/* Map */}
       <div className="h-[700px] w-full rounded-lg overflow-hidden border">
@@ -211,54 +248,34 @@ export function EnhancedMapView({
             url={mapTheme.tileLayerUrl}
           />
 
-          {/* Earthquake markers with clustering for performance */}
-          <MarkerClusterGroup
-            chunkedLoading
-            maxClusterRadius={50}
-            spiderfyOnMaxZoom={true}
-            showCoverageOnHover={false}
-            zoomToBoundsOnClick={true}
-            iconCreateFunction={(cluster: any) => {
-              const count = cluster.getChildCount();
-              let size = 'small';
-              if (count > 100) size = 'large';
-              else if (count > 10) size = 'medium';
+          {/* Earthquake markers - using intelligent sampling for performance */}
+          {sampledEvents.map((event) => {
+            const eventDate = new Date(event.time).toLocaleDateString();
+            const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
 
-              return L.divIcon({
-                html: `<div><span>${count}</span></div>`,
-                className: `marker-cluster marker-cluster-${size}`,
-                iconSize: L.point(40, 40),
-              });
-            }}
-          >
-            {events.map((event) => {
-              const eventDate = new Date(event.time).toLocaleDateString();
-              const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
-
-              return (
-                <Circle
-                  key={event.id}
-                  center={[event.latitude, event.longitude]}
-                  radius={getMagnitudeRadius(event.magnitude)}
-                  pathOptions={{
-                    color: getEventColor(event),
-                    fillColor: getEventColor(event),
-                    fillOpacity: mapColors.markerOpacity,
-                    weight: 2,
-                    // Add title for accessibility (shows on hover)
-                    title: ariaLabel,
-                  } as any}
-                  eventHandlers={{
-                    click: () => setSelectedEvent(event),
-                  }}
-                >
-                  <Popup>
-                    <EventPopup event={event} qualityScores={qualityScores} />
-                  </Popup>
-                </Circle>
-              );
-            })}
-          </MarkerClusterGroup>
+            return (
+              <Circle
+                key={event.id}
+                center={[event.latitude, event.longitude]}
+                radius={getMagnitudeRadius(event.magnitude)}
+                pathOptions={{
+                  color: getEventColor(event),
+                  fillColor: getEventColor(event),
+                  fillOpacity: mapColors.markerOpacity,
+                  weight: 2,
+                  // Add title for accessibility (shows on hover)
+                  title: ariaLabel,
+                } as any}
+                eventHandlers={{
+                  click: () => setSelectedEvent(event),
+                }}
+              >
+                <Popup>
+                  <EventPopup event={event} qualityScores={qualityScores} />
+                </Popup>
+              </Circle>
+            );
+          })}
 
           {/* Uncertainty ellipses */}
           {showUncertainty && uncertaintyEllipses.map(({ eventId, ellipse }) => (

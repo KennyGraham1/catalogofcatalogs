@@ -4,18 +4,18 @@ import { useEffect, useRef, useState, useMemo, memo, useCallback } from 'react';
 import L from 'leaflet';
 import { MapContainer, TileLayer, GeoJSON, FeatureGroup, Circle, Popup, Marker } from 'react-leaflet';
 import { EditControl } from 'react-leaflet-draw';
-import MarkerClusterGroup from 'react-leaflet-cluster';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Calendar, Ruler, Activity, Zap, Layers, MapPin } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Calendar, Ruler, Activity, Zap, Layers, MapPin, Info } from 'lucide-react';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
 import { useNearbyFaults } from '@/hooks/use-nearby-faults';
 import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
 import { calculateQualityScore, QualityMetrics, getQualityColor } from '@/lib/quality-scoring';
-import { getMagnitudeRadius, getMagnitudeColor } from '@/lib/earthquake-utils';
+import { getMagnitudeRadius, getMagnitudeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 import { loadFaultData, FaultCollection } from '@/lib/fault-data';
 import type { PathOptions } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -42,6 +42,7 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
   const [showActiveFaults, setShowActiveFaults] = useState(true);
   const [colorMode, setColorMode] = useState<'magnitude' | 'depth' | 'quality'>('magnitude');
   const [faultData, setFaultData] = useState<FaultCollection | null>(null);
+  const [sampleSize, setSampleSize] = useState<number>(1000);
 
   // Dark mode support
   const mapTheme = useMapTheme();
@@ -62,6 +63,12 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
     return [];
   }, [eventsData, propEvents]);
 
+  // Sample events for performance
+  const { sampled: sampledEvents, total, displayCount, isSampled } = useMemo(
+    () => sampleEarthquakeEvents(events, sampleSize),
+    [events, sampleSize]
+  );
+
   // Load fault data
   useEffect(() => {
     if (showActiveFaults) {
@@ -79,13 +86,13 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
     });
   }, []);
 
-  // Calculate quality scores (memoized for performance)
+  // Calculate quality scores (memoized for performance, use sampled events)
   const qualityScores = useMemo(() => {
-    return events.map(event => ({
+    return sampledEvents.map(event => ({
       eventId: event.id,
       score: calculateQualityScore(event as QualityMetrics)
     }));
-  }, [events]);
+  }, [sampledEvents]);
 
   // Memoize quality score lookup map for O(1) access
   const qualityScoreMap = useMemo(() => {
@@ -153,7 +160,7 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
   return (
     <div className="h-[calc(100vh-12rem)] w-full relative">
       {/* Control Panel */}
-      <Card className="absolute top-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[240px]">
+      <Card className="absolute top-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[280px]">
         <div className="space-y-3">
           <h3 className="font-semibold text-sm flex items-center gap-2">
             <Layers className="h-4 w-4" />
@@ -209,8 +216,38 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
               </div>
             </div>
           </div>
+
+          <div className="pt-2 border-t">
+            <Label htmlFor="sampleSize" className="text-xs font-medium mb-2 block">
+              Max Events to Display
+            </Label>
+            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(Number(value))}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="500">500</SelectItem>
+                <SelectItem value="1000">1,000</SelectItem>
+                <SelectItem value="2000">2,000</SelectItem>
+                <SelectItem value="5000">5,000</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </Card>
+
+      {/* Sampling Info Badge */}
+      {isSampled && (
+        <Card className="absolute top-4 left-4 z-[1000] p-3 bg-background/95 backdrop-blur-sm shadow-lg">
+          <div className="flex items-center gap-2 text-sm">
+            <Info className="h-4 w-4 text-blue-500" />
+            <span>
+              Displaying <strong>{displayCount.toLocaleString()}</strong> of{' '}
+              <strong>{total.toLocaleString()}</strong> events
+            </span>
+          </div>
+        </Card>
+      )}
 
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-[1000]">
@@ -261,51 +298,31 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
           />
         </FeatureGroup>
 
-        {/* Earthquake markers with clustering for performance */}
-        <MarkerClusterGroup
-          chunkedLoading
-          maxClusterRadius={50}
-          spiderfyOnMaxZoom={true}
-          showCoverageOnHover={false}
-          zoomToBoundsOnClick={true}
-          iconCreateFunction={(cluster: any) => {
-            const count = cluster.getChildCount();
-            let size = 'small';
-            if (count > 100) size = 'large';
-            else if (count > 10) size = 'medium';
+        {/* Earthquake markers - using intelligent sampling for performance */}
+        {sampledEvents.map((event) => {
+          const eventDate = new Date(event.time).toLocaleDateString();
+          const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
 
-            return L.divIcon({
-              html: `<div><span>${count}</span></div>`,
-              className: `marker-cluster marker-cluster-${size}`,
-              iconSize: L.point(40, 40),
-            });
-          }}
-        >
-          {events.map((event) => {
-            const eventDate = new Date(event.time).toLocaleDateString();
-            const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
-
-            return (
-              <Circle
-                key={event.id}
-                center={[event.latitude, event.longitude]}
-                radius={getMagnitudeRadius(event.magnitude)}
-                pathOptions={{
-                  color: getEventColor(event),
-                  fillColor: getEventColor(event),
-                  fillOpacity: mapColors.markerOpacity,
-                  weight: 2,
-                  // Add title for accessibility (shows on hover)
-                  title: ariaLabel,
-                } as any}
-              >
-                <Popup>
-                  <EventPopupWithFaults event={event} qualityScores={qualityScores} />
-                </Popup>
-              </Circle>
-            );
-          })}
-        </MarkerClusterGroup>
+          return (
+            <Circle
+              key={event.id}
+              center={[event.latitude, event.longitude]}
+              radius={getMagnitudeRadius(event.magnitude)}
+              pathOptions={{
+                color: getEventColor(event),
+                fillColor: getEventColor(event),
+                fillOpacity: mapColors.markerOpacity,
+                weight: 2,
+                // Add title for accessibility (shows on hover)
+                title: ariaLabel,
+              } as any}
+            >
+              <Popup>
+                <EventPopupWithFaults event={event} qualityScores={qualityScores} />
+              </Popup>
+            </Circle>
+          );
+        })}
       </MapContainer>
 
       {/* Legend */}

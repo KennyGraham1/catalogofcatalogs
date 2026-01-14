@@ -3,13 +3,13 @@
 import { useEffect, useState, useMemo, useCallback, memo } from 'react';
 import L from 'leaflet';
 import { MapContainer, TileLayer, Circle, Popup } from 'react-leaflet';
-import MarkerClusterGroup from 'react-leaflet-cluster';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Activity, Calendar, Ruler, MapPin, Filter } from 'lucide-react';
+import { Label } from '@/components/ui/label';
+import { Activity, Calendar, Ruler, MapPin, Filter, Info } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getMagnitudeColor, getMagnitudeRadius } from '@/lib/earthquake-utils';
+import { getMagnitudeColor, getMagnitudeRadius, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 import { useMapTheme } from '@/hooks/use-map-theme';
 import 'leaflet/dist/leaflet.css';
 
@@ -39,9 +39,16 @@ export const CatalogueMap = memo(function CatalogueMap() {
   const [selectedCatalogue, setSelectedCatalogue] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sampleSize, setSampleSize] = useState<number>(1000);
 
   // Dark mode support
   const mapTheme = useMapTheme();
+
+  // Sample events for performance
+  const { sampled: sampledEvents, total, displayCount, isSampled } = useMemo(
+    () => sampleEarthquakeEvents(events, sampleSize),
+    [events, sampleSize]
+  );
 
   // Fetch catalogues list
   useEffect(() => {
@@ -168,9 +175,9 @@ export const CatalogueMap = memo(function CatalogueMap() {
     return 'Micro';
   }, []);
 
-  // Memoize event markers to avoid unnecessary re-renders
+  // Memoize event markers to avoid unnecessary re-renders (use sampled events)
   const eventMarkers = useMemo(() => {
-    return events.map((event) => (
+    return sampledEvents.map((event) => (
       <Circle
         key={event.id}
         center={[event.latitude, event.longitude]}
@@ -218,7 +225,7 @@ export const CatalogueMap = memo(function CatalogueMap() {
         </Popup>
       </Circle>
     ));
-  }, [events, getMagnitudeLabel]);
+  }, [sampledEvents, getMagnitudeLabel]);
 
   return (
     <div className="h-[600px] w-full relative">
@@ -243,6 +250,19 @@ export const CatalogueMap = memo(function CatalogueMap() {
         </Card>
       </div>
 
+      {/* Sampling Info Badge */}
+      {isSampled && (
+        <Card className="absolute top-16 left-4 z-[2000] p-3 bg-background/95 backdrop-blur-sm shadow-lg">
+          <div className="flex items-center gap-2 text-sm">
+            <Info className="h-4 w-4 text-blue-500" />
+            <span>
+              Displaying <strong>{displayCount.toLocaleString()}</strong> of{' '}
+              <strong>{total.toLocaleString()}</strong> events
+            </span>
+          </div>
+        </Card>
+      )}
+
       <MapContainer
         center={[-41.0, 174.0]} // Center on New Zealand
         zoom={5}
@@ -255,28 +275,8 @@ export const CatalogueMap = memo(function CatalogueMap() {
           url={mapTheme.tileLayerUrl}
         />
 
-        {/* Earthquake markers with clustering for performance */}
-        <MarkerClusterGroup
-          chunkedLoading
-          maxClusterRadius={50}
-          spiderfyOnMaxZoom={true}
-          showCoverageOnHover={false}
-          zoomToBoundsOnClick={true}
-          iconCreateFunction={(cluster: any) => {
-            const count = cluster.getChildCount();
-            let size = 'small';
-            if (count > 100) size = 'large';
-            else if (count > 10) size = 'medium';
-
-            return L.divIcon({
-              html: `<div><span>${count}</span></div>`,
-              className: `marker-cluster marker-cluster-${size}`,
-              iconSize: L.point(40, 40),
-            });
-          }}
-        >
-          {eventMarkers}
-        </MarkerClusterGroup>
+        {/* Earthquake markers - using intelligent sampling for performance */}
+        {eventMarkers}
       </MapContainer>
 
       {/* Legend */}
@@ -292,15 +292,31 @@ export const CatalogueMap = memo(function CatalogueMap() {
             <div className="w-6 h-6 rounded-full bg-blue-500"></div>
           </div>
         </div>
-        <div className="mt-3 pt-3 border-t space-y-1">
+        <div className="mt-3 pt-3 border-t space-y-2">
           <div className="text-xs text-muted-foreground text-center">
-            {events.length} events
+            {total.toLocaleString()} total events
           </div>
           {selectedCatalogue && (
             <div className="text-xs text-muted-foreground text-center">
               {catalogues.find(c => c.id === selectedCatalogue)?.name}
             </div>
           )}
+          <div className="pt-2 border-t">
+            <Label htmlFor="sampleSize-map" className="text-xs font-medium mb-2 block">
+              Max Events
+            </Label>
+            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(Number(value))}>
+              <SelectTrigger className="w-full h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="500">500</SelectItem>
+                <SelectItem value="1000">1,000</SelectItem>
+                <SelectItem value="2000">2,000</SelectItem>
+                <SelectItem value="5000">5,000</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </Card>
     </div>

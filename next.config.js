@@ -93,7 +93,7 @@ const nextConfig = {
             // Leaflet and map libraries in separate chunk
             maps: {
               name: 'maps',
-              test: /[\\/]node_modules[\\/](leaflet|react-leaflet|react-leaflet-cluster)[\\/]/,
+              test: /[\\/]node_modules[\\/](leaflet|react-leaflet)[\\/]/,
               chunks: 'all',
               priority: 30
             }

@@ -1,14 +1,15 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { MapContainer, TileLayer, Circle, Popup } from 'react-leaflet';
-import MarkerClusterGroup from 'react-leaflet-cluster';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Activity, Ruler, Calendar } from 'lucide-react';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Activity, Ruler, Calendar, Info } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { getMagnitudeColor, getMagnitudeRadius, getMagnitudeLabel } from '@/lib/earthquake-utils';
+import { getMagnitudeColor, getMagnitudeRadius, getMagnitudeLabel, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
 
 interface MapComponentProps {
@@ -27,6 +28,13 @@ interface MapComponentProps {
 export default function MapComponent({ events }: MapComponentProps) {
   const mapTheme = useMapTheme();
   const mapColors = useMapColors();
+  const [sampleSize, setSampleSize] = useState<number>(1000);
+
+  // Sample events for performance
+  const { sampled: sampledEvents, total, displayCount, isSampled } = useMemo(
+    () => sampleEarthquakeEvents(events, sampleSize),
+    [events, sampleSize]
+  );
 
   // Fix for Leaflet icons in Next.js
   useEffect(() => {
@@ -40,6 +48,19 @@ export default function MapComponent({ events }: MapComponentProps) {
 
   return (
     <div className="h-full w-full rounded-lg overflow-hidden border relative">
+      {/* Sampling Info Badge */}
+      {isSampled && (
+        <Card className="absolute top-4 left-4 z-[1000] p-3 bg-background/95 backdrop-blur-sm shadow-lg">
+          <div className="flex items-center gap-2 text-sm">
+            <Info className="h-4 w-4 text-blue-500" />
+            <span>
+              Displaying <strong>{displayCount.toLocaleString()}</strong> of{' '}
+              <strong>{total.toLocaleString()}</strong> events
+            </span>
+          </div>
+        </Card>
+      )}
+
       <MapContainer
         center={[-41.0, 174.0]} // Center on New Zealand
         zoom={6}
@@ -51,46 +72,27 @@ export default function MapComponent({ events }: MapComponentProps) {
           url={mapTheme.tileLayerUrl}
         />
 
-        {/* Earthquake Markers with clustering for performance */}
-        <MarkerClusterGroup
-          chunkedLoading
-          maxClusterRadius={50}
-          spiderfyOnMaxZoom={true}
-          showCoverageOnHover={false}
-          zoomToBoundsOnClick={true}
-          iconCreateFunction={(cluster: any) => {
-            const count = cluster.getChildCount();
-            let size = 'small';
-            if (count > 100) size = 'large';
-            else if (count > 10) size = 'medium';
+        {/* Earthquake markers - using intelligent sampling for performance */}
+        {sampledEvents.map((event, index) => {
+          const eventDate = new Date(event.time).toLocaleDateString();
+          const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
 
-            return L.divIcon({
-              html: `<div><span>${count}</span></div>`,
-              className: `marker-cluster marker-cluster-${size}`,
-              iconSize: L.point(40, 40),
-            });
-          }}
-        >
-          {events.map((event, index) => {
-            const eventDate = new Date(event.time).toLocaleDateString();
-            const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
-
-            return (
-              <Circle
-                key={event.id || index}
-                center={[event.latitude, event.longitude]}
-                radius={getMagnitudeRadius(event.magnitude)}
-                pathOptions={{
-                  color: getMagnitudeColor(event.magnitude),
-                  fillColor: getMagnitudeColor(event.magnitude),
-                  fillOpacity: mapColors.markerOpacity,
-                  weight: 2,
-                  // Add title for accessibility (shows on hover)
-                  title: ariaLabel,
-                } as any}
+          return (
+            <Circle
+              key={event.id || index}
+              center={[event.latitude, event.longitude]}
+              radius={getMagnitudeRadius(event.magnitude)}
+              pathOptions={{
+                color: getMagnitudeColor(event.magnitude),
+                fillColor: getMagnitudeColor(event.magnitude),
+                fillOpacity: mapColors.markerOpacity,
+                weight: 2,
+                // Add title for accessibility (shows on hover)
+                title: ariaLabel,
+              } as any}
             >
-            <Popup>
-              <div className="p-2 min-w-[250px]">
+              <Popup>
+                <div className="p-2 min-w-[250px]">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-bold text-base">{event.region || 'New Zealand'}</h3>
                   <Badge variant={event.magnitude >= 5.0 ? 'destructive' : 'default'}>
@@ -134,11 +136,10 @@ export default function MapComponent({ events }: MapComponentProps) {
                   </div>
                 </div>
               </div>
-            </Popup>
-          </Circle>
+              </Popup>
+            </Circle>
           );
         })}
-        </MarkerClusterGroup>
       </MapContainer>
 
       {/* Legend */}
@@ -154,8 +155,26 @@ export default function MapComponent({ events }: MapComponentProps) {
             <div className="w-6 h-6 rounded-full bg-blue-500"></div>
           </div>
         </div>
-        <div className="mt-3 pt-3 border-t text-xs text-muted-foreground text-center">
-          {events.length} events
+        <div className="mt-3 pt-3 border-t space-y-2">
+          <div className="text-xs text-muted-foreground text-center">
+            {total.toLocaleString()} total events
+          </div>
+          <div className="pt-2 border-t">
+            <Label htmlFor="sampleSize-merge" className="text-xs font-medium mb-2 block">
+              Max Events
+            </Label>
+            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(Number(value))}>
+              <SelectTrigger className="w-full h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="500">500</SelectItem>
+                <SelectItem value="1000">1,000</SelectItem>
+                <SelectItem value="2000">2,000</SelectItem>
+                <SelectItem value="5000">5,000</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </Card>
     </div>

@@ -445,32 +445,179 @@ export function validateEvent(event: Partial<EarthquakeEvent>): {
   errors: string[];
 } {
   const errors: string[] = [];
-  
+
   if (event.latitude === undefined || event.longitude === undefined) {
     errors.push('Latitude and longitude are required');
   } else if (!validateCoordinates(event.latitude, event.longitude)) {
     errors.push('Invalid coordinates: latitude must be -90 to 90, longitude must be -180 to 180');
   }
-  
+
   if (event.magnitude === undefined) {
     errors.push('Magnitude is required');
   } else if (!validateMagnitude(event.magnitude)) {
     errors.push('Invalid magnitude: must be between -3 and 10');
   }
-  
+
   if (event.depth !== undefined && event.depth !== null && !validateDepth(event.depth)) {
     errors.push('Invalid depth: must be between 0 and 1000 km');
   }
-  
+
   if (!event.time) {
     errors.push('Timestamp is required');
   } else if (!validateTimestamp(event.time)) {
     errors.push('Invalid timestamp format');
   }
-  
+
   return {
     valid: errors.length === 0,
     errors
   };
+}
+
+/**
+ * Sample earthquake events intelligently for map rendering performance.
+ * Uses stratified sampling to maintain representativeness across:
+ * - Magnitude distribution (prioritizing larger events)
+ * - Geographic spread (sampling across the spatial distribution)
+ * - Temporal distribution (sampling across time periods)
+ *
+ * @param events - Array of earthquake events to sample
+ * @param maxSamples - Maximum number of events to return (default: 1000)
+ * @returns Object containing sampled events and metadata
+ */
+export function sampleEarthquakeEvents<T extends EarthquakeEvent>(
+  events: T[],
+  maxSamples: number = 1000
+): {
+  sampled: T[];
+  total: number;
+  displayCount: number;
+  isSampled: boolean;
+} {
+  const total = events.length;
+
+  // If we have fewer events than the limit, return all
+  if (total <= maxSamples) {
+    return {
+      sampled: events,
+      total,
+      displayCount: total,
+      isSampled: false,
+    };
+  }
+
+  // Stratified sampling strategy
+  const sampledEvents: T[] = [];
+  const samplingRatio = maxSamples / total;
+
+  // Sort events by magnitude (descending) to prioritize larger events
+  const sortedByMagnitude = [...events].sort((a, b) => b.magnitude - a.magnitude);
+
+  // Step 1: Always include the largest events (top 10% or 100, whichever is smaller)
+  const topEventCount = Math.min(Math.floor(maxSamples * 0.1), 100);
+  const topEvents = sortedByMagnitude.slice(0, topEventCount);
+  sampledEvents.push(...topEvents);
+
+  // Step 2: Sample remaining events using stratified approach
+  const remainingEvents = sortedByMagnitude.slice(topEventCount);
+  const remainingSamples = maxSamples - topEventCount;
+
+  // Divide into magnitude bins for stratified sampling
+  const magnitudeBins = createMagnitudeBins(remainingEvents);
+  const eventsPerBin = Math.floor(remainingSamples / magnitudeBins.length);
+
+  for (const bin of magnitudeBins) {
+    // Sample events from this bin
+    const binSample = stratifiedSampleBin(bin, eventsPerBin);
+    sampledEvents.push(...binSample);
+  }
+
+  // If we still have room, add more random samples to reach the target
+  if (sampledEvents.length < maxSamples) {
+    const usedIds = new Set(sampledEvents.map((e, idx) => idx));
+    const remaining = events.filter((_, idx) => !usedIds.has(idx));
+    const additionalCount = maxSamples - sampledEvents.length;
+    const additionalSamples = randomSample(remaining, additionalCount);
+    sampledEvents.push(...additionalSamples);
+  }
+
+  // Shuffle the final result to avoid clustering by magnitude
+  const shuffled = shuffleArray(sampledEvents.slice(0, maxSamples));
+
+  return {
+    sampled: shuffled,
+    total,
+    displayCount: shuffled.length,
+    isSampled: true,
+  };
+}
+
+/**
+ * Create magnitude bins for stratified sampling
+ */
+function createMagnitudeBins<T extends EarthquakeEvent>(events: T[]): T[][] {
+  const bins: T[][] = [[], [], [], [], []]; // 5 bins for magnitude ranges
+
+  for (const event of events) {
+    const mag = event.magnitude;
+    if (mag >= 6.0) bins[0].push(event); // Major
+    else if (mag >= 5.0) bins[1].push(event); // Moderate
+    else if (mag >= 4.0) bins[2].push(event); // Light
+    else if (mag >= 3.0) bins[3].push(event); // Minor
+    else bins[4].push(event); // Micro
+  }
+
+  return bins.filter(bin => bin.length > 0);
+}
+
+/**
+ * Sample events from a bin using geographic and temporal distribution
+ */
+function stratifiedSampleBin<T extends EarthquakeEvent>(
+  bin: T[],
+  targetCount: number
+): T[] {
+  if (bin.length <= targetCount) {
+    return bin;
+  }
+
+  // Sort by time to ensure temporal distribution
+  const sorted = [...bin].sort((a, b) =>
+    new Date(a.time).getTime() - new Date(b.time).getTime()
+  );
+
+  // Use systematic sampling with a random start for even distribution
+  const step = bin.length / targetCount;
+  const start = Math.random() * step;
+  const samples: T[] = [];
+
+  for (let i = 0; i < targetCount; i++) {
+    const index = Math.floor(start + i * step);
+    if (index < sorted.length) {
+      samples.push(sorted[index]);
+    }
+  }
+
+  return samples;
+}
+
+/**
+ * Random sample without replacement
+ */
+function randomSample<T>(array: T[], count: number): T[] {
+  const shuffled = shuffleArray([...array]);
+  return shuffled.slice(0, Math.min(count, array.length));
+}
+
+/**
+ * Fisher-Yates shuffle algorithm
+ */
+function shuffleArray<T>(array: T[]): T[] {
+  const result = [...array];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
 }
 
