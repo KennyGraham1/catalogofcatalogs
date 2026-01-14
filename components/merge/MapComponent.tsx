@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Activity, Ruler, Calendar, Info } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { getMagnitudeColor, getMagnitudeRadius, getMagnitudeLabel, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
+import { getMagnitudeColor, getMagnitudeRadius, getMagnitudeLabel, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
 
 interface MapComponentProps {
@@ -66,6 +66,7 @@ export default function MapComponent({ events }: MapComponentProps) {
         zoom={6}
         className="h-full w-full"
         scrollWheelZoom={true}
+        preferCanvas={true}
       >
         <TileLayer
           attribution={mapTheme.attribution}
@@ -73,7 +74,8 @@ export default function MapComponent({ events }: MapComponentProps) {
         />
 
         {/* Earthquake markers - using intelligent sampling for performance */}
-        {sampledEvents.map((event, index) => {
+        {/* Sort by magnitude (small to large) so larger events render on top */}
+        {[...sampledEvents].sort((a, b) => a.magnitude - b.magnitude).map((event, index) => {
           const eventDate = new Date(event.time).toLocaleDateString();
           const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
 
@@ -83,10 +85,10 @@ export default function MapComponent({ events }: MapComponentProps) {
               center={[event.latitude, event.longitude]}
               radius={getMagnitudeRadius(event.magnitude)}
               pathOptions={{
-                color: getMagnitudeColor(event.magnitude),
-                fillColor: getMagnitudeColor(event.magnitude),
+                color: getEarthquakeColor(event.depth || 0, mapColors.isDark),
+                fillColor: getEarthquakeColor(event.depth || 0, mapColors.isDark),
                 fillOpacity: mapColors.markerOpacity,
-                weight: 2,
+                weight: 1,
                 // Add title for accessibility (shows on hover)
                 title: ariaLabel,
               } as any}
@@ -146,13 +148,24 @@ export default function MapComponent({ events }: MapComponentProps) {
       <Card className="absolute bottom-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[220px]">
         <h4 className="font-semibold text-sm mb-3">Magnitude Scale</h4>
         <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">Circle size = magnitude</p>
-          <div className="flex items-center justify-center gap-1 py-1">
-            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-            <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-            <div className="w-4 h-4 rounded-full bg-blue-500"></div>
-            <div className="w-5 h-5 rounded-full bg-blue-500"></div>
-            <div className="w-6 h-6 rounded-full bg-blue-500"></div>
+          <p className="text-xs text-muted-foreground">Circle size = magnitude (+3km scale)</p>
+          <div className="space-y-1.5 text-xs">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <span>M2 (~6 km)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <span>M4 (~12 km)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <span>M6 (~18 km)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <span>M7+ (~21 km)</span>
+            </div>
           </div>
         </div>
         <div className="mt-3 pt-3 border-t space-y-2">
@@ -167,7 +180,7 @@ export default function MapComponent({ events }: MapComponentProps) {
               <SelectTrigger className="w-full h-8">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent position="popper" className="z-[10000]">
                 <SelectItem value="500">500</SelectItem>
                 <SelectItem value="1000">1,000</SelectItem>
                 <SelectItem value="2000">2,000</SelectItem>

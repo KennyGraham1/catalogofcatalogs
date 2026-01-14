@@ -9,8 +9,8 @@ import { Label } from '@/components/ui/label';
 import { Activity, Calendar, Ruler, MapPin, Filter, Info } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getMagnitudeColor, getMagnitudeRadius, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
-import { useMapTheme } from '@/hooks/use-map-theme';
+import { getMagnitudeColor, getMagnitudeRadius, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
+import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
 import 'leaflet/dist/leaflet.css';
 
 interface EarthquakeEvent {
@@ -43,6 +43,7 @@ export const CatalogueMap = memo(function CatalogueMap() {
 
   // Dark mode support
   const mapTheme = useMapTheme();
+  const mapColors = useMapColors();
 
   // Sample events for performance
   const { sampled: sampledEvents, total, displayCount, isSampled } = useMemo(
@@ -119,6 +120,69 @@ export const CatalogueMap = memo(function CatalogueMap() {
     });
   }, []);
 
+  // Memoize helper functions for better performance
+  // IMPORTANT: Must be before any conditional returns to follow Rules of Hooks
+  const getMagnitudeLabel = useMemo(() => (magnitude: number): string => {
+    if (magnitude >= 6.0) return 'Major';
+    if (magnitude >= 5.0) return 'Moderate';
+    if (magnitude >= 4.0) return 'Light';
+    if (magnitude >= 3.0) return 'Minor';
+    return 'Micro';
+  }, []);
+
+  // Memoize event markers to avoid unnecessary re-renders (use sampled events)
+  // Sort by magnitude (small to large) so larger events render on top
+  const eventMarkers = useMemo(() => {
+    return [...sampledEvents].sort((a, b) => a.magnitude - b.magnitude).map((event) => (
+      <Circle
+        key={event.id}
+        center={[event.latitude, event.longitude]}
+        radius={getMagnitudeRadius(event.magnitude)}
+        pathOptions={{
+          fillColor: getEarthquakeColor(event.depth || 0, mapColors.isDark),
+          fillOpacity: mapColors.markerOpacity,
+          color: getEarthquakeColor(event.depth || 0, mapColors.isDark),
+          weight: 1,
+        }}
+      >
+        <Popup>
+          <div className="p-2 min-w-[200px]">
+            <div className="flex items-center justify-between mb-2">
+              <Badge variant="outline" className="text-xs">
+                {getMagnitudeLabel(event.magnitude)}
+              </Badge>
+              <span className="text-sm font-semibold">M {event.magnitude.toFixed(1)}</span>
+            </div>
+            <div className="space-y-1 text-sm">
+              <div className="flex items-center gap-2">
+                <Calendar className="h-3 w-3 text-muted-foreground" />
+                <span>{new Date(event.time).toLocaleString()}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <MapPin className="h-3 w-3 text-muted-foreground" />
+                <span>
+                  {event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°
+                </span>
+              </div>
+              {event.depth !== null && (
+                <div className="flex items-center gap-2">
+                  <Ruler className="h-3 w-3 text-muted-foreground" />
+                  <span>{event.depth.toFixed(1)} km depth</span>
+                </div>
+              )}
+              {event.magnitude_type && (
+                <div className="flex items-center gap-2">
+                  <Activity className="h-3 w-3 text-muted-foreground" />
+                  <span>Type: {event.magnitude_type}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </Popup>
+      </Circle>
+    ));
+  }, [sampledEvents, getMagnitudeLabel, mapColors]);
+
   if (loading) {
     return (
       <div className="h-[600px] w-full relative flex items-center justify-center bg-muted/20">
@@ -166,67 +230,6 @@ export const CatalogueMap = memo(function CatalogueMap() {
     );
   }
 
-  // Memoize helper functions for better performance
-  const getMagnitudeLabel = useMemo(() => (magnitude: number): string => {
-    if (magnitude >= 6.0) return 'Major';
-    if (magnitude >= 5.0) return 'Moderate';
-    if (magnitude >= 4.0) return 'Light';
-    if (magnitude >= 3.0) return 'Minor';
-    return 'Micro';
-  }, []);
-
-  // Memoize event markers to avoid unnecessary re-renders (use sampled events)
-  const eventMarkers = useMemo(() => {
-    return sampledEvents.map((event) => (
-      <Circle
-        key={event.id}
-        center={[event.latitude, event.longitude]}
-        radius={getMagnitudeRadius(event.magnitude) * 1000}
-        pathOptions={{
-          fillColor: getMagnitudeColor(event.magnitude),
-          fillOpacity: 0.6,
-          color: getMagnitudeColor(event.magnitude),
-          weight: 1,
-        }}
-      >
-        <Popup>
-          <div className="p-2 min-w-[200px]">
-            <div className="flex items-center justify-between mb-2">
-              <Badge variant="outline" className="text-xs">
-                {getMagnitudeLabel(event.magnitude)}
-              </Badge>
-              <span className="text-sm font-semibold">M {event.magnitude.toFixed(1)}</span>
-            </div>
-            <div className="space-y-1 text-sm">
-              <div className="flex items-center gap-2">
-                <Calendar className="h-3 w-3 text-muted-foreground" />
-                <span>{new Date(event.time).toLocaleString()}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <MapPin className="h-3 w-3 text-muted-foreground" />
-                <span>
-                  {event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°
-                </span>
-              </div>
-              {event.depth !== null && (
-                <div className="flex items-center gap-2">
-                  <Ruler className="h-3 w-3 text-muted-foreground" />
-                  <span>{event.depth.toFixed(1)} km depth</span>
-                </div>
-              )}
-              {event.magnitude_type && (
-                <div className="flex items-center gap-2">
-                  <Activity className="h-3 w-3 text-muted-foreground" />
-                  <span>Type: {event.magnitude_type}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </Popup>
-      </Circle>
-    ));
-  }, [sampledEvents, getMagnitudeLabel]);
-
   return (
     <div className="h-[600px] w-full relative">
       {/* Catalogue Filter */}
@@ -238,7 +241,7 @@ export const CatalogueMap = memo(function CatalogueMap() {
               <SelectTrigger className="w-[250px] h-8">
                 <SelectValue placeholder="Select catalogue" />
               </SelectTrigger>
-              <SelectContent className="z-[2001]">
+              <SelectContent position="popper" className="z-[10000]">
                 {catalogues.map((catalogue) => (
                   <SelectItem key={catalogue.id} value={catalogue.id}>
                     {catalogue.name} ({catalogue.event_count} events)
@@ -269,6 +272,7 @@ export const CatalogueMap = memo(function CatalogueMap() {
         className="h-full w-full"
         minZoom={2}
         maxZoom={12}
+        preferCanvas={true}
       >
         <TileLayer
           attribution={mapTheme.attribution}
@@ -283,13 +287,24 @@ export const CatalogueMap = memo(function CatalogueMap() {
       <Card className="absolute bottom-4 right-4 z-[2000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[220px]">
         <h4 className="font-semibold text-sm mb-3">Magnitude Scale</h4>
         <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">Circle size = magnitude</p>
-          <div className="flex items-center justify-center gap-1 py-1">
-            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-            <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-            <div className="w-4 h-4 rounded-full bg-blue-500"></div>
-            <div className="w-5 h-5 rounded-full bg-blue-500"></div>
-            <div className="w-6 h-6 rounded-full bg-blue-500"></div>
+          <p className="text-xs text-muted-foreground">Circle size = magnitude (+3km scale)</p>
+          <div className="space-y-1.5 text-xs">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <span>M2 (~6 km)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <span>M4 (~12 km)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <span>M6 (~18 km)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <span>M7+ (~21 km)</span>
+            </div>
           </div>
         </div>
         <div className="mt-3 pt-3 border-t space-y-2">
@@ -309,7 +324,7 @@ export const CatalogueMap = memo(function CatalogueMap() {
               <SelectTrigger className="w-full h-8">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent position="popper" className="z-[10000]">
                 <SelectItem value="500">500</SelectItem>
                 <SelectItem value="1000">1,000</SelectItem>
                 <SelectItem value="2000">2,000</SelectItem>

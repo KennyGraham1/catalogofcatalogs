@@ -18,7 +18,7 @@ import { calculateUncertaintyEllipse, UncertaintyData } from '@/lib/uncertainty-
 import { parseFocalMechanism } from '@/lib/focal-mechanism-utils';
 import { calculateDistance } from '@/lib/station-coverage-utils';
 import { calculateQualityScore, QualityMetrics, getQualityColor } from '@/lib/quality-scoring';
-import { getMagnitudeColor, getMagnitudeRadius, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
+import { getMagnitudeColor, getMagnitudeRadius, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 
 interface EnhancedEvent {
   id: number | string;
@@ -137,13 +137,13 @@ export function EnhancedMapView({
     }));
   }, [sampledEvents]);
 
-  // Get event color based on quality or magnitude
+  // Get event color based on quality or depth
   const getEventColor = (event: EnhancedEvent) => {
     if (showQualityColors) {
       const quality = qualityScores.find(q => q.eventId === event.id);
-      return quality ? getQualityColor(quality.score.overall) : getMagnitudeColor(event.magnitude);
+      return quality ? getQualityColor(quality.score.overall) : getEarthquakeColor(event.depth, mapColors.isDark);
     }
-    return getMagnitudeColor(event.magnitude);
+    return getEarthquakeColor(event.depth, mapColors.isDark);
   };
 
   // Stations array - empty for now (would be fetched from database in production)
@@ -211,7 +211,7 @@ export function EnhancedMapView({
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent position="popper" className="z-[10000]">
                 <SelectItem value="500">500</SelectItem>
                 <SelectItem value="1000">1,000</SelectItem>
                 <SelectItem value="2000">2,000</SelectItem>
@@ -242,6 +242,7 @@ export function EnhancedMapView({
           zoom={zoom}
           className="h-full w-full"
           scrollWheelZoom={true}
+          preferCanvas={true}
         >
           <TileLayer
             attribution={mapTheme.attribution}
@@ -249,7 +250,8 @@ export function EnhancedMapView({
           />
 
           {/* Earthquake markers - using intelligent sampling for performance */}
-          {sampledEvents.map((event) => {
+          {/* Sort by magnitude (small to large) so larger events render on top */}
+          {[...sampledEvents].sort((a, b) => a.magnitude - b.magnitude).map((event) => {
             const eventDate = new Date(event.time).toLocaleDateString();
             const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
 
@@ -262,7 +264,7 @@ export function EnhancedMapView({
                   color: getEventColor(event),
                   fillColor: getEventColor(event),
                   fillOpacity: mapColors.markerOpacity,
-                  weight: 2,
+                  weight: 1,
                   // Add title for accessibility (shows on hover)
                   title: ariaLabel,
                 } as any}

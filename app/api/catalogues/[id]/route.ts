@@ -45,9 +45,10 @@ export async function PATCH(
     logger.info('Updating catalogue', { id: params.id });
 
     const body = await request.json();
-    const { name } = body;
+    const { name, ...metadata } = body;
 
-    if (!name || typeof name !== 'string' || !name.trim()) {
+    // Validate catalogue name if provided
+    if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
       return NextResponse.json(
         { error: 'Invalid catalogue name' },
         { status: 400 }
@@ -61,7 +62,16 @@ export async function PATCH(
       );
     }
 
-    await dbQueries.updateCatalogueName(name, params.id);
+    // Update name if provided
+    if (name && name.trim()) {
+      await dbQueries.updateCatalogueName(name, params.id);
+    }
+
+    // Update metadata if any metadata fields are provided
+    const metadataKeys = Object.keys(metadata);
+    if (metadataKeys.length > 0) {
+      await dbQueries.updateCatalogueMetadata(params.id, metadata);
+    }
 
     logger.info('Catalogue updated successfully', { id: params.id });
 

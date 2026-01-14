@@ -559,8 +559,8 @@ if (typeof window === 'undefined') {
       const collection = await getCollection(COLLECTIONS.EVENTS);
 
       // Performance optimization: Always use a limit to prevent loading massive datasets
-      // Default to 10000 events max if no pagination specified (for backward compatibility)
-      const DEFAULT_MAX_EVENTS = 10000;
+      // Default to 50000 events max if no pagination specified (for backward compatibility)
+      const DEFAULT_MAX_EVENTS = 50000;
 
       if (!params || (!params.page && !params.pageSize)) {
         // Return all events but with a safety limit

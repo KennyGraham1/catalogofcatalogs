@@ -13,7 +13,7 @@ import 'leaflet/dist/leaflet.css';
 
 import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
 import { calculateQualityScore, QualityMetrics, getQualityColor } from '@/lib/quality-scoring';
-import { getMagnitudeRadius, getMagnitudeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
+import { getMagnitudeRadius, getMagnitudeColor, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 import { useNearbyFaults } from '@/hooks/use-nearby-faults';
 import { loadFaultData, getFaultsInBounds, simplifyFaultsForZoom, FaultCollection, FaultFeature } from '@/lib/fault-data';
 import type { PathOptions } from 'leaflet';
@@ -124,21 +124,13 @@ export default function UnifiedEarthquakeMap({
     }));
   }, [sampledEarthquakes]);
 
-  const getDepthColor = (depth: number): string => {
-    if (depth >= 40) return '#000080'; // Navy
-    if (depth >= 30) return '#0000FF'; // Blue
-    if (depth >= 20) return '#4169E1'; // Royal blue
-    if (depth >= 10) return '#87CEEB'; // Sky blue
-    return '#ADD8E6'; // Light blue
-  };
-
   // Get event color based on selected mode
   const getEventColor = (event: Earthquake) => {
     if (colorMode === 'quality') {
       const quality = qualityScores.find(q => q.eventId === event.id);
-      return quality ? getQualityColor(quality.score.overall) : getMagnitudeColor(event.magnitude);
+      return quality ? getQualityColor(quality.score.overall) : getEarthquakeColor(event.depth, mapColors.isDark);
     } else if (colorMode === 'depth') {
-      return getDepthColor(event.depth);
+      return getEarthquakeColor(event.depth, mapColors.isDark);
     }
     return getMagnitudeColor(event.magnitude);
   };
@@ -219,7 +211,7 @@ export default function UnifiedEarthquakeMap({
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent position="popper" className="z-[10000]">
                 <SelectItem value="500">500</SelectItem>
                 <SelectItem value="1000">1,000</SelectItem>
                 <SelectItem value="2000">2,000</SelectItem>
@@ -250,6 +242,7 @@ export default function UnifiedEarthquakeMap({
           zoom={6}
           className="h-full w-full"
           scrollWheelZoom={true}
+          preferCanvas={true}
         >
           <TileLayer
             attribution={mapTheme.attribution}
@@ -272,7 +265,8 @@ export default function UnifiedEarthquakeMap({
           )}
 
           {/* Earthquake markers - using intelligent sampling for performance */}
-          {sampledEarthquakes.map((eq) => {
+          {/* Sort by magnitude (small to large) so larger events render on top */}
+          {[...sampledEarthquakes].sort((a, b) => a.magnitude - b.magnitude).map((eq) => {
             const eventDate = new Date(eq.time).toLocaleDateString();
             const ariaLabel = `Magnitude ${eq.magnitude} earthquake at ${eq.latitude.toFixed(2)}, ${eq.longitude.toFixed(2)} on ${eventDate}`;
 
@@ -285,7 +279,7 @@ export default function UnifiedEarthquakeMap({
                   color: getEventColor(eq),
                   fillColor: getEventColor(eq),
                   fillOpacity: mapColors.markerOpacity,
-                  weight: 2,
+                  weight: 1,
                   // Add title for accessibility (shows on hover)
                   title: ariaLabel,
                 } as any}
@@ -450,39 +444,50 @@ function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string;
       ) : colorMode === 'depth' ? (
         <div className="space-y-1.5 text-xs">
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#000080' }}></div>
-            <span>≥ 40 km (Deep)</span>
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#00CED1' }}></div>
+            <span>&lt; 15 km (Shallow)</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#0000FF' }}></div>
-            <span>30 - 39 km</span>
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#20B2AA' }}></div>
+            <span>15 - 40 km</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#4169E1' }}></div>
-            <span>20 - 29 km</span>
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#008B8B' }}></div>
+            <span>40 - 100 km</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#87CEEB' }}></div>
-            <span>10 - 19 km</span>
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#006666' }}></div>
+            <span>100 - 200 km (Deep)</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#ADD8E6' }}></div>
-            <span>&lt; 10 km (Shallow)</span>
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#004D4D' }}></div>
+            <span>≥ 200 km (V. Deep)</span>
           </div>
         </div>
       ) : (
         <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">Circle size = magnitude</p>
-          <div className="flex items-center justify-center gap-1 py-1">
-            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-            <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-            <div className="w-4 h-4 rounded-full bg-blue-500"></div>
-            <div className="w-5 h-5 rounded-full bg-blue-500"></div>
-            <div className="w-6 h-6 rounded-full bg-blue-500"></div>
+          <p className="text-xs text-muted-foreground">Circle size = magnitude (+3km scale)</p>
+          <div className="space-y-1.5 text-xs">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <span>M2 (~6 km)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <span>M4 (~12 km)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <span>M6 (~18 km)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <span>M7+ (~21 km)</span>
+            </div>
           </div>
         </div>
       )}
-      
+
       {showFaults && (
         <div className="mt-3 pt-3 border-t">
           <h4 className="font-semibold text-xs mb-2">Fault Lines</h4>

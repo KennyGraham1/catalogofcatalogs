@@ -63,9 +63,9 @@ export function useMapColors() {
 
   return {
     isDark,
-    
-    // Adjust opacity for better visibility in dark mode
-    markerOpacity: isDark ? 0.8 : 0.6,
+
+    // Consistent opacity for depth-gradient visualization
+    markerOpacity: 0.75,
     lineOpacity: isDark ? 0.8 : 0.6,
     
     // Fault line colors (adjusted for dark mode)

@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { toast } from '@/hooks/use-toast';
 import { ArrowLeft } from 'lucide-react';
 import { GeographicBoundsDisplay } from '@/components/catalogues/GeographicBoundsDisplay';
+import { CatalogueMetadataForm, CatalogueMetadata } from '@/components/upload/CatalogueMetadataForm';
 
 interface Catalogue {
   id: string;
@@ -22,12 +23,38 @@ interface Catalogue {
   max_latitude?: number | null;
   min_longitude?: number | null;
   max_longitude?: number | null;
+
+  // Metadata fields
+  description?: string;
+  data_source?: string;
+  provider?: string;
+  geographic_region?: string;
+  time_period_start?: string;
+  time_period_end?: string;
+  data_quality?: {
+    completeness?: string;
+    accuracy?: string;
+    reliability?: string;
+  };
+  quality_notes?: string;
+  contact_name?: string;
+  contact_email?: string;
+  contact_organization?: string;
+  license?: string;
+  usage_terms?: string;
+  citation?: string;
+  doi?: string;
+  version?: string;
+  keywords?: string[];
+  reference_links?: string[];
+  notes?: string;
 }
 
 export default function EditCataloguePage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const [catalogue, setCatalogue] = useState<Catalogue | null>(null);
   const [name, setName] = useState('');
+  const [metadata, setMetadata] = useState<CatalogueMetadata>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -43,6 +70,29 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
       const data = await response.json();
       setCatalogue(data);
       setName(data.name);
+
+      // Pre-populate metadata from catalogue
+      setMetadata({
+        description: data.description || '',
+        data_source: data.data_source || '',
+        provider: data.provider || '',
+        geographic_region: data.geographic_region || '',
+        time_period_start: data.time_period_start || '',
+        time_period_end: data.time_period_end || '',
+        data_quality: data.data_quality || { completeness: '', accuracy: '', reliability: '' },
+        quality_notes: data.quality_notes || '',
+        contact_name: data.contact_name || '',
+        contact_email: data.contact_email || '',
+        contact_organization: data.contact_organization || '',
+        license: data.license || '',
+        usage_terms: data.usage_terms || '',
+        citation: data.citation || '',
+        doi: data.doi || '',
+        version: data.version || '',
+        keywords: data.keywords || [],
+        reference_links: data.reference_links || [],
+        notes: data.notes || '',
+      });
     } catch (error) {
       toast({
         title: "Error loading catalogue",
@@ -72,7 +122,10 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({
+          name,
+          ...metadata
+        }),
       });
 
       if (!response.ok) throw new Error('Failed to update catalogue');
@@ -97,7 +150,7 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
   if (loading) {
     return (
       <div className="container py-8">
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-4xl mx-auto">
           <p className="text-center text-muted-foreground">Loading...</p>
         </div>
       </div>
@@ -110,7 +163,7 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
 
   return (
     <div className="container py-8">
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-4xl mx-auto">
         <Button
           variant="ghost"
           onClick={() => router.push('/catalogues')}
@@ -120,7 +173,7 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
           Back to Catalogues
         </Button>
 
-        <Card>
+        <Card className="mb-6">
           <CardHeader>
             <CardTitle>Edit Catalogue</CardTitle>
             <CardDescription>
@@ -129,7 +182,7 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="name">Catalogue Name</Label>
+              <Label htmlFor="name">Catalogue Name *</Label>
               <Input
                 id="name"
                 value={name}
@@ -138,25 +191,27 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
               />
             </div>
 
-            <div className="space-y-2">
-              <Label>Event Count</Label>
-              <p className="text-sm text-muted-foreground">
-                {catalogue.event_count.toLocaleString()} events
-              </p>
-            </div>
+            <div className="grid grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <Label>Event Count</Label>
+                <p className="text-sm text-muted-foreground">
+                  {catalogue.event_count.toLocaleString()} events
+                </p>
+              </div>
 
-            <div className="space-y-2">
-              <Label>Created</Label>
-              <p className="text-sm text-muted-foreground">
-                {new Date(catalogue.created_at).toLocaleString()}
-              </p>
-            </div>
+              <div className="space-y-2">
+                <Label>Created</Label>
+                <p className="text-sm text-muted-foreground">
+                  {new Date(catalogue.created_at).toLocaleString()}
+                </p>
+              </div>
 
-            <div className="space-y-2">
-              <Label>Status</Label>
-              <p className="text-sm text-muted-foreground capitalize">
-                {catalogue.status}
-              </p>
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <p className="text-sm text-muted-foreground capitalize">
+                  {catalogue.status}
+                </p>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -167,23 +222,27 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
                 maxLongitude={catalogue.max_longitude}
               />
             </div>
-
-            <div className="flex gap-3 pt-4">
-              <Button onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving...' : 'Save Changes'}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => router.push('/catalogues')}
-                disabled={saving}
-              >
-                Cancel
-              </Button>
-            </div>
           </CardContent>
         </Card>
+
+        <CatalogueMetadataForm
+          metadata={metadata}
+          onChange={setMetadata}
+        />
+
+        <div className="flex gap-3 pt-6">
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving...' : 'Save Changes'}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => router.push('/catalogues')}
+            disabled={saving}
+          >
+            Cancel
+          </Button>
+        </div>
       </div>
     </div>
   );
 }
-

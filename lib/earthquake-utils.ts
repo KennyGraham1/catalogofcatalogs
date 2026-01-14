@@ -11,9 +11,40 @@ export interface EarthquakeEvent {
 }
 
 /**
+ * Get color for earthquake markers based on depth (GeoNet style)
+ * Implements a cyan-to-dark-teal gradient matching GeoNet NZ earthquake maps
+ * Shallow events (< 15km) are bright cyan, deep events (>= 200km) are navy
+ * @param depth - Depth in kilometers
+ * @param isDark - Whether dark theme is active
+ * @returns Color hex code
+ */
+export function getEarthquakeColor(depth: number, isDark: boolean = false): string {
+  // Handle missing or null depth - use a neutral color
+  if (depth === null || depth === undefined || isNaN(depth)) {
+    return isDark ? '#9ca3af' : '#6b7280';  // gray for unknown depth
+  }
+
+  // Shallow events: bright cyan (most visible) - < 15km
+  if (depth < 15) return isDark ? '#06B6D4' : '#00CED1';  // cyan-500 / medium cyan
+
+  // Medium-shallow: teal - 15-40km
+  if (depth < 40) return isDark ? '#14B8A6' : '#20B2AA';  // teal-500 / light sea green
+
+  // Medium: darker teal - 40-100km
+  if (depth < 100) return isDark ? '#0D9488' : '#008B8B';  // teal-600 / dark cyan
+
+  // Deep: very dark teal - 100-200km
+  if (depth < 200) return isDark ? '#0F766E' : '#006666';  // teal-700 / darker teal
+
+  // Very deep: navy - >= 200km
+  return isDark ? '#115E59' : '#004D4D';  // teal-800 / very dark teal
+}
+
+/**
  * Get color for earthquake markers (single color for all magnitudes)
  * Magnitude is now represented by size only, not color
  * @param _magnitude - Magnitude value (unused, kept for API compatibility)
+ * @deprecated Use getEarthquakeColor() for depth-based coloring
  */
 export function getMagnitudeColor(_magnitude: number): string {
   return '#3b82f6'; // blue-500 - uniform color for all earthquake events
@@ -21,9 +52,47 @@ export function getMagnitudeColor(_magnitude: number): string {
 
 /**
  * Get radius for map visualization based on magnitude
+ * Returns radius in meters for Leaflet Circle component
+ *
+ * Uses a fixed lookup table with linear progression (+3km increment) for each
+ * magnitude increment, starting from a base radius of 3,000 meters.
+ * This provides consistent visual representation and improved maintainability.
+ *
+ * Magnitude-to-radius mapping (values in meters):
+ *   Magnitude 0.0-1.9: 3,000m radius (base size)
+ *   Magnitude 2.0-2.9: 6,000m radius
+ *   Magnitude 3.0-3.9: 9,000m radius
+ *   Magnitude 4.0-4.9: 12,000m radius
+ *   Magnitude 5.0-5.9: 15,000m radius
+ *   Magnitude 6.0-6.9: 18,000m radius
+ *   Magnitude 7.0+: 21,000m radius (capped)
  */
 export function getMagnitudeRadius(magnitude: number): number {
-  return Math.max(10000, magnitude * 8000);
+  // Handle edge cases - return base radius for invalid values
+  if (magnitude === null || magnitude === undefined || isNaN(magnitude)) {
+    return 3000; // Default 3km for unknown magnitude
+  }
+
+  // Clamp magnitude to reasonable range (0 to 10)
+  const clampedMag = Math.max(0, Math.min(10, magnitude));
+
+  // Fixed lookup table: index corresponds to Math.floor(magnitude)
+  // Linear progression: each magnitude increment adds 3km to radius
+  const radii = [
+    3000,  // M0: 3km (base)
+    3000,  // M1: 3km (same as base for very small events)
+    6000,  // M2: 6km
+    9000,  // M3: 9km
+    12000, // M4: 12km
+    15000, // M5: 15km
+    18000, // M6: 18km
+    21000, // M7+: 21km (capped)
+  ];
+
+  // Get the index from floored magnitude, cap at 7 for M7+
+  const index = Math.min(Math.floor(clampedMag), 7);
+
+  return radii[index];
 }
 
 /**

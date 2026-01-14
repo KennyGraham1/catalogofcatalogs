@@ -15,7 +15,7 @@ import { useCachedFetch } from '@/hooks/use-cached-fetch';
 import { useNearbyFaults } from '@/hooks/use-nearby-faults';
 import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
 import { calculateQualityScore, QualityMetrics, getQualityColor } from '@/lib/quality-scoring';
-import { getMagnitudeRadius, getMagnitudeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
+import { getMagnitudeRadius, getMagnitudeColor, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 import { loadFaultData, FaultCollection } from '@/lib/fault-data';
 import type { PathOptions } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -114,12 +114,12 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
   const getEventColor = useMemo(() => (event: any) => {
     if (colorMode === 'quality') {
       const quality = qualityScoreMap.get(event.id);
-      return quality ? getQualityColor(quality.overall) : getMagnitudeColor(event.magnitude);
+      return quality ? getQualityColor(quality.overall) : getEarthquakeColor(event.depth, mapColors.isDark);
     } else if (colorMode === 'depth') {
-      return getDepthColor(event.depth);
+      return getEarthquakeColor(event.depth, mapColors.isDark);
     }
     return getMagnitudeColor(event.magnitude);
-  }, [colorMode, qualityScoreMap, getDepthColor]);
+  }, [colorMode, qualityScoreMap, mapColors.isDark]);
 
   const getMagnitudeLabel = useMemo(() => (magnitude: number): string => {
     if (magnitude >= 6.0) return 'Major';
@@ -225,7 +225,7 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent position="popper" className="z-[10000]">
                 <SelectItem value="500">500</SelectItem>
                 <SelectItem value="1000">1,000</SelectItem>
                 <SelectItem value="2000">2,000</SelectItem>
@@ -262,6 +262,7 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
         zoom={2}
         ref={mapRef}
         className="h-full w-full"
+        preferCanvas={true}
       >
         <TileLayer
           attribution={mapTheme.attribution}
@@ -299,7 +300,8 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
         </FeatureGroup>
 
         {/* Earthquake markers - using intelligent sampling for performance */}
-        {sampledEvents.map((event) => {
+        {/* Sort by magnitude (small to large) so larger events render on top */}
+        {[...sampledEvents].sort((a, b) => a.magnitude - b.magnitude).map((event) => {
           const eventDate = new Date(event.time).toLocaleDateString();
           const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
 
@@ -312,7 +314,7 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
                 color: getEventColor(event),
                 fillColor: getEventColor(event),
                 fillOpacity: mapColors.markerOpacity,
-                weight: 2,
+                weight: 1,
                 // Add title for accessibility (shows on hover)
                 title: ariaLabel,
               } as any}
@@ -369,35 +371,46 @@ const LegendPanel = memo(function LegendPanel({ colorMode, showFaults, faultCoun
       ) : colorMode === 'depth' ? (
         <div className="space-y-1.5 text-xs">
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#000080' }}></div>
-            <span>≥ 40 km (Deep)</span>
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#00CED1' }}></div>
+            <span>&lt; 15 km (Shallow)</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#0000FF' }}></div>
-            <span>30 - 39 km</span>
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#20B2AA' }}></div>
+            <span>15 - 40 km</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#4169E1' }}></div>
-            <span>20 - 29 km</span>
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#008B8B' }}></div>
+            <span>40 - 100 km</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#87CEEB' }}></div>
-            <span>10 - 19 km</span>
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#006666' }}></div>
+            <span>100 - 200 km (Deep)</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#ADD8E6' }}></div>
-            <span>&lt; 10 km (Shallow)</span>
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#004D4D' }}></div>
+            <span>≥ 200 km (V. Deep)</span>
           </div>
         </div>
       ) : (
         <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">Circle size = magnitude</p>
-          <div className="flex items-center justify-center gap-1 py-1">
-            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-            <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-            <div className="w-4 h-4 rounded-full bg-blue-500"></div>
-            <div className="w-5 h-5 rounded-full bg-blue-500"></div>
-            <div className="w-6 h-6 rounded-full bg-blue-500"></div>
+          <p className="text-xs text-muted-foreground">Circle size = magnitude (+3km scale)</p>
+          <div className="space-y-1.5 text-xs">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <span>M2 (~6 km)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <span>M4 (~12 km)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <span>M6 (~18 km)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <span>M7+ (~21 km)</span>
+            </div>
           </div>
         </div>
       )}
