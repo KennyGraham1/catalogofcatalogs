@@ -44,7 +44,7 @@ interface FilterPanelProps {
 }
 
 export function FilterPanel({ onFiltersChange, onSaveFilter, onClearFilters }: FilterPanelProps) {
-  const [magnitudeRange, setMagnitudeRange] = useState([0, 10]);
+  const [magnitudeRange, setMagnitudeRange] = useState([-2, 10]);
   const [depthRange, setDepthRange] = useState([0, 700]);
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
@@ -65,7 +65,7 @@ export function FilterPanel({ onFiltersChange, onSaveFilter, onClearFilters }: F
   };
 
   const handleClearFilters = () => {
-    setMagnitudeRange([0, 10]);
+    setMagnitudeRange([-2, 10]);
     setDepthRange([0, 700]);
     setStartDate(null);
     setEndDate(null);

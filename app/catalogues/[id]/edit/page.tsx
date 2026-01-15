@@ -71,6 +71,33 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
       setCatalogue(data);
       setName(data.name);
 
+      // Helper to parse array fields that might be stored as JSON strings
+      const parseArrayField = (value: any): string[] => {
+        if (Array.isArray(value)) return value;
+        if (typeof value === 'string') {
+          try {
+            const parsed = JSON.parse(value);
+            return Array.isArray(parsed) ? parsed : [];
+          } catch {
+            return [];
+          }
+        }
+        return [];
+      };
+
+      // Helper to parse object fields that might be stored as JSON strings
+      const parseObjectField = (value: any, defaultValue: any): any => {
+        if (typeof value === 'object' && value !== null) return value;
+        if (typeof value === 'string') {
+          try {
+            return JSON.parse(value);
+          } catch {
+            return defaultValue;
+          }
+        }
+        return defaultValue;
+      };
+
       // Pre-populate metadata from catalogue
       setMetadata({
         description: data.description || '',
@@ -79,7 +106,7 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
         geographic_region: data.geographic_region || '',
         time_period_start: data.time_period_start || '',
         time_period_end: data.time_period_end || '',
-        data_quality: data.data_quality || { completeness: '', accuracy: '', reliability: '' },
+        data_quality: parseObjectField(data.data_quality, { completeness: '', accuracy: '', reliability: '' }),
         quality_notes: data.quality_notes || '',
         contact_name: data.contact_name || '',
         contact_email: data.contact_email || '',
@@ -89,8 +116,8 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
         citation: data.citation || '',
         doi: data.doi || '',
         version: data.version || '',
-        keywords: data.keywords || [],
-        reference_links: data.reference_links || [],
+        keywords: parseArrayField(data.keywords),
+        reference_links: parseArrayField(data.reference_links),
         notes: data.notes || '',
       });
     } catch (error) {

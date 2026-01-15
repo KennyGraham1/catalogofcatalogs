@@ -76,9 +76,9 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('map');
 
-  // Visualize page filters
-  const [magnitudeRange, setMagnitudeRange] = useState([2.0, 6.0]);
-  const [depthRange, setDepthRange] = useState([0, 50]);
+  // Visualize page filters - default to showing ALL events
+  const [magnitudeRange, setMagnitudeRange] = useState([-2.0, 10.0]);
+  const [depthRange, setDepthRange] = useState([0, 700]);
   const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
   const [selectedCataloguesFilter, setSelectedCataloguesFilter] = useState<string[]>([]);
   const [colorBy, setColorBy] = useState<'magnitude' | 'depth'>('magnitude');
@@ -144,6 +144,11 @@ export default function AnalyticsPage() {
   const filteredEarthquakes = useMemo(() => {
     let filtered = events;
 
+    // First, apply the main catalogue dropdown filter (affects all views)
+    if (selectedCatalogue !== 'all') {
+      filtered = filtered.filter(eq => eq.catalogueId === selectedCatalogue);
+    }
+
     // Magnitude filter
     filtered = filtered.filter(eq =>
       eq.magnitude >= magnitudeRange[0] && eq.magnitude <= magnitudeRange[1]
@@ -159,8 +164,8 @@ export default function AnalyticsPage() {
       filtered = filtered.filter(eq => selectedRegions.includes(eq.region || 'Unknown'));
     }
 
-    // Catalogue filter
-    if (selectedCataloguesFilter.length > 0) {
+    // Additional catalogue filter (checkbox-based, for multi-select when viewing all)
+    if (selectedCataloguesFilter.length > 0 && selectedCatalogue === 'all') {
       filtered = filtered.filter(eq => selectedCataloguesFilter.includes(eq.catalogue || 'Unknown'));
     }
 
@@ -185,7 +190,7 @@ export default function AnalyticsPage() {
     }
 
     return filtered;
-  }, [events, magnitudeRange, depthRange, selectedRegions, selectedCataloguesFilter, timeFilter]);
+  }, [events, selectedCatalogue, magnitudeRange, depthRange, selectedRegions, selectedCataloguesFilter, timeFilter]);
 
   // Visualization data calculations
   const availableRegions = useMemo(() => {
@@ -280,8 +285,8 @@ export default function AnalyticsPage() {
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D', '#FFC658', '#FF6B9D'];
 
   const handleResetFilters = () => {
-    setMagnitudeRange([2.0, 6.0]);
-    setDepthRange([0, 50]);
+    setMagnitudeRange([-2.0, 10.0]);
+    setDepthRange([0, 700]);
     setSelectedRegions([]);
     setSelectedCataloguesFilter([]);
     setTimeFilter('all');
@@ -574,8 +579,8 @@ export default function AnalyticsPage() {
                     Magnitude: {magnitudeRange[0].toFixed(1)} - {magnitudeRange[1].toFixed(1)}
                   </Label>
                   <Slider
-                    min={2.0}
-                    max={6.0}
+                    min={-2.0}
+                    max={10.0}
                     step={0.1}
                     value={magnitudeRange}
                     onValueChange={setMagnitudeRange}
@@ -590,8 +595,8 @@ export default function AnalyticsPage() {
                   </Label>
                   <Slider
                     min={0}
-                    max={50}
-                    step={1}
+                    max={700}
+                    step={5}
                     value={depthRange}
                     onValueChange={setDepthRange}
                     className="w-full"
@@ -636,27 +641,37 @@ export default function AnalyticsPage() {
                   </div>
                 </div>
 
-                {/* Catalogue Filter */}
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium">Catalogues ({selectedCataloguesFilter.length} selected)</Label>
-                  <div className="space-y-1.5 border rounded-md p-2">
-                    {availableCatalogues.map(catalogue => (
-                      <div key={catalogue} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`catalogue-${catalogue}`}
-                          checked={selectedCataloguesFilter.includes(catalogue)}
-                          onCheckedChange={() => handleCatalogueToggle(catalogue)}
-                        />
-                        <label
-                          htmlFor={`catalogue-${catalogue}`}
-                          className="text-xs cursor-pointer flex-1"
-                        >
-                          {catalogue}
-                        </label>
-                      </div>
-                    ))}
+                {/* Catalogue Filter - only show when "All Catalogues" is selected */}
+                {selectedCatalogue === 'all' && (
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium">Catalogues ({selectedCataloguesFilter.length} selected)</Label>
+                    <div className="space-y-1.5 border rounded-md p-2">
+                      {availableCatalogues.map(catalogue => (
+                        <div key={catalogue} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`catalogue-${catalogue}`}
+                            checked={selectedCataloguesFilter.includes(catalogue)}
+                            onCheckedChange={() => handleCatalogueToggle(catalogue)}
+                          />
+                          <label
+                            htmlFor={`catalogue-${catalogue}`}
+                            className="text-xs cursor-pointer flex-1"
+                          >
+                            {catalogue}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
+                {selectedCatalogue !== 'all' && (
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium">Catalogue Filter</Label>
+                    <p className="text-xs text-muted-foreground p-2 border rounded-md bg-muted/50">
+                      Showing events from: <strong>{catalogues.find(c => c.id === selectedCatalogue)?.name || 'Selected catalogue'}</strong>
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -671,7 +686,7 @@ export default function AnalyticsPage() {
                 </CardHeader>
                 <CardContent>
                   <UnifiedEarthquakeMap
-                    key={`map-${filteredEarthquakes.length}-${magnitudeRange.join('-')}-${depthRange.join('-')}-${timeFilter}`}
+                    key={`map-${selectedCatalogue}-${filteredEarthquakes.length}-${magnitudeRange.join('-')}-${depthRange.join('-')}-${timeFilter}`}
                     earthquakes={filteredEarthquakes}
                     colorBy={colorBy}
                     showFocalMechanisms={true}

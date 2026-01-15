@@ -285,26 +285,46 @@ export const CatalogueMap = memo(function CatalogueMap() {
 
       {/* Legend */}
       <Card className="absolute bottom-4 right-4 z-[2000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[220px]">
-        <h4 className="font-semibold text-sm mb-3">Magnitude Scale</h4>
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">Circle size = magnitude (+3km scale)</p>
-          <div className="space-y-1.5 text-xs">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <span>M2 (~6 km)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <span>M4 (~12 km)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <span>M6 (~18 km)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <span>M7+ (~21 km)</span>
-            </div>
+        <h4 className="font-semibold text-sm mb-3">Depth (Color)</h4>
+        <div className="space-y-1.5 text-xs">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#06B6D4' }}></div>
+            <span>&lt;15 km (Shallow)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#14B8A6' }}></div>
+            <span>15-40 km</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#0D9488' }}></div>
+            <span>40-100 km</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#0F766E' }}></div>
+            <span>100-200 km</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#115E59' }}></div>
+            <span>&gt;200 km (Deep)</span>
+          </div>
+        </div>
+        <h4 className="font-semibold text-sm mt-4 mb-2">Magnitude (Size)</h4>
+        <div className="space-y-1.5 text-xs">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#0D9488' }}></div>
+            <span>M2</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#0D9488' }}></div>
+            <span>M4</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: '#0D9488' }}></div>
+            <span>M6</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded-full flex-shrink-0" style={{ backgroundColor: '#0D9488' }}></div>
+            <span>M7+</span>
           </div>
         </div>
         <div className="mt-3 pt-3 border-t space-y-2">

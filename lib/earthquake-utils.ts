@@ -690,3 +690,182 @@ function shuffleArray<T>(array: T[]): T[] {
   return result;
 }
 
+/**
+ * Viewport bounds for map filtering
+ */
+export interface ViewportBounds {
+  north: number;
+  south: number;
+  east: number;
+  west: number;
+}
+
+/**
+ * Sample earthquake events with viewport awareness.
+ * Prioritizes events in the current viewport while maintaining
+ * representativeness across the full dataset.
+ *
+ * @param events - Array of earthquake events to sample
+ * @param maxSamples - Maximum number of events to return
+ * @param viewport - Optional viewport bounds to prioritize visible events
+ * @returns Object containing sampled events and metadata
+ */
+export function sampleEarthquakeEventsWithViewport<T extends EarthquakeEvent>(
+  events: T[],
+  maxSamples: number = 1000,
+  viewport?: ViewportBounds | null
+): {
+  sampled: T[];
+  total: number;
+  displayCount: number;
+  isSampled: boolean;
+  inViewport: number;
+} {
+  const total = events.length;
+
+  // If we have fewer events than the limit, return all
+  if (total <= maxSamples) {
+    return {
+      sampled: events,
+      total,
+      displayCount: total,
+      isSampled: false,
+      inViewport: total,
+    };
+  }
+
+  // Separate events into viewport and outside viewport
+  let inViewportEvents: T[] = [];
+  let outsideViewportEvents: T[] = [];
+
+  if (viewport) {
+    for (const event of events) {
+      if (
+        event.latitude >= viewport.south &&
+        event.latitude <= viewport.north &&
+        event.longitude >= viewport.west &&
+        event.longitude <= viewport.east
+      ) {
+        inViewportEvents.push(event);
+      } else {
+        outsideViewportEvents.push(event);
+      }
+    }
+  } else {
+    // No viewport, treat all as in-viewport
+    inViewportEvents = events;
+  }
+
+  const sampledEvents: T[] = [];
+
+  // Step 1: Prioritize in-viewport events (up to 80% of max samples)
+  const viewportAllocation = Math.floor(maxSamples * 0.8);
+  if (inViewportEvents.length <= viewportAllocation) {
+    // All in-viewport events fit, add them all
+    sampledEvents.push(...inViewportEvents);
+  } else {
+    // Need to sample in-viewport events
+    // Prioritize by magnitude (larger events first)
+    const sortedViewport = [...inViewportEvents].sort((a, b) => b.magnitude - a.magnitude);
+
+    // Always include top 20% by magnitude
+    const topCount = Math.floor(viewportAllocation * 0.2);
+    sampledEvents.push(...sortedViewport.slice(0, topCount));
+
+    // Stratified sample the rest
+    const remainingViewport = sortedViewport.slice(topCount);
+    const remainingSlots = viewportAllocation - topCount;
+    const viewportSample = stratifiedSampleBin(remainingViewport, remainingSlots);
+    sampledEvents.push(...viewportSample);
+  }
+
+  // Step 2: Fill remaining slots with outside-viewport events (for context)
+  const remainingSlots = maxSamples - sampledEvents.length;
+  if (remainingSlots > 0 && outsideViewportEvents.length > 0) {
+    // Prioritize larger events from outside viewport
+    const sortedOutside = [...outsideViewportEvents].sort((a, b) => b.magnitude - a.magnitude);
+    const outsideSample = sortedOutside.slice(0, remainingSlots);
+    sampledEvents.push(...outsideSample);
+  }
+
+  return {
+    sampled: sampledEvents,
+    total,
+    displayCount: sampledEvents.length,
+    isSampled: true,
+    inViewport: inViewportEvents.length,
+  };
+}
+
+/**
+ * Efficiently check if an event is within bounds
+ */
+export function isEventInBounds<T extends EarthquakeEvent>(
+  event: T,
+  bounds: ViewportBounds
+): boolean {
+  return (
+    event.latitude >= bounds.south &&
+    event.latitude <= bounds.north &&
+    event.longitude >= bounds.west &&
+    event.longitude <= bounds.east
+  );
+}
+
+/**
+ * Pre-compute event positions for faster filtering
+ * Returns a Map of event ID to grid cell for spatial indexing
+ */
+export function createSpatialIndex<T extends EarthquakeEvent & { id: string | number }>(
+  events: T[],
+  cellSize: number = 1 // degrees
+): Map<string, T[]> {
+  const grid = new Map<string, T[]>();
+
+  for (const event of events) {
+    const cellX = Math.floor(event.longitude / cellSize);
+    const cellY = Math.floor(event.latitude / cellSize);
+    const key = `${cellX},${cellY}`;
+
+    if (!grid.has(key)) {
+      grid.set(key, []);
+    }
+    grid.get(key)!.push(event);
+  }
+
+  return grid;
+}
+
+/**
+ * Query events from spatial index within bounds
+ */
+export function queryEventsInBounds<T extends EarthquakeEvent & { id: string | number }>(
+  grid: Map<string, T[]>,
+  bounds: ViewportBounds,
+  cellSize: number = 1
+): T[] {
+  const results: T[] = [];
+
+  const minCellX = Math.floor(bounds.west / cellSize);
+  const maxCellX = Math.floor(bounds.east / cellSize);
+  const minCellY = Math.floor(bounds.south / cellSize);
+  const maxCellY = Math.floor(bounds.north / cellSize);
+
+  for (let x = minCellX; x <= maxCellX; x++) {
+    for (let y = minCellY; y <= maxCellY; y++) {
+      const key = `${x},${y}`;
+      const cell = grid.get(key);
+      if (cell) {
+        // Fine-grained bounds check for events in this cell
+        for (const event of cell) {
+          if (isEventInBounds(event, bounds)) {
+            results.push(event);
+          }
+        }
+      }
+    }
+  }
+
+  return results;
+}
+

@@ -740,23 +740,101 @@ export function detectFieldMapping(sourceField: string): FieldMappingResult {
 }
 
 /**
+ * Custom field mapping entry (from user settings)
+ */
+export interface CustomFieldMapping {
+  id: string;
+  sourcePattern: string;
+  targetField: string;
+  isRegex: boolean;
+  priority: number;
+}
+
+/**
+ * Options for field mapping detection
+ */
+export interface FieldMappingOptions {
+  minConfidence?: number;
+  customMappings?: CustomFieldMapping[];
+  useBuiltInAliases?: boolean;
+}
+
+/**
+ * Check if a source field matches a custom mapping pattern
+ */
+function matchesCustomMapping(sourceField: string, mapping: CustomFieldMapping): boolean {
+  if (mapping.isRegex) {
+    try {
+      const regex = new RegExp(mapping.sourcePattern, 'i');
+      return regex.test(sourceField);
+    } catch {
+      return false;
+    }
+  }
+  // Case-insensitive exact match for non-regex patterns
+  return sourceField.toLowerCase() === mapping.sourcePattern.toLowerCase();
+}
+
+/**
+ * Auto-detect the best matching target field using custom mappings first
+ */
+export function detectFieldMappingWithCustom(
+  sourceField: string,
+  customMappings: CustomFieldMapping[] = []
+): FieldMappingResult {
+  // Sort custom mappings by priority (higher first)
+  const sortedCustom = [...customMappings].sort((a, b) => b.priority - a.priority);
+
+  // Check custom mappings first
+  for (const mapping of sortedCustom) {
+    if (matchesCustomMapping(sourceField, mapping)) {
+      return {
+        sourceField,
+        targetField: mapping.targetField,
+        confidence: mapping.priority / 100, // Convert priority to confidence
+        matchType: 'exact' // Custom mappings are treated as exact matches
+      };
+    }
+  }
+
+  // Fall back to built-in detection
+  return detectFieldMapping(sourceField);
+}
+
+/**
  * Auto-detect mappings for all source fields, avoiding duplicates
  */
 export function detectAllFieldMappings(
   sourceFields: string[],
-  minConfidence: number = 0.6
+  minConfidence: number = 0.6,
+  options?: FieldMappingOptions
 ): Record<string, string> {
   const usedTargets = new Set<string>();
   const result: Record<string, string> = {};
+  const customMappings = options?.customMappings || [];
+  const useBuiltIn = options?.useBuiltInAliases !== false;
+  const confidence = options?.minConfidence ?? minConfidence;
 
   // Get mappings sorted by confidence
   const mappings = sourceFields
-    .map(field => detectFieldMapping(field))
+    .map(field => {
+      // If we have custom mappings, use them first
+      if (customMappings.length > 0) {
+        return detectFieldMappingWithCustom(field, customMappings);
+      }
+      // Otherwise use built-in detection
+      return useBuiltIn ? detectFieldMapping(field) : {
+        sourceField: field,
+        targetField: null,
+        confidence: 0,
+        matchType: 'none' as const
+      };
+    })
     .sort((a, b) => b.confidence - a.confidence);
 
   for (const mapping of mappings) {
     if (mapping.targetField &&
-        mapping.confidence >= minConfidence &&
+        mapping.confidence >= confidence &&
         !usedTargets.has(mapping.targetField)) {
       result[mapping.sourceField] = mapping.targetField;
       usedTargets.add(mapping.targetField);
@@ -780,5 +858,49 @@ export function checkRequiredFieldsMapped(mappings: Record<string, string>): {
     .map(field => field.id);
 
   return { complete: missing.length === 0, missing };
+}
+
+/**
+ * Get default field mappings configuration for initialization
+ */
+export function getDefaultFieldMappingsConfig() {
+  const mappings: CustomFieldMapping[] = [];
+  let id = 0;
+
+  for (const [targetField, aliases] of Object.entries(FIELD_ALIASES)) {
+    // Add exact matches with high priority
+    for (const exactMatch of aliases.exactMatches) {
+      mappings.push({
+        id: `default-${id++}`,
+        sourcePattern: exactMatch,
+        targetField,
+        isRegex: false,
+        priority: 100
+      });
+    }
+    // Add aliases with medium priority
+    for (const alias of aliases.aliases) {
+      mappings.push({
+        id: `default-${id++}`,
+        sourcePattern: alias,
+        targetField,
+        isRegex: false,
+        priority: 50
+      });
+    }
+  }
+
+  return {
+    autoDetectEnabled: true,
+    strictValidation: false,
+    fuzzyMatchThreshold: 0.6,
+    formats: {
+      csv: { enabled: true, mappings: [] },
+      json: { enabled: true, mappings: [] },
+      quakeml: { enabled: true, mappings: [] },
+      geojson: { enabled: true, mappings: [] }
+    },
+    customMappings: mappings.slice(0, 50) // Return first 50 as defaults
+  };
 }
 

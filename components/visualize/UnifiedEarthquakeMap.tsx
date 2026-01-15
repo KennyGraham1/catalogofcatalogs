@@ -465,25 +465,22 @@ function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string;
           </div>
         </div>
       ) : (
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">Circle size = magnitude (+3km scale)</p>
-          <div className="space-y-1.5 text-xs">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <span>M2 (~6 km)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <span>M4 (~12 km)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <span>M6 (~18 km)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <span>M7+ (~21 km)</span>
-            </div>
+        <div className="space-y-1.5 text-xs">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
+            <span>M2</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0"></div>
+            <span>M4</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded-full bg-blue-500 flex-shrink-0"></div>
+            <span>M6</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-full bg-blue-500 flex-shrink-0"></div>
+            <span>M7+</span>
           </div>
         </div>
       )}

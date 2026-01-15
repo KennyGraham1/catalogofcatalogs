@@ -16,6 +16,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { DefaultFieldMappings } from '@/components/settings/DefaultFieldMappings';
 import {
   Settings,
   Database,
@@ -161,135 +162,8 @@ export default function SettingsPage() {
                   Configure default schema mappings for different file formats
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-4">
-                  <h3 className="text-lg font-medium">Default Field Mappings</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Configure how fields from different formats map to standardized schema
-                  </p>
-
-                  <Tabs defaultValue="csv" className="w-full">
-                    <TabsList className="w-full justify-start">
-                      <TabsTrigger value="csv">CSV</TabsTrigger>
-                      <TabsTrigger value="qml">QuakeML</TabsTrigger>
-                      <TabsTrigger value="json">GeoJSON</TabsTrigger>
-                      <TabsTrigger value="xml">XML</TabsTrigger>
-                    </TabsList>
-
-                    <TabsContent value="csv" className="space-y-4 mt-4">
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-5 gap-4">
-                          <div className="col-span-2">
-                            <Label className="text-muted-foreground">Source Field (CSV)</Label>
-                          </div>
-                          <div className="col-span-1 flex items-center justify-center">
-                            <span>→</span>
-                          </div>
-                          <div className="col-span-2">
-                            <Label className="text-muted-foreground">Target Field (Standard)</Label>
-                          </div>
-                        </div>
-
-                        {[
-                          { source: 'time', target: 'time' },
-                          { source: 'latitude', target: 'latitude' },
-                          { source: 'longitude', target: 'longitude' },
-                          { source: 'depth', target: 'depth' },
-                          { source: 'magnitude', target: 'magnitude' },
-                          { source: 'id', target: 'eventId' },
-                        ].map((mapping, i) => (
-                          <div key={i} className="grid grid-cols-5 gap-4 items-center">
-                            <div className="col-span-2">
-                              <Input defaultValue={mapping.source} />
-                            </div>
-                            <div className="col-span-1 flex items-center justify-center">
-                              <span>→</span>
-                            </div>
-                            <div className="col-span-2">
-                              <Select defaultValue={mapping.target}>
-                                <SelectTrigger>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="time">Time</SelectItem>
-                                  <SelectItem value="latitude">Latitude</SelectItem>
-                                  <SelectItem value="longitude">Longitude</SelectItem>
-                                  <SelectItem value="depth">Depth</SelectItem>
-                                  <SelectItem value="magnitude">Magnitude</SelectItem>
-                                  <SelectItem value="eventId">Event ID</SelectItem>
-                                  <SelectItem value="source">Source</SelectItem>
-                                  <SelectItem value="region">Region</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <Button variant="outline" size="sm">
-                        Add Field Mapping
-                      </Button>
-                    </TabsContent>
-
-                    <TabsContent value="qml" className="space-y-4 mt-4">
-                      {/* Similar content for QuakeML mappings */}
-                      <div className="text-center text-muted-foreground py-4">
-                        QuakeML mapping configuration
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="json" className="space-y-4 mt-4">
-                      {/* Similar content for GeoJSON mappings */}
-                      <div className="text-center text-muted-foreground py-4">
-                        GeoJSON mapping configuration
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="xml" className="space-y-4 mt-4">
-                      {/* Similar content for XML mappings */}
-                      <div className="text-center text-muted-foreground py-4">
-                        XML mapping configuration
-                      </div>
-                    </TabsContent>
-                  </Tabs>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-4">
-                  <h3 className="text-lg font-medium">Advanced Schema Settings</h3>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="auto-detect" className="text-base">
-                        Auto-detect Field Mappings
-                      </Label>
-                      <Switch id="auto-detect" defaultChecked />
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      Automatically detect and map fields based on common naming patterns
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="strict-validation" className="text-base">
-                        Strict Schema Validation
-                      </Label>
-                      <Switch id="strict-validation" />
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      Enforce strict validation for required fields and data types
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex justify-end">
-                  <Button>
-                    <Save className="mr-2 h-4 w-4" />
-                    Save Changes
-                  </Button>
-                </div>
+              <CardContent>
+                <DefaultFieldMappings />
               </CardContent>
             </Card>
           </TabsContent>
