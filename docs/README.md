@@ -105,6 +105,23 @@ Production deployment and operations guide.
 
 ---
 
+### [Vercel Deployment Guide](VERCEL_DEPLOYMENT_GUIDE.md)
+Step-by-step guide for deploying to Vercel with MongoDB Atlas.
+
+**Contents:**
+- MongoDB Atlas cluster setup
+- Database user and network configuration
+- Next.js Vercel configuration
+- Environment variables setup
+- Database initialization for production
+- Deployment process
+- Post-deployment verification
+- Troubleshooting common issues
+
+**Who should read this:** Developers deploying to Vercel's serverless platform.
+
+---
+
 ## 📊 For Data Managers
 
 ### [Data Validation Guide](DATA_VALIDATION_GUIDE.md)

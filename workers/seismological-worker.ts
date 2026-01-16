@@ -181,7 +181,183 @@ function estimateCompleteness(events: EarthquakeEvent[]) {
   };
 }
 
-// Temporal pattern analysis
+/**
+ * Gardner-Knopoff (1974) space-time window parameters
+ * Standard parameters used for earthquake declustering
+ */
+function getGardnerKnopoffWindow(magnitude: number): { timeWindowDays: number; distanceWindowKm: number } {
+  // Uhrhammer (1986) revision - widely used
+  const timeWindowDays = Math.pow(10, 0.5386 * magnitude - 0.547);
+  // Gardner & Knopoff (1974) original distance relation
+  const distanceWindowKm = Math.pow(10, 0.1238 * magnitude + 0.983);
+  return { timeWindowDays, distanceWindowKm };
+}
+
+/**
+ * Calculate Haversine distance between two points in kilometers
+ */
+function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Seismic cluster interface matching the main library
+interface SeismicCluster {
+  id: number;
+  startDate: string;
+  endDate: string;
+  eventCount: number;
+  maxMagnitude: number;
+  mainshock: {
+    id: number | string;
+    time: string;
+    magnitude: number;
+    latitude: number;
+    longitude: number;
+    depth: number;
+  };
+  aftershockCount: number;
+  foreshockCount: number;
+  durationDays: number;
+  spatialExtentKm: number;
+  centerLatitude: number;
+  centerLongitude: number;
+  clusterType: 'mainshock-aftershock' | 'swarm' | 'burst';
+  bValue?: number;
+}
+
+/**
+ * Gardner-Knopoff Declustering Algorithm (Worker version)
+ */
+function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): SeismicCluster[] {
+  if (events.length < 3) return [];
+
+  // Sort by time
+  const sortedEvents = [...events].sort((a, b) =>
+    new Date(a.time).getTime() - new Date(b.time).getTime()
+  );
+
+  // Filter events with valid locations
+  const validEvents = sortedEvents.filter(e =>
+    e.latitude != null && e.longitude != null &&
+    !isNaN(e.latitude) && !isNaN(e.longitude)
+  );
+
+  if (validEvents.length < 3) return [];
+
+  const clusterAssignment = new Map<number | string, number | string>();
+  const clusters = new Map<number | string, EarthquakeEvent[]>();
+
+  // Process by magnitude (largest first)
+  const byMagnitude = [...validEvents].sort((a, b) => b.magnitude - a.magnitude);
+
+  for (const mainshock of byMagnitude) {
+    if (clusterAssignment.has(mainshock.id)) continue;
+
+    const { timeWindowDays, distanceWindowKm } = getGardnerKnopoffWindow(mainshock.magnitude);
+    const mainshockTime = new Date(mainshock.time).getTime();
+    const clusterEvents: EarthquakeEvent[] = [mainshock];
+
+    for (const event of validEvents) {
+      if (event.id === mainshock.id || clusterAssignment.has(event.id)) continue;
+
+      const eventTime = new Date(event.time).getTime();
+      const timeDiffDays = Math.abs(eventTime - mainshockTime) / (1000 * 60 * 60 * 24);
+      if (timeDiffDays > timeWindowDays) continue;
+
+      const distance = haversineDistance(
+        mainshock.latitude, mainshock.longitude,
+        event.latitude, event.longitude
+      );
+
+      if (distance <= distanceWindowKm) {
+        clusterEvents.push(event);
+        clusterAssignment.set(event.id, mainshock.id);
+      }
+    }
+
+    if (clusterEvents.length > 1) {
+      clusters.set(mainshock.id, clusterEvents);
+    }
+  }
+
+  // Build cluster info
+  const clusterInfo: SeismicCluster[] = [];
+  let clusterId = 0;
+
+  clusters.forEach((clusterEvents, mainshockId) => {
+    const mainshock = clusterEvents.find(e => e.id === mainshockId)!;
+    const sorted = [...clusterEvents].sort((a, b) =>
+      new Date(a.time).getTime() - new Date(b.time).getTime()
+    );
+
+    const mainshockTime = new Date(mainshock.time).getTime();
+    const foreshocks = sorted.filter(e => e.id !== mainshockId && new Date(e.time).getTime() < mainshockTime);
+    const aftershocks = sorted.filter(e => e.id !== mainshockId && new Date(e.time).getTime() >= mainshockTime);
+
+    // Calculate spatial extent
+    let maxDist = 0, sumLat = 0, sumLon = 0;
+    clusterEvents.forEach(e => {
+      const dist = haversineDistance(mainshock.latitude, mainshock.longitude, e.latitude, e.longitude);
+      if (dist > maxDist) maxDist = dist;
+      sumLat += e.latitude;
+      sumLon += e.longitude;
+    });
+
+    const startTime = new Date(sorted[0].time);
+    const endTime = new Date(sorted[sorted.length - 1].time);
+    const durationDays = (endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60 * 24);
+
+    // Classify cluster type
+    const mags = clusterEvents.map(e => e.magnitude).sort((a, b) => b - a);
+    const magDiff = mags.length > 1 ? mags[0] - mags[1] : 999;
+
+    let clusterType: 'mainshock-aftershock' | 'swarm' | 'burst';
+    if (durationDays < 1 && clusterEvents.length >= 3) {
+      clusterType = 'burst';
+    } else if (magDiff < 0.5 && clusterEvents.length >= 5) {
+      clusterType = 'swarm';
+    } else {
+      clusterType = 'mainshock-aftershock';
+    }
+
+    clusterInfo.push({
+      id: clusterId++,
+      startDate: sorted[0].time,
+      endDate: sorted[sorted.length - 1].time,
+      eventCount: clusterEvents.length,
+      maxMagnitude: mainshock.magnitude,
+      mainshock: {
+        id: mainshock.id,
+        time: mainshock.time,
+        magnitude: mainshock.magnitude,
+        latitude: mainshock.latitude,
+        longitude: mainshock.longitude,
+        depth: mainshock.depth
+      },
+      aftershockCount: aftershocks.length,
+      foreshockCount: foreshocks.length,
+      durationDays,
+      spatialExtentKm: maxDist,
+      centerLatitude: sumLat / clusterEvents.length,
+      centerLongitude: sumLon / clusterEvents.length,
+      clusterType
+    });
+  });
+
+  // Sort by mainshock magnitude and return top clusters
+  return clusterInfo
+    .filter(c => c.eventCount >= 3)
+    .sort((a, b) => b.maxMagnitude - a.maxMagnitude)
+    .slice(0, 20);
+}
+
+// Temporal pattern analysis with Gardner-Knopoff declustering
 function analyzeTemporalPattern(events: EarthquakeEvent[]) {
   if (events.length === 0) {
     return { error: 'No events to analyze' };
@@ -193,58 +369,47 @@ function analyzeTemporalPattern(events: EarthquakeEvent[]) {
 
   const startTime = new Date(sortedEvents[0].time).getTime();
   const endTime = new Date(sortedEvents[sortedEvents.length - 1].time).getTime();
-  const timeSpanDays = (endTime - startTime) / (1000 * 60 * 60 * 24);
+  const timeSpanDays = Math.max((endTime - startTime) / (1000 * 60 * 60 * 24), 1);
 
-  // Aggregate by day for time series
-  const dayMap = new Map<string, number>();
+  // Use weekly bins if time span > 1 year
+  const useWeeklyBins = timeSpanDays > 365;
+
+  const bins = new Map<string, number>();
   sortedEvents.forEach(event => {
-    const day = new Date(event.time).toISOString().split('T')[0];
-    dayMap.set(day, (dayMap.get(day) || 0) + 1);
+    const eventDate = new Date(event.time);
+    let binKey: string;
+    if (useWeeklyBins) {
+      const startOfYear = new Date(eventDate.getFullYear(), 0, 1);
+      const weekNum = Math.ceil((((eventDate.getTime() - startOfYear.getTime()) / 86400000) + startOfYear.getDay() + 1) / 7);
+      binKey = `${eventDate.getFullYear()}-W${weekNum.toString().padStart(2, '0')}`;
+    } else {
+      binKey = eventDate.toISOString().split('T')[0];
+    }
+    bins.set(binKey, (bins.get(binKey) || 0) + 1);
   });
 
   const timeSeries: { date: string; count: number; cumulativeCount: number }[] = [];
   let cumulative = 0;
-  Array.from(dayMap.entries())
+  Array.from(bins.entries())
     .sort((a, b) => a[0].localeCompare(b[0]))
     .forEach(([date, count]) => {
       cumulative += count;
       timeSeries.push({ date, count, cumulativeCount: cumulative });
     });
 
-  // Detect clusters (simplified: periods with >2x average daily rate)
-  const avgDaily = events.length / Math.max(timeSpanDays, 1);
-  const clusters: { startDate: string; endDate: string; eventCount: number; maxMagnitude: number }[] = [];
-
-  let clusterStart: string | null = null;
-  let clusterEvents: EarthquakeEvent[] = [];
-
-  timeSeries.forEach(({ date, count }) => {
-    if (count > avgDaily * 2) {
-      if (!clusterStart) clusterStart = date;
-      const dayEvents = sortedEvents.filter(e => e.time.startsWith(date));
-      clusterEvents.push(...dayEvents);
-    } else if (clusterStart) {
-      clusters.push({
-        startDate: clusterStart,
-        endDate: timeSeries[timeSeries.indexOf({ date, count, cumulativeCount: 0 }) - 1]?.date || clusterStart,
-        eventCount: clusterEvents.length,
-        maxMagnitude: Math.max(...clusterEvents.map(e => e.magnitude))
-      });
-      clusterStart = null;
-      clusterEvents = [];
-    }
-  });
+  // Use Gardner-Knopoff declustering for proper cluster detection
+  const clusters = gardnerKnopoffDeclustering(events);
 
   return {
     totalEvents: events.length,
     timeSpanDays,
-    eventsPerDay: events.length / Math.max(timeSpanDays, 1),
-    eventsPerMonth: (events.length / Math.max(timeSpanDays, 1)) * 30,
-    eventsPerYear: (events.length / Math.max(timeSpanDays, 1)) * 365,
+    eventsPerDay: events.length / timeSpanDays,
+    eventsPerMonth: (events.length / timeSpanDays) * 30.44,
+    eventsPerYear: (events.length / timeSpanDays) * 365.25,
     timeSeries: timeSeries.length > 500
       ? timeSeries.filter((_, i) => i % Math.ceil(timeSeries.length / 500) === 0)
       : timeSeries,
-    clusters: clusters.slice(0, 10) // Limit to top 10 clusters
+    clusters
   };
 }
 

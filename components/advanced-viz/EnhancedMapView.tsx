@@ -238,6 +238,7 @@ export function EnhancedMapView({
       {/* Map */}
       <div className="h-[700px] w-full rounded-lg overflow-hidden border">
         <MapContainer
+          key="enhanced-map-view"
           center={center}
           zoom={zoom}
           className="h-full w-full"
@@ -410,7 +411,7 @@ export function EnhancedMapView({
 // Event popup component
 function EventPopup({ event, qualityScores }: { event: EnhancedEvent; qualityScores: any[] }) {
   const quality = qualityScores.find(q => q.eventId === event.id);
-  
+
   return (
     <div className="p-2 min-w-[280px]">
       <div className="flex items-center justify-between mb-3">

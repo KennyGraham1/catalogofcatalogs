@@ -62,6 +62,7 @@ export default function MapComponent({ events }: MapComponentProps) {
       )}
 
       <MapContainer
+        key="merge-map-component"
         center={[-41.0, 174.0]} // Center on New Zealand
         zoom={6}
         className="h-full w-full"
@@ -95,49 +96,49 @@ export default function MapComponent({ events }: MapComponentProps) {
             >
               <Popup>
                 <div className="p-2 min-w-[250px]">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-bold text-base">{event.region || 'New Zealand'}</h3>
-                  <Badge variant={event.magnitude >= 5.0 ? 'destructive' : 'default'}>
-                    {getMagnitudeLabel(event.magnitude)}
-                  </Badge>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm">
-                    <Activity className="h-4 w-4 text-primary" />
-                    <span className="font-medium">Magnitude:</span>
-                    <span>{event.magnitude.toFixed(1)}</span>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-bold text-base">{event.region || 'New Zealand'}</h3>
+                    <Badge variant={event.magnitude >= 5.0 ? 'destructive' : 'default'}>
+                      {getMagnitudeLabel(event.magnitude)}
+                    </Badge>
                   </div>
 
-                  {event.depth !== undefined && (
+                  <div className="space-y-2">
                     <div className="flex items-center gap-2 text-sm">
-                      <Ruler className="h-4 w-4 text-primary" />
-                      <span className="font-medium">Depth:</span>
-                      <span>{event.depth} km</span>
+                      <Activity className="h-4 w-4 text-primary" />
+                      <span className="font-medium">Magnitude:</span>
+                      <span>{event.magnitude.toFixed(1)}</span>
                     </div>
-                  )}
 
-                  <div className="flex items-center gap-2 text-sm">
-                    <Calendar className="h-4 w-4 text-primary" />
-                    <span className="font-medium">Time:</span>
-                    <span className="text-xs">{event.time}</span>
-                  </div>
+                    {event.depth !== undefined && (
+                      <div className="flex items-center gap-2 text-sm">
+                        <Ruler className="h-4 w-4 text-primary" />
+                        <span className="font-medium">Depth:</span>
+                        <span>{event.depth} km</span>
+                      </div>
+                    )}
 
-                  {event.source && (
-                    <div className="flex items-center gap-2 text-sm pt-2 border-t">
-                      <span className="font-medium">Source:</span>
-                      <span className="text-xs">{event.source}</span>
+                    <div className="flex items-center gap-2 text-sm">
+                      <Calendar className="h-4 w-4 text-primary" />
+                      <span className="font-medium">Time:</span>
+                      <span className="text-xs">{event.time}</span>
                     </div>
-                  )}
 
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="font-medium">Location:</span>
-                    <span className="text-xs">
-                      {event.latitude.toFixed(4)}°, {event.longitude.toFixed(4)}°
-                    </span>
+                    {event.source && (
+                      <div className="flex items-center gap-2 text-sm pt-2 border-t">
+                        <span className="font-medium">Source:</span>
+                        <span className="text-xs">{event.source}</span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="font-medium">Location:</span>
+                      <span className="text-xs">
+                        {event.latitude.toFixed(4)}°, {event.longitude.toFixed(4)}°
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
               </Popup>
             </Circle>
           );

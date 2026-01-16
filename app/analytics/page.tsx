@@ -27,7 +27,10 @@ import {
   Filter,
   RefreshCw,
   Loader2,
-  Info
+  Info,
+  Download,
+  Image,
+  FileJson
 } from 'lucide-react';
 import { QualityScoreCard } from '@/components/advanced-viz/QualityScoreCard';
 import { UncertaintyVisualization } from '@/components/advanced-viz/UncertaintyVisualization';
@@ -47,6 +50,8 @@ import {
   Bar,
   ScatterChart,
   Scatter,
+  AreaChart,
+  Area,
   PieChart,
   Pie,
   Cell,
@@ -57,8 +62,38 @@ import {
   Legend,
   ResponsiveContainer,
   ReferenceLine,
-  ZAxis
+  ZAxis,
+  Brush
 } from 'recharts';
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  ChartLegend,
+  ChartLegendContent,
+} from '@/components/ui/chart';
+import {
+  SEISMIC_COLORS,
+  CATEGORICAL_COLORS,
+  CHART_STYLES,
+  CHART_CONFIGS,
+  TOOLTIP_FORMATTERS,
+  AXIS_FORMATTERS,
+  getMagnitudeColor,
+  getDepthColor,
+  getGradeColor,
+  exportChartAsPNG,
+  exportChartAsSVG,
+  exportDataAsJSON,
+  exportDataAsCSV,
+} from '@/lib/chart-config';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 
 // Dynamically import unified map component to avoid SSR issues
 const UnifiedEarthquakeMap = dynamic(() => import('@/components/visualize/UnifiedEarthquakeMap'), {
@@ -89,22 +124,187 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue;
 }
 
-// Memoized chart components to prevent unnecessary re-renders
+// Chart export button component
+const ChartExportButton = memo(function ChartExportButton({
+  chartRef,
+  data,
+  filename,
+  className = ''
+}: {
+  chartRef: React.RefObject<HTMLDivElement | null>;
+  data?: Record<string, unknown>[];
+  filename: string;
+  className?: string;
+}) {
+  const handleExportPNG = async () => {
+    if (chartRef.current) {
+      await exportChartAsPNG(chartRef.current, filename);
+    }
+  };
+
+  const handleExportSVG = async () => {
+    if (chartRef.current) {
+      await exportChartAsSVG(chartRef.current, filename);
+    }
+  };
+
+  const handleExportJSON = () => {
+    if (data) {
+      exportDataAsJSON(data, filename);
+    }
+  };
+
+  const handleExportCSV = () => {
+    if (data) {
+      exportDataAsCSV(data, filename);
+    }
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className={className}>
+          <Download className="h-4 w-4 mr-2" />
+          Export
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={handleExportPNG}>
+          <Image className="h-4 w-4 mr-2" />
+          Export as PNG
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={handleExportSVG}>
+          <Image className="h-4 w-4 mr-2" />
+          Export as SVG
+        </DropdownMenuItem>
+        {data && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleExportJSON}>
+              <FileJson className="h-4 w-4 mr-2" />
+              Export Data (JSON)
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleExportCSV}>
+              <FileJson className="h-4 w-4 mr-2" />
+              Export Data (CSV)
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+});
+
+// Custom tooltip component for professional styling
+const CustomTooltip = memo(function CustomTooltip({
+  active,
+  payload,
+  label,
+  formatter,
+  labelFormatter
+}: {
+  active?: boolean;
+  payload?: Array<{ value: number; name: string; color: string; dataKey: string }>;
+  label?: string;
+  formatter?: (value: number) => string;
+  labelFormatter?: (label: string) => string;
+}) {
+  if (!active || !payload?.length) return null;
+
+  return (
+    <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg p-3 min-w-[140px]">
+      <p className="font-medium text-sm text-foreground mb-2 border-b pb-1">
+        {labelFormatter ? labelFormatter(label || '') : label}
+      </p>
+      {payload.map((entry, index) => (
+        <div key={index} className="flex items-center justify-between gap-4 text-sm">
+          <div className="flex items-center gap-2">
+            <div
+              className="w-3 h-3 rounded-sm"
+              style={{ backgroundColor: entry.color }}
+            />
+            <span className="text-muted-foreground">{entry.name}</span>
+          </div>
+          <span className="font-mono font-medium tabular-nums">
+            {formatter ? formatter(entry.value) : entry.value.toLocaleString()}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+});
+
+// Memoized chart components with professional styling
 const MagnitudeDistributionChart = memo(function MagnitudeDistributionChart({
   data
 }: {
   data: { range: string; count: number }[]
 }) {
+  // Color bars based on magnitude range
+  const getBarColor = (range: string) => {
+    if (range.includes('5.0')) return SEISMIC_COLORS.energy.dark;
+    if (range.includes('4.5') || range.includes('4.0')) return '#f97316';
+    if (range.includes('3.5') || range.includes('3.0')) return '#eab308';
+    return SEISMIC_COLORS.magnitude.dark;
+  };
+
   return (
-    <ResponsiveContainer width="100%" height={280}>
-      <BarChart data={data}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-        <XAxis dataKey="range" tick={{ fontSize: 12 }} />
-        <YAxis tick={{ fontSize: 12 }} />
-        <Tooltip contentStyle={{ fontSize: 12 }} />
-        <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+    <ChartContainer config={CHART_CONFIGS.magnitudeDistribution} className="h-[300px] w-full">
+      <BarChart data={data} margin={CHART_STYLES.margin.default}>
+        <defs>
+          <linearGradient id="magnitudeGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={SEISMIC_COLORS.magnitude.dark} stopOpacity={1} />
+            <stop offset="100%" stopColor={SEISMIC_COLORS.magnitude.dark} stopOpacity={0.6} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid
+          strokeDasharray={CHART_STYLES.grid.strokeDasharray}
+          className="stroke-muted"
+          opacity={CHART_STYLES.grid.opacity}
+          vertical={false}
+        />
+        <XAxis
+          dataKey="range"
+          tick={{ fontSize: CHART_STYLES.fontSize.tick }}
+          tickLine={false}
+          axisLine={{ className: 'stroke-muted' }}
+          label={{
+            value: 'Magnitude Range',
+            position: 'insideBottom',
+            offset: -10,
+            fontSize: CHART_STYLES.fontSize.label,
+            className: 'fill-muted-foreground'
+          }}
+        />
+        <YAxis
+          tick={{ fontSize: CHART_STYLES.fontSize.tick }}
+          tickLine={false}
+          axisLine={false}
+          tickFormatter={AXIS_FORMATTERS.compact}
+          label={{
+            value: 'Event Count',
+            angle: -90,
+            position: 'insideLeft',
+            fontSize: CHART_STYLES.fontSize.label,
+            className: 'fill-muted-foreground'
+          }}
+        />
+        <ChartTooltip
+          content={<ChartTooltipContent formatter={(value) => [value.toLocaleString(), 'Events']} />}
+          cursor={{ fill: 'hsl(var(--muted))', opacity: 0.3 }}
+        />
+        <Bar
+          dataKey="count"
+          fill="url(#magnitudeGradient)"
+          radius={CHART_STYLES.bar.radius}
+          maxBarSize={60}
+        >
+          {data.map((entry, index) => (
+            <Cell key={`cell-${index}`} fill={getBarColor(entry.range)} />
+          ))}
+        </Bar>
       </BarChart>
-    </ResponsiveContainer>
+    </ChartContainer>
   );
 });
 
@@ -114,15 +314,58 @@ const DepthDistributionChart = memo(function DepthDistributionChart({
   data: { range: string; count: number }[]
 }) {
   return (
-    <ResponsiveContainer width="100%" height={280}>
-      <BarChart data={data}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-        <XAxis dataKey="range" tick={{ fontSize: 12 }} />
-        <YAxis tick={{ fontSize: 12 }} />
-        <Tooltip contentStyle={{ fontSize: 12 }} />
-        <Bar dataKey="count" fill="#10b981" radius={[4, 4, 0, 0]} />
+    <ChartContainer config={CHART_CONFIGS.depthDistribution} className="h-[300px] w-full">
+      <BarChart data={data} margin={CHART_STYLES.margin.default}>
+        <defs>
+          <linearGradient id="depthGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={SEISMIC_COLORS.depth.dark} stopOpacity={1} />
+            <stop offset="100%" stopColor={SEISMIC_COLORS.depth.dark} stopOpacity={0.6} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid
+          strokeDasharray={CHART_STYLES.grid.strokeDasharray}
+          className="stroke-muted"
+          opacity={CHART_STYLES.grid.opacity}
+          vertical={false}
+        />
+        <XAxis
+          dataKey="range"
+          tick={{ fontSize: CHART_STYLES.fontSize.tick }}
+          tickLine={false}
+          axisLine={{ className: 'stroke-muted' }}
+          label={{
+            value: 'Depth Range',
+            position: 'insideBottom',
+            offset: -10,
+            fontSize: CHART_STYLES.fontSize.label,
+            className: 'fill-muted-foreground'
+          }}
+        />
+        <YAxis
+          tick={{ fontSize: CHART_STYLES.fontSize.tick }}
+          tickLine={false}
+          axisLine={false}
+          tickFormatter={AXIS_FORMATTERS.compact}
+          label={{
+            value: 'Event Count',
+            angle: -90,
+            position: 'insideLeft',
+            fontSize: CHART_STYLES.fontSize.label,
+            className: 'fill-muted-foreground'
+          }}
+        />
+        <ChartTooltip
+          content={<ChartTooltipContent formatter={(value) => [value.toLocaleString(), 'Events']} />}
+          cursor={{ fill: 'hsl(var(--muted))', opacity: 0.3 }}
+        />
+        <Bar
+          dataKey="count"
+          fill="url(#depthGradient)"
+          radius={CHART_STYLES.bar.radius}
+          maxBarSize={60}
+        />
       </BarChart>
-    </ResponsiveContainer>
+    </ChartContainer>
   );
 });
 
@@ -132,45 +375,111 @@ const RegionDistributionChart = memo(function RegionDistributionChart({
   data: { region: string; count: number }[]
 }) {
   return (
-    <ResponsiveContainer width="100%" height={280}>
-      <BarChart data={data} layout="vertical">
-        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-        <XAxis type="number" tick={{ fontSize: 12 }} />
-        <YAxis dataKey="region" type="category" width={100} tick={{ fontSize: 11 }} />
-        <Tooltip contentStyle={{ fontSize: 12 }} />
-        <Bar dataKey="count" fill="#f59e0b" radius={[0, 4, 4, 0]} />
+    <ChartContainer config={CHART_CONFIGS.region} className="h-[300px] w-full">
+      <BarChart data={data} layout="vertical" margin={{ ...CHART_STYLES.margin.default, left: 100 }}>
+        <defs>
+          <linearGradient id="regionGradient" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor={SEISMIC_COLORS.secondary.dark} stopOpacity={0.6} />
+            <stop offset="100%" stopColor={SEISMIC_COLORS.secondary.dark} stopOpacity={1} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid
+          strokeDasharray={CHART_STYLES.grid.strokeDasharray}
+          className="stroke-muted"
+          opacity={CHART_STYLES.grid.opacity}
+          horizontal={false}
+        />
+        <XAxis
+          type="number"
+          tick={{ fontSize: CHART_STYLES.fontSize.tick }}
+          tickLine={false}
+          axisLine={{ className: 'stroke-muted' }}
+          tickFormatter={AXIS_FORMATTERS.compact}
+        />
+        <YAxis
+          dataKey="region"
+          type="category"
+          width={95}
+          tick={{ fontSize: CHART_STYLES.fontSize.tick }}
+          tickLine={false}
+          axisLine={false}
+        />
+        <ChartTooltip
+          content={<ChartTooltipContent formatter={(value) => [value.toLocaleString(), 'Events']} />}
+          cursor={{ fill: 'hsl(var(--muted))', opacity: 0.3 }}
+        />
+        <Bar
+          dataKey="count"
+          fill="url(#regionGradient)"
+          radius={CHART_STYLES.bar.radiusHorizontal}
+          maxBarSize={24}
+        />
       </BarChart>
-    </ResponsiveContainer>
+    </ChartContainer>
   );
 });
-
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D', '#FFC658', '#FF6B9D'];
 
 const CatalogueDistributionChart = memo(function CatalogueDistributionChart({
   data
 }: {
   data: { catalogue: string; count: number }[]
 }) {
+  const total = useMemo(() => data.reduce((sum, item) => sum + item.count, 0), [data]);
+
   return (
-    <ResponsiveContainer width="100%" height={280}>
-      <PieChart>
+    <ChartContainer config={{}} className="h-[300px] w-full">
+      <PieChart margin={CHART_STYLES.margin.compact}>
+        <defs>
+          {CATEGORICAL_COLORS.map((color, index) => (
+            <linearGradient key={`gradient-${index}`} id={`pieGradient${index}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={1} />
+              <stop offset="100%" stopColor={color} stopOpacity={0.7} />
+            </linearGradient>
+          ))}
+        </defs>
         <Pie
           data={data}
           dataKey="count"
           nameKey="catalogue"
           cx="50%"
           cy="50%"
-          outerRadius={90}
-          label={(entry) => entry.catalogue}
-          labelLine={false}
+          innerRadius={45}
+          outerRadius={85}
+          paddingAngle={2}
+          label={({ catalogue, percent }) =>
+            percent > 0.05 ? `${catalogue.slice(0, 12)}${catalogue.length > 12 ? '...' : ''} (${(percent * 100).toFixed(0)}%)` : ''
+          }
+          labelLine={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1 }}
         >
           {data.map((_, index) => (
-            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+            <Cell
+              key={`cell-${index}`}
+              fill={`url(#pieGradient${index % CATEGORICAL_COLORS.length})`}
+              stroke="hsl(var(--background))"
+              strokeWidth={2}
+            />
           ))}
         </Pie>
-        <Tooltip contentStyle={{ fontSize: 12 }} />
+        <ChartTooltip
+          content={({ active, payload }) => {
+            if (!active || !payload?.length) return null;
+            const item = payload[0];
+            return (
+              <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg p-3">
+                <p className="font-medium text-sm">{item.name}</p>
+                <p className="text-muted-foreground text-sm">
+                  {item.value?.toLocaleString()} events ({((item.value as number / total) * 100).toFixed(1)}%)
+                </p>
+              </div>
+            );
+          }}
+        />
+        <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle" className="fill-foreground">
+          <tspan x="50%" dy="-0.5em" fontSize="20" fontWeight="bold">{total.toLocaleString()}</tspan>
+          <tspan x="50%" dy="1.4em" fontSize="11" className="fill-muted-foreground">Total Events</tspan>
+        </text>
       </PieChart>
-    </ResponsiveContainer>
+    </ChartContainer>
   );
 });
 
@@ -1294,109 +1603,280 @@ export default function AnalyticsPage() {
 
         {/* Gutenberg-Richter Tab */}
         <TabsContent value="gutenberg-richter" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Gutenberg-Richter Analysis</CardTitle>
-              <CardDescription>
-                Frequency-magnitude distribution and b-value calculation
-              </CardDescription>
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="bg-gradient-to-r from-violet-500/10 to-purple-500/10 rounded-t-lg">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-violet-500/20 rounded-lg">
+                  <Activity className="h-5 w-5 text-violet-600" />
+                </div>
+                <div>
+                  <CardTitle>Gutenberg-Richter Analysis</CardTitle>
+                  <CardDescription>
+                    Frequency-magnitude distribution following log₁₀(N) = a - bM relationship
+                  </CardDescription>
+                </div>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-6">
               {grAnalysis ? (
                 <div className="space-y-6">
-                  {/* Summary Cards */}
+                  {/* Summary Cards with professional styling */}
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <Card>
+                    <Card className="bg-gradient-to-br from-violet-50 to-violet-100/50 dark:from-violet-950/50 dark:to-violet-900/30 border-violet-200 dark:border-violet-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">b-value</CardTitle>
+                        <CardTitle className="text-sm font-medium text-violet-700 dark:text-violet-300 flex items-center gap-2">
+                          <span className="w-2 h-2 bg-violet-500 rounded-full"></span>
+                          b-value
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">{grAnalysis.bValue.toFixed(3)}</div>
-                        <p className="text-xs text-muted-foreground">
-                          {grAnalysis.bValue < 0.8 ? 'Low (stress accumulation)' :
-                           grAnalysis.bValue > 1.2 ? 'High (heterogeneous)' : 'Normal'}
-                        </p>
+                        <div className="text-3xl font-bold text-violet-900 dark:text-violet-100 font-mono">
+                          {grAnalysis.bValue.toFixed(3)}
+                        </div>
+                        <div className="flex items-center gap-2 mt-2">
+                          <Badge
+                            variant={grAnalysis.bValue < 0.8 ? 'destructive' : grAnalysis.bValue > 1.2 ? 'secondary' : 'default'}
+                            className="text-xs"
+                          >
+                            {grAnalysis.bValue < 0.8 ? 'Low' : grAnalysis.bValue > 1.2 ? 'High' : 'Normal'}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {grAnalysis.bValue < 0.8 ? 'Stress accumulation' : grAnalysis.bValue > 1.2 ? 'Heterogeneous' : 'Typical range'}
+                          </span>
+                        </div>
                       </CardContent>
                     </Card>
-                    <Card>
+
+                    <Card className="bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/50 dark:to-blue-900/30 border-blue-200 dark:border-blue-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">a-value</CardTitle>
+                        <CardTitle className="text-sm font-medium text-blue-700 dark:text-blue-300 flex items-center gap-2">
+                          <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
+                          a-value
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">{grAnalysis.aValue.toFixed(2)}</div>
-                        <p className="text-xs text-muted-foreground">Productivity</p>
+                        <div className="text-3xl font-bold text-blue-900 dark:text-blue-100 font-mono">
+                          {grAnalysis.aValue.toFixed(2)}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">Seismic productivity index</p>
                       </CardContent>
                     </Card>
-                    <Card>
+
+                    <Card className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 dark:from-emerald-950/50 dark:to-emerald-900/30 border-emerald-200 dark:border-emerald-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">R² Fit</CardTitle>
+                        <CardTitle className="text-sm font-medium text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                          <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
+                          R² Goodness of Fit
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">{grAnalysis.rSquared.toFixed(3)}</div>
-                        <p className="text-xs text-muted-foreground">
-                          {grAnalysis.rSquared > 0.95 ? 'Excellent' :
-                           grAnalysis.rSquared > 0.90 ? 'Good' : 'Fair'}
-                        </p>
+                        <div className="text-3xl font-bold text-emerald-900 dark:text-emerald-100 font-mono">
+                          {grAnalysis.rSquared.toFixed(3)}
+                        </div>
+                        <div className="flex items-center gap-2 mt-2">
+                          <Badge
+                            variant={grAnalysis.rSquared > 0.95 ? 'default' : grAnalysis.rSquared > 0.90 ? 'secondary' : 'outline'}
+                            className="text-xs"
+                          >
+                            {grAnalysis.rSquared > 0.95 ? 'Excellent' : grAnalysis.rSquared > 0.90 ? 'Good' : 'Fair'}
+                          </Badge>
+                        </div>
                       </CardContent>
                     </Card>
-                    <Card>
+
+                    <Card className="bg-gradient-to-br from-amber-50 to-amber-100/50 dark:from-amber-950/50 dark:to-amber-900/30 border-amber-200 dark:border-amber-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Mc (estimated)</CardTitle>
+                        <CardTitle className="text-sm font-medium text-amber-700 dark:text-amber-300 flex items-center gap-2">
+                          <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
+                          Mc (Completeness)
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">{grAnalysis.completeness.toFixed(1)}</div>
-                        <p className="text-xs text-muted-foreground">Completeness</p>
+                        <div className="text-3xl font-bold text-amber-900 dark:text-amber-100 font-mono">
+                          M{grAnalysis.completeness.toFixed(1)}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">Magnitude of completeness</p>
                       </CardContent>
                     </Card>
                   </div>
 
-                  {/* G-R Plot */}
-                  <div className="h-[400px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ScatterChart margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis
-                          dataKey="magnitude"
-                          type="number"
-                          label={{ value: 'Magnitude', position: 'insideBottom', offset: -10 }}
-                        />
-                        <YAxis
-                          dataKey="logCount"
-                          type="number"
-                          label={{ value: 'log₁₀(N)', angle: -90, position: 'insideLeft' }}
-                        />
-                        <Tooltip />
-                        <Legend />
-                        <Scatter
-                          name="Observed"
-                          data={grAnalysis.dataPoints}
-                          fill="#8884d8"
-                        />
-                        <Scatter
-                          name="G-R Fit"
-                          data={grAnalysis.fittedLine}
-                          fill="#82ca9d"
-                          line
-                          shape="cross"
-                        />
-                        <ReferenceLine
-                          x={grAnalysis.completeness}
-                          stroke="red"
-                          strokeDasharray="3 3"
-                          label="Mc"
-                        />
-                      </ScatterChart>
-                    </ResponsiveContainer>
+                  {/* G-R Plot with professional styling */}
+                  <Card className="border border-border/50">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base">Frequency-Magnitude Relationship</CardTitle>
+                      <CardDescription>
+                        log₁₀(N) = {grAnalysis.aValue.toFixed(2)} - {grAnalysis.bValue.toFixed(3)} × M
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <ChartContainer config={CHART_CONFIGS.gutenbergRichter} className="h-[420px] w-full">
+                        <ScatterChart margin={{ top: 20, right: 30, left: 60, bottom: 60 }}>
+                          <defs>
+                            <linearGradient id="grObservedGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor={SEISMIC_COLORS.magnitude.dark} stopOpacity={0.9} />
+                              <stop offset="100%" stopColor={SEISMIC_COLORS.magnitude.dark} stopOpacity={0.5} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid
+                            strokeDasharray={CHART_STYLES.grid.strokeDasharray}
+                            className="stroke-muted"
+                            opacity={CHART_STYLES.grid.opacity}
+                          />
+                          <XAxis
+                            dataKey="magnitude"
+                            type="number"
+                            tick={{ fontSize: CHART_STYLES.fontSize.tick }}
+                            tickLine={false}
+                            axisLine={{ className: 'stroke-muted' }}
+                            label={{
+                              value: 'Magnitude (M)',
+                              position: 'insideBottom',
+                              offset: -10,
+                              fontSize: CHART_STYLES.fontSize.label,
+                              className: 'fill-muted-foreground font-medium'
+                            }}
+                          />
+                          <YAxis
+                            dataKey="logCount"
+                            type="number"
+                            tick={{ fontSize: CHART_STYLES.fontSize.tick }}
+                            tickLine={false}
+                            axisLine={false}
+                            label={{
+                              value: 'log₁₀(N) - Cumulative Number',
+                              angle: -90,
+                              position: 'insideLeft',
+                              offset: 10,
+                              fontSize: CHART_STYLES.fontSize.label,
+                              className: 'fill-muted-foreground font-medium'
+                            }}
+                          />
+                          <ChartTooltip
+                            content={({ active, payload }) => {
+                              if (!active || !payload?.length) return null;
+                              const data = payload[0].payload;
+                              return (
+                                <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg p-3">
+                                  <p className="font-medium text-sm">M{data.magnitude?.toFixed(1)}</p>
+                                  <p className="text-muted-foreground text-sm">
+                                    log₁₀(N) = {data.logCount?.toFixed(2)}
+                                  </p>
+                                  <p className="text-muted-foreground text-sm">
+                                    N = {Math.pow(10, data.logCount)?.toFixed(0)} events
+                                  </p>
+                                </div>
+                              );
+                            }}
+                          />
+                          <Legend
+                            verticalAlign="top"
+                            align="right"
+                            wrapperStyle={{ paddingBottom: 10 }}
+                          />
+                          <Scatter
+                            name="Observed Data"
+                            data={grAnalysis.dataPoints}
+                            fill={SEISMIC_COLORS.magnitude.dark}
+                            fillOpacity={0.8}
+                          >
+                            {grAnalysis.dataPoints.map((_: unknown, index: number) => (
+                              <Cell
+                                key={`cell-${index}`}
+                                fill={SEISMIC_COLORS.magnitude.dark}
+                                strokeWidth={2}
+                                stroke="hsl(var(--background))"
+                              />
+                            ))}
+                          </Scatter>
+                          <Scatter
+                            name="G-R Linear Fit"
+                            data={grAnalysis.fittedLine}
+                            fill={SEISMIC_COLORS.fit.dark}
+                            line={{ stroke: SEISMIC_COLORS.fit.dark, strokeWidth: 2 }}
+                            shape="diamond"
+                            legendType="line"
+                          />
+                          <ReferenceLine
+                            x={grAnalysis.completeness}
+                            stroke={SEISMIC_COLORS.reference.dark}
+                            strokeWidth={2}
+                            strokeDasharray="8 4"
+                            label={{
+                              value: `Mc = ${grAnalysis.completeness.toFixed(1)}`,
+                              position: 'top',
+                              fill: SEISMIC_COLORS.reference.dark,
+                              fontSize: 12,
+                              fontWeight: 600
+                            }}
+                          />
+                        </ScatterChart>
+                      </ChartContainer>
+                    </CardContent>
+                  </Card>
+
+                  {/* Interpretation panel */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-4 bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/50 dark:to-slate-800/30 rounded-lg border">
+                      <h4 className="font-semibold mb-3 flex items-center gap-2">
+                        <Info className="h-4 w-4 text-blue-500" />
+                        Parameter Interpretation
+                      </h4>
+                      <ul className="space-y-2 text-sm">
+                        <li className="flex items-start gap-2">
+                          <span className="w-1.5 h-1.5 bg-violet-500 rounded-full mt-2"></span>
+                          <span><strong>b-value ≈ 1.0:</strong> Global average for tectonic earthquakes</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="w-1.5 h-1.5 bg-violet-500 rounded-full mt-2"></span>
+                          <span><strong>b &lt; 0.8:</strong> May indicate high stress or asperities</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="w-1.5 h-1.5 bg-violet-500 rounded-full mt-2"></span>
+                          <span><strong>b &gt; 1.2:</strong> Often seen in volcanic or geothermal areas</span>
+                        </li>
+                      </ul>
+                    </div>
+                    <div className="p-4 bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/50 dark:to-slate-800/30 rounded-lg border">
+                      <h4 className="font-semibold mb-3 flex items-center gap-2">
+                        <TrendingUp className="h-4 w-4 text-emerald-500" />
+                        Analysis Summary
+                      </h4>
+                      <ul className="space-y-2 text-sm">
+                        <li className="flex items-start gap-2">
+                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mt-2"></span>
+                          <span>Events analyzed: <strong>{displayEvents.length.toLocaleString()}</strong></span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mt-2"></span>
+                          <span>Data points above Mc: <strong>{grAnalysis.dataPoints?.length || 0}</strong></span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mt-2"></span>
+                          <span>Fit quality: <strong>{grAnalysis.rSquared > 0.95 ? 'Excellent' : grAnalysis.rSquared > 0.90 ? 'Good' : 'Fair'}</strong> (R² = {grAnalysis.rSquared.toFixed(3)})</span>
+                        </li>
+                      </ul>
+                    </div>
                   </div>
                 </div>
               ) : (
-                <div className="text-center py-12 text-muted-foreground">
-                  {events.length === 0 ? 'No events available' :
-                   displayEvents.length < 10 ? 'Insufficient data (need at least 10 events)' :
-                   <div className="flex flex-col items-center gap-2">
-                     <Loader2 className="h-8 w-8 animate-spin" />
-                     <span>Computing Gutenberg-Richter analysis...</span>
-                   </div>}
+                <div className="text-center py-16 text-muted-foreground">
+                  {events.length === 0 ? (
+                    <div className="flex flex-col items-center gap-3">
+                      <Activity className="h-12 w-12 opacity-30" />
+                      <span>No events available</span>
+                    </div>
+                  ) : displayEvents.length < 10 ? (
+                    <div className="flex flex-col items-center gap-3">
+                      <Activity className="h-12 w-12 opacity-30" />
+                      <span>Insufficient data (need at least 10 events)</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-3">
+                      <Loader2 className="h-10 w-10 animate-spin text-violet-500" />
+                      <span className="font-medium">Computing Gutenberg-Richter analysis...</span>
+                      <span className="text-xs">Fitting frequency-magnitude distribution</span>
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -1405,78 +1885,226 @@ export default function AnalyticsPage() {
 
         {/* Completeness Tab */}
         <TabsContent value="completeness" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Completeness Magnitude (Mc)</CardTitle>
-              <CardDescription>
-                Magnitude above which the catalogue is complete
-              </CardDescription>
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="bg-gradient-to-r from-cyan-500/10 to-teal-500/10 rounded-t-lg">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-cyan-500/20 rounded-lg">
+                  <Target className="h-5 w-5 text-cyan-600" />
+                </div>
+                <div>
+                  <CardTitle>Completeness Magnitude (Mc)</CardTitle>
+                  <CardDescription>
+                    Threshold magnitude above which the catalogue records all events
+                  </CardDescription>
+                </div>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-6">
               {completeness ? (
                 <div className="space-y-6">
-                  {/* Summary Cards */}
+                  {/* Summary Cards with professional styling */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <Card>
+                    <Card className="bg-gradient-to-br from-cyan-50 to-cyan-100/50 dark:from-cyan-950/50 dark:to-cyan-900/30 border-cyan-200 dark:border-cyan-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Mc</CardTitle>
+                        <CardTitle className="text-sm font-medium text-cyan-700 dark:text-cyan-300 flex items-center gap-2">
+                          <span className="w-2 h-2 bg-cyan-500 rounded-full"></span>
+                          Completeness Magnitude
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">{completeness.mc.toFixed(1)}</div>
-                        <p className="text-xs text-muted-foreground">{completeness.method} method</p>
+                        <div className="text-4xl font-bold text-cyan-900 dark:text-cyan-100 font-mono">
+                          M{completeness.mc.toFixed(1)}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Using {completeness.method} method
+                        </p>
                       </CardContent>
                     </Card>
-                    <Card>
+
+                    <Card className="bg-gradient-to-br from-teal-50 to-teal-100/50 dark:from-teal-950/50 dark:to-teal-900/30 border-teal-200 dark:border-teal-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Confidence</CardTitle>
+                        <CardTitle className="text-sm font-medium text-teal-700 dark:text-teal-300 flex items-center gap-2">
+                          <span className="w-2 h-2 bg-teal-500 rounded-full"></span>
+                          Catalogue Completeness
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">{(completeness.confidence * 100).toFixed(1)}%</div>
-                        <p className="text-xs text-muted-foreground">Events above Mc</p>
+                        <div className="text-4xl font-bold text-teal-900 dark:text-teal-100 font-mono">
+                          {(completeness.confidence * 100).toFixed(1)}%
+                        </div>
+                        <div className="mt-2">
+                          <Progress value={completeness.confidence * 100} className="h-2" />
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">Events above Mc</p>
                       </CardContent>
                     </Card>
-                    <Card>
+
+                    <Card className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 dark:from-emerald-950/50 dark:to-emerald-900/30 border-emerald-200 dark:border-emerald-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Method</CardTitle>
+                        <CardTitle className="text-sm font-medium text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                          <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
+                          Detection Method
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">{completeness.method}</div>
-                        <p className="text-xs text-muted-foreground">Maximum Curvature</p>
+                        <div className="text-2xl font-bold text-emerald-900 dark:text-emerald-100">
+                          {completeness.method}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Maximum curvature of FMD
+                        </p>
                       </CardContent>
                     </Card>
                   </div>
 
-                  {/* Magnitude Distribution */}
-                  <div className="h-[400px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={completeness.magnitudeDistribution} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis
-                          dataKey="magnitude"
-                          label={{ value: 'Magnitude', position: 'insideBottom', offset: -10 }}
-                        />
-                        <YAxis label={{ value: 'Event Count', angle: -90, position: 'insideLeft' }} />
-                        <Tooltip />
-                        <Legend />
-                        <Bar dataKey="count" fill="#8884d8" name="Event Count" />
-                        <ReferenceLine
-                          x={completeness.mc}
-                          stroke="red"
-                          strokeDasharray="3 3"
-                          label="Mc"
-                        />
-                      </BarChart>
-                    </ResponsiveContainer>
+                  {/* Magnitude Distribution Chart */}
+                  <Card className="border border-border/50">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base">Frequency-Magnitude Distribution</CardTitle>
+                      <CardDescription>
+                        Number of events per magnitude bin with completeness threshold
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <ChartContainer config={CHART_CONFIGS.completeness} className="h-[420px] w-full">
+                        <BarChart data={completeness.magnitudeDistribution} margin={{ top: 20, right: 30, left: 60, bottom: 60 }}>
+                          <defs>
+                            <linearGradient id="completenessGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor={SEISMIC_COLORS.frequency.dark} stopOpacity={1} />
+                              <stop offset="100%" stopColor={SEISMIC_COLORS.frequency.dark} stopOpacity={0.5} />
+                            </linearGradient>
+                            <linearGradient id="incompleteGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="#94a3b8" stopOpacity={0.6} />
+                              <stop offset="100%" stopColor="#94a3b8" stopOpacity={0.3} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid
+                            strokeDasharray={CHART_STYLES.grid.strokeDasharray}
+                            className="stroke-muted"
+                            opacity={CHART_STYLES.grid.opacity}
+                            vertical={false}
+                          />
+                          <XAxis
+                            dataKey="magnitude"
+                            tick={{ fontSize: CHART_STYLES.fontSize.tick }}
+                            tickLine={false}
+                            axisLine={{ className: 'stroke-muted' }}
+                            label={{
+                              value: 'Magnitude (M)',
+                              position: 'insideBottom',
+                              offset: -10,
+                              fontSize: CHART_STYLES.fontSize.label,
+                              className: 'fill-muted-foreground font-medium'
+                            }}
+                          />
+                          <YAxis
+                            tick={{ fontSize: CHART_STYLES.fontSize.tick }}
+                            tickLine={false}
+                            axisLine={false}
+                            tickFormatter={AXIS_FORMATTERS.compact}
+                            label={{
+                              value: 'Number of Events',
+                              angle: -90,
+                              position: 'insideLeft',
+                              offset: 10,
+                              fontSize: CHART_STYLES.fontSize.label,
+                              className: 'fill-muted-foreground font-medium'
+                            }}
+                          />
+                          <ChartTooltip
+                            content={({ active, payload }) => {
+                              if (!active || !payload?.length) return null;
+                              const data = payload[0].payload;
+                              const isComplete = data.magnitude >= completeness.mc;
+                              return (
+                                <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg p-3">
+                                  <p className="font-medium text-sm">M{data.magnitude?.toFixed(1)}</p>
+                                  <p className="text-muted-foreground text-sm">
+                                    {data.count?.toLocaleString()} events
+                                  </p>
+                                  <Badge variant={isComplete ? 'default' : 'secondary'} className="mt-1 text-xs">
+                                    {isComplete ? 'Complete' : 'Incomplete'}
+                                  </Badge>
+                                </div>
+                              );
+                            }}
+                          />
+                          <Bar
+                            dataKey="count"
+                            radius={CHART_STYLES.bar.radius}
+                            maxBarSize={50}
+                          >
+                            {completeness.magnitudeDistribution.map((entry: { magnitude: number; count: number }, index: number) => (
+                              <Cell
+                                key={`cell-${index}`}
+                                fill={entry.magnitude >= completeness.mc ? SEISMIC_COLORS.frequency.dark : '#94a3b8'}
+                                fillOpacity={entry.magnitude >= completeness.mc ? 1 : 0.5}
+                              />
+                            ))}
+                          </Bar>
+                          <ReferenceLine
+                            x={completeness.mc}
+                            stroke={SEISMIC_COLORS.reference.dark}
+                            strokeWidth={2}
+                            strokeDasharray="8 4"
+                            label={{
+                              value: `Mc = ${completeness.mc.toFixed(1)}`,
+                              position: 'top',
+                              fill: SEISMIC_COLORS.reference.dark,
+                              fontSize: 12,
+                              fontWeight: 600
+                            }}
+                          />
+                        </BarChart>
+                      </ChartContainer>
+                    </CardContent>
+                  </Card>
+
+                  {/* Interpretation panel */}
+                  <div className="p-4 bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/50 dark:to-slate-800/30 rounded-lg border">
+                    <h4 className="font-semibold mb-3 flex items-center gap-2">
+                      <Info className="h-4 w-4 text-cyan-500" />
+                      Understanding Mc
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="mb-2"><strong>What is Mc?</strong></p>
+                        <p className="text-muted-foreground">
+                          The magnitude of completeness (Mc) is the lowest magnitude at which 100% of
+                          earthquakes in a space-time volume are detected. Below Mc, network sensitivity
+                          limitations cause some events to be missed.
+                        </p>
+                      </div>
+                      <div>
+                        <p className="mb-2"><strong>Why it matters</strong></p>
+                        <ul className="space-y-1 text-muted-foreground">
+                          <li>• Statistical analyses should use M ≥ Mc only</li>
+                          <li>• Lower Mc indicates better network coverage</li>
+                          <li>• Mc may vary spatially and temporally</li>
+                        </ul>
+                      </div>
+                    </div>
                   </div>
                 </div>
               ) : (
-                <div className="text-center py-12 text-muted-foreground">
-                  {events.length === 0 ? 'No events available' :
-                   displayEvents.length < 50 ? 'Insufficient data (need at least 50 events)' :
-                   <div className="flex flex-col items-center gap-2">
-                     <Loader2 className="h-8 w-8 animate-spin" />
-                     <span>Computing completeness magnitude...</span>
-                   </div>}
+                <div className="text-center py-16 text-muted-foreground">
+                  {events.length === 0 ? (
+                    <div className="flex flex-col items-center gap-3">
+                      <Target className="h-12 w-12 opacity-30" />
+                      <span>No events available</span>
+                    </div>
+                  ) : displayEvents.length < 50 ? (
+                    <div className="flex flex-col items-center gap-3">
+                      <Target className="h-12 w-12 opacity-30" />
+                      <span>Insufficient data (need at least 50 events)</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-3">
+                      <Loader2 className="h-10 w-10 animate-spin text-cyan-500" />
+                      <span className="font-medium">Computing completeness magnitude...</span>
+                      <span className="text-xs">Analyzing frequency-magnitude distribution</span>
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -1485,108 +2113,332 @@ export default function AnalyticsPage() {
 
         {/* Temporal Tab */}
         <TabsContent value="temporal" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Temporal Analysis</CardTitle>
-              <CardDescription>
-                Time series analysis and cluster detection
-              </CardDescription>
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="bg-gradient-to-r from-blue-500/10 to-indigo-500/10 rounded-t-lg">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-500/20 rounded-lg">
+                  <Clock className="h-5 w-5 text-blue-600" />
+                </div>
+                <div>
+                  <CardTitle>Temporal Analysis</CardTitle>
+                  <CardDescription>
+                    Time series evolution and seismicity cluster detection
+                  </CardDescription>
+                </div>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-6">
               {temporalAnalysis ? (
                 <div className="space-y-6">
-                  {/* Summary Cards */}
+                  {/* Summary Cards with professional styling */}
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <Card>
+                    <Card className="bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/50 dark:to-blue-900/30 border-blue-200 dark:border-blue-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Time Span</CardTitle>
+                        <CardTitle className="text-sm font-medium text-blue-700 dark:text-blue-300 flex items-center gap-2">
+                          <Calendar className="h-4 w-4" />
+                          Time Span
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">{temporalAnalysis.timeSpanDays.toFixed(0)}</div>
-                        <p className="text-xs text-muted-foreground">days</p>
+                        <div className="text-3xl font-bold text-blue-900 dark:text-blue-100 font-mono">
+                          {temporalAnalysis.timeSpanDays.toFixed(0)}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          days ({(temporalAnalysis.timeSpanDays / 365.25).toFixed(1)} years)
+                        </p>
                       </CardContent>
                     </Card>
-                    <Card>
+
+                    <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100/50 dark:from-indigo-950/50 dark:to-indigo-900/30 border-indigo-200 dark:border-indigo-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Events/Day</CardTitle>
+                        <CardTitle className="text-sm font-medium text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
+                          <TrendingUp className="h-4 w-4" />
+                          Daily Rate
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">{temporalAnalysis.eventsPerDay.toFixed(2)}</div>
-                        <p className="text-xs text-muted-foreground">Average rate</p>
+                        <div className="text-3xl font-bold text-indigo-900 dark:text-indigo-100 font-mono">
+                          {temporalAnalysis.eventsPerDay.toFixed(2)}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">events per day</p>
                       </CardContent>
                     </Card>
-                    <Card>
+
+                    <Card className="bg-gradient-to-br from-violet-50 to-violet-100/50 dark:from-violet-950/50 dark:to-violet-900/30 border-violet-200 dark:border-violet-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Events/Month</CardTitle>
+                        <CardTitle className="text-sm font-medium text-violet-700 dark:text-violet-300 flex items-center gap-2">
+                          <Activity className="h-4 w-4" />
+                          Monthly Rate
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">{temporalAnalysis.eventsPerMonth.toFixed(1)}</div>
-                        <p className="text-xs text-muted-foreground">Average rate</p>
+                        <div className="text-3xl font-bold text-violet-900 dark:text-violet-100 font-mono">
+                          {temporalAnalysis.eventsPerMonth.toFixed(1)}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">events per month</p>
                       </CardContent>
                     </Card>
-                    <Card>
+
+                    <Card className="bg-gradient-to-br from-orange-50 to-orange-100/50 dark:from-orange-950/50 dark:to-orange-900/30 border-orange-200 dark:border-orange-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Clusters</CardTitle>
+                        <CardTitle className="text-sm font-medium text-orange-700 dark:text-orange-300 flex items-center gap-2">
+                          <Zap className="h-4 w-4" />
+                          Clusters
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">{temporalAnalysis.clusters.length}</div>
-                        <p className="text-xs text-muted-foreground">Detected</p>
+                        <div className="text-3xl font-bold text-orange-900 dark:text-orange-100 font-mono">
+                          {temporalAnalysis.clusters.length}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {temporalAnalysis.clusters.length === 0 ? 'No clusters' :
+                           temporalAnalysis.clusters.length === 1 ? 'cluster detected' : 'clusters detected'}
+                        </p>
                       </CardContent>
                     </Card>
                   </div>
 
                   {/* Time Series Plot */}
-                  <div className="h-[400px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={temporalAnalysis.timeSeries} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis
-                          dataKey="date"
-                          label={{ value: 'Date', position: 'insideBottom', offset: -10 }}
-                        />
-                        <YAxis label={{ value: 'Cumulative Count', angle: -90, position: 'insideLeft' }} />
-                        <Tooltip />
-                        <Legend />
-                        <Line
-                          type="monotone"
-                          dataKey="cumulativeCount"
-                          stroke="#8884d8"
-                          name="Cumulative Events"
-                          dot={false}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
+                  <Card className="border border-border/50">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base">Cumulative Event Time Series</CardTitle>
+                      <CardDescription>
+                        Temporal evolution of seismicity showing cumulative events over time
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <ChartContainer config={CHART_CONFIGS.temporal} className="h-[420px] w-full">
+                        <AreaChart data={temporalAnalysis.timeSeries} margin={{ top: 20, right: 30, left: 60, bottom: 60 }}>
+                          <defs>
+                            <linearGradient id="temporalGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor={SEISMIC_COLORS.time.dark} stopOpacity={0.4} />
+                              <stop offset="95%" stopColor={SEISMIC_COLORS.time.dark} stopOpacity={0.05} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid
+                            strokeDasharray={CHART_STYLES.grid.strokeDasharray}
+                            className="stroke-muted"
+                            opacity={CHART_STYLES.grid.opacity}
+                          />
+                          <XAxis
+                            dataKey="date"
+                            tick={{ fontSize: CHART_STYLES.fontSize.tick }}
+                            tickLine={false}
+                            axisLine={{ className: 'stroke-muted' }}
+                            tickFormatter={(value) => {
+                              const date = new Date(value);
+                              return `${date.getMonth() + 1}/${date.getFullYear().toString().slice(-2)}`;
+                            }}
+                            label={{
+                              value: 'Date',
+                              position: 'insideBottom',
+                              offset: -10,
+                              fontSize: CHART_STYLES.fontSize.label,
+                              className: 'fill-muted-foreground font-medium'
+                            }}
+                          />
+                          <YAxis
+                            tick={{ fontSize: CHART_STYLES.fontSize.tick }}
+                            tickLine={false}
+                            axisLine={false}
+                            tickFormatter={AXIS_FORMATTERS.compact}
+                            label={{
+                              value: 'Cumulative Events',
+                              angle: -90,
+                              position: 'insideLeft',
+                              offset: 10,
+                              fontSize: CHART_STYLES.fontSize.label,
+                              className: 'fill-muted-foreground font-medium'
+                            }}
+                          />
+                          <ChartTooltip
+                            content={({ active, payload }) => {
+                              if (!active || !payload?.length) return null;
+                              const data = payload[0].payload;
+                              return (
+                                <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg p-3">
+                                  <p className="font-medium text-sm">{new Date(data.date).toLocaleDateString()}</p>
+                                  <p className="text-muted-foreground text-sm">
+                                    {data.cumulativeCount?.toLocaleString()} cumulative events
+                                  </p>
+                                  {data.dailyCount !== undefined && (
+                                    <p className="text-muted-foreground text-sm">
+                                      {data.dailyCount?.toLocaleString()} events this period
+                                    </p>
+                                  )}
+                                </div>
+                              );
+                            }}
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="cumulativeCount"
+                            stroke={SEISMIC_COLORS.time.dark}
+                            strokeWidth={2}
+                            fill="url(#temporalGradient)"
+                            name="Cumulative Events"
+                          />
+                        </AreaChart>
+                      </ChartContainer>
+                    </CardContent>
+                  </Card>
 
-                  {/* Clusters */}
+                  {/* Clusters - Gardner-Knopoff Declustering Results */}
                   {temporalAnalysis.clusters && temporalAnalysis.clusters.length > 0 && (
-                    <div>
-                      <h3 className="text-lg font-semibold mb-2">Detected Clusters</h3>
-                      <div className="space-y-2">
-                        {temporalAnalysis.clusters.map((cluster: { startDate: string; endDate: string; eventCount: number; maxMagnitude: number }, idx: number) => (
-                          <div key={idx} className="flex items-center justify-between p-3 border rounded-lg">
-                            <div>
-                              <div className="font-medium">
-                                {new Date(cluster.startDate).toLocaleDateString()} - {new Date(cluster.endDate).toLocaleDateString()}
+                    <Card className="border border-border/50">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Zap className="h-4 w-4 text-orange-500" />
+                          Detected Seismicity Clusters
+                          <Badge variant="outline" className="ml-2 text-xs font-normal">
+                            Gardner-Knopoff Method
+                          </Badge>
+                        </CardTitle>
+                        <CardDescription>
+                          Mainshock-aftershock sequences identified using space-time windowing (Gardner & Knopoff, 1974; Uhrhammer, 1986)
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-4">
+                          {temporalAnalysis.clusters.map((cluster: {
+                            id: number;
+                            startDate: string;
+                            endDate: string;
+                            eventCount: number;
+                            maxMagnitude: number;
+                            mainshock?: { id: number | string; time: string; magnitude: number; latitude: number; longitude: number; depth: number };
+                            aftershockCount?: number;
+                            foreshockCount?: number;
+                            durationDays?: number;
+                            spatialExtentKm?: number;
+                            clusterType?: 'mainshock-aftershock' | 'swarm' | 'burst';
+                            bValue?: number;
+                          }, idx: number) => (
+                            <div
+                              key={cluster.id ?? idx}
+                              className="p-4 bg-gradient-to-r from-orange-50/50 to-amber-50/50 dark:from-orange-950/30 dark:to-amber-950/30 rounded-lg border border-orange-200/50 dark:border-orange-800/50"
+                            >
+                              {/* Header row */}
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="flex items-center gap-3">
+                                  <div className="p-2 bg-orange-500/20 rounded-lg">
+                                    <span className="text-lg font-bold text-orange-600 dark:text-orange-400">#{idx + 1}</span>
+                                  </div>
+                                  <div>
+                                    <div className="font-semibold flex items-center gap-2">
+                                      Mainshock M{cluster.mainshock?.magnitude?.toFixed(1) ?? cluster.maxMagnitude.toFixed(1)}
+                                      {cluster.clusterType && (
+                                        <Badge
+                                          variant={cluster.clusterType === 'swarm' ? 'secondary' : cluster.clusterType === 'burst' ? 'outline' : 'default'}
+                                          className="text-xs"
+                                        >
+                                          {cluster.clusterType === 'mainshock-aftershock' ? 'Sequence' :
+                                           cluster.clusterType === 'swarm' ? 'Swarm' : 'Burst'}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <div className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
+                                      <Calendar className="h-3 w-3" />
+                                      {new Date(cluster.mainshock?.time ?? cluster.startDate).toLocaleString()}
+                                    </div>
+                                  </div>
+                                </div>
+                                <Badge
+                                  variant={cluster.maxMagnitude >= 5 ? 'destructive' : cluster.maxMagnitude >= 4 ? 'default' : 'secondary'}
+                                  className="font-mono text-sm"
+                                >
+                                  M{cluster.maxMagnitude.toFixed(1)}
+                                </Badge>
                               </div>
-                              <div className="text-sm text-muted-foreground">
-                                {cluster.eventCount} events, Max M{cluster.maxMagnitude.toFixed(1)}
+
+                              {/* Statistics grid */}
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 pt-3 border-t border-orange-200/50 dark:border-orange-700/50">
+                                <div className="text-center p-2 bg-background/50 rounded">
+                                  <div className="font-mono font-bold text-lg">{cluster.eventCount}</div>
+                                  <div className="text-xs text-muted-foreground">Total Events</div>
+                                </div>
+                                {cluster.aftershockCount !== undefined && (
+                                  <div className="text-center p-2 bg-background/50 rounded">
+                                    <div className="font-mono font-bold text-lg">{cluster.aftershockCount}</div>
+                                    <div className="text-xs text-muted-foreground">Aftershocks</div>
+                                  </div>
+                                )}
+                                {cluster.foreshockCount !== undefined && cluster.foreshockCount > 0 && (
+                                  <div className="text-center p-2 bg-background/50 rounded">
+                                    <div className="font-mono font-bold text-lg">{cluster.foreshockCount}</div>
+                                    <div className="text-xs text-muted-foreground">Foreshocks</div>
+                                  </div>
+                                )}
+                                {cluster.durationDays !== undefined && (
+                                  <div className="text-center p-2 bg-background/50 rounded">
+                                    <div className="font-mono font-bold text-lg">
+                                      {cluster.durationDays < 1 ? `${(cluster.durationDays * 24).toFixed(1)}h` :
+                                       cluster.durationDays.toFixed(1)}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                      {cluster.durationDays < 1 ? 'Duration' : 'Days'}
+                                    </div>
+                                  </div>
+                                )}
+                                {cluster.spatialExtentKm !== undefined && cluster.spatialExtentKm > 0 && (
+                                  <div className="text-center p-2 bg-background/50 rounded">
+                                    <div className="font-mono font-bold text-lg">{cluster.spatialExtentKm.toFixed(1)}</div>
+                                    <div className="text-xs text-muted-foreground">km Extent</div>
+                                  </div>
+                                )}
+                                {cluster.bValue !== undefined && (
+                                  <div className="text-center p-2 bg-background/50 rounded">
+                                    <div className="font-mono font-bold text-lg">{cluster.bValue.toFixed(2)}</div>
+                                    <div className="text-xs text-muted-foreground">b-value</div>
+                                  </div>
+                                )}
                               </div>
+
+                              {/* Location info */}
+                              {cluster.mainshock?.latitude && cluster.mainshock?.longitude && (
+                                <div className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+                                  <MapPin className="h-3 w-3" />
+                                  {cluster.mainshock.latitude.toFixed(3)}°, {cluster.mainshock.longitude.toFixed(3)}°
+                                  {cluster.mainshock.depth && ` • ${cluster.mainshock.depth.toFixed(1)} km depth`}
+                                </div>
+                              )}
                             </div>
-                            <Badge>{cluster.eventCount} events</Badge>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* No clusters message */}
+                  {temporalAnalysis.clusters && temporalAnalysis.clusters.length === 0 && (
+                    <div className="p-4 bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/50 dark:to-slate-800/30 rounded-lg border">
+                      <div className="flex items-start gap-3">
+                        <Info className="h-5 w-5 text-blue-500 mt-0.5" />
+                        <div>
+                          <p className="font-medium">No significant earthquake sequences detected</p>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Gardner-Knopoff declustering found no mainshock-aftershock sequences with 3+ events.
+                            This suggests the catalogue contains mostly independent (background) seismicity.
+                          </p>
+                        </div>
                       </div>
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="text-center py-12 text-muted-foreground">
-                  {events.length === 0 ? 'No events available' :
-                   <div className="flex flex-col items-center gap-2">
-                     <Loader2 className="h-8 w-8 animate-spin" />
-                     <span>Computing temporal analysis...</span>
-                   </div>}
+                <div className="text-center py-16 text-muted-foreground">
+                  {events.length === 0 ? (
+                    <div className="flex flex-col items-center gap-3">
+                      <Clock className="h-12 w-12 opacity-30" />
+                      <span>No events available</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-3">
+                      <Loader2 className="h-10 w-10 animate-spin text-blue-500" />
+                      <span className="font-medium">Computing temporal analysis...</span>
+                      <span className="text-xs">Analyzing time series and detecting clusters</span>
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -1595,87 +2447,220 @@ export default function AnalyticsPage() {
 
         {/* Seismic Moment Tab */}
         <TabsContent value="moment" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Seismic Moment Analysis</CardTitle>
-              <CardDescription>
-                Energy release and moment magnitude calculations
-              </CardDescription>
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="bg-gradient-to-r from-red-500/10 to-orange-500/10 rounded-t-lg">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-red-500/20 rounded-lg">
+                  <Zap className="h-5 w-5 text-red-600" />
+                </div>
+                <div>
+                  <CardTitle>Seismic Moment Analysis</CardTitle>
+                  <CardDescription>
+                    Energy release quantification and moment magnitude distribution
+                  </CardDescription>
+                </div>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-6">
               {momentAnalysis ? (
                 <div className="space-y-6">
-                  {/* Summary Cards */}
+                  {/* Summary Cards with professional styling */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <Card>
+                    <Card className="bg-gradient-to-br from-red-50 to-red-100/50 dark:from-red-950/50 dark:to-red-900/30 border-red-200 dark:border-red-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Total Moment</CardTitle>
+                        <CardTitle className="text-sm font-medium text-red-700 dark:text-red-300 flex items-center gap-2">
+                          <span className="w-2 h-2 bg-red-500 rounded-full"></span>
+                          Total Seismic Moment
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">{momentAnalysis.totalMoment.toExponential(2)}</div>
-                        <p className="text-xs text-muted-foreground">N⋅m</p>
+                        <div className="text-3xl font-bold text-red-900 dark:text-red-100 font-mono">
+                          {momentAnalysis.totalMoment.toExponential(2)}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">Newton-meters (N·m)</p>
                       </CardContent>
                     </Card>
-                    <Card>
+
+                    <Card className="bg-gradient-to-br from-orange-50 to-orange-100/50 dark:from-orange-950/50 dark:to-orange-900/30 border-orange-200 dark:border-orange-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Equivalent Mw</CardTitle>
+                        <CardTitle className="text-sm font-medium text-orange-700 dark:text-orange-300 flex items-center gap-2">
+                          <span className="w-2 h-2 bg-orange-500 rounded-full"></span>
+                          Equivalent Magnitude
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">{momentAnalysis.totalMomentMagnitude.toFixed(2)}</div>
-                        <p className="text-xs text-muted-foreground">Moment magnitude</p>
+                        <div className="text-4xl font-bold text-orange-900 dark:text-orange-100 font-mono">
+                          Mw {momentAnalysis.totalMomentMagnitude.toFixed(2)}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Single event equivalent
+                        </p>
                       </CardContent>
                     </Card>
-                    <Card>
+
+                    <Card className="bg-gradient-to-br from-amber-50 to-amber-100/50 dark:from-amber-950/50 dark:to-amber-900/30 border-amber-200 dark:border-amber-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Largest Event</CardTitle>
+                        <CardTitle className="text-sm font-medium text-amber-700 dark:text-amber-300 flex items-center gap-2">
+                          <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
+                          Largest Event
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold">M{momentAnalysis.largestEvent.magnitude.toFixed(1)}</div>
-                        <p className="text-xs text-muted-foreground">
-                          {momentAnalysis.largestEvent.percentOfTotal.toFixed(1)}% of total
+                        <div className="text-4xl font-bold text-amber-900 dark:text-amber-100 font-mono">
+                          M{momentAnalysis.largestEvent.magnitude.toFixed(1)}
+                        </div>
+                        <div className="mt-2">
+                          <Progress value={momentAnalysis.largestEvent.percentOfTotal} className="h-2" />
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {momentAnalysis.largestEvent.percentOfTotal.toFixed(1)}% of total moment
                         </p>
                       </CardContent>
                     </Card>
                   </div>
 
-                  {/* Moment Distribution */}
-                  <div className="h-[400px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={momentAnalysis.momentByMagnitude} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis
-                          dataKey="magnitude"
-                          label={{ value: 'Magnitude', position: 'insideBottom', offset: -10 }}
-                        />
-                        <YAxis
-                          scale="log"
-                          domain={['auto', 'auto']}
-                          label={{ value: 'Seismic Moment (N⋅m)', angle: -90, position: 'insideLeft' }}
-                        />
-                        <Tooltip />
-                        <Legend />
-                        <Bar dataKey="moment" fill="#8884d8" name="Seismic Moment" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                  {/* Moment Distribution Chart */}
+                  <Card className="border border-border/50">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base">Moment Release by Magnitude</CardTitle>
+                      <CardDescription>
+                        Logarithmic distribution of seismic moment across magnitude bins
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <ChartContainer config={CHART_CONFIGS.moment} className="h-[420px] w-full">
+                        <BarChart data={momentAnalysis.momentByMagnitude} margin={{ top: 20, right: 30, left: 80, bottom: 60 }}>
+                          <defs>
+                            <linearGradient id="momentGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor={SEISMIC_COLORS.energy.dark} stopOpacity={1} />
+                              <stop offset="100%" stopColor={SEISMIC_COLORS.energy.dark} stopOpacity={0.5} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid
+                            strokeDasharray={CHART_STYLES.grid.strokeDasharray}
+                            className="stroke-muted"
+                            opacity={CHART_STYLES.grid.opacity}
+                            vertical={false}
+                          />
+                          <XAxis
+                            dataKey="magnitude"
+                            tick={{ fontSize: CHART_STYLES.fontSize.tick }}
+                            tickLine={false}
+                            axisLine={{ className: 'stroke-muted' }}
+                            label={{
+                              value: 'Magnitude (M)',
+                              position: 'insideBottom',
+                              offset: -10,
+                              fontSize: CHART_STYLES.fontSize.label,
+                              className: 'fill-muted-foreground font-medium'
+                            }}
+                          />
+                          <YAxis
+                            scale="log"
+                            domain={['auto', 'auto']}
+                            tick={{ fontSize: CHART_STYLES.fontSize.tick }}
+                            tickLine={false}
+                            axisLine={false}
+                            tickFormatter={(value) => value.toExponential(0)}
+                            label={{
+                              value: 'Seismic Moment (N·m)',
+                              angle: -90,
+                              position: 'insideLeft',
+                              offset: 0,
+                              fontSize: CHART_STYLES.fontSize.label,
+                              className: 'fill-muted-foreground font-medium'
+                            }}
+                          />
+                          <ChartTooltip
+                            content={({ active, payload }) => {
+                              if (!active || !payload?.length) return null;
+                              const data = payload[0].payload;
+                              const percentOfTotal = (data.moment / momentAnalysis.totalMoment * 100).toFixed(1);
+                              return (
+                                <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg p-3">
+                                  <p className="font-medium text-sm">M{data.magnitude?.toFixed(1)}</p>
+                                  <p className="text-muted-foreground text-sm">
+                                    {data.moment?.toExponential(2)} N·m
+                                  </p>
+                                  <p className="text-muted-foreground text-sm">
+                                    {percentOfTotal}% of total moment
+                                  </p>
+                                  {data.eventCount && (
+                                    <p className="text-muted-foreground text-sm">
+                                      {data.eventCount} events
+                                    </p>
+                                  )}
+                                </div>
+                              );
+                            }}
+                          />
+                          <Bar
+                            dataKey="moment"
+                            fill="url(#momentGradient)"
+                            radius={CHART_STYLES.bar.radius}
+                            maxBarSize={50}
+                          >
+                            {momentAnalysis.momentByMagnitude.map((_: unknown, index: number) => (
+                              <Cell
+                                key={`cell-${index}`}
+                                fill={getMagnitudeColor(momentAnalysis.momentByMagnitude[index].magnitude)}
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ChartContainer>
+                    </CardContent>
+                  </Card>
 
                   {/* Key Insights */}
-                  <div className="p-4 bg-muted rounded-lg">
-                    <h3 className="font-semibold mb-2">Key Insights</h3>
-                    <ul className="space-y-1 text-sm">
-                      <li>• Total moment release equivalent to a single M{momentAnalysis.totalMomentMagnitude.toFixed(2)} earthquake</li>
-                      <li>• Largest event (M{momentAnalysis.largestEvent.magnitude.toFixed(1)}) released {momentAnalysis.largestEvent.percentOfTotal.toFixed(1)}% of total moment</li>
-                      <li>• {momentAnalysis.momentByMagnitude.length} magnitude bins analyzed</li>
-                    </ul>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-4 bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/50 dark:to-slate-800/30 rounded-lg border">
+                      <h4 className="font-semibold mb-3 flex items-center gap-2">
+                        <TrendingUp className="h-4 w-4 text-red-500" />
+                        Energy Release Summary
+                      </h4>
+                      <ul className="space-y-2 text-sm">
+                        <li className="flex items-start gap-2">
+                          <span className="w-1.5 h-1.5 bg-red-500 rounded-full mt-2"></span>
+                          <span>Total moment equivalent to a <strong>single Mw {momentAnalysis.totalMomentMagnitude.toFixed(2)}</strong> earthquake</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="w-1.5 h-1.5 bg-red-500 rounded-full mt-2"></span>
+                          <span>Largest event (M{momentAnalysis.largestEvent.magnitude.toFixed(1)}) released <strong>{momentAnalysis.largestEvent.percentOfTotal.toFixed(1)}%</strong> of total</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="w-1.5 h-1.5 bg-red-500 rounded-full mt-2"></span>
+                          <span><strong>{momentAnalysis.momentByMagnitude.length}</strong> magnitude bins analyzed</span>
+                        </li>
+                      </ul>
+                    </div>
+                    <div className="p-4 bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/50 dark:to-slate-800/30 rounded-lg border">
+                      <h4 className="font-semibold mb-3 flex items-center gap-2">
+                        <Info className="h-4 w-4 text-blue-500" />
+                        About Seismic Moment
+                      </h4>
+                      <p className="text-sm text-muted-foreground">
+                        Seismic moment (M₀) is a measure of the total energy released during an earthquake.
+                        It is proportional to the fault area, average slip, and rigidity of the rock.
+                        Moment magnitude (Mw) is derived from M₀ using: Mw = ⅔ log₁₀(M₀) - 10.7
+                      </p>
+                    </div>
                   </div>
                 </div>
               ) : (
-                <div className="text-center py-12 text-muted-foreground">
-                  {events.length === 0 ? 'No events available' :
-                   <div className="flex flex-col items-center gap-2">
-                     <Loader2 className="h-8 w-8 animate-spin" />
-                     <span>Computing seismic moment analysis...</span>
-                   </div>}
+                <div className="text-center py-16 text-muted-foreground">
+                  {events.length === 0 ? (
+                    <div className="flex flex-col items-center gap-3">
+                      <Zap className="h-12 w-12 opacity-30" />
+                      <span>No events available</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-3">
+                      <Loader2 className="h-10 w-10 animate-spin text-red-500" />
+                      <span className="font-medium">Computing seismic moment analysis...</span>
+                      <span className="text-xs">Calculating energy release distribution</span>
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>

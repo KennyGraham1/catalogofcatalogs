@@ -267,6 +267,7 @@ export const CatalogueMap = memo(function CatalogueMap() {
       )}
 
       <MapContainer
+        key={`catalogue-map-${selectedCatalogue}`}
         center={[-41.0, 174.0]} // Center on New Zealand
         zoom={5}
         className="h-full w-full"

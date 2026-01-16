@@ -238,6 +238,7 @@ export default function UnifiedEarthquakeMap({
       {/* Map */}
       <div className="h-[600px] w-full rounded-lg overflow-hidden border shadow-sm">
         <MapContainer
+          key="unified-earthquake-map"
           center={[-41.0, 174.0]}
           zoom={6}
           className="h-full w-full"
@@ -417,7 +418,7 @@ function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string;
       <h4 className="font-semibold text-sm mb-3">
         {colorMode === 'quality' ? 'Quality Score' : colorMode === 'depth' ? 'Depth Scale' : 'Magnitude Scale'}
       </h4>
-      
+
       {colorMode === 'quality' ? (
         <div className="space-y-1.5 text-xs">
           <div className="flex items-center gap-2">

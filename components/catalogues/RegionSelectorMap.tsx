@@ -299,6 +299,7 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
         {/* Map */}
         <div style={{ height }} className="rounded-lg overflow-hidden border">
           <MapContainer
+            key="region-selector-map"
             center={[-41, 174]}
             zoom={5}
             ref={mapRef}
@@ -309,7 +310,7 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
-            
+
             <FeatureGroup ref={featureGroupRef}>
               <EditControl
                 position="topright"

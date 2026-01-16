@@ -258,6 +258,7 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
         </div>
       )}
       <MapContainer
+        key={`map-view-${catalogueId || 'default'}`}
         center={[0, 0]}
         zoom={2}
         ref={mapRef}

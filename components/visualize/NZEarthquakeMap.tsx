@@ -202,6 +202,7 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
 
       <div className="h-[600px] w-full rounded-lg overflow-hidden border">
         <MapContainer
+          key="nz-earthquake-map"
           center={[-41.0, 174.0]} // Center on New Zealand
           zoom={6}
           className="h-full w-full"
