@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback, useDeferredValue, useTransition, memo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -10,9 +10,10 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Progress } from '@/components/ui/progress';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   BarChart3,
-  Map,
   Target,
   Radio,
   Award,
@@ -25,7 +26,8 @@ import {
   Calendar,
   Filter,
   RefreshCw,
-  Loader2
+  Loader2,
+  Info
 } from 'lucide-react';
 import { QualityScoreCard } from '@/components/advanced-viz/QualityScoreCard';
 import { UncertaintyVisualization } from '@/components/advanced-viz/UncertaintyVisualization';
@@ -35,13 +37,9 @@ import { calculateQualityScore, QualityMetrics } from '@/lib/quality-scoring';
 import { parseFocalMechanism } from '@/lib/focal-mechanism-utils';
 import { parseStationData } from '@/lib/station-coverage-utils';
 import { EventTable } from '@/components/events/EventTable';
-import {
-  calculateGutenbergRichter,
-  estimateCompletenessMagnitude,
-  analyzeTemporalPattern,
-  calculateSeismicMoment,
-  type EarthquakeEvent
-} from '@/lib/seismological-analysis';
+import { type EarthquakeEvent } from '@/lib/seismological-analysis';
+import { useCachedFetch } from '@/hooks/use-cached-fetch';
+import { useSeismologicalAnalyses } from '@/hooks/use-seismological-worker';
 import {
   LineChart,
   Line,
@@ -68,13 +66,151 @@ const UnifiedEarthquakeMap = dynamic(() => import('@/components/visualize/Unifie
   loading: () => <div className="h-[600px] w-full bg-muted animate-pulse rounded-lg flex items-center justify-center text-muted-foreground">Loading map...</div>
 });
 
+// Performance constants
+const MAX_EVENTS_PER_CATALOGUE = 40000; // Limit per catalogue (API max is 40000)
+const MAX_CHART_DATA_POINTS = 500; // Limit for scatter plots
+const MAX_TIMELINE_POINTS = 365; // Max days for timeline chart
+const FILTER_DEBOUNCE_MS = 150; // Debounce delay for filter changes
+
+// Debounce hook for filter updates
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
+// Memoized chart components to prevent unnecessary re-renders
+const MagnitudeDistributionChart = memo(function MagnitudeDistributionChart({
+  data
+}: {
+  data: { range: string; count: number }[]
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <BarChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+        <XAxis dataKey="range" tick={{ fontSize: 12 }} />
+        <YAxis tick={{ fontSize: 12 }} />
+        <Tooltip contentStyle={{ fontSize: 12 }} />
+        <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+});
+
+const DepthDistributionChart = memo(function DepthDistributionChart({
+  data
+}: {
+  data: { range: string; count: number }[]
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <BarChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+        <XAxis dataKey="range" tick={{ fontSize: 12 }} />
+        <YAxis tick={{ fontSize: 12 }} />
+        <Tooltip contentStyle={{ fontSize: 12 }} />
+        <Bar dataKey="count" fill="#10b981" radius={[4, 4, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+});
+
+const RegionDistributionChart = memo(function RegionDistributionChart({
+  data
+}: {
+  data: { region: string; count: number }[]
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <BarChart data={data} layout="vertical">
+        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+        <XAxis type="number" tick={{ fontSize: 12 }} />
+        <YAxis dataKey="region" type="category" width={100} tick={{ fontSize: 11 }} />
+        <Tooltip contentStyle={{ fontSize: 12 }} />
+        <Bar dataKey="count" fill="#f59e0b" radius={[0, 4, 4, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+});
+
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D', '#FFC658', '#FF6B9D'];
+
+const CatalogueDistributionChart = memo(function CatalogueDistributionChart({
+  data
+}: {
+  data: { catalogue: string; count: number }[]
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <PieChart>
+        <Pie
+          data={data}
+          dataKey="count"
+          nameKey="catalogue"
+          cx="50%"
+          cy="50%"
+          outerRadius={90}
+          label={(entry) => entry.catalogue}
+          labelLine={false}
+        >
+          {data.map((_, index) => (
+            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+          ))}
+        </Pie>
+        <Tooltip contentStyle={{ fontSize: 12 }} />
+      </PieChart>
+    </ResponsiveContainer>
+  );
+});
+
+// Loading skeleton for statistics cards
+const StatisticsCardSkeleton = memo(function StatisticsCardSkeleton() {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-4 w-4 rounded" />
+      </CardHeader>
+      <CardContent>
+        <Skeleton className="h-8 w-16 mb-2" />
+        <Skeleton className="h-3 w-32" />
+      </CardContent>
+    </Card>
+  );
+});
+
+// Loading skeleton for charts
+const ChartSkeleton = memo(function ChartSkeleton({ height = 280 }: { height?: number }) {
+  return (
+    <div className="w-full animate-pulse" style={{ height }}>
+      <div className="h-full bg-muted rounded-lg flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    </div>
+  );
+});
+
 export default function AnalyticsPage() {
   const [catalogues, setCatalogues] = useState<any[]>([]);
   const [selectedCatalogue, setSelectedCatalogue] = useState<string>('all');
   const [events, setEvents] = useState<any[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [loadingMessage, setLoadingMessage] = useState('');
   const [activeTab, setActiveTab] = useState('map');
+  const [isPending, startTransition] = useTransition();
 
   // Visualize page filters - default to showing ALL events
   const [magnitudeRange, setMagnitudeRange] = useState([-2.0, 10.0]);
@@ -84,55 +220,118 @@ export default function AnalyticsPage() {
   const [colorBy, setColorBy] = useState<'magnitude' | 'depth'>('magnitude');
   const [timeFilter, setTimeFilter] = useState('all');
 
-  // Fetch catalogues and all events on mount
+  // Debounced filter values for expensive operations
+  const debouncedMagnitudeRange = useDebounce(magnitudeRange, FILTER_DEBOUNCE_MS);
+  const debouncedDepthRange = useDebounce(depthRange, FILTER_DEBOUNCE_MS);
+
+  // Use deferred value for non-critical UI updates
+  const deferredMagnitudeRange = useDeferredValue(debouncedMagnitudeRange);
+  const deferredDepthRange = useDeferredValue(debouncedDepthRange);
+
+
+
+  // Ref to track mounted state for async operations
+  const mountedRef = useRef(true);
   useEffect(() => {
-    fetchCataloguesAndEvents();
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
-  const fetchCataloguesAndEvents = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch('/api/catalogues');
-      const data = await response.json();
-      const catalogueList = Array.isArray(data) ? data : [];
-      setCatalogues(catalogueList);
+  // Use cached fetch for catalogues (fetched once and cached)
+  const { data: catalogueData, loading: cataloguesLoading } = useCachedFetch<any[]>(
+    '/api/catalogues',
+    { cacheTime: 10 * 60 * 1000 } // 10 minute cache
+  );
 
-      // Fetch events from all catalogues
+  // Update catalogues when data is fetched
+  useEffect(() => {
+    if (catalogueData) {
+      setCatalogues(Array.isArray(catalogueData) ? catalogueData : []);
+    }
+  }, [catalogueData]);
+
+  // Fetch events with pagination - only loads when catalogues are available
+  const fetchCataloguesAndEvents = useCallback(async () => {
+    if (!catalogueData || catalogueData.length === 0) return;
+
+    setLoading(true);
+    setLoadingProgress(0);
+    setLoadingMessage('Loading earthquake data...');
+
+    try {
+      const catalogueList = Array.isArray(catalogueData) ? catalogueData : [];
       const allEvents: any[] = [];
-      for (const catalogue of catalogueList) {
+      const totalCatalogues = catalogueList.length;
+
+      // Fetch events in parallel with limits using Promise.allSettled
+      const eventPromises = catalogueList.map(async (catalogue) => {
         try {
-          const eventsResponse = await fetch(`/api/catalogues/${catalogue.id}/events`);
+          // Use pagination to limit events per catalogue
+          const eventsResponse = await fetch(
+            `/api/catalogues/${catalogue.id}/events?limit=${MAX_EVENTS_PER_CATALOGUE}&direction=desc`
+          );
           if (eventsResponse.ok) {
-            const events = await eventsResponse.json();
-            const eventsWithCatalogue = events.map((event: any) => ({
+            const eventsData = await eventsResponse.json();
+            // Handle both array and paginated response formats
+            const eventsList = Array.isArray(eventsData) ? eventsData : eventsData.data || [];
+            return eventsList.map((event: any) => ({
               ...event,
               catalogue: catalogue.name,
               catalogueId: catalogue.id,
               region: event.region || 'Unknown'
             }));
-            allEvents.push(...eventsWithCatalogue);
           }
         } catch (error) {
           console.error(`Failed to fetch events for catalogue ${catalogue.id}:`, error);
         }
-      }
+        return [];
+      });
 
-      setEvents(allEvents);
-      if (allEvents.length > 0) {
-        setSelectedEvent(allEvents[0]);
+      // Process results with progress updates
+      const results = await Promise.allSettled(eventPromises);
+      let processedCount = 0;
+
+      results.forEach((result) => {
+        if (result.status === 'fulfilled' && result.value) {
+          allEvents.push(...result.value);
+        }
+        processedCount++;
+        if (mountedRef.current) {
+          setLoadingProgress(Math.round((processedCount / totalCatalogues) * 100));
+          setLoadingMessage(`Loaded ${processedCount}/${totalCatalogues} catalogues (${allEvents.length.toLocaleString()} events)`);
+        }
+      });
+
+      if (mountedRef.current) {
+        setEvents(allEvents);
+        if (allEvents.length > 0) {
+          setSelectedEvent(allEvents[0]);
+        }
       }
     } catch (error) {
       console.error('Error fetching catalogues and events:', error);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+        setLoadingProgress(100);
+        setLoadingMessage('');
+      }
     }
-  };
+  }, [catalogueData]);
 
-  // Filter events based on selected catalogue and filters
+  // Fetch events when catalogues are loaded
+  useEffect(() => {
+    if (catalogueData && catalogueData.length > 0 && events.length === 0) {
+      fetchCataloguesAndEvents();
+    }
+  }, [catalogueData, fetchCataloguesAndEvents, events.length]);
+
+  // Filter events based on selected catalogue (fast operation)
   const displayEvents = useMemo(() => {
     let filtered = events;
 
-    // Filter by selected catalogue (for quality analysis tabs)
     if (selectedCatalogue !== 'all') {
       filtered = filtered.filter(e => e.catalogueId === selectedCatalogue);
     }
@@ -140,23 +339,23 @@ export default function AnalyticsPage() {
     return filtered;
   }, [events, selectedCatalogue]);
 
-  // Filter events for visualization (with all filters applied)
+  // Filter events for visualization with debounced values (expensive operation)
   const filteredEarthquakes = useMemo(() => {
     let filtered = events;
 
-    // First, apply the main catalogue dropdown filter (affects all views)
+    // First, apply the main catalogue dropdown filter
     if (selectedCatalogue !== 'all') {
       filtered = filtered.filter(eq => eq.catalogueId === selectedCatalogue);
     }
 
-    // Magnitude filter
+    // Magnitude filter (using deferred values)
     filtered = filtered.filter(eq =>
-      eq.magnitude >= magnitudeRange[0] && eq.magnitude <= magnitudeRange[1]
+      eq.magnitude >= deferredMagnitudeRange[0] && eq.magnitude <= deferredMagnitudeRange[1]
     );
 
-    // Depth filter
+    // Depth filter (using deferred values)
     filtered = filtered.filter(eq =>
-      eq.depth >= depthRange[0] && eq.depth <= depthRange[1]
+      eq.depth >= deferredDepthRange[0] && eq.depth <= deferredDepthRange[1]
     );
 
     // Region filter
@@ -164,7 +363,7 @@ export default function AnalyticsPage() {
       filtered = filtered.filter(eq => selectedRegions.includes(eq.region || 'Unknown'));
     }
 
-    // Additional catalogue filter (checkbox-based, for multi-select when viewing all)
+    // Additional catalogue filter
     if (selectedCataloguesFilter.length > 0 && selectedCatalogue === 'all') {
       filtered = filtered.filter(eq => selectedCataloguesFilter.includes(eq.catalogue || 'Unknown'));
     }
@@ -190,9 +389,9 @@ export default function AnalyticsPage() {
     }
 
     return filtered;
-  }, [events, selectedCatalogue, magnitudeRange, depthRange, selectedRegions, selectedCataloguesFilter, timeFilter]);
+  }, [events, selectedCatalogue, deferredMagnitudeRange, deferredDepthRange, selectedRegions, selectedCataloguesFilter, timeFilter]);
 
-  // Visualization data calculations
+  // Visualization data calculations (optimized with sampling)
   const availableRegions = useMemo(() => {
     return Array.from(new Set(events.map(e => e.region || 'Unknown'))).sort();
   }, [events]);
@@ -262,6 +461,7 @@ export default function AnalyticsPage() {
       .sort((a, b) => b.count - a.count);
   }, [filteredEarthquakes]);
 
+  // Optimized time series data with aggregation for large datasets
   const timeSeriesData = useMemo(() => {
     const dateCounts: Record<string, number> = {};
     filteredEarthquakes.forEach(eq => {
@@ -269,130 +469,198 @@ export default function AnalyticsPage() {
       dateCounts[date] = (dateCounts[date] || 0) + 1;
     });
 
-    return Object.entries(dateCounts)
+    let timeData = Object.entries(dateCounts)
       .map(([date, count]) => ({ date, count }))
       .sort((a, b) => a.date.localeCompare(b.date));
+
+    // Aggregate data if too many points (group by week/month)
+    if (timeData.length > MAX_TIMELINE_POINTS) {
+      const aggregated: Record<string, number> = {};
+
+      timeData.forEach(({ date, count }) => {
+        const d = new Date(date);
+        const weekStart = new Date(d.getTime() - d.getDay() * 24 * 60 * 60 * 1000);
+        const aggregatedDate = weekStart.toISOString().split('T')[0];
+        aggregated[aggregatedDate] = (aggregated[aggregatedDate] || 0) + count;
+      });
+
+      timeData = Object.entries(aggregated)
+        .map(([date, count]) => ({ date, count }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+    }
+
+    return timeData;
   }, [filteredEarthquakes]);
 
+  // Sampled scatter data for large datasets
   const magnitudeDepthScatter = useMemo(() => {
-    return filteredEarthquakes.map(eq => ({
+    // Sample data if too large
+    let dataToPlot = filteredEarthquakes;
+
+    if (filteredEarthquakes.length > MAX_CHART_DATA_POINTS) {
+      // Stratified sampling: always include extremes, sample the rest
+      const sorted = [...filteredEarthquakes].sort((a, b) => b.magnitude - a.magnitude);
+      const topEvents = sorted.slice(0, Math.floor(MAX_CHART_DATA_POINTS * 0.2));
+      const remaining = sorted.slice(Math.floor(MAX_CHART_DATA_POINTS * 0.2));
+
+      // Random sample from remaining
+      const step = Math.floor(remaining.length / (MAX_CHART_DATA_POINTS * 0.8));
+      const sampled = remaining.filter((_, idx) => idx % step === 0);
+
+      dataToPlot = [...topEvents, ...sampled].slice(0, MAX_CHART_DATA_POINTS);
+    }
+
+    return dataToPlot.map(eq => ({
       magnitude: eq.magnitude,
       depth: eq.depth,
       region: eq.region || 'Unknown'
     }));
   }, [filteredEarthquakes]);
 
-  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D', '#FFC658', '#FF6B9D'];
+  const handleResetFilters = useCallback(() => {
+    startTransition(() => {
+      setMagnitudeRange([-2.0, 10.0]);
+      setDepthRange([0, 700]);
+      setSelectedRegions([]);
+      setSelectedCataloguesFilter([]);
+      setTimeFilter('all');
+    });
+  }, []);
 
-  const handleResetFilters = () => {
-    setMagnitudeRange([-2.0, 10.0]);
-    setDepthRange([0, 700]);
-    setSelectedRegions([]);
-    setSelectedCataloguesFilter([]);
-    setTimeFilter('all');
-  };
+  const handleRegionToggle = useCallback((region: string) => {
+    startTransition(() => {
+      setSelectedRegions(prev =>
+        prev.includes(region)
+          ? prev.filter(r => r !== region)
+          : [...prev, region]
+      );
+    });
+  }, []);
 
-  const handleRegionToggle = (region: string) => {
-    setSelectedRegions(prev =>
-      prev.includes(region)
-        ? prev.filter(r => r !== region)
-        : [...prev, region]
-    );
-  };
+  const handleCatalogueToggle = useCallback((catalogue: string) => {
+    startTransition(() => {
+      setSelectedCataloguesFilter(prev =>
+        prev.includes(catalogue)
+          ? prev.filter(c => c !== catalogue)
+          : [...prev, catalogue]
+      );
+    });
+  }, []);
 
-  const handleCatalogueToggle = (catalogue: string) => {
-    setSelectedCataloguesFilter(prev =>
-      prev.includes(catalogue)
-        ? prev.filter(c => c !== catalogue)
-        : [...prev, catalogue]
-    );
-  };
-
-  // Calculate statistics (using displayEvents for quality analysis)
+  // Calculate statistics - optimized with single pass and sampling
   const statistics = useMemo(() => {
     if (displayEvents.length === 0) return null;
 
-    const qualityScores = displayEvents.map(e => calculateQualityScore(e as QualityMetrics));
-    const avgQuality = qualityScores.reduce((sum, s) => sum + s.overall, 0) / qualityScores.length;
+    const totalEvents = displayEvents.length;
+
+    // Use sampling for quality scores (expensive calculation)
+    // Sample size: max 1000 events for quality calculation
+    const sampleSize = Math.min(1000, totalEvents);
+    const sampleStep = Math.max(1, Math.floor(totalEvents / sampleSize));
+
+    // Single pass for counting and sampling
+    let withUncertainty = 0;
+    let withFocalMechanism = 0;
+    let withStationData = 0;
+    const sampledEvents: any[] = [];
+
+    for (let i = 0; i < totalEvents; i++) {
+      const e = displayEvents[i];
+
+      // Count uncertainty data
+      if (e.latitude_uncertainty || e.longitude_uncertainty || e.depth_uncertainty) {
+        withUncertainty++;
+      }
+
+      // Fast check for focal mechanism (avoid expensive parsing)
+      // Just check if the field exists and is non-empty
+      if (e.focal_mechanisms &&
+          (typeof e.focal_mechanisms === 'string' ? e.focal_mechanisms.length > 2 :
+           Array.isArray(e.focal_mechanisms) ? e.focal_mechanisms.length > 0 :
+           typeof e.focal_mechanisms === 'object')) {
+        withFocalMechanism++;
+      }
+
+      // Count station data
+      if (e.used_station_count && e.used_station_count > 0) {
+        withStationData++;
+      }
+
+      // Sample for quality calculation
+      if (i % sampleStep === 0) {
+        sampledEvents.push(e);
+      }
+    }
+
+    // Calculate quality scores only for sampled events
+    const qualityScores = sampledEvents.map(e => calculateQualityScore(e as QualityMetrics));
+    const avgQuality = qualityScores.length > 0
+      ? qualityScores.reduce((sum, s) => sum + s.overall, 0) / qualityScores.length
+      : 0;
 
     const gradeDistribution = qualityScores.reduce((acc, s) => {
       acc[s.grade] = (acc[s.grade] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
 
-    const withUncertainty = displayEvents.filter(e =>
-      e.latitude_uncertainty || e.longitude_uncertainty || e.depth_uncertainty
-    ).length;
-
-    const withFocalMechanism = displayEvents.filter(e => {
-      const fm = parseFocalMechanism(e.focal_mechanisms);
-      return fm !== null;
-    }).length;
-
-    const withStationData = displayEvents.filter(e =>
-      e.used_station_count && e.used_station_count > 0
-    ).length;
+    // Scale grade distribution back to full dataset
+    const scaleFactor = totalEvents / sampledEvents.length;
+    if (scaleFactor > 1) {
+      Object.keys(gradeDistribution).forEach(grade => {
+        gradeDistribution[grade] = Math.round(gradeDistribution[grade] * scaleFactor);
+      });
+    }
 
     return {
-      totalEvents: displayEvents.length,
+      totalEvents,
       avgQuality: avgQuality.toFixed(1),
       gradeDistribution,
       withUncertainty,
       withFocalMechanism,
       withStationData,
-      percentageWithUncertainty: ((withUncertainty / displayEvents.length) * 100).toFixed(1),
-      percentageWithFocalMechanism: ((withFocalMechanism / displayEvents.length) * 100).toFixed(1),
-      percentageWithStationData: ((withStationData / displayEvents.length) * 100).toFixed(1),
+      percentageWithUncertainty: ((withUncertainty / totalEvents) * 100).toFixed(1),
+      percentageWithFocalMechanism: ((withFocalMechanism / totalEvents) * 100).toFixed(1),
+      percentageWithStationData: ((withStationData / totalEvents) * 100).toFixed(1),
     };
   }, [displayEvents]);
 
-  // Seismological analysis calculations (using displayEvents for selected catalogue)
-  const grAnalysis = useMemo(() => {
-    if (displayEvents.length < 10) return null;
-    try {
-      return calculateGutenbergRichter(displayEvents as EarthquakeEvent[]);
-    } catch (error) {
-      console.error('GR analysis error:', error);
-      return null;
-    }
-  }, [displayEvents]);
+  // Use web workers for seismological analysis (non-blocking)
+  const {
+    grAnalysis: grWorkerResult,
+    completeness: completenessWorkerResult,
+    temporalAnalysis: temporalWorkerResult,
+    momentAnalysis: momentWorkerResult,
+    anyLoading: analysisLoading
+  } = useSeismologicalAnalyses(displayEvents as EarthquakeEvent[], activeTab);
 
-  const completeness = useMemo(() => {
-    if (displayEvents.length < 50) return null;
-    try {
-      return estimateCompletenessMagnitude(displayEvents as EarthquakeEvent[]);
-    } catch (error) {
-      console.error('Completeness analysis error:', error);
-      return null;
-    }
-  }, [displayEvents]);
+  // Extract data from worker results
+  const grAnalysis = grWorkerResult.data;
+  const completeness = completenessWorkerResult.data;
+  const temporalAnalysis = temporalWorkerResult.data;
+  const momentAnalysis = momentWorkerResult.data;
 
-  const temporalAnalysis = useMemo(() => {
-    if (displayEvents.length === 0) return null;
-    try {
-      return analyzeTemporalPattern(displayEvents as EarthquakeEvent[]);
-    } catch (error) {
-      console.error('Temporal analysis error:', error);
-      return null;
-    }
-  }, [displayEvents]);
+  // Handle tab change with transition
+  const handleTabChange = useCallback((value: string) => {
+    startTransition(() => {
+      setActiveTab(value);
+    });
+  }, []);
 
-  const momentAnalysis = useMemo(() => {
-    if (displayEvents.length === 0) return null;
-    try {
-      return calculateSeismicMoment(displayEvents as EarthquakeEvent[]);
-    } catch (error) {
-      console.error('Moment analysis error:', error);
-      return null;
-    }
-  }, [displayEvents]);
-
-  if (loading) {
+  // Loading state
+  if (loading || cataloguesLoading) {
     return (
       <div className="container py-8">
         <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
           <Loader2 className="h-12 w-12 animate-spin text-primary" />
-          <p className="text-muted-foreground">Loading earthquake data...</p>
+          <p className="text-muted-foreground">{loadingMessage || 'Loading earthquake data...'}</p>
+          {loadingProgress > 0 && loadingProgress < 100 && (
+            <div className="w-64">
+              <Progress value={loadingProgress} className="h-2" />
+              <p className="text-xs text-muted-foreground text-center mt-2">
+                {loadingProgress}% complete
+              </p>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -431,10 +699,10 @@ export default function AnalyticsPage() {
               <SelectValue placeholder="Select catalogue" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Catalogues ({events.length} events)</SelectItem>
+              <SelectItem value="all">All Catalogues ({events.length.toLocaleString()} events)</SelectItem>
               {catalogues.map((cat) => (
                 <SelectItem key={cat.id} value={cat.id}>
-                  {cat.name} ({cat.event_count || 0} events)
+                  {cat.name} ({(cat.event_count || 0).toLocaleString()} events)
                 </SelectItem>
               ))}
             </SelectContent>
@@ -447,8 +715,26 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
+      {/* Performance indicator */}
+      {(isPending || analysisLoading || filteredEarthquakes.length > 5000) && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 px-4 py-2 rounded-lg">
+          {(isPending || analysisLoading) && <Loader2 className="h-4 w-4 animate-spin" />}
+          {!isPending && !analysisLoading && <Info className="h-4 w-4" />}
+          {isPending ? (
+            <span>Processing filter changes...</span>
+          ) : analysisLoading ? (
+            <span>Computing seismological analysis in background...</span>
+          ) : (
+            <span>
+              Displaying {filteredEarthquakes.length.toLocaleString()} events.
+              Large datasets may use sampling for optimal performance.
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Statistics Cards */}
-      {statistics && (
+      {statistics ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -456,7 +742,7 @@ export default function AnalyticsPage() {
               <BarChart3 className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{statistics.totalEvents}</div>
+              <div className="text-2xl font-bold">{statistics.totalEvents.toLocaleString()}</div>
               <p className="text-xs text-muted-foreground">
                 Avg Quality: {statistics.avgQuality}/100
               </p>
@@ -469,7 +755,7 @@ export default function AnalyticsPage() {
               <Target className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{statistics.withUncertainty}</div>
+              <div className="text-2xl font-bold">{statistics.withUncertainty.toLocaleString()}</div>
               <p className="text-xs text-muted-foreground">
                 {statistics.percentageWithUncertainty}% of events
               </p>
@@ -482,7 +768,7 @@ export default function AnalyticsPage() {
               <Award className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{statistics.withFocalMechanism}</div>
+              <div className="text-2xl font-bold">{statistics.withFocalMechanism.toLocaleString()}</div>
               <p className="text-xs text-muted-foreground">
                 {statistics.percentageWithFocalMechanism}% of events
               </p>
@@ -495,17 +781,24 @@ export default function AnalyticsPage() {
               <Radio className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{statistics.withStationData}</div>
+              <div className="text-2xl font-bold">{statistics.withStationData.toLocaleString()}</div>
               <p className="text-xs text-muted-foreground">
                 {statistics.percentageWithStationData}% of events
               </p>
             </CardContent>
           </Card>
         </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatisticsCardSkeleton />
+          <StatisticsCardSkeleton />
+          <StatisticsCardSkeleton />
+          <StatisticsCardSkeleton />
+        </div>
       )}
 
       {/* Main Content */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
         <TabsList className="grid w-full grid-cols-5 lg:grid-cols-11 gap-1">
           <TabsTrigger value="map" className="text-xs">
             <MapPin className="h-3 w-3 mr-1" />
@@ -569,7 +862,7 @@ export default function AnalyticsPage() {
                   </Button>
                 </div>
                 <CardDescription className="text-xs">
-                  {filteredEarthquakes.length} of {events.length} events
+                  {filteredEarthquakes.length.toLocaleString()} of {events.length.toLocaleString()} events
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -686,7 +979,7 @@ export default function AnalyticsPage() {
                 </CardHeader>
                 <CardContent>
                   <UnifiedEarthquakeMap
-                    key={`map-${selectedCatalogue}-${filteredEarthquakes.length}-${magnitudeRange.join('-')}-${depthRange.join('-')}-${timeFilter}`}
+                    key={`map-${selectedCatalogue}`}
                     earthquakes={filteredEarthquakes}
                     colorBy={colorBy}
                     showFocalMechanisms={true}
@@ -707,15 +1000,7 @@ export default function AnalyticsPage() {
                 <CardDescription className="text-xs">Number of events by magnitude range</CardDescription>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={magnitudeDistribution}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis dataKey="range" tick={{ fontSize: 12 }} />
-                    <YAxis tick={{ fontSize: 12 }} />
-                    <Tooltip contentStyle={{ fontSize: 12 }} />
-                    <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <MagnitudeDistributionChart data={magnitudeDistribution} />
               </CardContent>
             </Card>
 
@@ -725,15 +1010,7 @@ export default function AnalyticsPage() {
                 <CardDescription className="text-xs">Number of events by depth range</CardDescription>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={depthDistribution}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis dataKey="range" tick={{ fontSize: 12 }} />
-                    <YAxis tick={{ fontSize: 12 }} />
-                    <Tooltip contentStyle={{ fontSize: 12 }} />
-                    <Bar dataKey="count" fill="#10b981" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <DepthDistributionChart data={depthDistribution} />
               </CardContent>
             </Card>
           </div>
@@ -748,15 +1025,7 @@ export default function AnalyticsPage() {
                 <CardDescription className="text-xs">Events by region (top 10)</CardDescription>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={regionDistribution} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis type="number" tick={{ fontSize: 12 }} />
-                    <YAxis dataKey="region" type="category" width={100} tick={{ fontSize: 11 }} />
-                    <Tooltip contentStyle={{ fontSize: 12 }} />
-                    <Bar dataKey="count" fill="#f59e0b" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <RegionDistributionChart data={regionDistribution} />
               </CardContent>
             </Card>
 
@@ -766,32 +1035,21 @@ export default function AnalyticsPage() {
                 <CardDescription className="text-xs">Events by catalogue</CardDescription>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={280}>
-                  <PieChart>
-                    <Pie
-                      data={catalogueDistribution}
-                      dataKey="count"
-                      nameKey="catalogue"
-                      cx="50%"
-                      cy="50%"
-                      outerRadius={90}
-                      label={(entry) => entry.catalogue}
-                      labelLine={false}
-                    >
-                      {catalogueDistribution.map((_, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip contentStyle={{ fontSize: 12 }} />
-                  </PieChart>
-                </ResponsiveContainer>
+                <CatalogueDistributionChart data={catalogueDistribution} />
               </CardContent>
             </Card>
 
             <Card className="lg:col-span-2 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Magnitude vs Depth</CardTitle>
-                <CardDescription className="text-xs">Scatter plot showing relationship between magnitude and depth</CardDescription>
+                <CardDescription className="text-xs">
+                  Scatter plot showing relationship between magnitude and depth
+                  {magnitudeDepthScatter.length < filteredEarthquakes.length && (
+                    <span className="ml-2 text-amber-600">
+                      (Sampled: {magnitudeDepthScatter.length.toLocaleString()} of {filteredEarthquakes.length.toLocaleString()} events)
+                    </span>
+                  )}
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={350}>
@@ -815,7 +1073,15 @@ export default function AnalyticsPage() {
           <Card className="shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Earthquake Timeline</CardTitle>
-              <CardDescription className="text-xs">Number of events over time</CardDescription>
+              <CardDescription className="text-xs">
+                Number of events over time
+                {timeSeriesData.length < MAX_TIMELINE_POINTS && timeSeriesData.length > 0 && (
+                  <span className="ml-2">({timeSeriesData.length} data points)</span>
+                )}
+                {filteredEarthquakes.length > 40000 && (
+                  <span className="ml-2 text-amber-600">(Aggregated by week for performance)</span>
+                )}
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={400}>
@@ -831,7 +1097,7 @@ export default function AnalyticsPage() {
                     stroke="#3b82f6"
                     strokeWidth={2}
                     name="Events per Day"
-                    dot={{ r: 3 }}
+                    dot={timeSeriesData.length < 100 ? { r: 3 } : false}
                     activeDot={{ r: 5 }}
                   />
                 </LineChart>
@@ -847,6 +1113,9 @@ export default function AnalyticsPage() {
               <CardTitle className="text-base">Event List</CardTitle>
               <CardDescription className="text-xs">
                 Sortable table of all events in the selected catalogue. Click column headers to sort.
+                {displayEvents.length > 100 && (
+                  <span className="ml-2 text-blue-600">(Virtual scrolling enabled for {displayEvents.length.toLocaleString()} events)</span>
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent className="p-0">
@@ -871,10 +1140,7 @@ export default function AnalyticsPage() {
                     const fullEvent = displayEvents.find(e => e.id === event.id);
                     if (fullEvent) {
                       setSelectedEvent(fullEvent);
-                      // Switch to event details tab
-                      const tabsList = document.querySelector('[role="tablist"]');
-                      const eventDetailsTab = tabsList?.querySelector('[value="event-details"]') as HTMLElement;
-                      eventDetailsTab?.click();
+                      handleTabChange('event-details');
                     }
                   }}
                 />
@@ -897,8 +1163,8 @@ export default function AnalyticsPage() {
                   <CardTitle>Select Event</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <Select 
-                    value={selectedEvent.id} 
+                  <Select
+                    value={selectedEvent.id}
                     onValueChange={(id) => {
                       const event = events.find(e => e.id === id);
                       if (event) setSelectedEvent(event);
@@ -908,11 +1174,17 @@ export default function AnalyticsPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {events.map((event) => (
+                      {/* Only show first 100 events in dropdown to prevent performance issues */}
+                      {events.slice(0, 100).filter((event) => event.id && event.id !== '').map((event) => (
                         <SelectItem key={event.id} value={event.id}>
                           M{event.magnitude.toFixed(1)} - {new Date(event.time).toLocaleString()} - {event.region || 'Unknown'}
                         </SelectItem>
                       ))}
+                      {events.length > 100 && (
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground text-center">
+                          ... and {(events.length - 100).toLocaleString()} more events (use Events tab to browse all)
+                        </div>
+                      )}
                     </SelectContent>
                   </Select>
                 </CardContent>
@@ -926,14 +1198,14 @@ export default function AnalyticsPage() {
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {parseFocalMechanism(selectedEvent.focal_mechanisms) && (
-                  <FocalMechanismCard 
-                    mechanism={parseFocalMechanism(selectedEvent.focal_mechanisms)!} 
+                  <FocalMechanismCard
+                    mechanism={parseFocalMechanism(selectedEvent.focal_mechanisms)!}
                   />
                 )}
-                
+
                 {parseStationData(selectedEvent.picks, selectedEvent.arrivals, selectedEvent.latitude, selectedEvent.longitude) && (
-                  <StationCoverageCard 
-                    coverage={parseStationData(selectedEvent.picks, selectedEvent.arrivals, selectedEvent.latitude, selectedEvent.longitude)!} 
+                  <StationCoverageCard
+                    coverage={parseStationData(selectedEvent.picks, selectedEvent.arrivals, selectedEvent.latitude, selectedEvent.longitude)!}
                   />
                 )}
               </div>
@@ -962,7 +1234,7 @@ export default function AnalyticsPage() {
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                     {(['A+', 'A', 'B', 'C', 'D', 'F'] as const).map(grade => (
                       <div key={grade} className="text-center p-4 border rounded-lg">
-                        <div className="text-3xl font-bold">{statistics.gradeDistribution[grade] || 0}</div>
+                        <div className="text-3xl font-bold">{(statistics.gradeDistribution[grade] || 0).toLocaleString()}</div>
                         <div className="text-sm text-muted-foreground">Grade {grade}</div>
                         <div className="text-xs text-muted-foreground mt-1">
                           {((((statistics.gradeDistribution[grade] || 0) / statistics.totalEvents) * 100).toFixed(1))}%
@@ -980,34 +1252,34 @@ export default function AnalyticsPage() {
                           <span>{statistics.percentageWithUncertainty}%</span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div 
-                            className="bg-blue-500 h-2 rounded-full" 
+                          <div
+                            className="bg-blue-500 h-2 rounded-full"
                             style={{ width: `${statistics.percentageWithUncertainty}%` }}
                           />
                         </div>
                       </div>
-                      
+
                       <div>
                         <div className="flex justify-between text-sm mb-1">
                           <span>Events with Focal Mechanisms</span>
                           <span>{statistics.percentageWithFocalMechanism}%</span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div 
-                            className="bg-green-500 h-2 rounded-full" 
+                          <div
+                            className="bg-green-500 h-2 rounded-full"
                             style={{ width: `${statistics.percentageWithFocalMechanism}%` }}
                           />
                         </div>
                       </div>
-                      
+
                       <div>
                         <div className="flex justify-between text-sm mb-1">
                           <span>Events with Station Data</span>
                           <span>{statistics.percentageWithStationData}%</span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div 
-                            className="bg-purple-500 h-2 rounded-full" 
+                          <div
+                            className="bg-purple-500 h-2 rounded-full"
                             style={{ width: `${statistics.percentageWithStationData}%` }}
                           />
                         </div>
@@ -1120,8 +1392,11 @@ export default function AnalyticsPage() {
               ) : (
                 <div className="text-center py-12 text-muted-foreground">
                   {events.length === 0 ? 'No events available' :
-                   events.length < 10 ? 'Insufficient data (need at least 10 events)' :
-                   'Unable to calculate G-R analysis'}
+                   displayEvents.length < 10 ? 'Insufficient data (need at least 10 events)' :
+                   <div className="flex flex-col items-center gap-2">
+                     <Loader2 className="h-8 w-8 animate-spin" />
+                     <span>Computing Gutenberg-Richter analysis...</span>
+                   </div>}
                 </div>
               )}
             </CardContent>
@@ -1197,8 +1472,11 @@ export default function AnalyticsPage() {
               ) : (
                 <div className="text-center py-12 text-muted-foreground">
                   {events.length === 0 ? 'No events available' :
-                   events.length < 50 ? 'Insufficient data (need at least 50 events)' :
-                   'Unable to calculate completeness magnitude'}
+                   displayEvents.length < 50 ? 'Insufficient data (need at least 50 events)' :
+                   <div className="flex flex-col items-center gap-2">
+                     <Loader2 className="h-8 w-8 animate-spin" />
+                     <span>Computing completeness magnitude...</span>
+                   </div>}
                 </div>
               )}
             </CardContent>
@@ -1281,11 +1559,11 @@ export default function AnalyticsPage() {
                   </div>
 
                   {/* Clusters */}
-                  {temporalAnalysis.clusters.length > 0 && (
+                  {temporalAnalysis.clusters && temporalAnalysis.clusters.length > 0 && (
                     <div>
                       <h3 className="text-lg font-semibold mb-2">Detected Clusters</h3>
                       <div className="space-y-2">
-                        {temporalAnalysis.clusters.map((cluster, idx) => (
+                        {temporalAnalysis.clusters.map((cluster: { startDate: string; endDate: string; eventCount: number; maxMagnitude: number }, idx: number) => (
                           <div key={idx} className="flex items-center justify-between p-3 border rounded-lg">
                             <div>
                               <div className="font-medium">
@@ -1304,7 +1582,11 @@ export default function AnalyticsPage() {
                 </div>
               ) : (
                 <div className="text-center py-12 text-muted-foreground">
-                  {events.length === 0 ? 'No events available' : 'Unable to perform temporal analysis'}
+                  {events.length === 0 ? 'No events available' :
+                   <div className="flex flex-col items-center gap-2">
+                     <Loader2 className="h-8 w-8 animate-spin" />
+                     <span>Computing temporal analysis...</span>
+                   </div>}
                 </div>
               )}
             </CardContent>
@@ -1389,7 +1671,11 @@ export default function AnalyticsPage() {
                 </div>
               ) : (
                 <div className="text-center py-12 text-muted-foreground">
-                  {events.length === 0 ? 'No events available' : 'Unable to calculate seismic moment'}
+                  {events.length === 0 ? 'No events available' :
+                   <div className="flex flex-col items-center gap-2">
+                     <Loader2 className="h-8 w-8 animate-spin" />
+                     <span>Computing seismic moment analysis...</span>
+                   </div>}
                 </div>
               )}
             </CardContent>
@@ -1399,4 +1685,3 @@ export default function AnalyticsPage() {
     </div>
   );
 }
-

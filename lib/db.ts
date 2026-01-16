@@ -603,8 +603,8 @@ if (typeof window === 'undefined') {
       const direction = params?.direction || 'desc';
       const cursor = params?.cursor;
 
-      if (limit < 1 || limit > 1000) {
-        throw new Error('Limit must be between 1 and 1000');
+      if (limit < 1 || limit > 40000) {
+        throw new Error('Limit must be between 1 and 40000');
       }
 
       const collection = await getCollection(COLLECTIONS.EVENTS);

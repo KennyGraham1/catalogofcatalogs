@@ -1,30 +1,31 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { 
-  ArrowRight, 
-  AlertTriangle, 
-  Loader2, 
-  Save, 
-  FolderOpen, 
-  Eye, 
+import {
+  ArrowRight,
+  AlertTriangle,
+  Loader2,
+  Save,
+  FolderOpen,
+  Eye,
   Download,
   Trash2,
   Plus,
   ChevronDown,
   ChevronRight,
-  Info
+  Info,
+  Settings
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -55,6 +56,12 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 import {
@@ -63,14 +70,18 @@ import {
   getFieldById,
   getFieldsByCategory,
   detectAllFieldMappings,
-  checkRequiredFieldsMapped
+  detectFieldMappingWithCustom,
+  checkRequiredFieldsMapped,
+  type CustomFieldMapping
 } from '@/lib/field-definitions';
+import type { DefaultFieldMappingsConfig, FileFormat, FieldMappingEntry } from '@/components/settings/DefaultFieldMappings';
 
 interface EnhancedSchemaMapperProps {
   validationResults: any;
   isProcessing: boolean;
   onSchemaReady: (isReady: boolean) => void;
   onMappingsChange?: (mappings: Record<string, string>) => void;
+  fileFormat?: FileFormat; // Detected file format for format-specific mappings
 }
 
 interface MappingTemplate {
@@ -82,11 +93,12 @@ interface MappingTemplate {
   updated_at: string;
 }
 
-export function EnhancedSchemaMapper({ 
-  validationResults, 
-  isProcessing, 
+export function EnhancedSchemaMapper({
+  validationResults,
+  isProcessing,
   onSchemaReady,
-  onMappingsChange 
+  onMappingsChange,
+  fileFormat = 'csv'
 }: EnhancedSchemaMapperProps) {
   const [fieldMappings, setFieldMappings] = useState<Record<string, string>>({});
   const [autoMapping, setAutoMapping] = useState(true);
@@ -103,31 +115,100 @@ export function EnhancedSchemaMapper({
   const [expandedCategories, setExpandedCategories] = useState<string[]>(['basic']);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [templateToDelete, setTemplateToDelete] = useState<string | null>(null);
-  
-  // Load templates on mount
+  const [savedMappingConfig, setSavedMappingConfig] = useState<DefaultFieldMappingsConfig | null>(null);
+  const [configLoaded, setConfigLoaded] = useState(false);
+
+  // Load saved field mapping configuration
   useEffect(() => {
+    loadSavedMappingConfig();
     loadTemplates();
   }, []);
+
+  const loadSavedMappingConfig = async () => {
+    try {
+      const response = await fetch('/api/settings/field-mappings');
+      if (response.ok) {
+        const config = await response.json();
+        setSavedMappingConfig(config);
+      }
+    } catch (error) {
+      console.error('Failed to load saved mapping config:', error);
+    } finally {
+      setConfigLoaded(true);
+    }
+  };
+
+  // Convert saved config to CustomFieldMapping format for detection
+  const getCustomMappingsFromConfig = useCallback((): CustomFieldMapping[] => {
+    if (!savedMappingConfig) return [];
+
+    const mappings: CustomFieldMapping[] = [];
+
+    // Add custom mappings first (highest priority)
+    for (const mapping of savedMappingConfig.customMappings || []) {
+      mappings.push({
+        id: mapping.id,
+        sourcePattern: mapping.sourcePattern,
+        targetField: mapping.targetField,
+        isRegex: mapping.isRegex,
+        priority: mapping.priority + 50 // Boost custom mapping priority
+      });
+    }
+
+    // Add format-specific mappings if enabled
+    const formatConfig = savedMappingConfig.formats?.[fileFormat];
+    if (formatConfig?.enabled) {
+      for (const mapping of formatConfig.mappings || []) {
+        mappings.push({
+          id: mapping.id,
+          sourcePattern: mapping.sourcePattern,
+          targetField: mapping.targetField,
+          isRegex: mapping.isRegex,
+          priority: mapping.priority
+        });
+      }
+    }
+
+    return mappings;
+  }, [savedMappingConfig, fileFormat]);
   
   // Auto-detect field mappings using comprehensive field mapping utility
   useEffect(() => {
+    // Wait for config to load before detecting
+    if (!configLoaded) return;
+
     const timer = setTimeout(() => {
       if (validationResults && validationResults.length > 0 && autoMapping) {
         const sampleFields = validationResults[0].fields || [];
 
-        // Use the new comprehensive field mapping utility
-        // This handles all QuakeML 1.2 fields, GeoNet/ISC variations, and fuzzy matching
-        const detectedMappings = detectAllFieldMappings(sampleFields, 0.6);
+        // Get fuzzy match threshold from saved config or use default
+        const threshold = savedMappingConfig?.fuzzyMatchThreshold ?? 0.6;
 
-        setFieldMappings(detectedMappings);
+        // Check if auto-detect is enabled in settings
+        const autoDetectEnabled = savedMappingConfig?.autoDetectEnabled ?? true;
+
+        if (autoDetectEnabled) {
+          // Get custom mappings from saved configuration
+          const customMappings = getCustomMappingsFromConfig();
+
+          // Use the comprehensive field mapping utility with custom mappings
+          // This handles all QuakeML 1.2 fields, GeoNet/ISC variations, and fuzzy matching
+          const detectedMappings = detectAllFieldMappings(sampleFields, threshold, {
+            customMappings,
+            useBuiltInAliases: true,
+            minConfidence: threshold
+          });
+
+          setFieldMappings(detectedMappings);
+        }
       }
 
       setLoading(false);
       checkRequiredFieldsInternal();
-    }, 1000);
+    }, 500);
 
     return () => clearTimeout(timer);
-  }, [validationResults, autoMapping]);
+  }, [validationResults, autoMapping, configLoaded, savedMappingConfig, fileFormat, getCustomMappingsFromConfig]);
   
   // Check if required fields are mapped (internal function)
   const checkRequiredFieldsInternal = () => {
@@ -306,7 +387,18 @@ export function EnhancedSchemaMapper({
   const sourceFields = getSourceFields();
   const unmappedRequiredFields = FIELD_DEFINITIONS.filter(f => f.required && isRequiredFieldUnmapped(f.id));
   
+  // Count how many mappings came from saved config
+  const getConfigMappingCount = () => {
+    if (!savedMappingConfig) return 0;
+    const customCount = savedMappingConfig.customMappings?.length || 0;
+    const formatCount = savedMappingConfig.formats?.[fileFormat]?.enabled
+      ? savedMappingConfig.formats[fileFormat].mappings?.length || 0
+      : 0;
+    return customCount + formatCount;
+  };
+
   return (
+    <TooltipProvider>
     <div className="space-y-6">
       {/* Header with actions */}
       <div className="flex items-center justify-between">
@@ -315,6 +407,24 @@ export function EnhancedSchemaMapper({
           <p className="text-sm text-muted-foreground">
             Map fields from your catalogue to the QuakeML 1.2 database schema
           </p>
+          {savedMappingConfig && (
+            <div className="flex items-center gap-2 mt-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground cursor-help">
+                    <Settings className="h-3 w-3" />
+                    <span>Using {getConfigMappingCount()} saved mappings ({fileFormat.toUpperCase()})</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Field mappings from Settings are being applied.</p>
+                  <p className="text-xs text-muted-foreground">
+                    Fuzzy threshold: {((savedMappingConfig.fuzzyMatchThreshold || 0.6) * 100).toFixed(0)}%
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Dialog open={loadDialogOpen} onOpenChange={setLoadDialogOpen}>
@@ -675,6 +785,7 @@ export function EnhancedSchemaMapper({
         </AlertDialogContent>
       </AlertDialog>
     </div>
+    </TooltipProvider>
   );
 }
 

@@ -6,8 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { dbQueries, getDb } from '@/lib/db';
-import { v4 as uuidv4 } from 'uuid';
+import { getDb } from '@/lib/mongodb';
 
 const SETTINGS_COLLECTION = 'settings';
 const FIELD_MAPPINGS_KEY = 'default_field_mappings';

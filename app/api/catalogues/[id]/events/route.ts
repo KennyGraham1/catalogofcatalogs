@@ -49,9 +49,9 @@ export async function GET(
       // Cursor-based pagination (most efficient for large datasets)
       const limitNum = limit ? parseInt(limit, 10) : 100;
 
-      if (isNaN(limitNum) || limitNum < 1 || limitNum > 1000) {
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 40000) {
         return NextResponse.json(
-          { error: 'Invalid limit. Must be between 1 and 1000' },
+          { error: 'Invalid limit. Must be between 1 and 40000' },
           { status: 400 }
         );
       }
@@ -89,9 +89,9 @@ export async function GET(
         );
       }
 
-      if (isNaN(pageSizeNum) || pageSizeNum < 1 || pageSizeNum > 1000) {
+      if (isNaN(pageSizeNum) || pageSizeNum < 1 || pageSizeNum > 40000) {
         return NextResponse.json(
-          { error: 'Invalid page size. Must be between 1 and 1000' },
+          { error: 'Invalid page size. Must be between 1 and 40000' },
           { status: 400 }
         );
       }
@@ -114,9 +114,9 @@ export async function GET(
       const limitNum = limit ? parseInt(limit, 10) : 100;
       const offsetNum = offset ? parseInt(offset, 10) : 0;
 
-      if (isNaN(limitNum) || limitNum < 1 || limitNum > 1000) {
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 40000) {
         return NextResponse.json(
-          { error: 'Invalid limit. Must be between 1 and 1000' },
+          { error: 'Invalid limit. Must be between 1 and 40000' },
           { status: 400 }
         );
       }
