@@ -32,28 +32,32 @@ The Analytics page (`app/analytics/page.tsx`) currently loads all catalogues and
 
 The catalogue edit page (`app/catalogues/[id]/edit/page.tsx`) currently only allows editing the catalogue name, but users need access to edit all metadata fields that are available during catalogue import/creation. Please enhance the edit functionality to include:
 
-1. **Full metadata form**: Replace the simple name input with the complete `CatalogueMetadataForm` component that's used during upload
-2. **All metadata fields**: Include all fields from the `CatalogueMetadata` interface:
-   - Basic info: description, data_source, provider, geographic_region, version
-   - Time period: time_period_start, time_period_end
-   - Quality: data_quality (completeness, accuracy, reliability), quality_notes
-   - Contact: contact_name, contact_email, contact_organization
-   - License: license, usage_terms, citation, doi
-   - Additional: keywords, reference_links, notes
-3. **Pre-populate existing data**: Load and display current metadata values in the form
-4. **Update API endpoint**: Ensure the PATCH `/api/catalogues/[id]` endpoint can handle all metadata fields
-5. **Validation**: Apply the same validation rules used during catalogue creation
-
-This will allow users to add any missing information or update metadata that may have changed after the initial catalogue import.
 
 
 
-The "Max Events to Display" dropdown selector in the map components is not functioning properly. When I click on the dropdown, I cannot see the available options (500, 1,000, 2,000, 5,000 events). This issue appears to be affecting multiple map components including:
+Analyze the codebase to identify performance bottlenecks and optimization opportunities, focusing on the following areas:
 
-- EnhancedMapView.tsx
-- CatalogueMap.tsx  
-- MapView.tsx (catalogues)
-- UnifiedEarthquakeMap.tsx
-- MapComponent.tsx (merge)
+1. **Database Operations**: Review queries, indexing, and bulk operations in files like `lib/db.ts`, `lib/geonet-import-service.ts`, and API routes to identify slow database calls
 
-The dropdown may be hidden behind other UI elements due to z-index issues, or there could be a problem with the SelectContent component rendering. Please investigate and fix the dropdown visibility so users can change the sampling size for performance optimization when viewing large earthquake datasets.
+2. **Frontend Performance**: Examine React components, especially data-heavy pages like:
+   - Analytics page (`app/analytics/page.tsx`) - currently loads all catalogues and events on page load
+   - Catalogue detail pages with large event datasets
+   - Map components that render thousands of earthquake markers
+
+3. **API Endpoints**: Check for inefficient data fetching patterns, missing pagination, or lack of caching in API routes
+
+4. **User Experience Improvements**: Implement loading states and progress indicators for long-running operations such as:
+   - Data imports from GeoNet API
+   - File uploads and parsing
+   - Catalogue merging operations
+   - Large dataset queries and map rendering
+
+5. **Specific Optimizations to Consider**:
+   - Implement pagination or virtual scrolling for large datasets
+   - Add lazy loading for components and data
+   - Use React.memo() and useMemo() for expensive computations
+   - Implement proper loading skeletons and progress bars
+   - Consider data sampling for map visualizations (e.g., show 2000 random events out of 20K+ with transparency about total count)
+
+Provide specific code examples and implementation suggestions for the most impactful optimizations, prioritizing user experience improvements that prevent the application from appearing frozen during heavy operations.
+

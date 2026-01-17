@@ -3,6 +3,9 @@ import { dbQueries } from '@/lib/db';
 import { Logger, formatErrorResponse } from '@/lib/errors';
 import { eventCache, generateCacheKey } from '@/lib/cache';
 
+// Force dynamic rendering for this API route
+export const dynamic = 'force-dynamic';
+
 const logger = new Logger('CatalogueEventsAPI');
 
 export async function GET(

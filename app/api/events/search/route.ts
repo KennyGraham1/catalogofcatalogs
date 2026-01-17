@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { applyRateLimit, apiRateLimiter } from '@/lib/rate-limiter';
 
+// Force dynamic rendering for this API route
+export const dynamic = 'force-dynamic';
+
 // Global search API endpoint for searching events across all catalogues
 export async function GET(request: NextRequest) {
   try {

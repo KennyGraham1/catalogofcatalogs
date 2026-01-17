@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+// Force dynamic rendering for this API route
+export const dynamic = 'force-dynamic';
+
 /**
  * API endpoint to query nearby active faults from GNS Science WFS service
- * 
+ *
  * Query parameters:
  * - lat: Latitude of the point
  * - lon: Longitude of the point

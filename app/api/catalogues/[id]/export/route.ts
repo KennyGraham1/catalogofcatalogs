@@ -10,6 +10,9 @@ import { eventsToQuakeMLDocument } from '@/lib/quakeml-exporter';
 import { generateExportFilename, createDownloadHeaders } from '@/lib/export-utils';
 import { safeJSONParse } from '@/lib/errors';
 
+// Force dynamic rendering for this API route
+export const dynamic = 'force-dynamic';
+
 type ExportFormat = 'csv' | 'json' | 'geojson' | 'kml' | 'quakeml';
 
 export async function GET(

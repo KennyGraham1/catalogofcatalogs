@@ -1,11 +1,14 @@
 /**
  * Import History API Endpoint
- * 
+ *
  * GET /api/import/history?catalogueId=xxx&limit=10 - Get import history for a catalogue
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { geonetImportService } from '@/lib/geonet-import-service';
+
+// Force dynamic rendering for this API route
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {

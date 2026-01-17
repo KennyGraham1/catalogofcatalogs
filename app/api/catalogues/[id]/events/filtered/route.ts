@@ -5,6 +5,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries, EventFilters } from '@/lib/db';
 
+// Force dynamic rendering for this API route
+export const dynamic = 'force-dynamic';
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }

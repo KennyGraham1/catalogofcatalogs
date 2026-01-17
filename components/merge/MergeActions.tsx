@@ -15,7 +15,7 @@ import {
 import dynamic from 'next/dynamic';
 import 'leaflet/dist/leaflet.css';
 import { generateMergedCatalogueFilename } from '@/lib/export-utils';
-import { eventsToGeoJSON, eventsToJSON } from '@/lib/exporters';
+import { eventsToGeoJSON, eventsToJSON, eventsToKML } from '@/lib/exporters';
 import { EventTable } from '@/components/events/EventTable';
 
 const MapWithNoSSR = dynamic(
@@ -174,6 +174,27 @@ export function MergeActions({ events, catalogueMetadata = {} }: MergeActionsPro
     downloadFile(geoJsonContent, filename, 'application/geo+json');
   };
 
+  const downloadKML = () => {
+    // Prepare metadata for export
+    const metadata = {
+      catalogueName: catalogueMetadata.name || 'Merged Earthquake Catalogue',
+      description: catalogueMetadata.description,
+      source: catalogueMetadata.data_source,
+      provider: catalogueMetadata.provider,
+      region: catalogueMetadata.geographic_region || 'New Zealand',
+      timePeriodStart: catalogueMetadata.time_period_start,
+      timePeriodEnd: catalogueMetadata.time_period_end,
+      license: catalogueMetadata.license,
+      citation: catalogueMetadata.citation,
+      eventCount: events.length,
+      generatedAt: new Date().toISOString(),
+    };
+
+    const kmlContent = eventsToKML(events, metadata);
+    const filename = generateMergedCatalogueFilename('kml', events.length);
+    downloadFile(kmlContent, filename, 'application/vnd.google-earth.kml+xml');
+  };
+
   const downloadQuakeML = () => {
     const timestamp = new Date().toISOString();
 
@@ -285,6 +306,10 @@ ${events.map((event, index) => `    <event publicID="quakeml:nz.geonet/event/${e
             <DropdownMenuItem onClick={downloadGeoJSON}>
               <Download className="mr-2 h-4 w-4" />
               GeoJSON
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={downloadKML}>
+              <Download className="mr-2 h-4 w-4" />
+              KML (Google Earth)
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

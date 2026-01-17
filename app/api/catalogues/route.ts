@@ -5,6 +5,9 @@ import { apiCache, generateCacheKey, catalogueCache, invalidateCacheByPrefix } f
 import { applyRateLimit, readRateLimiter, apiRateLimiter } from '@/lib/rate-limiter';
 import { v4 as uuidv4 } from 'uuid';
 
+// Force dynamic rendering for this API route
+export const dynamic = 'force-dynamic';
+
 const logger = new Logger('CataloguesAPI');
 
 export async function GET(request: NextRequest) {
