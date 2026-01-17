@@ -267,7 +267,40 @@ export const CHART_CONFIGS = {
       },
     },
   } satisfies ChartConfig,
+
+  mfd: {
+    count: {
+      label: 'Number of Events',
+      theme: {
+        light: SEISMIC_COLORS.frequency.light,
+        dark: SEISMIC_COLORS.frequency.dark,
+      },
+    },
+    cumulative: {
+      label: 'Cumulative Count (N≥M)',
+      theme: {
+        light: SEISMIC_COLORS.magnitude.light,
+        dark: SEISMIC_COLORS.magnitude.dark,
+      },
+    },
+  } satisfies ChartConfig,
 } as const;
+
+// Extended color palette for multiple catalogues in MFD comparison
+export const MFD_CATALOGUE_COLORS = [
+  '#2563eb', // Blue
+  '#7c3aed', // Violet
+  '#059669', // Emerald
+  '#ea580c', // Orange
+  '#0891b2', // Cyan
+  '#dc2626', // Red
+  '#84cc16', // Lime
+  '#f59e0b', // Amber
+  '#ec4899', // Pink
+  '#6366f1', // Indigo
+  '#14b8a6', // Teal
+  '#a855f7', // Purple
+] as const;
 
 // Tooltip formatters
 export const TOOLTIP_FORMATTERS = {

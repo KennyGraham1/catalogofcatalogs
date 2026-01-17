@@ -99,6 +99,162 @@ export interface SeismicMomentResult {
 }
 
 /**
+ * Magnitude-Frequency Distribution (MFD) result for a single catalogue
+ */
+export interface MFDResult {
+  catalogueId: string;
+  catalogueName: string;
+  color: string;
+  totalEvents: number;
+  minMagnitude: number;
+  maxMagnitude: number;
+  // Non-cumulative histogram (incremental count per bin)
+  histogram: { magnitude: number; count: number }[];
+  // Cumulative distribution (N >= M)
+  cumulative: { magnitude: number; count: number; logCount: number }[];
+}
+
+/**
+ * Combined MFD results for multiple catalogues
+ */
+export interface MFDComparisonResult {
+  catalogues: MFDResult[];
+  magnitudeRange: { min: number; max: number };
+  binWidth: number;
+}
+
+/**
+ * Calculate Magnitude-Frequency Distribution for a catalogue
+ * Returns both incremental histogram and cumulative distribution
+ */
+export function calculateMFD(
+  events: EarthquakeEvent[],
+  catalogueId: string,
+  catalogueName: string,
+  color: string,
+  binWidth: number = 0.1,
+  minMagnitude?: number
+): MFDResult {
+  if (events.length === 0) {
+    return {
+      catalogueId,
+      catalogueName,
+      color,
+      totalEvents: 0,
+      minMagnitude: 0,
+      maxMagnitude: 0,
+      histogram: [],
+      cumulative: [],
+    };
+  }
+
+  // Filter by minimum magnitude if specified
+  let magnitudes = events.map(e => e.magnitude).filter(m => m != null && !isNaN(m));
+
+  if (minMagnitude !== undefined) {
+    magnitudes = magnitudes.filter(m => m >= minMagnitude);
+  }
+
+  if (magnitudes.length === 0) {
+    return {
+      catalogueId,
+      catalogueName,
+      color,
+      totalEvents: 0,
+      minMagnitude: minMagnitude || 0,
+      maxMagnitude: 0,
+      histogram: [],
+      cumulative: [],
+    };
+  }
+
+  const minMag = Math.floor(Math.min(...magnitudes) / binWidth) * binWidth;
+  const maxMag = Math.ceil(Math.max(...magnitudes) / binWidth) * binWidth;
+
+  // Create histogram bins
+  const bins: Map<number, number> = new Map();
+  for (let mag = minMag; mag <= maxMag + binWidth; mag += binWidth) {
+    const roundedMag = Math.round(mag * 10) / 10; // Round to avoid floating point issues
+    bins.set(roundedMag, 0);
+  }
+
+  // Count events in each bin
+  magnitudes.forEach(mag => {
+    const bin = Math.floor(mag / binWidth) * binWidth;
+    const roundedBin = Math.round(bin * 10) / 10;
+    bins.set(roundedBin, (bins.get(roundedBin) || 0) + 1);
+  });
+
+  // Convert to sorted array for histogram
+  const sortedBins = Array.from(bins.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([magnitude, count]) => ({ magnitude, count }));
+
+  // Calculate cumulative counts (N >= M)
+  const cumulative: { magnitude: number; count: number; logCount: number }[] = [];
+  for (let i = 0; i < sortedBins.length; i++) {
+    const magnitude = sortedBins[i].magnitude;
+    const cumulativeCount = sortedBins.slice(i).reduce((sum, bin) => sum + bin.count, 0);
+    if (cumulativeCount > 0) {
+      cumulative.push({
+        magnitude,
+        count: cumulativeCount,
+        logCount: Math.log10(cumulativeCount),
+      });
+    }
+  }
+
+  return {
+    catalogueId,
+    catalogueName,
+    color,
+    totalEvents: magnitudes.length,
+    minMagnitude: minMag,
+    maxMagnitude: maxMag,
+    histogram: sortedBins.filter(bin => bin.count > 0),
+    cumulative,
+  };
+}
+
+/**
+ * Calculate MFD comparison for multiple catalogues
+ */
+export function calculateMFDComparison(
+  catalogueData: Array<{
+    events: EarthquakeEvent[];
+    catalogueId: string;
+    catalogueName: string;
+    color: string;
+  }>,
+  binWidth: number = 0.1,
+  minMagnitude?: number
+): MFDComparisonResult {
+  const results = catalogueData.map(({ events, catalogueId, catalogueName, color }) =>
+    calculateMFD(events, catalogueId, catalogueName, color, binWidth, minMagnitude)
+  );
+
+  // Calculate overall magnitude range
+  let globalMin = Infinity;
+  let globalMax = -Infinity;
+
+  results.forEach(result => {
+    if (result.totalEvents > 0) {
+      globalMin = Math.min(globalMin, result.minMagnitude);
+      globalMax = Math.max(globalMax, result.maxMagnitude);
+    }
+  });
+
+  return {
+    catalogues: results,
+    magnitudeRange: {
+      min: globalMin === Infinity ? 0 : globalMin,
+      max: globalMax === -Infinity ? 10 : globalMax,
+    },
+    binWidth,
+  };
+}
+
+/**
  * Calculate Gutenberg-Richter b-value using maximum likelihood estimation
  */
 export function calculateGutenbergRichter(
@@ -118,7 +274,7 @@ export function calculateGutenbergRichter(
   // Bin magnitudes
   const minMag = Math.floor(Math.min(...filteredEvents.map(e => e.magnitude)) / binWidth) * binWidth;
   const maxMag = Math.ceil(Math.max(...filteredEvents.map(e => e.magnitude)) / binWidth) * binWidth;
-  
+
   const bins: Map<number, number> = new Map();
   for (let mag = minMag; mag <= maxMag; mag += binWidth) {
     bins.set(Number(mag.toFixed(2)), 0);
@@ -134,7 +290,7 @@ export function calculateGutenbergRichter(
   // Calculate cumulative counts (N >= M)
   const sortedBins = Array.from(bins.entries()).sort((a, b) => a[0] - b[0]);
   const cumulativeCounts: { magnitude: number; count: number; logCount: number }[] = [];
-  
+
   for (let i = 0; i < sortedBins.length; i++) {
     const magnitude = sortedBins[i][0];
     const cumulativeCount = sortedBins.slice(i).reduce((sum, [, count]) => sum + count, 0);
@@ -213,7 +369,7 @@ export function estimateCompletenessMagnitude(
   // Bin magnitudes
   const minMag = Math.floor(Math.min(...events.map(e => e.magnitude)) / binWidth) * binWidth;
   const maxMag = Math.ceil(Math.max(...events.map(e => e.magnitude)) / binWidth) * binWidth;
-  
+
   const bins: Map<number, number> = new Map();
   for (let mag = minMag; mag <= maxMag; mag += binWidth) {
     bins.set(Number(mag.toFixed(2)), 0);
@@ -232,7 +388,7 @@ export function estimateCompletenessMagnitude(
   // Find maximum curvature (peak of frequency distribution)
   let maxCount = 0;
   let mc = minMag;
-  
+
   magnitudeDistribution.forEach(({ magnitude, count }) => {
     if (count > maxCount) {
       maxCount = count;
@@ -556,7 +712,7 @@ export function calculateSeismicMoment(events: EarthquakeEvent[]): SeismicMoment
 
   // Group by magnitude bins
   const momentByMagnitude: Map<number, { moment: number; count: number }> = new Map();
-  
+
   momentsData.forEach(({ magnitude, moment }) => {
     const bin = Math.floor(magnitude * 2) / 2; // 0.5 magnitude bins
     const existing = momentByMagnitude.get(bin) || { moment: 0, count: 0 };
@@ -571,7 +727,7 @@ export function calculateSeismicMoment(events: EarthquakeEvent[]): SeismicMoment
     .sort((a, b) => a.magnitude - b.magnitude);
 
   // Find largest event
-  const largestEvent = momentsData.reduce((max, curr) => 
+  const largestEvent = momentsData.reduce((max, curr) =>
     curr.moment > max.moment ? curr : max
   );
 

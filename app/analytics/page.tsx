@@ -40,7 +40,7 @@ import { calculateQualityScore, QualityMetrics } from '@/lib/quality-scoring';
 import { parseFocalMechanism } from '@/lib/focal-mechanism-utils';
 import { parseStationData } from '@/lib/station-coverage-utils';
 import { EventTable } from '@/components/events/EventTable';
-import { type EarthquakeEvent } from '@/lib/seismological-analysis';
+import { type EarthquakeEvent, calculateMFDComparison, type MFDComparisonResult } from '@/lib/seismological-analysis';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
 import { useSeismologicalAnalyses } from '@/hooks/use-seismological-worker';
 import {
@@ -52,6 +52,7 @@ import {
   Scatter,
   AreaChart,
   Area,
+  ComposedChart,
   PieChart,
   Pie,
   Cell,
@@ -86,6 +87,7 @@ import {
   exportChartAsSVG,
   exportDataAsJSON,
   exportDataAsCSV,
+  MFD_CATALOGUE_COLORS,
 } from '@/lib/chart-config';
 import {
   DropdownMenu,
@@ -529,6 +531,16 @@ export default function AnalyticsPage() {
   const [colorBy, setColorBy] = useState<'magnitude' | 'depth'>('magnitude');
   const [timeFilter, setTimeFilter] = useState('all');
 
+  // MFD (Magnitude-Frequency Distribution) state
+  const [mfdSelectedCatalogues, setMfdSelectedCatalogues] = useState<string[]>([]);
+  const [mfdShowCumulative, setMfdShowCumulative] = useState(true);
+  const [mfdShowHistogram, setMfdShowHistogram] = useState(true);
+  const [mfdLogScale, setMfdLogScale] = useState(true);
+  const [mfdBinWidth, setMfdBinWidth] = useState<number>(0.1); // 0.1 or 0.01
+  const [mfdMinMagnitude, setMfdMinMagnitude] = useState<number | undefined>(undefined); // Truncation threshold
+  const [mfdCumulativeStyle, setMfdCumulativeStyle] = useState<'solid' | 'dotted'>('solid');
+  const mfdChartRef = useRef<HTMLDivElement>(null);
+
   // Debounced filter values for expensive operations
   const debouncedMagnitudeRange = useDebounce(magnitudeRange, FILTER_DEBOUNCE_MS);
   const debouncedDepthRange = useDebounce(depthRange, FILTER_DEBOUNCE_MS);
@@ -884,9 +896,9 @@ export default function AnalyticsPage() {
       // Fast check for focal mechanism (avoid expensive parsing)
       // Just check if the field exists and is non-empty
       if (e.focal_mechanisms &&
-          (typeof e.focal_mechanisms === 'string' ? e.focal_mechanisms.length > 2 :
-           Array.isArray(e.focal_mechanisms) ? e.focal_mechanisms.length > 0 :
-           typeof e.focal_mechanisms === 'object')) {
+        (typeof e.focal_mechanisms === 'string' ? e.focal_mechanisms.length > 2 :
+          Array.isArray(e.focal_mechanisms) ? e.focal_mechanisms.length > 0 :
+            typeof e.focal_mechanisms === 'object')) {
         withFocalMechanism++;
       }
 
@@ -947,6 +959,47 @@ export default function AnalyticsPage() {
   const completeness = completenessWorkerResult.data;
   const temporalAnalysis = temporalWorkerResult.data;
   const momentAnalysis = momentWorkerResult.data;
+
+  // Calculate MFD comparison for selected catalogues
+  const mfdComparison = useMemo((): MFDComparisonResult | null => {
+    if (mfdSelectedCatalogues.length === 0 || events.length === 0) {
+      return null;
+    }
+
+    // Group events by catalogue and prepare data for MFD calculation
+    const catalogueData = mfdSelectedCatalogues.map((catalogueId, index) => {
+      const catalogue = catalogues.find(c => c.id === catalogueId);
+      const catalogueEvents = events.filter(e => e.catalogueId === catalogueId);
+      return {
+        events: catalogueEvents as EarthquakeEvent[],
+        catalogueId,
+        catalogueName: catalogue?.name || `Catalogue ${index + 1}`,
+        color: MFD_CATALOGUE_COLORS[index % MFD_CATALOGUE_COLORS.length],
+      };
+    });
+
+    return calculateMFDComparison(catalogueData, mfdBinWidth, mfdMinMagnitude);
+  }, [mfdSelectedCatalogues, events, catalogues, mfdBinWidth, mfdMinMagnitude]);
+
+  // Handle MFD catalogue selection toggle
+  const handleMfdCatalogueToggle = useCallback((catalogueId: string) => {
+    setMfdSelectedCatalogues(prev => {
+      if (prev.includes(catalogueId)) {
+        return prev.filter(id => id !== catalogueId);
+      }
+      return [...prev, catalogueId];
+    });
+  }, []);
+
+  // Select all catalogues for MFD
+  const handleMfdSelectAll = useCallback(() => {
+    setMfdSelectedCatalogues(catalogues.map(c => c.id));
+  }, [catalogues]);
+
+  // Clear all MFD selections
+  const handleMfdClearAll = useCallback(() => {
+    setMfdSelectedCatalogues([]);
+  }, []);
 
   // Handle tab change with transition
   const handleTabChange = useCallback((value: string) => {
@@ -1108,7 +1161,7 @@ export default function AnalyticsPage() {
 
       {/* Main Content */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-5 lg:grid-cols-11 gap-1">
+        <TabsList className="grid w-full grid-cols-6 lg:grid-cols-12 gap-1">
           <TabsTrigger value="map" className="text-xs">
             <MapPin className="h-3 w-3 mr-1" />
             Map
@@ -1152,6 +1205,10 @@ export default function AnalyticsPage() {
           <TabsTrigger value="moment" className="text-xs">
             <Zap className="h-3 w-3 mr-1" />
             Moment
+          </TabsTrigger>
+          <TabsTrigger value="mfd" className="text-xs">
+            <BarChart3 className="h-3 w-3 mr-1" />
+            MFD
           </TabsTrigger>
         </TabsList>
 
@@ -2192,7 +2249,7 @@ export default function AnalyticsPage() {
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
                           {temporalAnalysis.clusters.length === 0 ? 'No clusters' :
-                           temporalAnalysis.clusters.length === 1 ? 'cluster detected' : 'clusters detected'}
+                            temporalAnalysis.clusters.length === 1 ? 'cluster detected' : 'clusters detected'}
                         </p>
                       </CardContent>
                     </Card>
@@ -2333,7 +2390,7 @@ export default function AnalyticsPage() {
                                           className="text-xs"
                                         >
                                           {cluster.clusterType === 'mainshock-aftershock' ? 'Sequence' :
-                                           cluster.clusterType === 'swarm' ? 'Swarm' : 'Burst'}
+                                            cluster.clusterType === 'swarm' ? 'Swarm' : 'Burst'}
                                         </Badge>
                                       )}
                                     </div>
@@ -2373,7 +2430,7 @@ export default function AnalyticsPage() {
                                   <div className="text-center p-2 bg-background/50 rounded">
                                     <div className="font-mono font-bold text-lg">
                                       {cluster.durationDays < 1 ? `${(cluster.durationDays * 24).toFixed(1)}h` :
-                                       cluster.durationDays.toFixed(1)}
+                                        cluster.durationDays.toFixed(1)}
                                     </div>
                                     <div className="text-xs text-muted-foreground">
                                       {cluster.durationDays < 1 ? 'Duration' : 'Days'}
@@ -2663,6 +2720,420 @@ export default function AnalyticsPage() {
                   )}
                 </div>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* MFD (Magnitude-Frequency Distribution) Tab */}
+        <TabsContent value="mfd" className="space-y-4">
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="bg-gradient-to-r from-indigo-500/10 to-blue-500/10 rounded-t-lg">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-indigo-500/20 rounded-lg">
+                  <BarChart3 className="h-5 w-5 text-indigo-600" />
+                </div>
+                <div>
+                  <CardTitle>Magnitude-Frequency Distribution (MFD)</CardTitle>
+                  <CardDescription>
+                    Compare frequency-magnitude relationships across multiple catalogues
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                {/* Catalogue Selection Sidebar */}
+                <div className="lg:col-span-1 space-y-4">
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium flex items-center justify-between">
+                        Select Catalogues
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="sm" onClick={handleMfdSelectAll} className="h-6 text-xs px-2">
+                            All
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={handleMfdClearAll} className="h-6 text-xs px-2">
+                            Clear
+                          </Button>
+                        </div>
+                      </CardTitle>
+                      <CardDescription className="text-xs">
+                        {mfdSelectedCatalogues.length} of {catalogues.length} selected
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-2 max-h-[300px] overflow-y-auto">
+                      {catalogues.map((catalogue, index) => (
+                        <div key={catalogue.id} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`mfd-cat-${catalogue.id}`}
+                            checked={mfdSelectedCatalogues.includes(catalogue.id)}
+                            onCheckedChange={() => handleMfdCatalogueToggle(catalogue.id)}
+                          />
+                          <div
+                            className="w-3 h-3 rounded-full flex-shrink-0"
+                            style={{
+                              backgroundColor: mfdSelectedCatalogues.includes(catalogue.id)
+                                ? MFD_CATALOGUE_COLORS[mfdSelectedCatalogues.indexOf(catalogue.id) % MFD_CATALOGUE_COLORS.length]
+                                : '#94a3b8'
+                            }}
+                          />
+                          <label
+                            htmlFor={`mfd-cat-${catalogue.id}`}
+                            className="text-xs cursor-pointer flex-1 truncate"
+                            title={catalogue.name}
+                          >
+                            {catalogue.name}
+                          </label>
+                          <Badge variant="outline" className="text-[10px] px-1">
+                            {events.filter(e => e.catalogueId === catalogue.id).length.toLocaleString()}
+                          </Badge>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+
+                  {/* Chart Options */}
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">Display Options</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="mfd-cumulative"
+                          checked={mfdShowCumulative}
+                          onCheckedChange={(checked) => setMfdShowCumulative(checked as boolean)}
+                        />
+                        <label htmlFor="mfd-cumulative" className="text-xs cursor-pointer">
+                          Show cumulative (N≥M)
+                        </label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="mfd-histogram"
+                          checked={mfdShowHistogram}
+                          onCheckedChange={(checked) => setMfdShowHistogram(checked as boolean)}
+                        />
+                        <label htmlFor="mfd-histogram" className="text-xs cursor-pointer">
+                          Show histogram (filled)
+                        </label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="mfd-log-scale"
+                          checked={mfdLogScale}
+                          onCheckedChange={(checked) => setMfdLogScale(checked as boolean)}
+                        />
+                        <label htmlFor="mfd-log-scale" className="text-xs cursor-pointer">
+                          Logarithmic Y-axis
+                        </label>
+                      </div>
+
+                      {/* Cumulative line style */}
+                      {mfdShowCumulative && (
+                        <div className="pt-2 border-t space-y-1">
+                          <label className="text-xs text-muted-foreground">Cumulative line style</label>
+                          <Select
+                            value={mfdCumulativeStyle}
+                            onValueChange={(value) => setMfdCumulativeStyle(value as 'solid' | 'dotted')}
+                          >
+                            <SelectTrigger className="h-7 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="solid">Solid line</SelectItem>
+                              <SelectItem value="dotted">Dotted line</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      {/* Bin width */}
+                      <div className="pt-2 border-t space-y-1">
+                        <label className="text-xs text-muted-foreground">Magnitude bin width</label>
+                        <Select
+                          value={mfdBinWidth.toString()}
+                          onValueChange={(value) => setMfdBinWidth(parseFloat(value))}
+                        >
+                          <SelectTrigger className="h-7 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="0.1">0.1 (standard)</SelectItem>
+                            <SelectItem value="0.05">0.05 (fine)</SelectItem>
+                            <SelectItem value="0.01">0.01 (very fine)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Min magnitude truncation */}
+                      <div className="pt-2 border-t space-y-1">
+                        <label className="text-xs text-muted-foreground">Min magnitude cutoff</label>
+                        <Select
+                          value={mfdMinMagnitude?.toString() || 'none'}
+                          onValueChange={(value) => setMfdMinMagnitude(value === 'none' ? undefined : parseFloat(value))}
+                        >
+                          <SelectTrigger className="h-7 text-xs">
+                            <SelectValue placeholder="No cutoff" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No cutoff</SelectItem>
+                            <SelectItem value="-1">M ≥ -1.0</SelectItem>
+                            <SelectItem value="0">M ≥ 0.0</SelectItem>
+                            <SelectItem value="1">M ≥ 1.0</SelectItem>
+                            <SelectItem value="2">M ≥ 2.0</SelectItem>
+                            <SelectItem value="3">M ≥ 3.0</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Statistics Summary */}
+                  {mfdComparison && mfdComparison.catalogues.length > 0 && (
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium">Statistics</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-2 text-xs">
+                        {mfdComparison.catalogues.map((cat, idx) => (
+                          <div key={cat.catalogueId} className="flex items-center gap-2">
+                            <div
+                              className="w-2 h-2 rounded-full"
+                              style={{ backgroundColor: cat.color }}
+                            />
+                            <span className="flex-1 truncate" title={cat.catalogueName}>
+                              {cat.catalogueName}
+                            </span>
+                            <span className="font-mono text-muted-foreground">
+                              {cat.totalEvents.toLocaleString()}
+                            </span>
+                          </div>
+                        ))}
+                        <div className="pt-2 border-t">
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Mag Range:</span>
+                            <span className="font-mono">
+                              M{mfdComparison.magnitudeRange.min.toFixed(1)} - {mfdComparison.magnitudeRange.max.toFixed(1)}
+                            </span>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+
+                {/* MFD Chart */}
+                <div className="lg:col-span-3">
+                  <Card className="border border-border/50">
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="text-base">Frequency-Magnitude Distribution</CardTitle>
+                          <CardDescription>
+                            {mfdShowCumulative && mfdShowHistogram
+                              ? 'Cumulative (lines) and incremental (bars) magnitude distribution'
+                              : mfdShowCumulative
+                                ? 'Cumulative distribution (N ≥ M)'
+                                : 'Incremental histogram'}
+                          </CardDescription>
+                        </div>
+                        {mfdComparison && (
+                          <ChartExportButton
+                            chartRef={mfdChartRef}
+                            data={mfdComparison.catalogues.flatMap(cat =>
+                              cat.cumulative.map(d => ({
+                                catalogue: cat.catalogueName,
+                                magnitude: d.magnitude,
+                                count: d.count,
+                                logCount: d.logCount,
+                              }))
+                            )}
+                            filename="mfd_comparison"
+                          />
+                        )}
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      {mfdSelectedCatalogues.length === 0 ? (
+                        <div className="text-center py-20 text-muted-foreground">
+                          <BarChart3 className="h-16 w-16 mx-auto mb-4 opacity-30" />
+                          <p className="font-medium">Select catalogues to compare</p>
+                          <p className="text-sm mt-2">
+                            Choose one or more catalogues from the left panel to view their MFD
+                          </p>
+                        </div>
+                      ) : mfdComparison ? (
+                        <div ref={mfdChartRef}>
+                          <ChartContainer config={CHART_CONFIGS.mfd} className="h-[500px] w-full">
+                            <ComposedChart margin={{ top: 20, right: 30, left: 60, bottom: 60 }}>
+                              <defs>
+                                {mfdComparison.catalogues.map((cat, index) => (
+                                  <linearGradient key={`gradient-${index}`} id={`mfdGradient-${index}`} x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor={cat.color} stopOpacity={0.8} />
+                                    <stop offset="100%" stopColor={cat.color} stopOpacity={0.3} />
+                                  </linearGradient>
+                                ))}
+                              </defs>
+                              <CartesianGrid
+                                strokeDasharray={CHART_STYLES.grid.strokeDasharray}
+                                className="stroke-muted"
+                                opacity={CHART_STYLES.grid.opacity}
+                              />
+                              <XAxis
+                                dataKey="magnitude"
+                                type="number"
+                                domain={[
+                                  Math.floor(mfdComparison.magnitudeRange.min),
+                                  Math.ceil(mfdComparison.magnitudeRange.max)
+                                ]}
+                                tick={{ fontSize: CHART_STYLES.fontSize.tick }}
+                                tickLine={false}
+                                axisLine={{ className: 'stroke-muted' }}
+                                tickFormatter={(v) => `M${v}`}
+                                label={{
+                                  value: 'Magnitude (ML)',
+                                  position: 'insideBottom',
+                                  offset: -10,
+                                  fontSize: CHART_STYLES.fontSize.label,
+                                  className: 'fill-muted-foreground font-medium'
+                                }}
+                              />
+                              <YAxis
+                                scale={mfdLogScale ? 'log' : 'linear'}
+                                domain={mfdLogScale ? [1, 'auto'] : [0, 'auto']}
+                                tick={{ fontSize: CHART_STYLES.fontSize.tick }}
+                                tickLine={false}
+                                axisLine={false}
+                                tickFormatter={(v) => {
+                                  if (mfdLogScale) {
+                                    if (v >= 1000000) return `${v / 1000000}M`;
+                                    if (v >= 1000) return `${v / 1000}K`;
+                                    return v.toString();
+                                  }
+                                  return AXIS_FORMATTERS.compact(v);
+                                }}
+                                label={{
+                                  value: 'Number of events',
+                                  angle: -90,
+                                  position: 'insideLeft',
+                                  offset: 10,
+                                  fontSize: CHART_STYLES.fontSize.label,
+                                  className: 'fill-muted-foreground font-medium'
+                                }}
+                              />
+                              <ChartTooltip
+                                content={({ active, payload, label }) => {
+                                  if (!active || !payload?.length) return null;
+                                  return (
+                                    <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg p-3 min-w-[180px]">
+                                      <p className="font-medium text-sm border-b pb-1 mb-2">
+                                        M{typeof label === 'number' ? label.toFixed(1) : label}
+                                      </p>
+                                      {payload.map((entry: any, index: number) => (
+                                        <div key={index} className="flex items-center justify-between gap-4 text-sm">
+                                          <div className="flex items-center gap-2">
+                                            <div
+                                              className="w-3 h-3 rounded-sm"
+                                              style={{ backgroundColor: entry.color }}
+                                            />
+                                            <span className="text-muted-foreground truncate max-w-[120px]">
+                                              {entry.name}
+                                            </span>
+                                          </div>
+                                          <span className="font-mono font-medium tabular-nums">
+                                            {entry.value?.toLocaleString()}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  );
+                                }}
+                              />
+                              <Legend
+                                verticalAlign="top"
+                                align="right"
+                                wrapperStyle={{ paddingBottom: 10 }}
+                              />
+                              {/* Render histogram as filled stepped area (render first so cumulative overlays on top) */}
+                              {mfdShowHistogram && mfdComparison.catalogues.map((cat, index) => (
+                                <Area
+                                  key={`histogram-${cat.catalogueId}`}
+                                  data={cat.histogram}
+                                  dataKey="count"
+                                  name={cat.catalogueName}
+                                  type="stepAfter"
+                                  stroke={cat.color}
+                                  fill={`url(#mfdGradient-${index})`}
+                                  strokeWidth={1}
+                                  fillOpacity={0.4}
+                                  legendType={mfdShowCumulative ? 'none' : 'square'}
+                                />
+                              ))}
+                              {/* Render cumulative lines (overlays on top of histogram) */}
+                              {mfdShowCumulative && mfdComparison.catalogues.map((cat, index) => (
+                                <Line
+                                  key={`cumulative-${cat.catalogueId}`}
+                                  data={cat.cumulative}
+                                  dataKey="count"
+                                  name={cat.catalogueName}
+                                  type="stepAfter"
+                                  stroke={cat.color}
+                                  strokeWidth={2}
+                                  strokeDasharray={mfdCumulativeStyle === 'dotted' ? '5 5' : undefined}
+                                  dot={{ r: 3, fill: cat.color }}
+                                  activeDot={{ r: 5, strokeWidth: 2 }}
+                                  connectNulls
+                                />
+                              ))}
+                            </ComposedChart>
+                          </ChartContainer>
+                        </div>
+                      ) : (
+                        <div className="text-center py-20 text-muted-foreground">
+                          <Loader2 className="h-10 w-10 animate-spin mx-auto mb-4" />
+                          <p>Computing MFD...</p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* MFD Information */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                    <div className="p-4 bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/50 dark:to-slate-800/30 rounded-lg border">
+                      <h4 className="font-semibold mb-3 flex items-center gap-2">
+                        <Info className="h-4 w-4 text-indigo-500" />
+                        About MFD
+                      </h4>
+                      <p className="text-sm text-muted-foreground">
+                        The Magnitude-Frequency Distribution shows how earthquake frequency varies with magnitude.
+                        The cumulative plot (N≥M) typically follows the Gutenberg-Richter relation:
+                        log₁₀(N) = a - bM, where b ≈ 1 for most tectonic regions.
+                      </p>
+                    </div>
+                    <div className="p-4 bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/50 dark:to-slate-800/30 rounded-lg border">
+                      <h4 className="font-semibold mb-3 flex items-center gap-2">
+                        <TrendingUp className="h-4 w-4 text-emerald-500" />
+                        Interpreting the Plot
+                      </h4>
+                      <ul className="text-sm text-muted-foreground space-y-1">
+                        <li className="flex items-start gap-2">
+                          <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full mt-2"></span>
+                          <span>Steeper slopes indicate higher b-values (more small earthquakes)</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full mt-2"></span>
+                          <span>Rolloff at low magnitudes shows the completeness magnitude (Mc)</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full mt-2"></span>
+                          <span>Compare catalogues to assess detection capabilities</span>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
