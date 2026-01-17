@@ -165,7 +165,7 @@ function generateCSV(events: any[], catalogue: any): string {
   
   metadataLines.push('#');
   
-  // Define CSV headers with all available fields
+  // Define CSV headers with all available fields including uncertainties
   const headers = [
     'Time',
     'Latitude',
@@ -177,10 +177,19 @@ function generateCSV(events: any[], catalogue: any): string {
     'Region',
     'Source',
     'PublicID',
+    // Uncertainty values
+    'TimeUncertainty',
+    'LatitudeUncertainty',
+    'LongitudeUncertainty',
+    'DepthUncertainty',
+    'MagnitudeUncertainty',
+    // Quality metrics
     'AzimuthalGap',
     'UsedStationCount',
     'UsedPhaseCount',
     'StandardError',
+    // Evaluation metadata
+    'EvaluationMode',
     'EvaluationStatus'
   ];
   
@@ -188,6 +197,9 @@ function generateCSV(events: any[], catalogue: any): string {
   const rows = events.map((event: any) => {
     const sourceEvents = safeJSONParse<Array<{ source?: string }>>(event.source_events, []);
     const source = sourceEvents[0]?.source || 'unknown';
+
+    // Use region or location_name if available
+    const region = event.region || event.location_name || '';
 
     return [
       event.time,
@@ -197,13 +209,22 @@ function generateCSV(events: any[], catalogue: any): string {
       event.magnitude,
       event.magnitude_type || '',
       event.event_type || '',
-      '', // Region - not in current schema
+      region,
       source,
       event.event_public_id || '',
+      // Uncertainty values
+      event.time_uncertainty !== null ? event.time_uncertainty : '',
+      event.latitude_uncertainty !== null ? event.latitude_uncertainty : '',
+      event.longitude_uncertainty !== null ? event.longitude_uncertainty : '',
+      event.depth_uncertainty !== null ? event.depth_uncertainty : '',
+      event.magnitude_uncertainty !== null ? event.magnitude_uncertainty : '',
+      // Quality metrics
       event.azimuthal_gap !== null ? event.azimuthal_gap : '',
       event.used_station_count !== null ? event.used_station_count : '',
       event.used_phase_count !== null ? event.used_phase_count : '',
       event.standard_error !== null ? event.standard_error : '',
+      // Evaluation metadata
+      event.evaluation_mode || '',
       event.evaluation_status || ''
     ].join(',');
   });

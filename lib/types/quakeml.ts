@@ -215,6 +215,8 @@ export interface Origin {
   evaluationStatus?: EvaluationStatus;
   creationInfo?: CreationInfo;
   comment?: Comment[];
+  // Arrivals are child elements of Origin in QuakeML
+  arrivals?: Arrival[];
 }
 
 // ============================================================================

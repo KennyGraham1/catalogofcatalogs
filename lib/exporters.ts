@@ -205,6 +205,15 @@ export function eventsToKML(
         if (event.used_station_count != null) {
           kml += `            <tr><td><b>Stations:</b></td><td>${event.used_station_count}</td></tr>\n`;
         }
+        if (event.used_phase_count != null) {
+          kml += `            <tr><td><b>Phases:</b></td><td>${event.used_phase_count}</td></tr>\n`;
+        }
+        if (event.standard_error != null) {
+          kml += `            <tr><td><b>RMS Error:</b></td><td>${event.standard_error.toFixed(3)} s</td></tr>\n`;
+        }
+        if (event.evaluation_mode) {
+          kml += `            <tr><td><b>Mode:</b></td><td>${escapeXml(event.evaluation_mode)}</td></tr>\n`;
+        }
         if (event.evaluation_status) {
           kml += `            <tr><td><b>Status:</b></td><td>${escapeXml(event.evaluation_status)}</td></tr>\n`;
         }
