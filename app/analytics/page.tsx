@@ -514,7 +514,7 @@ const ChartSkeleton = memo(function ChartSkeleton({ height = 280 }: { height?: n
 
 export default function AnalyticsPage() {
   const [catalogues, setCatalogues] = useState<any[]>([]);
-  const [selectedCatalogue, setSelectedCatalogue] = useState<string>('all');
+  const [selectedCatalogue, setSelectedCatalogue] = useState<string>(''); // Empty by default - user must select
   const [events, setEvents] = useState<any[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
@@ -522,6 +522,7 @@ export default function AnalyticsPage() {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [activeTab, setActiveTab] = useState('map');
   const [isPending, startTransition] = useTransition();
+  const [eventsLoaded, setEventsLoaded] = useState(false); // Track if events have been loaded for current selection
 
   // Visualize page filters - default to showing ALL events
   const [magnitudeRange, setMagnitudeRange] = useState([-2.0, 10.0]);
@@ -573,13 +574,59 @@ export default function AnalyticsPage() {
     }
   }, [catalogueData]);
 
-  // Fetch events with pagination - only loads when catalogues are available
-  const fetchCataloguesAndEvents = useCallback(async () => {
+  // Fetch events for a single catalogue (on-demand loading)
+  const fetchSingleCatalogueEvents = useCallback(async (catalogueId: string) => {
+    if (!catalogueData) return;
+
+    const catalogue = catalogueData.find((c: any) => c.id === catalogueId);
+    if (!catalogue) return;
+
+    setLoading(true);
+    setLoadingProgress(0);
+    setLoadingMessage(`Loading events for ${catalogue.name}...`);
+
+    try {
+      const eventsResponse = await fetch(
+        `/api/catalogues/${catalogueId}/events?limit=${MAX_EVENTS_PER_CATALOGUE}&direction=desc`
+      );
+
+      if (eventsResponse.ok) {
+        const eventsData = await eventsResponse.json();
+        const eventsList = Array.isArray(eventsData) ? eventsData : eventsData.data || [];
+        const mappedEvents = eventsList.map((event: any) => ({
+          ...event,
+          catalogue: catalogue.name,
+          catalogueId: catalogue.id,
+          region: event.region || 'Unknown'
+        }));
+
+        if (mountedRef.current) {
+          setEvents(mappedEvents);
+          setEventsLoaded(true);
+          if (mappedEvents.length > 0) {
+            setSelectedEvent(mappedEvents[0]);
+          }
+          setLoadingProgress(100);
+          setLoadingMessage(`Loaded ${mappedEvents.length.toLocaleString()} events`);
+        }
+      }
+    } catch (error) {
+      console.error(`Failed to fetch events for catalogue ${catalogueId}:`, error);
+    } finally {
+      if (mountedRef.current) {
+        setLoading(false);
+        setLoadingMessage('');
+      }
+    }
+  }, [catalogueData]);
+
+  // Fetch events for all catalogues (explicit user choice)
+  const fetchAllCataloguesEvents = useCallback(async () => {
     if (!catalogueData || catalogueData.length === 0) return;
 
     setLoading(true);
     setLoadingProgress(0);
-    setLoadingMessage('Loading earthquake data...');
+    setLoadingMessage('Loading all catalogues... This may take a moment.');
 
     try {
       const catalogueList = Array.isArray(catalogueData) ? catalogueData : [];
@@ -589,13 +636,11 @@ export default function AnalyticsPage() {
       // Fetch events in parallel with limits using Promise.allSettled
       const eventPromises = catalogueList.map(async (catalogue) => {
         try {
-          // Use pagination to limit events per catalogue
           const eventsResponse = await fetch(
             `/api/catalogues/${catalogue.id}/events?limit=${MAX_EVENTS_PER_CATALOGUE}&direction=desc`
           );
           if (eventsResponse.ok) {
             const eventsData = await eventsResponse.json();
-            // Handle both array and paginated response formats
             const eventsList = Array.isArray(eventsData) ? eventsData : eventsData.data || [];
             return eventsList.map((event: any) => ({
               ...event,
@@ -627,6 +672,7 @@ export default function AnalyticsPage() {
 
       if (mountedRef.current) {
         setEvents(allEvents);
+        setEventsLoaded(true);
         if (allEvents.length > 0) {
           setSelectedEvent(allEvents[0]);
         }
@@ -642,32 +688,31 @@ export default function AnalyticsPage() {
     }
   }, [catalogueData]);
 
-  // Fetch events when catalogues are loaded
-  useEffect(() => {
-    if (catalogueData && catalogueData.length > 0 && events.length === 0) {
-      fetchCataloguesAndEvents();
+  // Handle catalogue selection change - load events on demand
+  const handleCatalogueChange = useCallback((value: string) => {
+    setSelectedCatalogue(value);
+    setEvents([]); // Clear current events
+    setEventsLoaded(false);
+    setSelectedEvent(null);
+
+    if (value === 'all') {
+      fetchAllCataloguesEvents();
+    } else if (value) {
+      fetchSingleCatalogueEvents(value);
     }
-  }, [catalogueData, fetchCataloguesAndEvents, events.length]);
+  }, [fetchSingleCatalogueEvents, fetchAllCataloguesEvents]);
 
   // Filter events based on selected catalogue (fast operation)
+  // With lazy loading, events are already filtered by catalogue when loaded
   const displayEvents = useMemo(() => {
-    let filtered = events;
-
-    if (selectedCatalogue !== 'all') {
-      filtered = filtered.filter(e => e.catalogueId === selectedCatalogue);
-    }
-
-    return filtered;
-  }, [events, selectedCatalogue]);
+    // If "all" is selected, events contain all catalogues, otherwise single catalogue
+    return events;
+  }, [events]);
 
   // Filter events for visualization with debounced values (expensive operation)
+  // Events are already filtered by catalogue on load, so no need to filter again
   const filteredEarthquakes = useMemo(() => {
     let filtered = events;
-
-    // First, apply the main catalogue dropdown filter
-    if (selectedCatalogue !== 'all') {
-      filtered = filtered.filter(eq => eq.catalogueId === selectedCatalogue);
-    }
 
     // Magnitude filter (using deferred values)
     filtered = filtered.filter(eq =>
@@ -684,7 +729,7 @@ export default function AnalyticsPage() {
       filtered = filtered.filter(eq => selectedRegions.includes(eq.region || 'Unknown'));
     }
 
-    // Additional catalogue filter
+    // Additional catalogue filter (only when "all" is selected and we have all catalogues loaded)
     if (selectedCataloguesFilter.length > 0 && selectedCatalogue === 'all') {
       filtered = filtered.filter(eq => selectedCataloguesFilter.includes(eq.catalogue || 'Unknown'));
     }
@@ -1008,8 +1053,172 @@ export default function AnalyticsPage() {
     });
   }, []);
 
-  // Loading state
-  if (loading || cataloguesLoading) {
+  // No catalogues available (only show after loading completes)
+  if (!cataloguesLoading && catalogueData && catalogueData.length === 0) {
+    return (
+      <div className="container py-8">
+        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+          <MapPin className="h-12 w-12 text-muted-foreground" />
+          <h2 className="text-2xl font-bold">No Catalogues Available</h2>
+          <p className="text-muted-foreground text-center max-w-md">
+            Upload catalogues or create merged catalogues to visualize earthquake data.
+          </p>
+          <Button onClick={() => window.location.href = '/upload'}>
+            Upload Catalogue
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Get total events count from catalogue metadata
+  const totalEventsFromMetadata = catalogues.reduce((sum, cat) => sum + (cat.event_count || 0), 0);
+
+  // No catalogue selected - show selection prompt (immediately, with loading state for catalogue list)
+  if (!selectedCatalogue) {
+    return (
+      <div className="container mx-auto py-6 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Visualization & Analytics</h1>
+            <p className="text-muted-foreground">
+              Comprehensive visualization, quality assessment, and seismological analysis
+            </p>
+          </div>
+        </div>
+
+        {/* Catalogue Selection Card */}
+        <Card className="max-w-2xl mx-auto mt-12">
+          <CardHeader className="text-center">
+            <div className="mx-auto mb-4 p-4 bg-primary/10 rounded-full w-fit">
+              <BarChart3 className="h-12 w-12 text-primary" />
+            </div>
+            <CardTitle className="text-2xl">Select a Catalogue to Analyze</CardTitle>
+            <CardDescription>
+              Choose a specific catalogue for fast analysis, or load all catalogues for comprehensive comparison.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label>Available Catalogues</Label>
+              {cataloguesLoading ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-10 w-full" />
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Loading catalogues...</span>
+                  </div>
+                </div>
+              ) : (
+                <Select value={selectedCatalogue} onValueChange={handleCatalogueChange}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select a catalogue..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {catalogues.map((cat) => (
+                      <SelectItem key={cat.id} value={cat.id}>
+                        <div className="flex items-center justify-between w-full gap-4">
+                          <span>{cat.name}</span>
+                          <Badge variant="secondary" className="ml-2">
+                            {(cat.event_count || 0).toLocaleString()} events
+                          </Badge>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            <div className="relative py-4">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground">or</span>
+              </div>
+            </div>
+
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => handleCatalogueChange('all')}
+              disabled={cataloguesLoading}
+            >
+              {cataloguesLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Loading...
+                </>
+              ) : (
+                <>
+                  <Activity className="h-4 w-4 mr-2" />
+                  Load All Catalogues ({totalEventsFromMetadata.toLocaleString()} events total)
+                </>
+              )}
+            </Button>
+            <p className="text-xs text-muted-foreground text-center">
+              Loading all catalogues may take longer for large datasets
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* Quick Stats */}
+        <div className="max-w-2xl mx-auto">
+          <h3 className="text-sm font-medium text-muted-foreground mb-3">Available Catalogues Summary</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {cataloguesLoading ? (
+              <>
+                <Card><CardContent className="p-4"><Skeleton className="h-8 w-12 mb-1" /><Skeleton className="h-3 w-16" /></CardContent></Card>
+                <Card><CardContent className="p-4"><Skeleton className="h-8 w-16 mb-1" /><Skeleton className="h-3 w-16" /></CardContent></Card>
+                <Card><CardContent className="p-4"><Skeleton className="h-8 w-12 mb-1" /><Skeleton className="h-3 w-20" /></CardContent></Card>
+                <Card><CardContent className="p-4"><Skeleton className="h-8 w-16 mb-1" /><Skeleton className="h-3 w-20" /></CardContent></Card>
+              </>
+            ) : (
+              <>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-2xl font-bold">{catalogues.length}</div>
+                    <div className="text-xs text-muted-foreground">Catalogues</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-2xl font-bold">{totalEventsFromMetadata.toLocaleString()}</div>
+                    <div className="text-xs text-muted-foreground">Total Events</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-2xl font-bold">
+                      {catalogues.length > 0
+                        ? Math.round(totalEventsFromMetadata / catalogues.length).toLocaleString()
+                        : 0}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Avg Events/Catalogue</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-2xl font-bold">
+                      {catalogues.length > 0
+                        ? Math.max(...catalogues.map(c => c.event_count || 0)).toLocaleString()
+                        : 0}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Largest Catalogue</div>
+                  </CardContent>
+                </Card>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Loading events for selected catalogue
+  if (loading) {
     return (
       <div className="container py-8">
         <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
@@ -1023,27 +1232,51 @@ export default function AnalyticsPage() {
               </p>
             </div>
           )}
-        </div>
-      </div>
-    );
-  }
-
-  if (events.length === 0) {
-    return (
-      <div className="container py-8">
-        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-          <MapPin className="h-12 w-12 text-muted-foreground" />
-          <h2 className="text-2xl font-bold">No Earthquake Data Available</h2>
-          <p className="text-muted-foreground text-center max-w-md">
-            Upload catalogues or create merged catalogues to visualize earthquake data.
-          </p>
-          <Button onClick={() => window.location.href = '/upload'}>
-            Upload Catalogue
+          <Button
+            variant="outline"
+            onClick={() => {
+              setSelectedCatalogue('');
+              setEvents([]);
+              setEventsLoaded(false);
+              setLoading(false);
+            }}
+          >
+            Cancel
           </Button>
         </div>
       </div>
     );
   }
+
+  // Events loaded but empty (shouldn't normally happen)
+  if (eventsLoaded && events.length === 0) {
+    const currentCatalogue = catalogues.find(c => c.id === selectedCatalogue);
+    return (
+      <div className="container py-8">
+        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+          <MapPin className="h-12 w-12 text-muted-foreground" />
+          <h2 className="text-2xl font-bold">No Events Found</h2>
+          <p className="text-muted-foreground text-center max-w-md">
+            {selectedCatalogue === 'all'
+              ? 'No events found in any catalogue.'
+              : `No events found in "${currentCatalogue?.name || 'selected catalogue'}".`}
+          </p>
+          <Button variant="outline" onClick={() => {
+            setSelectedCatalogue('');
+            setEvents([]);
+            setEventsLoaded(false);
+          }}>
+            Select Different Catalogue
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Get current catalogue name for display
+  const currentCatalogueName = selectedCatalogue === 'all'
+    ? 'All Catalogues'
+    : catalogues.find(c => c.id === selectedCatalogue)?.name || 'Selected Catalogue';
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -1052,16 +1285,19 @@ export default function AnalyticsPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Visualization & Analytics</h1>
           <p className="text-muted-foreground">
-            Comprehensive visualization, quality assessment, and seismological analysis
+            Analyzing: <span className="font-medium text-foreground">{currentCatalogueName}</span>
+            {' '}({events.length.toLocaleString()} events)
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <Select value={selectedCatalogue} onValueChange={setSelectedCatalogue}>
+          <Select value={selectedCatalogue} onValueChange={handleCatalogueChange}>
             <SelectTrigger className="w-[300px]">
               <SelectValue placeholder="Select catalogue" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Catalogues ({events.length.toLocaleString()} events)</SelectItem>
+              <SelectItem value="all">
+                All Catalogues ({totalEventsFromMetadata.toLocaleString()} events)
+              </SelectItem>
               {catalogues.map((cat) => (
                 <SelectItem key={cat.id} value={cat.id}>
                   {cat.name} ({(cat.event_count || 0).toLocaleString()} events)
@@ -1070,9 +1306,7 @@ export default function AnalyticsPage() {
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            {['quality', 'gutenberg-richter', 'completeness', 'temporal', 'moment'].includes(activeTab)
-              ? 'Filters quality analysis tabs'
-              : 'Use filters in Map tab for visualization'}
+            {selectedCatalogue === 'all' ? 'Comparing all catalogues' : 'Switch catalogue to analyze different data'}
           </p>
         </div>
       </div>
