@@ -509,11 +509,23 @@ const StatisticsCardSkeleton = memo(function StatisticsCardSkeleton() {
 });
 
 // Loading skeleton for charts
-const ChartSkeleton = memo(function ChartSkeleton({ height = 280 }: { height?: number }) {
+const ChartSkeleton = memo(function ChartSkeleton({
+  height = 280,
+  message,
+  children
+}: {
+  height?: number;
+  message?: string;
+  children?: React.ReactNode;
+}) {
   return (
     <div className="w-full animate-pulse" style={{ height }}>
-      <div className="h-full bg-muted rounded-lg flex items-center justify-center">
+      <div className="h-full bg-muted rounded-lg flex flex-col items-center justify-center gap-2">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        {message && (
+          <p className="text-sm text-muted-foreground">{message}</p>
+        )}
+        {children}
       </div>
     </div>
   );

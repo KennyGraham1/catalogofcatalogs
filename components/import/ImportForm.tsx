@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Download, CheckCircle, XCircle } from 'lucide-react';
 import { IndeterminateProgress } from '@/components/ui/progress-indicator';
+import { ProgressOverlay } from '@/components/ui/ProgressOverlay';
 
 interface ImportResult {
   success: boolean;
@@ -29,7 +30,8 @@ export function ImportForm() {
   const [isImporting, setIsImporting] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  
+  const [importPhase, setImportPhase] = useState<string>('');
+
   // Form state
   const [timeRange, setTimeRange] = useState<'hours' | 'custom'>('hours');
   const [hours, setHours] = useState('24');
@@ -43,19 +45,20 @@ export function ImportForm() {
   const [maxLongitude, setMaxLongitude] = useState('');
   const [updateExisting, setUpdateExisting] = useState(false);
   const [catalogueName, setCatalogueName] = useState('GeoNet - Automated Import');
-  
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsImporting(true);
     setResult(null);
     setError(null);
-    
+    setImportPhase('Connecting to GeoNet API...');
+
     try {
       const body: any = {
         updateExisting,
         catalogueName,
       };
-      
+
       // Add time range
       if (timeRange === 'hours') {
         body.hours = parseInt(hours, 10);
@@ -63,7 +66,7 @@ export function ImportForm() {
         body.startDate = startDate;
         body.endDate = endDate;
       }
-      
+
       // Add magnitude filters
       if (minMagnitude) {
         body.minMagnitude = parseFloat(minMagnitude);
@@ -85,7 +88,7 @@ export function ImportForm() {
       if (maxLongitude) {
         body.maxLongitude = parseFloat(maxLongitude);
       }
-      
+
       const response = await fetch('/api/import/geonet', {
         method: 'POST',
         headers: {
@@ -93,23 +96,34 @@ export function ImportForm() {
         },
         body: JSON.stringify(body),
       });
-      
+
       const data = await response.json();
-      
+
       if (!response.ok) {
         throw new Error(data.message || data.error || 'Import failed');
       }
-      
+
       setResult(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsImporting(false);
+      setImportPhase('');
     }
   };
-  
+
   return (
     <div className="space-y-6">
+      {/* Progress Overlay for Import */}
+      <ProgressOverlay
+        isOpen={isImporting}
+        title="Importing from GeoNet"
+        progress={0}
+        message={importPhase}
+        subMessage="This may take a few moments depending on the time range selected."
+        indeterminate
+      />
+
       <Card>
         <CardHeader>
           <CardTitle>Import from GeoNet</CardTitle>
@@ -131,7 +145,7 @@ export function ImportForm() {
                   <SelectItem value="custom">Custom Date Range</SelectItem>
                 </SelectContent>
               </Select>
-              
+
               {timeRange === 'hours' ? (
                 <div className="space-y-2">
                   <Label htmlFor="hours">Hours</Label>
@@ -175,7 +189,7 @@ export function ImportForm() {
                 </div>
               )}
             </div>
-            
+
             {/* Magnitude Filters */}
             <div className="space-y-4">
               <Label>Magnitude Filters (Optional)</Label>
@@ -267,7 +281,7 @@ export function ImportForm() {
                 placeholder="GeoNet - Automated Import"
               />
             </div>
-            
+
             {/* Update Existing */}
             <div className="flex items-center space-x-2">
               <Switch
@@ -279,7 +293,7 @@ export function ImportForm() {
                 Update existing events if data has changed
               </Label>
             </div>
-            
+
             {/* Submit Button */}
             <Button type="submit" disabled={isImporting} className="w-full">
               {isImporting ? (
@@ -297,18 +311,6 @@ export function ImportForm() {
           </form>
         </CardContent>
       </Card>
-
-      {/* Loading Progress */}
-      {isImporting && (
-        <Card>
-          <CardContent className="pt-6">
-            <IndeterminateProgress label="Fetching earthquake data from GeoNet..." />
-            <p className="text-sm text-muted-foreground mt-4 text-center">
-              This may take a few moments depending on the time range and filters selected.
-            </p>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Result */}
       {result && (
@@ -347,12 +349,12 @@ export function ImportForm() {
                 <p className="text-2xl font-bold text-gray-600">{result.skippedEvents}</p>
               </div>
             </div>
-            
+
             <div>
               <p className="text-sm text-muted-foreground">Duration</p>
               <p className="text-lg font-semibold">{(result.duration / 1000).toFixed(2)}s</p>
             </div>
-            
+
             {result.errors.length > 0 && (
               <Alert variant="destructive">
                 <AlertDescription>
@@ -371,7 +373,7 @@ export function ImportForm() {
           </CardContent>
         </Card>
       )}
-      
+
       {/* Error */}
       {error && (
         <Alert variant="destructive">
