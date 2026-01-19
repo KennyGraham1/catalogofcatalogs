@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { MapContainer, TileLayer, Circle, Popup, Polyline } from 'react-leaflet';
+import { MapContainer, Circle, Popup, Polyline } from 'react-leaflet';
+import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -13,7 +14,7 @@ import 'leaflet/dist/leaflet.css';
 import { UncertaintyEllipse } from './UncertaintyEllipse';
 import { BeachBallMarker } from './BeachBallMarker';
 import { StationMarker } from './StationMarker';
-import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
+import { useMapColors } from '@/hooks/use-map-theme';
 import { calculateUncertaintyEllipse, UncertaintyData } from '@/lib/uncertainty-utils';
 import { parseFocalMechanism } from '@/lib/focal-mechanism-utils';
 import { calculateDistance } from '@/lib/station-coverage-utils';
@@ -92,8 +93,7 @@ export function EnhancedMapView({
   const [showQualityColors, setShowQualityColors] = useState(false);
   const [sampleSize, setSampleSize] = useState<number>(1000);
 
-  // Dark mode support
-  const mapTheme = useMapTheme();
+  // Dark mode support for marker colors
   const mapColors = useMapColors();
 
   // Sample events for performance
@@ -207,7 +207,7 @@ export function EnhancedMapView({
             <Label htmlFor="sampleSize" className="text-sm font-medium mb-2 block">
               Max Events to Display
             </Label>
-            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(Number(value))}>
+            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(value === 'all' ? Infinity : Number(value))}>
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -216,6 +216,7 @@ export function EnhancedMapView({
                 <SelectItem value="1000">1,000</SelectItem>
                 <SelectItem value="2000">2,000</SelectItem>
                 <SelectItem value="5000">5,000</SelectItem>
+                <SelectItem value="Infinity">All</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -245,10 +246,7 @@ export function EnhancedMapView({
           scrollWheelZoom={true}
           preferCanvas={true}
         >
-          <TileLayer
-            attribution={mapTheme.attribution}
-            url={mapTheme.tileLayerUrl}
-          />
+          <MapLayerControl position="topright" />
 
           {/* Earthquake markers - using intelligent sampling for performance */}
           {/* Sort by magnitude (small to large) so larger events render on top */}

@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState, useMemo, memo, useCallback } from 'react';
 import L from 'leaflet';
-import { MapContainer, TileLayer, GeoJSON, FeatureGroup, Circle, Popup, Marker } from 'react-leaflet';
+import { MapContainer, GeoJSON, FeatureGroup, Circle, Popup, Marker } from 'react-leaflet';
+import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { EditControl } from 'react-leaflet-draw';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -13,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Calendar, Ruler, Activity, Zap, Layers, MapPin, Info } from 'lucide-react';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
 import { useNearbyFaults } from '@/hooks/use-nearby-faults';
-import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
+import { useMapColors } from '@/hooks/use-map-theme';
 import { calculateQualityScore, QualityMetrics, getQualityColor } from '@/lib/quality-scoring';
 import { getMagnitudeRadius, getMagnitudeColor, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 import { loadFaultData, FaultCollection } from '@/lib/fault-data';
@@ -44,8 +45,7 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
   const [faultData, setFaultData] = useState<FaultCollection | null>(null);
   const [sampleSize, setSampleSize] = useState<number>(1000);
 
-  // Dark mode support
-  const mapTheme = useMapTheme();
+  // Dark mode support for marker colors
   const mapColors = useMapColors();
 
   // Use cached fetch for events if catalogueId is provided
@@ -221,7 +221,7 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
             <Label htmlFor="sampleSize" className="text-xs font-medium mb-2 block">
               Max Events to Display
             </Label>
-            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(Number(value))}>
+            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(value === 'all' ? Infinity : Number(value))}>
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -230,6 +230,7 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
                 <SelectItem value="1000">1,000</SelectItem>
                 <SelectItem value="2000">2,000</SelectItem>
                 <SelectItem value="5000">5,000</SelectItem>
+                <SelectItem value="Infinity">All</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -265,10 +266,7 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
         className="h-full w-full"
         preferCanvas={true}
       >
-        <TileLayer
-          attribution={mapTheme.attribution}
-          url={mapTheme.tileLayerUrl}
-        />
+        <MapLayerControl position="topright" />
 
         {/* NZ Active Faults from Local GeoJSON */}
         {showActiveFaults && faultData && (

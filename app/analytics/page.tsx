@@ -41,6 +41,7 @@ import { parseFocalMechanism } from '@/lib/focal-mechanism-utils';
 import { parseStationData } from '@/lib/station-coverage-utils';
 import { EventTable } from '@/components/events/EventTable';
 import { type EarthquakeEvent, calculateMFDComparison, type MFDComparisonResult } from '@/lib/seismological-analysis';
+import { type MergedCatalogue, type MergedEvent } from '@/lib/db';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
 import { useSeismologicalAnalyses } from '@/hooks/use-seismological-worker';
 import {
@@ -108,6 +109,12 @@ const MAX_EVENTS_PER_CATALOGUE = 40000; // Limit per catalogue (API max is 40000
 const MAX_CHART_DATA_POINTS = 500; // Limit for scatter plots
 const MAX_TIMELINE_POINTS = 365; // Max days for timeline chart
 const FILTER_DEBOUNCE_MS = 150; // Debounce delay for filter changes
+
+// Extended event type with catalogue info added during mapping
+interface AnalyticsEvent extends MergedEvent {
+  catalogue: string;      // Catalogue name
+  catalogueId: string;    // Catalogue ID
+}
 
 // Debounce hook for filter updates
 function useDebounce<T>(value: T, delay: number): T {
@@ -513,10 +520,11 @@ const ChartSkeleton = memo(function ChartSkeleton({ height = 280 }: { height?: n
 });
 
 export default function AnalyticsPage() {
-  const [catalogues, setCatalogues] = useState<any[]>([]);
+  // Core state
   const [selectedCatalogue, setSelectedCatalogue] = useState<string>(''); // Empty by default - user must select
-  const [events, setEvents] = useState<any[]>([]);
-  const [selectedEvent, setSelectedEvent] = useState<any | null>(null);
+  const [events, setEvents] = useState<AnalyticsEvent[]>([]);
+  const [selectedEvent, setSelectedEvent] = useState<AnalyticsEvent | null>(null);
+  // Note: Events from API may have null depth values, which are handled in filtering/display logic
   const [loading, setLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingMessage, setLoadingMessage] = useState('');
@@ -537,8 +545,8 @@ export default function AnalyticsPage() {
   const [mfdShowCumulative, setMfdShowCumulative] = useState(true);
   const [mfdShowHistogram, setMfdShowHistogram] = useState(true);
   const [mfdLogScale, setMfdLogScale] = useState(true);
-  const [mfdBinWidth, setMfdBinWidth] = useState<number>(0.1); // 0.1 or 0.01
-  const [mfdMinMagnitude, setMfdMinMagnitude] = useState<number | undefined>(undefined); // Truncation threshold
+  const [mfdBinWidth, setMfdBinWidth] = useState<number>(0.1);
+  const [mfdMinMagnitude, setMfdMinMagnitude] = useState<number | undefined>(undefined);
   const [mfdCumulativeStyle, setMfdCumulativeStyle] = useState<'solid' | 'dotted'>('solid');
   const mfdChartRef = useRef<HTMLDivElement>(null);
 
@@ -550,8 +558,6 @@ export default function AnalyticsPage() {
   const deferredMagnitudeRange = useDeferredValue(debouncedMagnitudeRange);
   const deferredDepthRange = useDeferredValue(debouncedDepthRange);
 
-
-
   // Ref to track mounted state for async operations
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -562,23 +568,22 @@ export default function AnalyticsPage() {
   }, []);
 
   // Use cached fetch for catalogues (fetched once and cached)
-  const { data: catalogueData, loading: cataloguesLoading } = useCachedFetch<any[]>(
+  const { data: catalogueData, loading: cataloguesLoading } = useCachedFetch<MergedCatalogue[]>(
     '/api/catalogues',
     { cacheTime: 10 * 60 * 1000 } // 10 minute cache
   );
 
-  // Update catalogues when data is fetched
-  useEffect(() => {
-    if (catalogueData) {
-      setCatalogues(Array.isArray(catalogueData) ? catalogueData : []);
-    }
-  }, [catalogueData]);
+  // Derive catalogues array from fetched data (no separate state needed)
+  const catalogues = useMemo(() =>
+    Array.isArray(catalogueData) ? catalogueData : [],
+    [catalogueData]
+  );
 
   // Fetch events for a single catalogue (on-demand loading)
   const fetchSingleCatalogueEvents = useCallback(async (catalogueId: string) => {
-    if (!catalogueData) return;
+    if (!catalogues.length) return;
 
-    const catalogue = catalogueData.find((c: any) => c.id === catalogueId);
+    const catalogue = catalogues.find((c) => c.id === catalogueId);
     if (!catalogue) return;
 
     setLoading(true);
@@ -592,8 +597,8 @@ export default function AnalyticsPage() {
 
       if (eventsResponse.ok) {
         const eventsData = await eventsResponse.json();
-        const eventsList = Array.isArray(eventsData) ? eventsData : eventsData.data || [];
-        const mappedEvents = eventsList.map((event: any) => ({
+        const eventsList: MergedEvent[] = Array.isArray(eventsData) ? eventsData : eventsData.data || [];
+        const mappedEvents: AnalyticsEvent[] = eventsList.map((event) => ({
           ...event,
           catalogue: catalogue.name,
           catalogueId: catalogue.id,
@@ -618,31 +623,30 @@ export default function AnalyticsPage() {
         setLoadingMessage('');
       }
     }
-  }, [catalogueData]);
+  }, [catalogues]);
 
   // Fetch events for all catalogues (explicit user choice)
   const fetchAllCataloguesEvents = useCallback(async () => {
-    if (!catalogueData || catalogueData.length === 0) return;
+    if (!catalogues.length) return;
 
     setLoading(true);
     setLoadingProgress(0);
     setLoadingMessage('Loading all catalogues... This may take a moment.');
 
     try {
-      const catalogueList = Array.isArray(catalogueData) ? catalogueData : [];
-      const allEvents: any[] = [];
-      const totalCatalogues = catalogueList.length;
+      const allEvents: AnalyticsEvent[] = [];
+      const totalCatalogues = catalogues.length;
 
       // Fetch events in parallel with limits using Promise.allSettled
-      const eventPromises = catalogueList.map(async (catalogue) => {
+      const eventPromises = catalogues.map(async (catalogue) => {
         try {
           const eventsResponse = await fetch(
             `/api/catalogues/${catalogue.id}/events?limit=${MAX_EVENTS_PER_CATALOGUE}&direction=desc`
           );
           if (eventsResponse.ok) {
             const eventsData = await eventsResponse.json();
-            const eventsList = Array.isArray(eventsData) ? eventsData : eventsData.data || [];
-            return eventsList.map((event: any) => ({
+            const eventsList: MergedEvent[] = Array.isArray(eventsData) ? eventsData : eventsData.data || [];
+            return eventsList.map((event): AnalyticsEvent => ({
               ...event,
               catalogue: catalogue.name,
               catalogueId: catalogue.id,
@@ -652,7 +656,7 @@ export default function AnalyticsPage() {
         } catch (error) {
           console.error(`Failed to fetch events for catalogue ${catalogue.id}:`, error);
         }
-        return [];
+        return [] as AnalyticsEvent[];
       });
 
       // Process results with progress updates
@@ -686,7 +690,7 @@ export default function AnalyticsPage() {
         setLoadingMessage('');
       }
     }
-  }, [catalogueData]);
+  }, [catalogues]);
 
   // Handle catalogue selection change - load events on demand
   const handleCatalogueChange = useCallback((value: string) => {
@@ -719,9 +723,9 @@ export default function AnalyticsPage() {
       eq.magnitude >= deferredMagnitudeRange[0] && eq.magnitude <= deferredMagnitudeRange[1]
     );
 
-    // Depth filter (using deferred values)
+    // Depth filter (using deferred values) - handle null depth values
     filtered = filtered.filter(eq =>
-      eq.depth >= deferredDepthRange[0] && eq.depth <= deferredDepthRange[1]
+      eq.depth != null && eq.depth >= deferredDepthRange[0] && eq.depth <= deferredDepthRange[1]
     );
 
     // Region filter
@@ -795,7 +799,8 @@ export default function AnalyticsPage() {
     ];
 
     filteredEarthquakes.forEach(eq => {
-      const bin = bins.find(b => eq.depth >= b.min && eq.depth < b.max);
+      if (eq.depth == null) return;
+      const bin = bins.find(b => eq.depth! >= b.min && eq.depth! < b.max);
       if (bin) bin.count++;
     });
 
@@ -940,10 +945,12 @@ export default function AnalyticsPage() {
 
       // Fast check for focal mechanism (avoid expensive parsing)
       // Just check if the field exists and is non-empty
-      if (e.focal_mechanisms &&
-        (typeof e.focal_mechanisms === 'string' ? e.focal_mechanisms.length > 2 :
-          Array.isArray(e.focal_mechanisms) ? e.focal_mechanisms.length > 0 :
-            typeof e.focal_mechanisms === 'object')) {
+      // Note: focal_mechanisms can be JSON string or parsed array/object depending on API response
+      const fm = e.focal_mechanisms as string | unknown[] | object | null | undefined;
+      if (fm &&
+        (typeof fm === 'string' ? fm.length > 2 :
+          Array.isArray(fm) ? fm.length > 0 :
+            typeof fm === 'object')) {
         withFocalMechanism++;
       }
 
@@ -1054,7 +1061,7 @@ export default function AnalyticsPage() {
   }, []);
 
   // No catalogues available (only show after loading completes)
-  if (!cataloguesLoading && catalogueData && catalogueData.length === 0) {
+  if (!cataloguesLoading && catalogues.length === 0) {
     return (
       <div className="container py-8">
         <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
@@ -1221,28 +1228,72 @@ export default function AnalyticsPage() {
   if (loading) {
     return (
       <div className="container py-8">
-        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-          <Loader2 className="h-12 w-12 animate-spin text-primary" />
-          <p className="text-muted-foreground">{loadingMessage || 'Loading earthquake data...'}</p>
-          {loadingProgress > 0 && loadingProgress < 100 && (
-            <div className="w-64">
-              <Progress value={loadingProgress} className="h-2" />
-              <p className="text-xs text-muted-foreground text-center mt-2">
-                {loadingProgress}% complete
-              </p>
-            </div>
-          )}
-          <Button
-            variant="outline"
-            onClick={() => {
-              setSelectedCatalogue('');
-              setEvents([]);
-              setEventsLoaded(false);
-              setLoading(false);
-            }}
-          >
-            Cancel
-          </Button>
+        <div className="flex flex-col items-center justify-center min-h-[60vh]">
+          <Card className="w-full max-w-md border-0 shadow-lg bg-gradient-to-br from-background to-muted/30">
+            <CardContent className="pt-8 pb-6">
+              <div className="flex flex-col items-center gap-6">
+                {/* Animated seismic wave loader */}
+                <div className="relative">
+                  <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" style={{ animationDuration: '1.5s' }} />
+                  <div className="absolute inset-2 rounded-full bg-primary/30 animate-ping" style={{ animationDuration: '1.5s', animationDelay: '0.2s' }} />
+                  <div className="relative flex items-center justify-center h-20 w-20 rounded-full bg-gradient-to-br from-primary to-primary/80 shadow-lg">
+                    <Activity className="h-10 w-10 text-primary-foreground animate-pulse" />
+                  </div>
+                </div>
+
+                {/* Loading message */}
+                <div className="text-center space-y-2">
+                  <h3 className="text-lg font-semibold">
+                    {loadingMessage || 'Loading earthquake data...'}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    Fetching seismic events from the database
+                  </p>
+                </div>
+
+                {/* Progress indicator */}
+                {loadingProgress > 0 && loadingProgress < 100 ? (
+                  <div className="w-full space-y-2">
+                    <div className="relative">
+                      <Progress value={loadingProgress} className="h-2" />
+                      <div
+                        className="absolute top-0 h-2 bg-primary/30 rounded-full animate-pulse"
+                        style={{ width: `${Math.min(loadingProgress + 10, 100)}%`, opacity: 0.5 }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>Processing...</span>
+                      <span className="font-medium">{loadingProgress}%</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <div className="flex gap-1">
+                      <span className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                    <span>Connecting to database</span>
+                  </div>
+                )}
+
+                {/* Cancel button */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-2 text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    setSelectedCatalogue('');
+                    setEvents([]);
+                    setEventsLoaded(false);
+                    setLoading(false);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     );
@@ -1580,7 +1631,7 @@ export default function AnalyticsPage() {
                 <CardContent>
                   <UnifiedEarthquakeMap
                     key={`map-${selectedCatalogue}`}
-                    earthquakes={filteredEarthquakes}
+                    earthquakes={filteredEarthquakes.filter(eq => eq.depth != null) as any}
                     colorBy={colorBy}
                     showFocalMechanisms={true}
                     showFaultLines={true}
@@ -1731,10 +1782,9 @@ export default function AnalyticsPage() {
                     magnitude_type: e.magnitude_type || null,
                     location_name: e.region || e.location_name || null,
                     event_type: e.event_type || null,
-                    quality_score: e.quality_score || null,
                     azimuthal_gap: e.azimuthal_gap || null,
                     used_station_count: e.used_station_count || null,
-                    public_id: e.public_id || null,
+                    public_id: e.event_public_id || null,
                   }))}
                   onEventClick={(event) => {
                     const fullEvent = displayEvents.find(e => e.id === event.id);

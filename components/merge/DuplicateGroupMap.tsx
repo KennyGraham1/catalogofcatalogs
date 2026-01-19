@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { BASE_LAYERS, getDefaultBaseLayer } from '@/hooks/use-map-theme';
 
 interface EventData {
   id?: string;
@@ -33,6 +34,26 @@ interface DuplicateGroupMapProps {
 export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: DuplicateGroupMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
+  const layerControlRef = useRef<L.Control.Layers | null>(null);
+  const [isDark, setIsDark] = useState(false);
+
+  // Check for dark mode
+  useEffect(() => {
+    const checkDarkMode = () => {
+      const isDarkMode = document.documentElement.classList.contains('dark');
+      setIsDark(isDarkMode);
+    };
+
+    checkDarkMode();
+
+    const observer = new MutationObserver(checkDarkMode);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -45,10 +66,26 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
         zoomControl: true,
       });
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
-        maxZoom: 19,
-      }).addTo(mapRef.current);
+      // Create base layer map for layer control
+      const baseLayers: Record<string, L.TileLayer> = {};
+      const defaultLayerName = getDefaultBaseLayer(isDark);
+
+      BASE_LAYERS.forEach((layer) => {
+        const tileLayer = L.tileLayer(layer.url, {
+          attribution: layer.attribution,
+          maxZoom: layer.maxZoom || 19,
+        });
+        baseLayers[layer.name] = tileLayer;
+
+        // Add the default layer to the map
+        if (layer.name === defaultLayerName) {
+          tileLayer.addTo(mapRef.current!);
+        }
+      });
+
+      // Add layer control
+      layerControlRef.current = L.control.layers(baseLayers, {}, { position: 'topright' });
+      layerControlRef.current.addTo(mapRef.current);
     }
 
     const map = mapRef.current;
@@ -143,9 +180,10 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
+        layerControlRef.current = null;
       }
     };
-  }, [group, catalogueColors]);
+  }, [group, catalogueColors, isDark]);
 
   return (
     <div 

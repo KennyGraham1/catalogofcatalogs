@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { MapContainer, TileLayer, Circle, Popup, GeoJSON } from 'react-leaflet';
+import { MapContainer, Circle, Popup, GeoJSON } from 'react-leaflet';
+import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -11,7 +12,7 @@ import { Activity, Ruler, Calendar, MapPin, Layers, Target, Radio, Zap, Info } f
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
+import { useMapColors } from '@/hooks/use-map-theme';
 import { calculateQualityScore, QualityMetrics, getQualityColor } from '@/lib/quality-scoring';
 import { getMagnitudeRadius, getMagnitudeColor, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 import { useNearbyFaults } from '@/hooks/use-nearby-faults';
@@ -84,8 +85,7 @@ export default function UnifiedEarthquakeMap({
   const [faultData, setFaultData] = useState<FaultCollection | null>(null);
   const [sampleSize, setSampleSize] = useState<number>(1000);
 
-  // Dark mode support
-  const mapTheme = useMapTheme();
+  // Dark mode support for marker colors
   const mapColors = useMapColors();
 
   // Sample earthquakes for performance
@@ -207,7 +207,7 @@ export default function UnifiedEarthquakeMap({
             <Label htmlFor="sampleSize" className="text-xs font-medium mb-2 block">
               Max Events to Display
             </Label>
-            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(Number(value))}>
+            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(value === 'all' ? Infinity : Number(value))}>
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -216,6 +216,7 @@ export default function UnifiedEarthquakeMap({
                 <SelectItem value="1000">1,000</SelectItem>
                 <SelectItem value="2000">2,000</SelectItem>
                 <SelectItem value="5000">5,000</SelectItem>
+                <SelectItem value="Infinity">All</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -245,10 +246,7 @@ export default function UnifiedEarthquakeMap({
           scrollWheelZoom={true}
           preferCanvas={true}
         >
-          <TileLayer
-            attribution={mapTheme.attribution}
-            url={mapTheme.tileLayerUrl}
-          />
+          <MapLayerControl position="topright" />
 
           {/* NZ Active Faults from Local GeoJSON */}
           {showFaults && faultData && (

@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { MapContainer, TileLayer, Circle, Popup } from 'react-leaflet';
+import { MapContainer, Circle, Popup } from 'react-leaflet';
+import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
@@ -10,7 +11,7 @@ import { Activity, Ruler, Calendar, Info } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { getMagnitudeColor, getMagnitudeRadius, getMagnitudeLabel, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
-import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
+import { useMapColors } from '@/hooks/use-map-theme';
 
 interface MapComponentProps {
   events: Array<{
@@ -26,7 +27,6 @@ interface MapComponentProps {
 }
 
 export default function MapComponent({ events }: MapComponentProps) {
-  const mapTheme = useMapTheme();
   const mapColors = useMapColors();
   const [sampleSize, setSampleSize] = useState<number>(1000);
 
@@ -69,10 +69,7 @@ export default function MapComponent({ events }: MapComponentProps) {
         scrollWheelZoom={true}
         preferCanvas={true}
       >
-        <TileLayer
-          attribution={mapTheme.attribution}
-          url={mapTheme.tileLayerUrl}
-        />
+        <MapLayerControl position="topright" />
 
         {/* Earthquake markers - using intelligent sampling for performance */}
         {/* Sort by magnitude (small to large) so larger events render on top */}
@@ -174,7 +171,7 @@ export default function MapComponent({ events }: MapComponentProps) {
             <Label htmlFor="sampleSize-merge" className="text-xs font-medium mb-2 block">
               Max Events
             </Label>
-            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(Number(value))}>
+            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(value === 'all' ? Infinity : Number(value))}>
               <SelectTrigger className="w-full h-8">
                 <SelectValue />
               </SelectTrigger>
@@ -183,6 +180,7 @@ export default function MapComponent({ events }: MapComponentProps) {
                 <SelectItem value="1000">1,000</SelectItem>
                 <SelectItem value="2000">2,000</SelectItem>
                 <SelectItem value="5000">5,000</SelectItem>
+                <SelectItem value="Infinity">All</SelectItem>
               </SelectContent>
             </Select>
           </div>

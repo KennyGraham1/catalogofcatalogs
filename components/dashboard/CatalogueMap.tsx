@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useMemo, useCallback, memo } from 'react';
 import L from 'leaflet';
-import { MapContainer, TileLayer, Circle, Popup } from 'react-leaflet';
+import { MapContainer, Circle, Popup } from 'react-leaflet';
+import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
@@ -10,7 +11,7 @@ import { Activity, Calendar, Ruler, MapPin, Filter, Info } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getMagnitudeColor, getMagnitudeRadius, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
-import { useMapTheme, useMapColors } from '@/hooks/use-map-theme';
+import { useMapColors } from '@/hooks/use-map-theme';
 import 'leaflet/dist/leaflet.css';
 
 interface EarthquakeEvent {
@@ -41,8 +42,7 @@ export const CatalogueMap = memo(function CatalogueMap() {
   const [error, setError] = useState<string | null>(null);
   const [sampleSize, setSampleSize] = useState<number>(1000);
 
-  // Dark mode support
-  const mapTheme = useMapTheme();
+  // Dark mode support for marker colors
   const mapColors = useMapColors();
 
   // Sample events for performance
@@ -275,10 +275,7 @@ export const CatalogueMap = memo(function CatalogueMap() {
         maxZoom={12}
         preferCanvas={true}
       >
-        <TileLayer
-          attribution={mapTheme.attribution}
-          url={mapTheme.tileLayerUrl}
-        />
+        <MapLayerControl position="topright" />
 
         {/* Earthquake markers - using intelligent sampling for performance */}
         {eventMarkers}
@@ -341,7 +338,7 @@ export const CatalogueMap = memo(function CatalogueMap() {
             <Label htmlFor="sampleSize-map" className="text-xs font-medium mb-2 block">
               Max Events
             </Label>
-            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(Number(value))}>
+            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(value === 'all' ? Infinity : Number(value))}>
               <SelectTrigger className="w-full h-8">
                 <SelectValue />
               </SelectTrigger>
@@ -350,6 +347,7 @@ export const CatalogueMap = memo(function CatalogueMap() {
                 <SelectItem value="1000">1,000</SelectItem>
                 <SelectItem value="2000">2,000</SelectItem>
                 <SelectItem value="5000">5,000</SelectItem>
+                <SelectItem value="Infinity">All</SelectItem>
               </SelectContent>
             </Select>
           </div>

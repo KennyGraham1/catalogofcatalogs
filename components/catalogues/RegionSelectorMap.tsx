@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
 import L from 'leaflet';
-import { MapContainer, TileLayer, FeatureGroup } from 'react-leaflet';
+import { MapContainer, FeatureGroup } from 'react-leaflet';
+import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { EditControl } from 'react-leaflet-draw';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -306,10 +307,7 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
             className="h-full w-full"
             scrollWheelZoom={true}
           >
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
+            <MapLayerControl position="topright" />
 
             <FeatureGroup ref={featureGroupRef}>
               <EditControl
