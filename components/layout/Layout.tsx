@@ -77,7 +77,7 @@ export function Layout({ children }: LayoutProps) {
 
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-      <CatalogueProvider autoRefreshInterval={30000}>
+      <CatalogueProvider>
         <div className="min-h-screen flex flex-col">
           <Header
             onShowShortcuts={() => setShortcutsHelpOpen(true)}
