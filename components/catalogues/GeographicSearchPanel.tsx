@@ -63,7 +63,7 @@ export const GeographicSearchPanel = memo(function GeographicSearchPanel({
       if (!mapBounds) {
         toast({
           title: 'No Region Selected',
-          description: 'Please draw a rectangle on the map or choose a preset region',
+          description: 'Please draw a polygon on the map or choose a preset region',
           variant: 'destructive',
         });
         return;
@@ -189,111 +189,111 @@ export const GeographicSearchPanel = memo(function GeographicSearchPanel({
         </CollapsibleTrigger>
         <CollapsibleContent>
           <CardContent className="space-y-4">
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'map' | 'manual')}>
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="map" className="flex items-center gap-2">
-              <MapIcon className="h-4 w-4" />
-              Interactive Map
-            </TabsTrigger>
-            <TabsTrigger value="manual" className="flex items-center gap-2">
-              <Edit3 className="h-4 w-4" />
-              Manual Entry
-            </TabsTrigger>
-          </TabsList>
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'map' | 'manual')}>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="map" className="flex items-center gap-2">
+                  <MapIcon className="h-4 w-4" />
+                  Interactive Map
+                </TabsTrigger>
+                <TabsTrigger value="manual" className="flex items-center gap-2">
+                  <Edit3 className="h-4 w-4" />
+                  Manual Entry
+                </TabsTrigger>
+              </TabsList>
 
-          <TabsContent value="map" className="space-y-4 mt-4">
-            <RegionSelectorMap
-              onRegionSelected={handleMapRegionSelected}
-              initialBounds={mapBounds}
-              height="450px"
-            />
-          </TabsContent>
+              <TabsContent value="map" className="space-y-4 mt-4">
+                <RegionSelectorMap
+                  onRegionSelected={handleMapRegionSelected}
+                  initialBounds={mapBounds}
+                  height="450px"
+                />
+              </TabsContent>
 
-          <TabsContent value="manual" className="space-y-4 mt-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="minLat">Min Latitude</Label>
-                <Input
-                  id="minLat"
-                  type="number"
-                  step="0.01"
-                  min="-90"
-                  max="90"
-                  placeholder="-90 to 90"
-                  value={minLat}
-                  onChange={(e) => setMinLat(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="maxLat">Max Latitude</Label>
-                <Input
-                  id="maxLat"
-                  type="number"
-                  step="0.01"
-                  min="-90"
-                  max="90"
-                  placeholder="-90 to 90"
-                  value={maxLat}
-                  onChange={(e) => setMaxLat(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="minLon">Min Longitude</Label>
-                <Input
-                  id="minLon"
-                  type="number"
-                  step="0.01"
-                  min="-180"
-                  max="180"
-                  placeholder="-180 to 180"
-                  value={minLon}
-                  onChange={(e) => setMinLon(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="maxLon">Max Longitude</Label>
-                <Input
-                  id="maxLon"
-                  type="number"
-                  step="0.01"
-                  min="-180"
-                  max="180"
-                  placeholder="-180 to 180"
-                  value={maxLon}
-                  onChange={(e) => setMaxLon(e.target.value)}
-                />
-              </div>
-            </div>
+              <TabsContent value="manual" className="space-y-4 mt-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="minLat">Min Latitude</Label>
+                    <Input
+                      id="minLat"
+                      type="number"
+                      step="0.01"
+                      min="-90"
+                      max="90"
+                      placeholder="-90 to 90"
+                      value={minLat}
+                      onChange={(e) => setMinLat(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="maxLat">Max Latitude</Label>
+                    <Input
+                      id="maxLat"
+                      type="number"
+                      step="0.01"
+                      min="-90"
+                      max="90"
+                      placeholder="-90 to 90"
+                      value={maxLat}
+                      onChange={(e) => setMaxLat(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="minLon">Min Longitude</Label>
+                    <Input
+                      id="minLon"
+                      type="number"
+                      step="0.01"
+                      min="-180"
+                      max="180"
+                      placeholder="-180 to 180"
+                      value={minLon}
+                      onChange={(e) => setMinLon(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="maxLon">Max Longitude</Label>
+                    <Input
+                      id="maxLon"
+                      type="number"
+                      step="0.01"
+                      min="-180"
+                      max="180"
+                      placeholder="-180 to 180"
+                      value={maxLon}
+                      onChange={(e) => setMaxLon(e.target.value)}
+                    />
+                  </div>
+                </div>
 
-            <div className="flex gap-2">
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPresetRegion('nz')}
+                  >
+                    New Zealand (All)
+                  </Button>
+                </div>
+              </TabsContent>
+            </Tabs>
+
+            <div className="flex gap-2 pt-2">
+              <Button
+                className="flex-1"
+                onClick={handleSearch}
+                disabled={isSearching}
+              >
+                <Search className="mr-2 h-4 w-4" />
+                {isSearching ? 'Searching...' : 'Search Region'}
+              </Button>
               <Button
                 variant="outline"
-                size="sm"
-                onClick={() => setPresetRegion('nz')}
+                onClick={handleClear}
+                disabled={isSearching}
               >
-                New Zealand (All)
+                <X className="h-4 w-4" />
               </Button>
             </div>
-          </TabsContent>
-        </Tabs>
-
-        <div className="flex gap-2 pt-2">
-          <Button
-            className="flex-1"
-            onClick={handleSearch}
-            disabled={isSearching}
-          >
-            <Search className="mr-2 h-4 w-4" />
-            {isSearching ? 'Searching...' : 'Search Region'}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={handleClear}
-            disabled={isSearching}
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
           </CardContent>
         </CollapsibleContent>
       </Card>

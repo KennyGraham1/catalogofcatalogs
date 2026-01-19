@@ -32,10 +32,10 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
   initialBounds = null,
   height = '400px'
 }: RegionSelectorMapProps) {
-  const mapRef = useRef<L.Map>(null);
-  const featureGroupRef = useRef<L.FeatureGroup>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const featureGroupRef = useRef<L.FeatureGroup | null>(null);
   const [selectedBounds, setSelectedBounds] = useState<GeographicBounds | null>(initialBounds);
-  const [drawnRectangle, setDrawnRectangle] = useState<L.Rectangle | null>(null);
+  const drawnPolygonRef = useRef<L.Layer | null>(null);
 
   // Fix for Leaflet icons in Next.js
   useEffect(() => {
@@ -47,18 +47,20 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
     });
   }, []);
 
-  // Memoized rectangle creation handler
-  const handleRectangleCreated = useCallback((e: any) => {
-    const layer = e.layer as L.Rectangle;
+  // Memoized polygon creation handler
+  const handlePolygonCreated = useCallback((e: any) => {
+    const layer = e.layer as L.Polygon;
     const bounds = layer.getBounds();
 
-    // Remove previous rectangle if exists
-    if (drawnRectangle && featureGroupRef.current) {
-      featureGroupRef.current.removeLayer(drawnRectangle);
+    // Remove previous polygon if exists (use ref to avoid stale closure)
+    if (drawnPolygonRef.current && featureGroupRef.current) {
+      featureGroupRef.current.removeLayer(drawnPolygonRef.current);
     }
 
-    setDrawnRectangle(layer);
+    // Update ref
+    drawnPolygonRef.current = layer;
 
+    // Extract bounding box from polygon for API compatibility
     const geoBounds: GeographicBounds = {
       minLatitude: bounds.getSouth(),
       maxLatitude: bounds.getNorth(),
@@ -68,12 +70,12 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
 
     setSelectedBounds(geoBounds);
     onRegionSelected(geoBounds);
-  }, [drawnRectangle, onRegionSelected]);
+  }, [onRegionSelected]);
 
-  // Memoized rectangle edit handler
-  const handleRectangleEdited = useCallback((e: any) => {
+  // Memoized polygon edit handler
+  const handlePolygonEdited = useCallback((e: any) => {
     const layers = e.layers;
-    layers.eachLayer((layer: L.Rectangle) => {
+    layers.eachLayer((layer: L.Polygon) => {
       const bounds = layer.getBounds();
       const geoBounds: GeographicBounds = {
         minLatitude: bounds.getSouth(),
@@ -87,26 +89,31 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
     });
   }, [onRegionSelected]);
 
-  // Memoized rectangle deletion handler
-  const handleRectangleDeleted = useCallback(() => {
-    setDrawnRectangle(null);
-    setSelectedBounds(null);
+  // Memoized polygon deletion handler
+  const handlePolygonDeleted = useCallback((e: any) => {
+    const layers = e.layers;
+    layers.eachLayer((layer: L.Layer) => {
+      if (drawnPolygonRef.current === layer) {
+        drawnPolygonRef.current = null;
+        setSelectedBounds(null);
+      }
+    });
   }, []);
 
   // Memoized clear handler
   const handleClear = useCallback(() => {
-    if (drawnRectangle && featureGroupRef.current) {
-      featureGroupRef.current.removeLayer(drawnRectangle);
-      setDrawnRectangle(null);
+    if (drawnPolygonRef.current && featureGroupRef.current) {
+      featureGroupRef.current.removeLayer(drawnPolygonRef.current);
+      drawnPolygonRef.current = null;
       setSelectedBounds(null);
     }
-  }, [drawnRectangle]);
+  }, []);
 
   // Set preset region
   const setPresetRegion = (region: string) => {
-    // Clear existing rectangle
-    if (drawnRectangle && featureGroupRef.current) {
-      featureGroupRef.current.removeLayer(drawnRectangle);
+    // Clear existing polygon
+    if (drawnPolygonRef.current && featureGroupRef.current) {
+      featureGroupRef.current.removeLayer(drawnPolygonRef.current);
     }
 
     let bounds: L.LatLngBounds;
@@ -206,7 +213,7 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
         break;
     }
 
-    // Create rectangle
+    // Create rectangle for preset (keep as rectangle for presets)
     const rectangle = L.rectangle(bounds, {
       color: '#3b82f6',
       weight: 2,
@@ -215,7 +222,7 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
 
     if (featureGroupRef.current) {
       featureGroupRef.current.addLayer(rectangle);
-      setDrawnRectangle(rectangle);
+      drawnPolygonRef.current = rectangle;
       setSelectedBounds(geoBounds);
       onRegionSelected(geoBounds);
 
@@ -242,7 +249,7 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
           Interactive Region Selector
         </CardTitle>
         <CardDescription>
-          Draw a rectangle on the map to select a geographic region, or choose a preset
+          Draw a polygon on the map to select a geographic region, or choose a preset
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -312,26 +319,23 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
             <FeatureGroup ref={featureGroupRef}>
               <EditControl
                 position="topright"
-                onCreated={handleRectangleCreated}
-                onEdited={handleRectangleEdited}
-                onDeleted={handleRectangleDeleted}
+                onCreated={handlePolygonCreated}
+                onEdited={handlePolygonEdited}
+                onDeleted={handlePolygonDeleted}
                 draw={{
-                  rectangle: {
+                  polygon: {
+                    allowIntersection: false,
                     shapeOptions: {
                       color: '#3b82f6',
                       weight: 2,
                       fillOpacity: 0.2,
                     },
                   },
-                  polygon: false,
+                  rectangle: false,
                   circle: false,
                   circlemarker: false,
                   marker: false,
                   polyline: false,
-                }}
-                edit={{
-                  edit: {},
-                  remove: true,
                 }}
               />
             </FeatureGroup>
@@ -342,9 +346,9 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
         <div className="text-xs text-muted-foreground space-y-1">
           <div className="flex items-center gap-1">
             <Badge variant="outline" className="text-xs">Tip</Badge>
-            <span>Click the rectangle tool (□) in the top-right corner to draw a region on the map</span>
+            <span>Click the polygon tool (⬠) in the top-right corner to draw a region on the map</span>
           </div>
-          <div>You can also edit or delete the rectangle after drawing it</div>
+          <div>You can also edit or delete the polygon after drawing it</div>
         </div>
       </CardContent>
     </Card>
