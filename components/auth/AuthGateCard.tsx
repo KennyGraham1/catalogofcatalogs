@@ -23,6 +23,40 @@ interface AuthGateCardProps {
   secondaryAction?: AuthGateAction;
 }
 
+const ROLE_CONTEXT: Record<UserRole, string> = {
+  [UserRole.ADMIN]: 'Full control over system settings and user management.',
+  [UserRole.EDITOR]: 'Can create, edit, merge, and import catalogues.',
+  [UserRole.VIEWER]: 'Read-only access with export permissions.',
+  [UserRole.GUEST]: 'Public read-only access to catalogues.',
+};
+
+const PERMISSION_CONTEXT: Partial<Record<Permission, string>> = {
+  [Permission.CATALOGUE_CREATE]: 'Create new catalogues and upload data.',
+  [Permission.CATALOGUE_READ]: 'View catalogue data.',
+  [Permission.CATALOGUE_UPDATE]: 'Edit catalogue metadata and content.',
+  [Permission.CATALOGUE_DELETE]: 'Delete catalogues and associated data.',
+  [Permission.CATALOGUE_EXPORT]: 'Export catalogues to supported formats.',
+  [Permission.IMPORT_GEONET]: 'Import data from GeoNet.',
+  [Permission.IMPORT_FILE]: 'Import data from file uploads.',
+  [Permission.MERGE_CATALOGUES]: 'Merge multiple catalogues into one.',
+  [Permission.USER_READ]: 'View user accounts.',
+  [Permission.USER_CREATE]: 'Create new user accounts.',
+  [Permission.USER_UPDATE]: 'Update user details.',
+  [Permission.USER_DELETE]: 'Remove user accounts.',
+  [Permission.USER_MANAGE_ROLES]: 'Manage user roles and permissions.',
+  [Permission.SYSTEM_SETTINGS]: 'Manage system settings.',
+  [Permission.SYSTEM_AUDIT]: 'Access system audit logs.',
+};
+
+const formatPermissionLabel = (permission: Permission) => {
+  const [resource, action] = permission.split(':');
+  const actionLabel = action
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+  const resourceLabel = resource.replace(/_/g, ' ');
+  return `${actionLabel} ${resourceLabel}`.trim();
+};
+
 export function AuthGateCard({
   title,
   description,
@@ -32,6 +66,8 @@ export function AuthGateCard({
   secondaryAction,
 }: AuthGateCardProps) {
   const { user, isAuthenticated, isLoading } = useAuth();
+  const roleContext = requiredRole ? ROLE_CONTEXT[requiredRole] : null;
+  const permissionContext = requiredPermission ? PERMISSION_CONTEXT[requiredPermission] : null;
 
   if (isLoading) {
     return (
@@ -109,12 +145,23 @@ export function AuthGateCard({
               </Link>
 
               {(requiredRole || requiredPermission) && (
-                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  {requiredRole && (
-                    <Badge variant="outline">Role: {requiredRole.toUpperCase()}</Badge>
-                  )}
-                  {requiredPermission && (
-                    <Badge variant="outline">Permission: {requiredPermission}</Badge>
+                <div className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[11px] uppercase tracking-wide text-muted-foreground/80">
+                      Access needed
+                    </span>
+                    {requiredRole && (
+                      <Badge variant="outline">{requiredRole.toUpperCase()}</Badge>
+                    )}
+                    {requiredPermission && (
+                      <Badge variant="outline">
+                        {formatPermissionLabel(requiredPermission)}
+                      </Badge>
+                    )}
+                  </div>
+                  {roleContext && <div className="mt-1 text-[11px]">{roleContext}</div>}
+                  {permissionContext && (
+                    <div className="mt-1 text-[11px]">{permissionContext}</div>
                   )}
                 </div>
               )}
