@@ -290,7 +290,11 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
 
   const handleSave = async () => {
     if (readOnly) {
-      toast({ title: 'Read-only mode', description: 'Log in to save settings.', variant: 'destructive' });
+      toast({
+        title: 'Admin access required',
+        description: 'Log in with an Admin account to save settings.',
+        variant: 'destructive'
+      });
       return;
     }
     try {

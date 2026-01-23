@@ -18,6 +18,8 @@ import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DefaultFieldMappings } from '@/components/settings/DefaultFieldMappings';
 import { useAuth } from '@/lib/auth/hooks';
+import { AuthGateCard } from '@/components/auth/AuthGateCard';
+import { UserRole } from '@/lib/auth/types';
 import {
   Settings,
   Database,
@@ -27,8 +29,25 @@ import {
 } from 'lucide-react';
 
 export default function SettingsPage() {
-  const { isAuthenticated } = useAuth();
-  const isReadOnly = !isAuthenticated;
+  const { user } = useAuth();
+  const canManageSettings = user?.role === UserRole.ADMIN;
+  const isReadOnly = !canManageSettings;
+
+  if (!canManageSettings) {
+    return (
+      <AuthGateCard
+        title={user ? 'Admin access required' : 'Login required'}
+        description={
+          user
+            ? 'Only administrators can manage application settings.'
+            : 'Log in with an Admin account to manage settings.'
+        }
+        requiredRole={UserRole.ADMIN}
+        action={user ? { label: 'Back to Dashboard', href: '/dashboard' } : { label: 'Log in', href: '/login' }}
+        secondaryAction={user ? { label: 'View Catalogues', href: '/catalogues' } : { label: 'Back to Home', href: '/' }}
+      />
+    );
+  }
 
   return (
     <div className="container py-6 max-w-7xl mx-auto">

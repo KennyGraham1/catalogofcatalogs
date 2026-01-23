@@ -66,6 +66,8 @@ import { Database } from 'lucide-react';
 import { CatalogueStatsPopover } from '@/components/catalogues/CatalogueStatsPopover';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { useAuth } from '@/lib/auth/hooks';
+import { UserRole } from '@/lib/auth/types';
+import { ToastAction } from '@/components/ui/toast';
 
 interface Catalogue {
   id: string;
@@ -98,8 +100,8 @@ type SearchFields = {
 export default function CataloguesPage() {
   const router = useRouter();
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const isReadOnly = !authLoading && !isAuthenticated;
+  const { user } = useAuth();
+  const canManageCatalogues = user?.role === UserRole.EDITOR || user?.role === UserRole.ADMIN;
 
   // Use global catalogue context
   const { catalogues: contextCatalogues, loading: contextLoading, refreshCatalogues } = useCatalogues();
@@ -170,7 +172,13 @@ export default function CataloguesPage() {
       });
 
       const response = await fetch(`/api/catalogues/search/region?${params}`);
-      if (!response.ok) throw new Error('Failed to search catalogues');
+      if (!response.ok) {
+        const error = await response.json().catch(() => null);
+        const message = error?.details
+          ? `${error.error}: ${error.details}`
+          : error?.error || 'Failed to search catalogues';
+        throw new Error(message);
+      }
 
       const data = await response.json();
       setCatalogues(data.catalogues);
@@ -838,11 +846,21 @@ export default function CataloguesPage() {
   };
 
   const handleEdit = (catalogue: Catalogue) => {
-    if (isReadOnly) {
+    if (!canManageCatalogues) {
       toast({
-        title: 'Read-only mode',
-        description: 'Log in to edit catalogues.',
+        title: user ? 'Insufficient permissions' : 'Login required',
+        description: user
+          ? 'You need Editor or Admin access to edit catalogues.'
+          : 'Log in to edit catalogues.',
         variant: 'destructive',
+        action: (
+          <ToastAction
+            altText={user ? 'View role' : 'Log in'}
+            onClick={() => router.push(user ? '/profile' : '/login')}
+          >
+            {user ? 'View role' : 'Log in'}
+          </ToastAction>
+        ),
       });
       return;
     }
@@ -868,11 +886,21 @@ export default function CataloguesPage() {
   };
 
   const handleDelete = async (catalogue: Catalogue) => {
-    if (isReadOnly) {
+    if (!canManageCatalogues) {
       toast({
-        title: 'Read-only mode',
-        description: 'Log in to delete catalogues.',
+        title: user ? 'Insufficient permissions' : 'Login required',
+        description: user
+          ? 'You need Editor or Admin access to delete catalogues.'
+          : 'Log in to delete catalogues.',
         variant: 'destructive',
+        action: (
+          <ToastAction
+            altText={user ? 'View role' : 'Log in'}
+            onClick={() => router.push(user ? '/profile' : '/login')}
+          >
+            {user ? 'View role' : 'Log in'}
+          </ToastAction>
+        ),
       });
       return;
     }
@@ -881,12 +909,24 @@ export default function CataloguesPage() {
   };
 
   const confirmDelete = async () => {
-    if (isReadOnly) {
+    if (!canManageCatalogues) {
       toast({
-        title: 'Read-only mode',
-        description: 'Log in to delete catalogues.',
+        title: user ? 'Insufficient permissions' : 'Login required',
+        description: user
+          ? 'You need Editor or Admin access to delete catalogues.'
+          : 'Log in to delete catalogues.',
         variant: 'destructive',
+        action: (
+          <ToastAction
+            altText={user ? 'View role' : 'Log in'}
+            onClick={() => router.push(user ? '/profile' : '/login')}
+          >
+            {user ? 'View role' : 'Log in'}
+          </ToastAction>
+        ),
       });
+      setDeleteDialogOpen(false);
+      setSelectedCatalogue(null);
       return;
     }
     if (!selectedCatalogue) return;
@@ -896,7 +936,31 @@ export default function CataloguesPage() {
         method: 'DELETE',
       });
 
-      if (!response.ok) throw new Error('Delete failed');
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          toast({
+            title: response.status === 401 ? 'Login required' : 'Insufficient permissions',
+            description:
+              response.status === 401
+                ? 'Log in to delete catalogues.'
+                : 'You need Editor or Admin access to delete catalogues.',
+            variant: 'destructive',
+            action: (
+              <ToastAction
+                altText={response.status === 401 ? 'Log in' : 'View role'}
+                onClick={() => router.push(response.status === 401 ? '/login' : '/profile')}
+              >
+                {response.status === 401 ? 'Log in' : 'View role'}
+              </ToastAction>
+            ),
+          });
+          setDeleteDialogOpen(false);
+          setSelectedCatalogue(null);
+          return;
+        }
+        const error = await response.json().catch(() => null);
+        throw new Error(error?.error || 'Delete failed');
+      }
 
       toast({
         title: "Catalogue deleted",
@@ -1062,22 +1126,60 @@ export default function CataloguesPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleEdit(catalogue)} disabled={isReadOnly}>
-                          <Edit className="h-4 w-4 mr-2" />
-                          Edit Metadata
-                        </DropdownMenuItem>
+                        {canManageCatalogues ? (
+                          <DropdownMenuItem onClick={() => handleEdit(catalogue)}>
+                            <Edit className="h-4 w-4 mr-2" />
+                            Edit Metadata
+                          </DropdownMenuItem>
+                        ) : (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="flex w-full cursor-not-allowed">
+                                  <DropdownMenuItem disabled className="pointer-events-none text-muted-foreground">
+                                    <Edit className="h-4 w-4 mr-2" />
+                                    Edit Metadata
+                                  </DropdownMenuItem>
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {user ? 'Editor or Admin access required.' : 'Log in to edit catalogues.'}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
                         <DropdownMenuItem onClick={() => handleShare(catalogue)}>
                           <Share2 className="h-4 w-4 mr-2" />
                           Share
                         </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => handleDelete(catalogue)}
-                          className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400"
-                          disabled={isReadOnly}
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
+                        {canManageCatalogues ? (
+                          <DropdownMenuItem
+                            onClick={() => handleDelete(catalogue)}
+                            className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        ) : (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="flex w-full cursor-not-allowed">
+                                  <DropdownMenuItem
+                                    disabled
+                                    className="pointer-events-none text-red-400/70 dark:text-red-400/60"
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {user ? 'Editor or Admin access required.' : 'Log in to delete catalogues.'}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
@@ -1134,6 +1236,9 @@ export default function CataloguesPage() {
                 <Button variant="ghost" size="sm" onClick={handleClearGeoSearch}>
                   Clear Filter
                 </Button>
+              </div>
+              <div className="mt-2 text-xs text-blue-700 dark:text-blue-300">
+                Debug bounds: minLat={geoSearchBounds.minLatitude}, maxLat={geoSearchBounds.maxLatitude}, minLon={geoSearchBounds.minLongitude}, maxLon={geoSearchBounds.maxLongitude}
               </div>
             </div>
           )}
@@ -1272,7 +1377,7 @@ export default function CataloguesPage() {
             <AlertDialogAction 
               onClick={confirmDelete}
               className="bg-red-600 hover:bg-red-700 dark:bg-red-900 dark:hover:bg-red-800"
-              disabled={isReadOnly}
+              disabled={!canManageCatalogues}
             >
               Delete
             </AlertDialogAction>
