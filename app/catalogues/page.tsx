@@ -1101,6 +1101,7 @@ export default function CataloguesPage() {
                   <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
                     Showing catalogues in region: Lat {geoSearchBounds.minLatitude.toFixed(2)}° to {geoSearchBounds.maxLatitude.toFixed(2)}°,
                     Lon {geoSearchBounds.minLongitude.toFixed(2)}° to {geoSearchBounds.maxLongitude.toFixed(2)}°
+                    {geoSearchBounds.minLongitude > geoSearchBounds.maxLongitude ? ' (crosses date line)' : ''}
                   </span>
                 </div>
                 <Button variant="ghost" size="sm" onClick={handleClearGeoSearch}>

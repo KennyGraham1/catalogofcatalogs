@@ -26,6 +26,74 @@ interface RegionSelectorMapProps {
   height?: string;
 }
 
+const clampValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const normalizeLongitude360 = (value: number) => ((value % 360) + 360) % 360;
+
+const normalizeLongitude180 = (value: number) => (value > 180 ? value - 360 : value);
+
+const collectLatLngs = (latlngs: any): L.LatLng[] => {
+  const result: L.LatLng[] = [];
+  const visit = (item: any) => {
+    if (!item) return;
+    if (Array.isArray(item)) {
+      item.forEach(visit);
+      return;
+    }
+    if (typeof item.lat === 'number' && typeof item.lng === 'number') {
+      result.push(item as L.LatLng);
+    }
+  };
+
+  visit(latlngs);
+  return result;
+};
+
+const getPolygonBounds = (layer: L.Polygon): GeographicBounds => {
+  const latlngs = collectLatLngs(layer.getLatLngs());
+  if (latlngs.length === 0) {
+    const bounds = layer.getBounds();
+    return {
+      minLatitude: clampValue(bounds.getSouth(), -90, 90),
+      maxLatitude: clampValue(bounds.getNorth(), -90, 90),
+      minLongitude: clampValue(bounds.getWest(), -180, 180),
+      maxLongitude: clampValue(bounds.getEast(), -180, 180),
+    };
+  }
+
+  const lats = latlngs.map((point) => point.lat);
+  const lons = latlngs.map((point) => point.lng);
+  const minLat = clampValue(Math.min(...lats), -90, 90);
+  const maxLat = clampValue(Math.max(...lats), -90, 90);
+  const minLon = clampValue(Math.min(...lons), -180, 180);
+  const maxLon = clampValue(Math.max(...lons), -180, 180);
+  const span = maxLon - minLon;
+
+  const lons360 = lons.map(normalizeLongitude360);
+  const minLon360 = Math.min(...lons360);
+  const maxLon360 = Math.max(...lons360);
+  const span360 = maxLon360 - minLon360;
+
+  const hasDatelineEdge = lons.some((lon) => lon >= 150) && lons.some((lon) => lon <= -150);
+  const crossesDateline = span > 180 && span360 < span && span360 <= 180 && hasDatelineEdge;
+
+  if (crossesDateline) {
+    return {
+      minLatitude: minLat,
+      maxLatitude: maxLat,
+      minLongitude: normalizeLongitude180(minLon360),
+      maxLongitude: normalizeLongitude180(maxLon360),
+    };
+  }
+
+  return {
+    minLatitude: minLat,
+    maxLatitude: maxLat,
+    minLongitude: minLon,
+    maxLongitude: maxLon,
+  };
+};
+
 // Memoized component for better performance
 export const RegionSelectorMap = memo(function RegionSelectorMap({
   onRegionSelected,
@@ -50,7 +118,6 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
   // Memoized polygon creation handler
   const handlePolygonCreated = useCallback((e: any) => {
     const layer = e.layer as L.Polygon;
-    const bounds = layer.getBounds();
 
     // Remove previous polygon if exists (use ref to avoid stale closure)
     if (drawnPolygonRef.current && featureGroupRef.current) {
@@ -61,12 +128,7 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
     drawnPolygonRef.current = layer;
 
     // Extract bounding box from polygon for API compatibility
-    const geoBounds: GeographicBounds = {
-      minLatitude: bounds.getSouth(),
-      maxLatitude: bounds.getNorth(),
-      minLongitude: bounds.getWest(),
-      maxLongitude: bounds.getEast(),
-    };
+    const geoBounds = getPolygonBounds(layer);
 
     setSelectedBounds(geoBounds);
     onRegionSelected(geoBounds);
@@ -76,13 +138,7 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
   const handlePolygonEdited = useCallback((e: any) => {
     const layers = e.layers;
     layers.eachLayer((layer: L.Polygon) => {
-      const bounds = layer.getBounds();
-      const geoBounds: GeographicBounds = {
-        minLatitude: bounds.getSouth(),
-        maxLatitude: bounds.getNorth(),
-        minLongitude: bounds.getWest(),
-        maxLongitude: bounds.getEast(),
-      };
+      const geoBounds = getPolygonBounds(layer);
 
       setSelectedBounds(geoBounds);
       onRegionSelected(geoBounds);
@@ -297,6 +353,9 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
                   </div>
                   <div>
                     Longitude: {formatCoord(selectedBounds.minLongitude, false)} to {formatCoord(selectedBounds.maxLongitude, false)}
+                    {selectedBounds.minLongitude > selectedBounds.maxLongitude && (
+                      <span className="ml-1 text-xs text-blue-700 dark:text-blue-300">(crosses date line)</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -354,4 +413,3 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
     </Card>
   );
 });
-

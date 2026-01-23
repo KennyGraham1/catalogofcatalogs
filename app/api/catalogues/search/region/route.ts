@@ -37,6 +37,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const epsilon = 1e-6;
+    const clampValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
     // Parse and validate coordinates
     const minLatNum = parseFloat(minLat);
     const maxLatNum = parseFloat(maxLat);
@@ -50,37 +53,37 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Validate coordinate ranges
-    if (minLatNum < -90 || minLatNum > 90 || maxLatNum < -90 || maxLatNum > 90) {
+    // Validate coordinate ranges (allow small epsilon over/under due to rounding)
+    if (minLatNum < -90 - epsilon || minLatNum > 90 + epsilon || maxLatNum < -90 - epsilon || maxLatNum > 90 + epsilon) {
       return NextResponse.json(
         { error: 'Latitude values must be between -90 and 90' },
         { status: 400 }
       );
     }
 
-    if (minLonNum < -180 || minLonNum > 180 || maxLonNum < -180 || maxLonNum > 180) {
+    if (minLonNum < -180 - epsilon || minLonNum > 180 + epsilon || maxLonNum < -180 - epsilon || maxLonNum > 180 + epsilon) {
       return NextResponse.json(
         { error: 'Longitude values must be between -180 and 180' },
         { status: 400 }
       );
     }
 
-    if (minLatNum > maxLatNum) {
+    const clampedMinLat = clampValue(minLatNum, -90, 90);
+    const clampedMaxLat = clampValue(maxLatNum, -90, 90);
+    const clampedMinLon = clampValue(minLonNum, -180, 180);
+    const clampedMaxLon = clampValue(maxLonNum, -180, 180);
+
+    if (clampedMinLat > clampedMaxLat) {
       return NextResponse.json(
         { error: 'Minimum latitude cannot be greater than maximum latitude' },
         { status: 400 }
       );
     }
 
-    if (minLonNum > maxLonNum) {
-      return NextResponse.json(
-        { error: 'Minimum longitude cannot be greater than maximum longitude' },
-        { status: 400 }
-      );
-    }
+    const crossesDateline = clampedMinLon > clampedMaxLon;
 
     // Create cache key from coordinates (rounded to 2 decimal places for better cache hits)
-    const cacheKey = `region:${minLatNum.toFixed(2)},${maxLatNum.toFixed(2)},${minLonNum.toFixed(2)},${maxLonNum.toFixed(2)}`;
+    const cacheKey = `region:${clampedMinLat.toFixed(2)},${clampedMaxLat.toFixed(2)},${clampedMinLon.toFixed(2)},${clampedMaxLon.toFixed(2)}:${crossesDateline ? 'wrap' : 'normal'}`;
 
     // Check cache first
     const cachedResult = apiCache.get<any>(cacheKey);
@@ -90,18 +93,19 @@ export async function GET(request: NextRequest) {
     }
 
     logger.info('Searching catalogues by region', {
-      minLat: minLatNum,
-      maxLat: maxLatNum,
-      minLon: minLonNum,
-      maxLon: maxLonNum
+      minLat: clampedMinLat,
+      maxLat: clampedMaxLat,
+      minLon: clampedMinLon,
+      maxLon: clampedMaxLon,
+      crossesDateline
     });
 
     // Search for catalogues in the region
     const catalogues = await dbQueries.getCataloguesByRegion(
-      minLatNum,
-      maxLatNum,
-      minLonNum,
-      maxLonNum
+      clampedMinLat,
+      clampedMaxLat,
+      clampedMinLon,
+      clampedMaxLon
     );
 
     logger.info('Region search completed', { count: catalogues.length });
@@ -109,10 +113,10 @@ export async function GET(request: NextRequest) {
     const result = {
       catalogues,
       searchRegion: {
-        minLatitude: minLatNum,
-        maxLatitude: maxLatNum,
-        minLongitude: minLonNum,
-        maxLongitude: maxLonNum
+        minLatitude: clampedMinLat,
+        maxLatitude: clampedMaxLat,
+        minLongitude: clampedMinLon,
+        maxLongitude: clampedMaxLon
       },
       count: catalogues.length
     };
@@ -132,4 +136,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

@@ -746,6 +746,8 @@ if (typeof window === 'undefined') {
         throw new Error('Longitude must be between -180 and 180');
       }
 
+      const crossesDateline = minLon > maxLon;
+
       const collection = await getCollection(COLLECTIONS.CATALOGUES);
       const docs = await collection.find({
         min_latitude: { $ne: null },
@@ -755,8 +757,19 @@ if (typeof window === 'undefined') {
         $and: [
           { max_latitude: { $gte: minLat } },
           { min_latitude: { $lte: maxLat } },
-          { max_longitude: { $gte: minLon } },
-          { min_longitude: { $lte: maxLon } }
+          crossesDateline
+            ? {
+                $or: [
+                  { max_longitude: { $gte: minLon } },
+                  { min_longitude: { $lte: maxLon } }
+                ]
+              }
+            : {
+                $and: [
+                  { max_longitude: { $gte: minLon } },
+                  { min_longitude: { $lte: maxLon } }
+                ]
+              }
         ]
       }).sort({ created_at: -1 }).toArray();
 

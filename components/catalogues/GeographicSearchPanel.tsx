@@ -124,15 +124,6 @@ export const GeographicSearchPanel = memo(function GeographicSearchPanel({
         return;
       }
 
-      if (minLonNum > maxLonNum) {
-        toast({
-          title: 'Validation Error',
-          description: 'Minimum longitude cannot be greater than maximum longitude',
-          variant: 'destructive',
-        });
-        return;
-      }
-
       bounds = {
         minLatitude: minLatNum,
         maxLatitude: maxLatNum,
@@ -247,7 +238,7 @@ export const GeographicSearchPanel = memo(function GeographicSearchPanel({
                   <div className="space-y-2">
                     <div className="flex items-center gap-1.5">
                       <Label htmlFor="minLon">Min Longitude</Label>
-                      <InfoTooltip content="Western boundary in degrees (-180 to 180)." />
+                      <InfoTooltip content="Western boundary in degrees (-180 to 180). For date line regions, this can be greater than max longitude." />
                     </div>
                     <Input
                       id="minLon"
@@ -263,7 +254,7 @@ export const GeographicSearchPanel = memo(function GeographicSearchPanel({
                   <div className="space-y-2">
                     <div className="flex items-center gap-1.5">
                       <Label htmlFor="maxLon">Max Longitude</Label>
-                      <InfoTooltip content="Eastern boundary in degrees (-180 to 180)." />
+                      <InfoTooltip content="Eastern boundary in degrees (-180 to 180). For date line regions, this can be less than min longitude." />
                     </div>
                     <Input
                       id="maxLon"
@@ -287,6 +278,9 @@ export const GeographicSearchPanel = memo(function GeographicSearchPanel({
                     New Zealand (All)
                   </Button>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  Tip: If your region crosses the international date line, enter a min longitude greater than the max longitude (e.g., 170 to -170).
+                </p>
               </TabsContent>
             </Tabs>
 

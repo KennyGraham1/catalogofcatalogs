@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth/config';
-import { getUserById } from '@/lib/auth/utils';
-import { hashPassword, verifyPassword } from '@/lib/auth/utils';
-import { connectToDatabase } from '@/lib/mongodb';
+import { getUserById, hashPassword, verifyPassword } from '@/lib/auth/utils';
+import { getCollection, COLLECTIONS } from '@/lib/mongodb';
+import type { User } from '@/lib/auth/types';
 import { AppError } from '@/lib/errors';
 
 /**
@@ -62,9 +62,9 @@ export async function POST(request: NextRequest) {
     const newPasswordHash = await hashPassword(newPassword);
 
     // Update password in database
-    const { db } = await connectToDatabase();
-    const result = await db.collection('users').updateOne(
-      { user_id: session.user.id },
+    const usersCollection = await getCollection<User>(COLLECTIONS.USERS);
+    const result = await usersCollection.updateOne(
+      { id: user.id },
       {
         $set: {
           password_hash: newPasswordHash,
@@ -97,4 +97,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
