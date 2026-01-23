@@ -68,13 +68,69 @@ export const TECHNICAL_TERMS = {
     term: 'Quality Grade',
     definition: 'Overall assessment of earthquake location quality from A+ (excellent) to F (poor), based on location uncertainty, network geometry, solution quality, and magnitude reliability.'
   },
+  qualityScore: {
+    term: 'Quality Score',
+    definition: 'A numeric quality score (0-100) derived from station coverage, azimuthal gap, uncertainty, and solution fit. Higher scores indicate more reliable event locations.'
+  },
+  magnitude: {
+    term: 'Magnitude',
+    definition: 'A logarithmic measure of earthquake size or energy release. Each whole number increase corresponds to ~32× more energy.'
+  },
   magnitudeType: {
     term: 'Magnitude Type',
     definition: 'The method used to calculate earthquake magnitude. Common types: ML (local), Mw (moment), mb (body wave), Ms (surface wave). Mw is preferred for large earthquakes.'
   },
+  magnitudeFrequencyDistribution: {
+    term: 'Magnitude-Frequency Distribution (MFD)',
+    definition: 'Describes how earthquake counts change with magnitude. Used to evaluate completeness and seismicity rates.'
+  },
+  completenessMagnitude: {
+    term: 'Completeness Magnitude (Mc)',
+    definition: 'The lowest magnitude above which the catalogue is considered complete and reliably recorded.'
+  },
+  bValue: {
+    term: 'b-value',
+    definition: 'Slope of the Gutenberg-Richter relation. Higher values indicate relatively more small earthquakes.'
+  },
+  aValue: {
+    term: 'a-value',
+    definition: 'Intercept of the Gutenberg-Richter relation. Represents overall seismicity rate.'
+  },
+  rSquared: {
+    term: 'R^2 (Goodness of Fit)',
+    definition: 'Measure of how well a model fits the data. Values closer to 1 indicate a better fit.'
+  },
+  seismicMoment: {
+    term: 'Seismic Moment (M0)',
+    definition: 'Physical measure of earthquake size based on fault area, slip, and rock rigidity; measured in N·m.'
+  },
+  momentMagnitude: {
+    term: 'Moment Magnitude (Mw)',
+    definition: 'Magnitude scale derived from seismic moment, preferred for large earthquakes because it does not saturate.'
+  },
   depth: {
     term: 'Depth',
     definition: 'Distance from the Earth\'s surface to the earthquake hypocenter, measured in kilometers. Shallow earthquakes (< 70 km) are typically more damaging than deep ones.'
+  },
+  strike: {
+    term: 'Strike',
+    definition: 'Compass direction of the horizontal line on a fault plane, measured clockwise from north (degrees).'
+  },
+  dip: {
+    term: 'Dip',
+    definition: 'Angle between the fault plane and horizontal, measured in degrees (0° is horizontal, 90° is vertical).'
+  },
+  rake: {
+    term: 'Rake',
+    definition: 'Direction of slip on the fault plane, measured within the plane.'
+  },
+  timeWindow: {
+    term: 'Time Window',
+    definition: 'Maximum time difference between events to consider them duplicates during merging. Smaller windows reduce false matches but may miss duplicates.'
+  },
+  distanceThreshold: {
+    term: 'Distance Threshold',
+    definition: 'Maximum spatial separation (in kilometers) between events to consider them duplicates during merging.'
   },
   uncertainty: {
     term: 'Location Uncertainty',
@@ -176,4 +232,3 @@ export function LabelWithTooltip({
     </div>
   );
 }
-

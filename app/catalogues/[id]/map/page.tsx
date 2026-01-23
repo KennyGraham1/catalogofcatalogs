@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, MapPin, AlertCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
+import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 
 interface CatalogueEvent {
   id: number | string;
@@ -117,25 +118,37 @@ export default function CatalogueMapPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card>
               <CardHeader className="pb-2">
-                <CardDescription>Total Events</CardDescription>
+                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <span>Total Events</span>
+                  <InfoTooltip content="Number of events with coordinates loaded for this catalogue." />
+                </div>
                 <CardTitle className="text-2xl">{stats.total}</CardTitle>
               </CardHeader>
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardDescription>With Uncertainty</CardDescription>
+                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <span>With Uncertainty</span>
+                  <TechnicalTermTooltip term="uncertainty" />
+                </div>
                 <CardTitle className="text-2xl">{stats.withUncertainty}</CardTitle>
               </CardHeader>
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardDescription>Focal Mechanisms</CardDescription>
+                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <span>Focal Mechanisms</span>
+                  <TechnicalTermTooltip term="focalMechanism" />
+                </div>
                 <CardTitle className="text-2xl">{stats.withFocalMechanisms}</CardTitle>
               </CardHeader>
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardDescription>Station Data</CardDescription>
+                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <span>Station Data</span>
+                  <InfoTooltip content="Events that include picks or arrivals from seismic stations." />
+                </div>
                 <CardTitle className="text-2xl">{stats.withStationData}</CardTitle>
               </CardHeader>
             </Card>

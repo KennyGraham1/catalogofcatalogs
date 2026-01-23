@@ -3,6 +3,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
 
 export interface MergeMetadata {
   merge_description?: string;
@@ -31,7 +32,10 @@ export function MergeMetadataForm({ metadata, onChange }: MergeMetadataFormProps
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="merge_description">Merge Description</Label>
+          <div className="flex items-center gap-1.5">
+            <Label htmlFor="merge_description">Merge Description</Label>
+            <InfoTooltip content="Summarize which catalogues are merged and the high-level goal." />
+          </div>
           <Textarea
             id="merge_description"
             placeholder="Describe what catalogues are being merged and why..."
@@ -45,7 +49,10 @@ export function MergeMetadataForm({ metadata, onChange }: MergeMetadataFormProps
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="merge_use_case">Intended Use Case</Label>
+          <div className="flex items-center gap-1.5">
+            <Label htmlFor="merge_use_case">Intended Use Case</Label>
+            <InfoTooltip content="Describe the analysis or workflow this merged catalogue supports." />
+          </div>
           <Textarea
             id="merge_use_case"
             placeholder="What is the intended use of this merged catalogue?"
@@ -59,7 +66,10 @@ export function MergeMetadataForm({ metadata, onChange }: MergeMetadataFormProps
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="merge_methodology">Merge Methodology</Label>
+          <div className="flex items-center gap-1.5">
+            <Label htmlFor="merge_methodology">Merge Methodology</Label>
+            <InfoTooltip content="Record the strategy, thresholds, and any overrides used for merging." />
+          </div>
           <Textarea
             id="merge_methodology"
             placeholder="Describe the merge strategy and parameters used..."
@@ -73,7 +83,10 @@ export function MergeMetadataForm({ metadata, onChange }: MergeMetadataFormProps
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="merge_quality_assessment">Quality Assessment</Label>
+          <div className="flex items-center gap-1.5">
+            <Label htmlFor="merge_quality_assessment">Quality Assessment</Label>
+            <InfoTooltip content="Note validation steps, caveats, or known limitations of the merged output." />
+          </div>
           <Textarea
             id="merge_quality_assessment"
             placeholder="Assess the quality and reliability of the merged result..."
@@ -89,4 +102,3 @@ export function MergeMetadataForm({ metadata, onChange }: MergeMetadataFormProps
     </Card>
   );
 }
-

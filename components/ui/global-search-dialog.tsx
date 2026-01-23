@@ -26,15 +26,22 @@ export function GlobalSearchDialog({ open, onOpenChange }: GlobalSearchDialogPro
             <DialogTitle>Search Events</DialogTitle>
           </div>
           <DialogDescription>
-            Search for earthquake events by ID, location, magnitude, or other attributes
+            Search events across all catalogues by ID, location, magnitude, depth, or date. Use tokens for precision.
           </DialogDescription>
         </DialogHeader>
 
         <div className="px-6 pb-6">
           <GlobalSearch 
-            placeholder="Search by event ID, location, magnitude..."
+            placeholder="Search events (e.g., id:us1234 mag:>=4 region:wellington)"
             onResultSelect={() => onOpenChange(false)}
           />
+          <p className="mt-2 text-xs text-muted-foreground">
+            Tokens: id:, public:, type:, region:, location:, mag:, depth:, date:, catalogue:. Example:
+            <span className="font-medium">{' mag:>=4 depth:<10 date:2023-01-01..2023-12-31'}</span>
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Date format: YYYY-MM-DD (or YYYY-MM). Ranges use <span className="font-medium">..</span>.
+          </p>
         </div>
 
         <div className="border-t px-6 py-3 text-xs text-muted-foreground bg-muted/30">
@@ -63,4 +70,3 @@ export function GlobalSearchDialog({ open, onOpenChange }: GlobalSearchDialogPro
     </Dialog>
   );
 }
-

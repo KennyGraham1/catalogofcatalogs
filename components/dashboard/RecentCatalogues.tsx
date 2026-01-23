@@ -30,7 +30,11 @@ export function RecentCatalogues() {
       return {
         id: cat.id,
         name: cat.name,
-        date: new Date(cat.created_at).toLocaleDateString(),
+        date: new Date(cat.created_at).toLocaleDateString('en-GB', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+        }),
         events: cat.event_count,
         status: cat.status,
         isMerged

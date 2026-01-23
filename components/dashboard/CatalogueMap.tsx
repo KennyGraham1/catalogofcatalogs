@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Activity, Calendar, Ruler, MapPin, Filter, Info } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import { getMagnitudeColor, getMagnitudeRadius, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 import { useMapColors } from '@/hooks/use-map-theme';
 import 'leaflet/dist/leaflet.css';
@@ -156,7 +157,14 @@ export const CatalogueMap = memo(function CatalogueMap() {
             <div className="space-y-1 text-sm">
               <div className="flex items-center gap-2">
                 <Calendar className="h-3 w-3 text-muted-foreground" />
-                <span>{new Date(event.time).toLocaleString()}</span>
+                <span>{new Date(event.time).toLocaleString('en-GB', {
+                  day: '2-digit',
+                  month: '2-digit',
+                  year: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                })}</span>
               </div>
               <div className="flex items-center gap-2">
                 <MapPin className="h-3 w-3 text-muted-foreground" />
@@ -283,7 +291,10 @@ export const CatalogueMap = memo(function CatalogueMap() {
 
       {/* Legend */}
       <Card className="absolute bottom-4 right-4 z-[2000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[220px]">
-        <h4 className="font-semibold text-sm mb-3">Depth (Color)</h4>
+        <div className="flex items-center gap-1.5 mb-3">
+          <h4 className="font-semibold text-sm">Depth (Color)</h4>
+          <TechnicalTermTooltip term="depth" />
+        </div>
         <div className="space-y-1.5 text-xs">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#06B6D4' }}></div>
@@ -306,7 +317,10 @@ export const CatalogueMap = memo(function CatalogueMap() {
             <span>&gt;200 km (Deep)</span>
           </div>
         </div>
-        <h4 className="font-semibold text-sm mt-4 mb-2">Magnitude (Size)</h4>
+        <div className="flex items-center gap-1.5 mt-4 mb-2">
+          <h4 className="font-semibold text-sm">Magnitude (Size)</h4>
+          <TechnicalTermTooltip term="magnitude" />
+        </div>
         <div className="space-y-1.5 text-xs">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#0D9488' }}></div>
@@ -371,25 +385,47 @@ const EventPopup = memo(function EventPopup({ event, getMagnitudeLabel }: { even
       <div className="space-y-2">
         <div className="flex items-center gap-2 text-sm">
           <Activity className="h-4 w-4 text-primary" />
-          <span className="font-medium">M {event.magnitude.toFixed(1)}{event.magnitude_type ? ` ${event.magnitude_type}` : ''}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">M {event.magnitude.toFixed(1)}{event.magnitude_type ? ` ${event.magnitude_type}` : ''}</span>
+            <TechnicalTermTooltip term="magnitude" />
+          </div>
         </div>
         {event.depth !== null && (
           <div className="flex items-center gap-2 text-sm">
             <Ruler className="h-4 w-4 text-primary" />
-            <span>Depth: {event.depth.toFixed(1)} km</span>
+            <div className="flex items-center gap-1.5">
+              <span>Depth: {event.depth.toFixed(1)} km</span>
+              <TechnicalTermTooltip term="depth" />
+            </div>
           </div>
         )}
         <div className="flex items-center gap-2 text-sm">
           <Calendar className="h-4 w-4 text-primary" />
-          <span className="text-xs">{new Date(event.time).toLocaleString()}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs">{new Date(event.time).toLocaleString('en-GB', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            })}</span>
+            <InfoTooltip content="Event origin time in local timezone." />
+          </div>
         </div>
         <div className="flex items-center gap-2 text-sm">
           <MapPin className="h-4 w-4 text-primary" />
-          <span className="text-xs">{event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs">{event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°</span>
+            <InfoTooltip content="Epicenter coordinates in decimal degrees." />
+          </div>
         </div>
         {event.event_type && (
           <div className="pt-2 border-t">
-            <Badge variant="outline">{event.event_type}</Badge>
+            <div className="flex items-center gap-1.5">
+              <Badge variant="outline">{event.event_type}</Badge>
+              <InfoTooltip content="Event classification from the reporting catalogue." />
+            </div>
           </div>
         )}
       </div>

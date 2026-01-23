@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Activity, Ruler, Calendar, MapPin, Layers, Target, Radio, Info } from 'lucide-react';
+import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { UncertaintyEllipse } from './UncertaintyEllipse';
@@ -160,9 +161,12 @@ export function EnhancedMapView({
           </h3>
 
           <div className="flex items-center justify-between gap-3">
-            <Label htmlFor="uncertainty" className="text-sm cursor-pointer">
-              Uncertainty Ellipses
-            </Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="uncertainty" className="text-sm cursor-pointer">
+                Uncertainty Ellipses
+              </Label>
+              <TechnicalTermTooltip term="uncertainty" />
+            </div>
             <Switch
               id="uncertainty"
               checked={showUncertainty}
@@ -171,9 +175,12 @@ export function EnhancedMapView({
           </div>
 
           <div className="flex items-center justify-between gap-3">
-            <Label htmlFor="focal" className="text-sm cursor-pointer">
-              Focal Mechanisms
-            </Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="focal" className="text-sm cursor-pointer">
+                Focal Mechanisms
+              </Label>
+              <TechnicalTermTooltip term="focalMechanism" />
+            </div>
             <Switch
               id="focal"
               checked={showFocalMechanisms}
@@ -182,9 +189,12 @@ export function EnhancedMapView({
           </div>
 
           <div className="flex items-center justify-between gap-3">
-            <Label htmlFor="stations" className="text-sm cursor-pointer">
-              Station Coverage
-            </Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="stations" className="text-sm cursor-pointer">
+                Station Coverage
+              </Label>
+              <InfoTooltip content="Shows station markers and link lines for coverage context." />
+            </div>
             <Switch
               id="stations"
               checked={showStations}
@@ -193,9 +203,12 @@ export function EnhancedMapView({
           </div>
 
           <div className="flex items-center justify-between gap-3">
-            <Label htmlFor="quality" className="text-sm cursor-pointer">
-              Quality Colors
-            </Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="quality" className="text-sm cursor-pointer">
+                Quality Colors
+              </Label>
+              <TechnicalTermTooltip term="qualityScore" />
+            </div>
             <Switch
               id="quality"
               checked={showQualityColors}
@@ -204,9 +217,12 @@ export function EnhancedMapView({
           </div>
 
           <div className="pt-2 border-t">
-            <Label htmlFor="sampleSize" className="text-sm font-medium mb-2 block">
-              Max Events to Display
-            </Label>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Label htmlFor="sampleSize" className="text-sm font-medium">
+                Max Events to Display
+              </Label>
+              <InfoTooltip content="Limits the number of events rendered for performance." />
+            </div>
             <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(value === 'all' ? Infinity : Number(value))}>
               <SelectTrigger className="w-full">
                 <SelectValue />
@@ -251,7 +267,11 @@ export function EnhancedMapView({
           {/* Earthquake markers - using intelligent sampling for performance */}
           {/* Sort by magnitude (small to large) so larger events render on top */}
           {[...sampledEvents].sort((a, b) => a.magnitude - b.magnitude).map((event) => {
-            const eventDate = new Date(event.time).toLocaleDateString();
+            const eventDate = new Date(event.time).toLocaleDateString('en-GB', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+            });
             const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
 
             return (
@@ -363,9 +383,16 @@ export function EnhancedMapView({
 
       {/* Legend */}
       <Card className="absolute bottom-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg">
-        <h4 className="font-semibold text-sm mb-2">
-          {showQualityColors ? 'Quality Score' : 'Magnitude Scale'}
-        </h4>
+        <div className="flex items-center gap-1.5 mb-2">
+          <h4 className="font-semibold text-sm">
+            {showQualityColors ? 'Quality Score' : 'Magnitude Scale'}
+          </h4>
+          {showQualityColors ? (
+            <TechnicalTermTooltip term="qualityScore" />
+          ) : (
+            <TechnicalTermTooltip term="magnitude" />
+          )}
+        </div>
         {showQualityColors ? (
           <div className="space-y-1 text-xs">
             <div className="flex items-center gap-2">
@@ -391,7 +418,10 @@ export function EnhancedMapView({
           </div>
         ) : (
           <div className="space-y-2">
-            <p className="text-xs text-muted-foreground mb-2">Circle size represents magnitude</p>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
+              <span>Circle size represents magnitude</span>
+              <TechnicalTermTooltip term="magnitude" />
+            </div>
             <div className="flex items-center justify-center gap-1 py-2">
               <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
               <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0"></div>
@@ -424,32 +454,54 @@ function EventPopup({ event, qualityScores }: { event: EnhancedEvent; qualitySco
       <div className="space-y-2">
         <div className="flex items-center gap-2 text-sm">
           <Activity className="h-4 w-4 text-primary" />
-          <span className="font-medium">Magnitude:</span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">Magnitude:</span>
+            <TechnicalTermTooltip term="magnitude" />
+          </div>
           <span>{event.magnitude.toFixed(1)} {event.magnitude_type || ''}</span>
         </div>
 
         <div className="flex items-center gap-2 text-sm">
           <Ruler className="h-4 w-4 text-primary" />
-          <span className="font-medium">Depth:</span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">Depth:</span>
+            <TechnicalTermTooltip term="depth" />
+          </div>
           <span>{event.depth?.toFixed(1) || 'N/A'} km</span>
         </div>
 
         <div className="flex items-center gap-2 text-sm">
           <Calendar className="h-4 w-4 text-primary" />
-          <span className="font-medium">Time:</span>
-          <span className="text-xs">{new Date(event.time).toLocaleString()}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">Time:</span>
+            <InfoTooltip content="Event origin time in local timezone." />
+          </div>
+          <span className="text-xs">{new Date(event.time).toLocaleString('en-GB', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          })}</span>
         </div>
 
         <div className="flex items-center gap-2 text-sm">
           <MapPin className="h-4 w-4 text-primary" />
-          <span className="font-medium">Location:</span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">Location:</span>
+            <InfoTooltip content="Epicenter coordinates in decimal degrees." />
+          </div>
           <span className="text-xs">{event.latitude.toFixed(4)}°, {event.longitude.toFixed(4)}°</span>
         </div>
 
         {event.azimuthal_gap !== null && event.azimuthal_gap !== undefined && (
           <div className="flex items-center gap-2 text-sm">
             <Target className="h-4 w-4 text-primary" />
-            <span className="font-medium">Azimuthal Gap:</span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium">Azimuthal Gap:</span>
+              <TechnicalTermTooltip term="azimuthalGap" />
+            </div>
             <span>{event.azimuthal_gap.toFixed(0)}°</span>
           </div>
         )}
@@ -457,7 +509,10 @@ function EventPopup({ event, qualityScores }: { event: EnhancedEvent; qualitySco
         {event.used_station_count !== null && event.used_station_count !== undefined && (
           <div className="flex items-center gap-2 text-sm">
             <Radio className="h-4 w-4 text-primary" />
-            <span className="font-medium">Stations:</span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium">Stations:</span>
+              <TechnicalTermTooltip term="stationCount" />
+            </div>
             <span>{event.used_station_count}</span>
           </div>
         )}
@@ -465,4 +520,3 @@ function EventPopup({ event, qualityScores }: { event: EnhancedEvent; qualitySco
     </div>
   );
 }
-

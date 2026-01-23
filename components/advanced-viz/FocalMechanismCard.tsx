@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Compass, Layers, TrendingDown } from 'lucide-react';
+import { TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import { 
   FocalMechanism, 
   generateBeachBallSVG, 
@@ -65,6 +66,7 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Compass className="h-4 w-4" />
                       <span>Strike</span>
+                      <TechnicalTermTooltip term="strike" />
                     </div>
                     <div className="text-2xl font-bold">
                       {mechanism.nodalPlane1.strike.toFixed(0)}°
@@ -75,6 +77,7 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Layers className="h-4 w-4" />
                       <span>Dip</span>
+                      <TechnicalTermTooltip term="dip" />
                     </div>
                     <div className="text-2xl font-bold">
                       {mechanism.nodalPlane1.dip.toFixed(0)}°
@@ -85,6 +88,7 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <TrendingDown className="h-4 w-4" />
                       <span>Rake</span>
+                      <TechnicalTermTooltip term="rake" />
                     </div>
                     <div className="text-2xl font-bold">
                       {mechanism.nodalPlane1.rake.toFixed(0)}°
@@ -110,6 +114,7 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Compass className="h-4 w-4" />
                       <span>Strike</span>
+                      <TechnicalTermTooltip term="strike" />
                     </div>
                     <div className="text-2xl font-bold">
                       {mechanism.nodalPlane2.strike.toFixed(0)}°
@@ -120,6 +125,7 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Layers className="h-4 w-4" />
                       <span>Dip</span>
+                      <TechnicalTermTooltip term="dip" />
                     </div>
                     <div className="text-2xl font-bold">
                       {mechanism.nodalPlane2.dip.toFixed(0)}°
@@ -130,6 +136,7 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <TrendingDown className="h-4 w-4" />
                       <span>Rake</span>
+                      <TechnicalTermTooltip term="rake" />
                     </div>
                     <div className="text-2xl font-bold">
                       {mechanism.nodalPlane2.rake.toFixed(0)}°
@@ -231,4 +238,3 @@ function getFaultTypeExplanation(type: string): string {
       return 'The fault mechanism indicates the type of motion that occurred during the earthquake.';
   }
 }
-

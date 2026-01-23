@@ -3,6 +3,7 @@ import { dbQueries } from '@/lib/db';
 import { Logger, DatabaseError, formatErrorResponse } from '@/lib/errors';
 import { apiCache, generateCacheKey, catalogueCache, invalidateCacheByPrefix } from '@/lib/cache';
 import { applyRateLimit, readRateLimiter, apiRateLimiter } from '@/lib/rate-limiter';
+import { requireEditor } from '@/lib/auth/middleware';
 import { v4 as uuidv4 } from 'uuid';
 
 // Force dynamic rendering for this API route
@@ -63,6 +64,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    // Require Editor role or higher
+    const authResult = await requireEditor(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     // Apply rate limiting (30 requests per minute for write operations)
     const rateLimitResult = applyRateLimit(request, apiRateLimiter, 30);
 

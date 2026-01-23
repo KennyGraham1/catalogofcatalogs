@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Activity, Ruler, Calendar, MapPin, Layers, Target, Radio, Zap, Info } from 'lucide-react';
+import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -154,9 +155,12 @@ export default function UnifiedEarthquakeMap({
           </h3>
 
           <div className="flex items-center justify-between gap-3">
-            <Label htmlFor="faults" className="text-xs cursor-pointer">
-              NZ Active Faults
-            </Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="faults" className="text-xs cursor-pointer">
+                NZ Active Faults
+              </Label>
+              <InfoTooltip content="Overlay active fault traces to compare events with known structures." />
+            </div>
             <Switch
               id="faults"
               checked={showFaults}
@@ -165,7 +169,10 @@ export default function UnifiedEarthquakeMap({
           </div>
 
           <div className="pt-2 border-t">
-            <Label className="text-xs font-medium mb-2 block">Color By</Label>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Label className="text-xs font-medium">Color By</Label>
+              <InfoTooltip content="Choose which attribute determines marker color." />
+            </div>
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <input
@@ -176,7 +183,10 @@ export default function UnifiedEarthquakeMap({
                   onChange={() => setColorMode('magnitude')}
                   className="cursor-pointer"
                 />
-                <Label htmlFor="color-magnitude" className="text-xs cursor-pointer">Magnitude</Label>
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="color-magnitude" className="text-xs cursor-pointer">Magnitude</Label>
+                  <TechnicalTermTooltip term="magnitude" />
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <input
@@ -187,7 +197,10 @@ export default function UnifiedEarthquakeMap({
                   onChange={() => setColorMode('depth')}
                   className="cursor-pointer"
                 />
-                <Label htmlFor="color-depth" className="text-xs cursor-pointer">Depth</Label>
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="color-depth" className="text-xs cursor-pointer">Depth</Label>
+                  <TechnicalTermTooltip term="depth" />
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <input
@@ -198,15 +211,21 @@ export default function UnifiedEarthquakeMap({
                   onChange={() => setColorMode('quality')}
                   className="cursor-pointer"
                 />
-                <Label htmlFor="color-quality" className="text-xs cursor-pointer">Quality</Label>
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="color-quality" className="text-xs cursor-pointer">Quality</Label>
+                  <TechnicalTermTooltip term="qualityScore" />
+                </div>
               </div>
             </div>
           </div>
 
           <div className="pt-2 border-t">
-            <Label htmlFor="sampleSize" className="text-xs font-medium mb-2 block">
-              Max Events to Display
-            </Label>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Label htmlFor="sampleSize" className="text-xs font-medium">
+                Max Events to Display
+              </Label>
+              <InfoTooltip content="Limits rendered events for performance." />
+            </div>
             <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(value === 'all' ? Infinity : Number(value))}>
               <SelectTrigger className="w-full">
                 <SelectValue />
@@ -266,7 +285,11 @@ export default function UnifiedEarthquakeMap({
           {/* Earthquake markers - using intelligent sampling for performance */}
           {/* Sort by magnitude (small to large) so larger events render on top */}
           {[...sampledEarthquakes].sort((a, b) => a.magnitude - b.magnitude).map((eq) => {
-            const eventDate = new Date(eq.time).toLocaleDateString();
+            const eventDate = new Date(eq.time).toLocaleDateString('en-GB', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+            });
             const ariaLabel = `Magnitude ${eq.magnitude} earthquake at ${eq.latitude.toFixed(2)}, ${eq.longitude.toFixed(2)} on ${eventDate}`;
 
             return (
@@ -332,32 +355,53 @@ function EventPopup({ event, qualityScores }: { event: Earthquake; qualityScores
       <div className="space-y-2">
         <div className="flex items-center gap-2 text-sm">
           <Activity className="h-4 w-4 text-primary" />
-          <span className="font-medium">Magnitude:</span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">Magnitude:</span>
+            <TechnicalTermTooltip term="magnitude" />
+          </div>
           <span className="font-bold">{event.magnitude.toFixed(1)} {event.magnitude_type || ''}</span>
         </div>
 
         <div className="flex items-center gap-2 text-sm">
           <Ruler className="h-4 w-4 text-primary" />
-          <span className="font-medium">Depth:</span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">Depth:</span>
+            <TechnicalTermTooltip term="depth" />
+          </div>
           <span>{event.depth?.toFixed(1) || 'N/A'} km</span>
         </div>
 
         <div className="flex items-center gap-2 text-sm">
           <Calendar className="h-4 w-4 text-primary" />
-          <span className="font-medium">Time:</span>
-          <span className="text-xs">{new Date(event.time).toLocaleString()}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">Time:</span>
+            <InfoTooltip content="Event origin time in local timezone." />
+          </div>
+          <span className="text-xs">{new Date(event.time).toLocaleString('en-GB', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          })}</span>
         </div>
 
         <div className="flex items-center gap-2 text-sm">
           <MapPin className="h-4 w-4 text-primary" />
-          <span className="font-medium">Location:</span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">Location:</span>
+            <InfoTooltip content="Epicenter coordinates in decimal degrees." />
+          </div>
           <span className="text-xs">{event.latitude.toFixed(4)}°, {event.longitude.toFixed(4)}°</span>
         </div>
 
         {event.catalogue && (
           <div className="pt-2 border-t">
-            <div className="text-xs text-muted-foreground">
-              <span className="font-medium">Source:</span> {event.catalogue}
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="font-medium">Source:</span>
+              <InfoTooltip content="Catalogue or agency that reported the event." />
+              <span>{event.catalogue}</span>
             </div>
           </div>
         )}
@@ -365,7 +409,10 @@ function EventPopup({ event, qualityScores }: { event: Earthquake; qualityScores
         {event.azimuthal_gap !== null && event.azimuthal_gap !== undefined && (
           <div className="flex items-center gap-2 text-sm">
             <Target className="h-4 w-4 text-primary" />
-            <span className="font-medium">Azimuthal Gap:</span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium">Azimuthal Gap:</span>
+              <TechnicalTermTooltip term="azimuthalGap" />
+            </div>
             <span>{event.azimuthal_gap.toFixed(0)}°</span>
           </div>
         )}
@@ -373,7 +420,10 @@ function EventPopup({ event, qualityScores }: { event: Earthquake; qualityScores
         {event.used_station_count !== null && event.used_station_count !== undefined && (
           <div className="flex items-center gap-2 text-sm">
             <Radio className="h-4 w-4 text-primary" />
-            <span className="font-medium">Stations:</span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium">Stations:</span>
+              <TechnicalTermTooltip term="stationCount" />
+            </div>
             <span>{event.used_station_count}</span>
           </div>
         )}
@@ -383,7 +433,10 @@ function EventPopup({ event, qualityScores }: { event: Earthquake; qualityScores
           <div className="pt-2 border-t mt-2">
             <div className="flex items-center gap-2 mb-2">
               <Zap className="h-4 w-4 text-orange-500" />
-              <span className="font-medium text-sm">Nearby Faults ({faultCount})</span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-medium text-sm">Nearby Faults ({faultCount})</span>
+                <InfoTooltip content="Closest faults within 50 km of the epicenter." />
+              </div>
             </div>
             <div className="space-y-1.5">
               {faults.map((fault, idx) => (
@@ -413,9 +466,18 @@ function EventPopup({ event, qualityScores }: { event: Earthquake; qualityScores
 function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string; showFaults: boolean; faultCount?: number }) {
   return (
     <Card className="absolute bottom-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[220px]">
-      <h4 className="font-semibold text-sm mb-3">
-        {colorMode === 'quality' ? 'Quality Score' : colorMode === 'depth' ? 'Depth Scale' : 'Magnitude Scale'}
-      </h4>
+      <div className="flex items-center gap-1.5 mb-3">
+        <h4 className="font-semibold text-sm">
+          {colorMode === 'quality' ? 'Quality Score' : colorMode === 'depth' ? 'Depth Scale' : 'Magnitude Scale'}
+        </h4>
+        {colorMode === 'quality' ? (
+          <TechnicalTermTooltip term="qualityScore" />
+        ) : colorMode === 'depth' ? (
+          <TechnicalTermTooltip term="depth" />
+        ) : (
+          <TechnicalTermTooltip term="magnitude" />
+        )}
+      </div>
 
       {colorMode === 'quality' ? (
         <div className="space-y-1.5 text-xs">
@@ -486,7 +548,10 @@ function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string;
 
       {showFaults && (
         <div className="mt-3 pt-3 border-t">
-          <h4 className="font-semibold text-xs mb-2">Fault Lines</h4>
+          <div className="flex items-center gap-1.5 mb-2">
+            <h4 className="font-semibold text-xs">Fault Lines</h4>
+            <InfoTooltip content="Active fault traces from the GNS Science dataset." />
+          </div>
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-xs">
               <div className="w-6 h-0.5 bg-red-500"></div>
@@ -501,4 +566,3 @@ function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string;
     </Card>
   );
 }
-

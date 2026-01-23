@@ -56,9 +56,23 @@ export async function GET(request: NextRequest) {
       magnitude: row.magnitude,
       magnitudeType: row.magnitude_type,
       eventType: row.event_type,
+      region: row.region || null,
+      locationName: row.location_name || row.region || null,
       // Create a display label for the search result
-      label: `${row.magnitude ? `M${row.magnitude}` : 'Unknown'} ${row.event_type || 'Unknown type'} - ${new Date(row.time).toLocaleDateString()}`,
-      description: `${row.public_id || row.id} • ${row.catalogue_name || 'Unknown catalogue'}`,
+      label: (() => {
+        const magnitudeLabel = row.magnitude ? `M${row.magnitude}` : 'Unknown magnitude';
+        const locationLabel = row.location_name || row.region;
+        const dateLabel = new Date(row.time).toLocaleDateString('en-GB', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+        });
+        if (locationLabel) {
+          return `${magnitudeLabel} ${locationLabel} - ${dateLabel}`;
+        }
+        return `${magnitudeLabel} ${row.event_type || 'Unknown type'} - ${dateLabel}`;
+      })(),
+      description: `${row.public_id || row.id} • ${row.event_type || 'Unknown type'} • ${row.catalogue_name || 'Unknown catalogue'}`,
     }));
 
     return NextResponse.json({
@@ -74,4 +88,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

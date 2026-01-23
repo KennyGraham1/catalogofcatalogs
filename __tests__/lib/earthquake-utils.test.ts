@@ -26,10 +26,19 @@ describe('earthquake-utils', () => {
 
   describe('getMagnitudeRadius', () => {
     it('should return correct radius for different magnitudes', () => {
-      expect(getMagnitudeRadius(1)).toBe(10000); // Min radius
-      expect(getMagnitudeRadius(3)).toBe(24000); // 3 * 8000
-      expect(getMagnitudeRadius(5)).toBe(40000); // 5 * 8000
-      expect(getMagnitudeRadius(7)).toBe(56000); // 7 * 8000
+      // Fixed lookup table: radii are 3km for M0-1, 6km for M2, 9km for M3, etc.
+      // Each magnitude increment adds 3km, capped at 21km for M7+
+      expect(getMagnitudeRadius(1)).toBe(3000);  // M1: 3km (base for small events)
+      expect(getMagnitudeRadius(3)).toBe(9000);  // M3: 9km
+      expect(getMagnitudeRadius(5)).toBe(15000); // M5: 15km
+      expect(getMagnitudeRadius(7)).toBe(21000); // M7+: 21km (capped)
+    });
+
+    it('should handle edge cases', () => {
+      expect(getMagnitudeRadius(0)).toBe(3000);  // M0: base radius
+      expect(getMagnitudeRadius(10)).toBe(21000); // M10: capped at M7+ radius
+      expect(getMagnitudeRadius(-1)).toBe(3000);  // Negative: clamped to 0
+      expect(getMagnitudeRadius(NaN)).toBe(3000); // Invalid: default radius
     });
   });
 

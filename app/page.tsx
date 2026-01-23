@@ -41,22 +41,26 @@ export default function Home() {
     {
       icon: Upload,
       title: 'Multi-format Upload',
-      description: 'Support for CSV, TXT, QML, JSON, and XML earthquake catalogue formats.'
+      description: 'Support for CSV, TXT, QML, JSON, and XML earthquake catalogue formats.',
+      href: '/upload'
     },
     {
       icon: Database,
       title: 'Schema Normalization',
-      description: 'Automatically map field names from different formats to a standardized schema.'
+      description: 'Automatically map field names from different formats to a standardized schema.',
+      href: '/settings'
     },
     {
       icon: Layers,
       title: 'Catalogue Merging',
-      description: 'Merge catalogues using configurable rules for matching events by time and location.'
+      description: 'Merge catalogues using configurable rules for matching events by time and location.',
+      href: '/merge'
     },
     {
       icon: BarChart,
       title: 'Data Visualization',
-      description: 'Visualize earthquake data with interactive maps and charts.'
+      description: 'Visualize earthquake data with interactive maps and charts.',
+      href: '/analytics'
     }
   ];
 
@@ -158,16 +162,18 @@ export default function Home() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
             {features.map((feature, index) => (
-              <div
+              <Link
                 key={index}
-                className="flex flex-col items-center p-6 bg-background rounded-lg border transition-all duration-300 hover:shadow-lg hover:border-primary/50 hover:-translate-y-1"
+                href={feature.href}
+                className="group flex flex-col items-center p-6 bg-background rounded-lg border transition-all duration-300 hover:shadow-lg hover:border-primary/50 hover:-translate-y-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                aria-label={`Go to ${feature.title}`}
               >
-                <div className="p-3 rounded-full bg-primary/10 mb-4">
+                <div className="p-3 rounded-full bg-primary/10 mb-4 group-hover:bg-primary/15 transition-colors">
                   <feature.icon className="h-6 w-6 text-primary" />
                 </div>
                 <h3 className="text-xl font-semibold mb-2">{feature.title}</h3>
                 <p className="text-muted-foreground text-center">{feature.description}</p>
-              </div>
+              </Link>
             ))}
           </div>
         </div>

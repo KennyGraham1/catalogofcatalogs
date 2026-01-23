@@ -6,6 +6,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
@@ -30,7 +39,9 @@ import {
   Info,
   Download,
   Image,
-  FileJson
+  FileJson,
+  ChevronsUpDown,
+  Check
 } from 'lucide-react';
 import { QualityScoreCard } from '@/components/advanced-viz/QualityScoreCard';
 import { UncertaintyVisualization } from '@/components/advanced-viz/UncertaintyVisualization';
@@ -40,6 +51,7 @@ import { calculateQualityScore, QualityMetrics } from '@/lib/quality-scoring';
 import { parseFocalMechanism } from '@/lib/focal-mechanism-utils';
 import { parseStationData } from '@/lib/station-coverage-utils';
 import { EventTable } from '@/components/events/EventTable';
+import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import { type EarthquakeEvent, calculateMFDComparison, type MFDComparisonResult } from '@/lib/seismological-analysis';
 import { type MergedCatalogue, type MergedEvent } from '@/lib/db';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
@@ -201,6 +213,29 @@ const ChartExportButton = memo(function ChartExportButton({
         )}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+});
+
+const AxisLegendHints = memo(function AxisLegendHints({
+  axes,
+  legend,
+}: {
+  axes: string;
+  legend?: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+      <div className="flex items-center gap-1.5">
+        <span>Axes</span>
+        <InfoTooltip content={axes} />
+      </div>
+      {legend && (
+        <div className="flex items-center gap-1.5">
+          <span>Legend</span>
+          <InfoTooltip content={legend} />
+        </div>
+      )}
+    </div>
   );
 });
 
@@ -534,6 +569,8 @@ const ChartSkeleton = memo(function ChartSkeleton({
 export default function AnalyticsPage() {
   // Core state
   const [selectedCatalogue, setSelectedCatalogue] = useState<string>(''); // Empty by default - user must select
+  const [catalogueSelectOpen, setCatalogueSelectOpen] = useState(false);
+  const [catalogueSearchTerm, setCatalogueSearchTerm] = useState('');
   const [events, setEvents] = useState<AnalyticsEvent[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<AnalyticsEvent | null>(null);
   // Note: Events from API may have null depth values, which are handled in filtering/display logic
@@ -578,6 +615,12 @@ export default function AnalyticsPage() {
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!catalogueSelectOpen) {
+      setCatalogueSearchTerm('');
+    }
+  }, [catalogueSelectOpen]);
 
   // Use cached fetch for catalogues (fetched once and cached)
   const { data: catalogueData, loading: cataloguesLoading } = useCachedFetch<MergedCatalogue[]>(
@@ -1130,23 +1173,54 @@ export default function AnalyticsPage() {
                   </div>
                 </div>
               ) : (
-                <Select value={selectedCatalogue} onValueChange={handleCatalogueChange}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select a catalogue..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {catalogues.map((cat) => (
-                      <SelectItem key={cat.id} value={cat.id}>
-                        <div className="flex items-center justify-between w-full gap-4">
-                          <span>{cat.name}</span>
-                          <Badge variant="secondary" className="ml-2">
-                            {(cat.event_count || 0).toLocaleString()} events
-                          </Badge>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Popover open={catalogueSelectOpen} onOpenChange={setCatalogueSelectOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={catalogueSelectOpen}
+                      className="w-full justify-between"
+                    >
+                      <span className="truncate">Select a catalogue...</span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                    <Command>
+                      <CommandInput
+                        placeholder="Search catalogues..."
+                        value={catalogueSearchTerm}
+                        onValueChange={setCatalogueSearchTerm}
+                      />
+                      <CommandList>
+                        <CommandEmpty>No catalogues found.</CommandEmpty>
+                        <CommandGroup>
+                          {catalogues.map((cat) => (
+                            <CommandItem
+                              key={cat.id}
+                              value={`${cat.name} ${cat.id}`}
+                              onSelect={() => {
+                                handleCatalogueChange(cat.id);
+                                setCatalogueSelectOpen(false);
+                              }}
+                              className="flex items-center justify-between gap-3"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <Check
+                                  className={`h-4 w-4 ${selectedCatalogue === cat.id ? 'opacity-100' : 'opacity-0'}`}
+                                />
+                                <span className="truncate">{cat.name}</span>
+                              </div>
+                              <Badge variant="secondary" className="ml-2">
+                                {(cat.event_count || 0).toLocaleString()} events
+                              </Badge>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               )}
             </div>
 
@@ -1531,9 +1605,12 @@ export default function AnalyticsPage() {
               <CardContent className="space-y-4">
                 {/* Magnitude Range */}
                 <div className="space-y-2">
-                  <Label className="text-xs font-medium">
-                    Magnitude: {magnitudeRange[0].toFixed(1)} - {magnitudeRange[1].toFixed(1)}
-                  </Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label className="text-xs font-medium">
+                      Magnitude: {magnitudeRange[0].toFixed(1)} - {magnitudeRange[1].toFixed(1)}
+                    </Label>
+                    <TechnicalTermTooltip term="magnitude" />
+                  </div>
                   <Slider
                     min={-2.0}
                     max={10.0}
@@ -1546,9 +1623,12 @@ export default function AnalyticsPage() {
 
                 {/* Depth Range */}
                 <div className="space-y-2">
-                  <Label className="text-xs font-medium">
-                    Depth: {depthRange[0]} - {depthRange[1]} km
-                  </Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label className="text-xs font-medium">
+                      Depth: {depthRange[0]} - {depthRange[1]} km
+                    </Label>
+                    <TechnicalTermTooltip term="depth" />
+                  </div>
                   <Slider
                     min={0}
                     max={700}
@@ -1561,7 +1641,10 @@ export default function AnalyticsPage() {
 
                 {/* Time Filter */}
                 <div className="space-y-2">
-                  <Label className="text-xs font-medium">Time Period</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label className="text-xs font-medium">Time Period</Label>
+                    <InfoTooltip content="Limits events to a relative time window based on origin time." />
+                  </div>
                   <Select value={timeFilter} onValueChange={setTimeFilter}>
                     <SelectTrigger className="h-8 text-xs">
                       <SelectValue />
@@ -1577,7 +1660,10 @@ export default function AnalyticsPage() {
 
                 {/* Region Filter */}
                 <div className="space-y-2">
-                  <Label className="text-xs font-medium">Regions ({selectedRegions.length} selected)</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label className="text-xs font-medium">Regions ({selectedRegions.length} selected)</Label>
+                    <InfoTooltip content="Region names derived from event metadata or location lookup." />
+                  </div>
                   <div className="space-y-1.5 max-h-32 overflow-y-auto border rounded-md p-2">
                     {availableRegions.slice(0, 10).map(region => (
                       <div key={region} className="flex items-center space-x-2">
@@ -1600,7 +1686,10 @@ export default function AnalyticsPage() {
                 {/* Catalogue Filter - only show when "All Catalogues" is selected */}
                 {selectedCatalogue === 'all' && (
                   <div className="space-y-2">
-                    <Label className="text-xs font-medium">Catalogues ({selectedCataloguesFilter.length} selected)</Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label className="text-xs font-medium">Catalogues ({selectedCataloguesFilter.length} selected)</Label>
+                      <InfoTooltip content="Filter events to a subset of catalogues when viewing all." />
+                    </div>
                     <div className="space-y-1.5 border rounded-md p-2">
                       {availableCatalogues.map(catalogue => (
                         <div key={catalogue} className="flex items-center space-x-2">
@@ -1622,7 +1711,10 @@ export default function AnalyticsPage() {
                 )}
                 {selectedCatalogue !== 'all' && (
                   <div className="space-y-2">
-                    <Label className="text-xs font-medium">Catalogue Filter</Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label className="text-xs font-medium">Catalogue Filter</Label>
+                      <InfoTooltip content="Shows the currently selected catalogue." />
+                    </div>
                     <p className="text-xs text-muted-foreground p-2 border rounded-md bg-muted/50">
                       Showing events from: <strong>{catalogues.find(c => c.id === selectedCatalogue)?.name || 'Selected catalogue'}</strong>
                     </p>
@@ -1659,8 +1751,15 @@ export default function AnalyticsPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Card className="shadow-sm">
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Magnitude Distribution</CardTitle>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-base">Magnitude Distribution</CardTitle>
+                  <TechnicalTermTooltip term="magnitudeFrequencyDistribution" />
+                </div>
                 <CardDescription className="text-xs">Number of events by magnitude range</CardDescription>
+                <AxisLegendHints
+                  axes="X: magnitude range bins. Y: event count."
+                  legend="Color indicates relative magnitude bin."
+                />
               </CardHeader>
               <CardContent>
                 <MagnitudeDistributionChart data={magnitudeDistribution} />
@@ -1669,8 +1768,15 @@ export default function AnalyticsPage() {
 
             <Card className="shadow-sm">
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Depth Distribution</CardTitle>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-base">Depth Distribution</CardTitle>
+                  <TechnicalTermTooltip term="depth" />
+                </div>
                 <CardDescription className="text-xs">Number of events by depth range</CardDescription>
+                <AxisLegendHints
+                  axes="X: depth range (km). Y: event count."
+                  legend="Color indicates depth bin."
+                />
               </CardHeader>
               <CardContent>
                 <DepthDistributionChart data={depthDistribution} />
@@ -1684,8 +1790,12 @@ export default function AnalyticsPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Card className="shadow-sm">
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Top Regions</CardTitle>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-base">Top Regions</CardTitle>
+                  <InfoTooltip content="Regions derived from event metadata or geocoding." />
+                </div>
                 <CardDescription className="text-xs">Events by region (top 10)</CardDescription>
+                <AxisLegendHints axes="X: event count. Y: region name." />
               </CardHeader>
               <CardContent>
                 <RegionDistributionChart data={regionDistribution} />
@@ -1694,8 +1804,15 @@ export default function AnalyticsPage() {
 
             <Card className="shadow-sm">
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Catalogue Distribution</CardTitle>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-base">Catalogue Distribution</CardTitle>
+                  <InfoTooltip content="Event counts grouped by catalogue source." />
+                </div>
                 <CardDescription className="text-xs">Events by catalogue</CardDescription>
+                <AxisLegendHints
+                  axes="Slice size shows event count by catalogue."
+                  legend="Labels show percent share of events."
+                />
               </CardHeader>
               <CardContent>
                 <CatalogueDistributionChart data={catalogueDistribution} />
@@ -1704,7 +1821,10 @@ export default function AnalyticsPage() {
 
             <Card className="lg:col-span-2 shadow-sm">
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Magnitude vs Depth</CardTitle>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-base">Magnitude vs Depth</CardTitle>
+                  <InfoTooltip content="Scatter plot of event magnitude against hypocentral depth." />
+                </div>
                 <CardDescription className="text-xs">
                   Scatter plot showing relationship between magnitude and depth
                   {magnitudeDepthScatter.length < filteredEarthquakes.length && (
@@ -1713,6 +1833,10 @@ export default function AnalyticsPage() {
                     </span>
                   )}
                 </CardDescription>
+                <AxisLegendHints
+                  axes="X: magnitude. Y: depth in km (inverted)."
+                  legend="Points represent events."
+                />
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={350}>
@@ -1745,6 +1869,10 @@ export default function AnalyticsPage() {
                   <span className="ml-2 text-amber-600">(Aggregated by week for performance)</span>
                 )}
               </CardDescription>
+              <AxisLegendHints
+                axes="X: date. Y: event count."
+                legend="Line shows events per day or per week when aggregated."
+              />
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={400}>
@@ -1839,7 +1967,14 @@ export default function AnalyticsPage() {
                       {/* Only show first 100 events in dropdown to prevent performance issues */}
                       {events.slice(0, 100).filter((event) => event.id && event.id !== '').map((event) => (
                         <SelectItem key={event.id} value={event.id}>
-                          M{event.magnitude.toFixed(1)} - {new Date(event.time).toLocaleString()} - {event.region || 'Unknown'}
+                          M{event.magnitude.toFixed(1)} - {new Date(event.time).toLocaleString('en-GB', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                          })} - {event.region || 'Unknown'}
                         </SelectItem>
                       ))}
                       {events.length > 100 && (
@@ -1885,7 +2020,10 @@ export default function AnalyticsPage() {
         <TabsContent value="quality" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Catalogue Quality Distribution</CardTitle>
+              <div className="flex items-center gap-2">
+                <CardTitle>Catalogue Quality Distribution</CardTitle>
+                <TechnicalTermTooltip term="qualityGrade" />
+              </div>
               <CardDescription>
                 Distribution of quality grades across all events in the catalogue
               </CardDescription>
@@ -1910,7 +2048,10 @@ export default function AnalyticsPage() {
                     <div className="space-y-2">
                       <div>
                         <div className="flex justify-between text-sm mb-1">
-                          <span>Events with Uncertainty Data</span>
+                          <div className="flex items-center gap-1.5">
+                            <span>Events with Uncertainty Data</span>
+                            <TechnicalTermTooltip term="uncertainty" />
+                          </div>
                           <span>{statistics.percentageWithUncertainty}%</span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2">
@@ -1923,7 +2064,10 @@ export default function AnalyticsPage() {
 
                       <div>
                         <div className="flex justify-between text-sm mb-1">
-                          <span>Events with Focal Mechanisms</span>
+                          <div className="flex items-center gap-1.5">
+                            <span>Events with Focal Mechanisms</span>
+                            <TechnicalTermTooltip term="focalMechanism" />
+                          </div>
                           <span>{statistics.percentageWithFocalMechanism}%</span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2">
@@ -1936,7 +2080,10 @@ export default function AnalyticsPage() {
 
                       <div>
                         <div className="flex justify-between text-sm mb-1">
-                          <span>Events with Station Data</span>
+                          <div className="flex items-center gap-1.5">
+                            <span>Events with Station Data</span>
+                            <InfoTooltip content="Events that include picks or arrivals from seismic stations." />
+                          </div>
                           <span>{statistics.percentageWithStationData}%</span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2">
@@ -1963,7 +2110,10 @@ export default function AnalyticsPage() {
                   <Activity className="h-5 w-5 text-violet-600" />
                 </div>
                 <div>
-                  <CardTitle>Gutenberg-Richter Analysis</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <CardTitle>Gutenberg-Richter Analysis</CardTitle>
+                    <InfoTooltip content="Relates earthquake frequency to magnitude using a log-linear model." />
+                  </div>
                   <CardDescription>
                     Frequency-magnitude distribution following log₁₀(N) = a - bM relationship
                   </CardDescription>
@@ -1977,10 +2127,13 @@ export default function AnalyticsPage() {
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <Card className="bg-gradient-to-br from-violet-50 to-violet-100/50 dark:from-violet-950/50 dark:to-violet-900/30 border-violet-200 dark:border-violet-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-violet-700 dark:text-violet-300 flex items-center gap-2">
-                          <span className="w-2 h-2 bg-violet-500 rounded-full"></span>
-                          b-value
-                        </CardTitle>
+                        <div className="flex items-center gap-2">
+                          <CardTitle className="text-sm font-medium text-violet-700 dark:text-violet-300 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-violet-500 rounded-full"></span>
+                            b-value
+                          </CardTitle>
+                          <TechnicalTermTooltip term="bValue" />
+                        </div>
                       </CardHeader>
                       <CardContent>
                         <div className="text-3xl font-bold text-violet-900 dark:text-violet-100 font-mono">
@@ -2002,10 +2155,13 @@ export default function AnalyticsPage() {
 
                     <Card className="bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/50 dark:to-blue-900/30 border-blue-200 dark:border-blue-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-blue-700 dark:text-blue-300 flex items-center gap-2">
-                          <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
-                          a-value
-                        </CardTitle>
+                        <div className="flex items-center gap-2">
+                          <CardTitle className="text-sm font-medium text-blue-700 dark:text-blue-300 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
+                            a-value
+                          </CardTitle>
+                          <TechnicalTermTooltip term="aValue" />
+                        </div>
                       </CardHeader>
                       <CardContent>
                         <div className="text-3xl font-bold text-blue-900 dark:text-blue-100 font-mono">
@@ -2017,10 +2173,13 @@ export default function AnalyticsPage() {
 
                     <Card className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 dark:from-emerald-950/50 dark:to-emerald-900/30 border-emerald-200 dark:border-emerald-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
-                          <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
-                          R² Goodness of Fit
-                        </CardTitle>
+                        <div className="flex items-center gap-2">
+                          <CardTitle className="text-sm font-medium text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
+                            R² Goodness of Fit
+                          </CardTitle>
+                          <TechnicalTermTooltip term="rSquared" />
+                        </div>
                       </CardHeader>
                       <CardContent>
                         <div className="text-3xl font-bold text-emerald-900 dark:text-emerald-100 font-mono">
@@ -2039,10 +2198,13 @@ export default function AnalyticsPage() {
 
                     <Card className="bg-gradient-to-br from-amber-50 to-amber-100/50 dark:from-amber-950/50 dark:to-amber-900/30 border-amber-200 dark:border-amber-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-amber-700 dark:text-amber-300 flex items-center gap-2">
-                          <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
-                          Mc (Completeness)
-                        </CardTitle>
+                        <div className="flex items-center gap-2">
+                          <CardTitle className="text-sm font-medium text-amber-700 dark:text-amber-300 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
+                            Mc (Completeness)
+                          </CardTitle>
+                          <TechnicalTermTooltip term="completenessMagnitude" />
+                        </div>
                       </CardHeader>
                       <CardContent>
                         <div className="text-3xl font-bold text-amber-900 dark:text-amber-100 font-mono">
@@ -2056,10 +2218,17 @@ export default function AnalyticsPage() {
                   {/* G-R Plot with professional styling */}
                   <Card className="border border-border/50">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-base">Frequency-Magnitude Relationship</CardTitle>
+                      <div className="flex items-center gap-2">
+                        <CardTitle className="text-base">Frequency-Magnitude Relationship</CardTitle>
+                        <TechnicalTermTooltip term="magnitudeFrequencyDistribution" />
+                      </div>
                       <CardDescription>
                         log₁₀(N) = {grAnalysis.aValue.toFixed(2)} - {grAnalysis.bValue.toFixed(3)} × M
                       </CardDescription>
+                      <AxisLegendHints
+                        axes="X: magnitude. Y: log10 cumulative event count."
+                        legend="Points are observed data; line is G-R fit; dashed line marks Mc."
+                      />
                     </CardHeader>
                     <CardContent>
                       <ChartContainer config={CHART_CONFIGS.gutenbergRichter} className="h-[420px] w-full">
@@ -2245,7 +2414,10 @@ export default function AnalyticsPage() {
                   <Target className="h-5 w-5 text-cyan-600" />
                 </div>
                 <div>
-                  <CardTitle>Completeness Magnitude (Mc)</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <CardTitle>Completeness Magnitude (Mc)</CardTitle>
+                    <TechnicalTermTooltip term="completenessMagnitude" />
+                  </div>
                   <CardDescription>
                     Threshold magnitude above which the catalogue records all events
                   </CardDescription>
@@ -2259,10 +2431,13 @@ export default function AnalyticsPage() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <Card className="bg-gradient-to-br from-cyan-50 to-cyan-100/50 dark:from-cyan-950/50 dark:to-cyan-900/30 border-cyan-200 dark:border-cyan-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-cyan-700 dark:text-cyan-300 flex items-center gap-2">
-                          <span className="w-2 h-2 bg-cyan-500 rounded-full"></span>
-                          Completeness Magnitude
-                        </CardTitle>
+                        <div className="flex items-center gap-2">
+                          <CardTitle className="text-sm font-medium text-cyan-700 dark:text-cyan-300 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-cyan-500 rounded-full"></span>
+                            Completeness Magnitude
+                          </CardTitle>
+                          <TechnicalTermTooltip term="completenessMagnitude" />
+                        </div>
                       </CardHeader>
                       <CardContent>
                         <div className="text-4xl font-bold text-cyan-900 dark:text-cyan-100 font-mono">
@@ -2276,10 +2451,13 @@ export default function AnalyticsPage() {
 
                     <Card className="bg-gradient-to-br from-teal-50 to-teal-100/50 dark:from-teal-950/50 dark:to-teal-900/30 border-teal-200 dark:border-teal-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-teal-700 dark:text-teal-300 flex items-center gap-2">
-                          <span className="w-2 h-2 bg-teal-500 rounded-full"></span>
-                          Catalogue Completeness
-                        </CardTitle>
+                        <div className="flex items-center gap-2">
+                          <CardTitle className="text-sm font-medium text-teal-700 dark:text-teal-300 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-teal-500 rounded-full"></span>
+                            Catalogue Completeness
+                          </CardTitle>
+                          <InfoTooltip content="Percent of events above Mc used to assess completeness confidence." />
+                        </div>
                       </CardHeader>
                       <CardContent>
                         <div className="text-4xl font-bold text-teal-900 dark:text-teal-100 font-mono">
@@ -2294,10 +2472,13 @@ export default function AnalyticsPage() {
 
                     <Card className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 dark:from-emerald-950/50 dark:to-emerald-900/30 border-emerald-200 dark:border-emerald-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
-                          <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
-                          Detection Method
-                        </CardTitle>
+                        <div className="flex items-center gap-2">
+                          <CardTitle className="text-sm font-medium text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
+                            Detection Method
+                          </CardTitle>
+                          <InfoTooltip content="Method used to estimate Mc (e.g., maximum curvature)." />
+                        </div>
                       </CardHeader>
                       <CardContent>
                         <div className="text-2xl font-bold text-emerald-900 dark:text-emerald-100">
@@ -2313,10 +2494,17 @@ export default function AnalyticsPage() {
                   {/* Magnitude Distribution Chart */}
                   <Card className="border border-border/50">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-base">Frequency-Magnitude Distribution</CardTitle>
+                      <div className="flex items-center gap-2">
+                        <CardTitle className="text-base">Frequency-Magnitude Distribution</CardTitle>
+                        <TechnicalTermTooltip term="magnitudeFrequencyDistribution" />
+                      </div>
                       <CardDescription>
                         Number of events per magnitude bin with completeness threshold
                       </CardDescription>
+                      <AxisLegendHints
+                        axes="X: magnitude bin. Y: event count."
+                        legend="Bars above Mc are complete; dashed line marks Mc."
+                      />
                     </CardHeader>
                     <CardContent>
                       <ChartContainer config={CHART_CONFIGS.completeness} className="h-[420px] w-full">
@@ -2558,6 +2746,7 @@ export default function AnalyticsPage() {
                       <CardDescription>
                         Temporal evolution of seismicity showing cumulative events over time
                       </CardDescription>
+                      <AxisLegendHints axes="X: date. Y: cumulative events." />
                     </CardHeader>
                     <CardContent>
                       <ChartContainer config={CHART_CONFIGS.temporal} className="h-[420px] w-full">
@@ -2610,7 +2799,11 @@ export default function AnalyticsPage() {
                               const data = payload[0].payload;
                               return (
                                 <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg p-3">
-                                  <p className="font-medium text-sm">{new Date(data.date).toLocaleDateString()}</p>
+                                  <p className="font-medium text-sm">{new Date(data.date).toLocaleDateString('en-GB', {
+                                    day: '2-digit',
+                                    month: '2-digit',
+                                    year: 'numeric',
+                                  })}</p>
                                   <p className="text-muted-foreground text-sm">
                                     {data.cumulativeCount?.toLocaleString()} cumulative events
                                   </p>
@@ -2692,7 +2885,14 @@ export default function AnalyticsPage() {
                                     </div>
                                     <div className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
                                       <Calendar className="h-3 w-3" />
-                                      {new Date(cluster.mainshock?.time ?? cluster.startDate).toLocaleString()}
+                                      {new Date(cluster.mainshock?.time ?? cluster.startDate).toLocaleString('en-GB', {
+                                        day: '2-digit',
+                                        month: '2-digit',
+                                        year: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        second: '2-digit',
+                                      })}
                                     </div>
                                   </div>
                                 </div>
@@ -2807,7 +3007,10 @@ export default function AnalyticsPage() {
                   <Zap className="h-5 w-5 text-red-600" />
                 </div>
                 <div>
-                  <CardTitle>Seismic Moment Analysis</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <CardTitle>Seismic Moment Analysis</CardTitle>
+                    <TechnicalTermTooltip term="seismicMoment" />
+                  </div>
                   <CardDescription>
                     Energy release quantification and moment magnitude distribution
                   </CardDescription>
@@ -2821,10 +3024,13 @@ export default function AnalyticsPage() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <Card className="bg-gradient-to-br from-red-50 to-red-100/50 dark:from-red-950/50 dark:to-red-900/30 border-red-200 dark:border-red-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-red-700 dark:text-red-300 flex items-center gap-2">
-                          <span className="w-2 h-2 bg-red-500 rounded-full"></span>
-                          Total Seismic Moment
-                        </CardTitle>
+                        <div className="flex items-center gap-2">
+                          <CardTitle className="text-sm font-medium text-red-700 dark:text-red-300 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-red-500 rounded-full"></span>
+                            Total Seismic Moment
+                          </CardTitle>
+                          <TechnicalTermTooltip term="seismicMoment" />
+                        </div>
                       </CardHeader>
                       <CardContent>
                         <div className="text-3xl font-bold text-red-900 dark:text-red-100 font-mono">
@@ -2836,10 +3042,13 @@ export default function AnalyticsPage() {
 
                     <Card className="bg-gradient-to-br from-orange-50 to-orange-100/50 dark:from-orange-950/50 dark:to-orange-900/30 border-orange-200 dark:border-orange-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-orange-700 dark:text-orange-300 flex items-center gap-2">
-                          <span className="w-2 h-2 bg-orange-500 rounded-full"></span>
-                          Equivalent Magnitude
-                        </CardTitle>
+                        <div className="flex items-center gap-2">
+                          <CardTitle className="text-sm font-medium text-orange-700 dark:text-orange-300 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-orange-500 rounded-full"></span>
+                            Equivalent Magnitude
+                          </CardTitle>
+                          <TechnicalTermTooltip term="momentMagnitude" />
+                        </div>
                       </CardHeader>
                       <CardContent>
                         <div className="text-4xl font-bold text-orange-900 dark:text-orange-100 font-mono">
@@ -2875,10 +3084,14 @@ export default function AnalyticsPage() {
                   {/* Moment Distribution Chart */}
                   <Card className="border border-border/50">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-base">Moment Release by Magnitude</CardTitle>
+                      <div className="flex items-center gap-2">
+                        <CardTitle className="text-base">Moment Release by Magnitude</CardTitle>
+                        <TechnicalTermTooltip term="seismicMoment" />
+                      </div>
                       <CardDescription>
                         Logarithmic distribution of seismic moment across magnitude bins
                       </CardDescription>
+                      <AxisLegendHints axes="X: magnitude bin. Y: seismic moment (log scale)." />
                     </CardHeader>
                     <CardContent>
                       <ChartContainer config={CHART_CONFIGS.moment} className="h-[420px] w-full">
@@ -3029,7 +3242,10 @@ export default function AnalyticsPage() {
                   <BarChart3 className="h-5 w-5 text-indigo-600" />
                 </div>
                 <div>
-                  <CardTitle>Magnitude-Frequency Distribution (MFD)</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <CardTitle>Magnitude-Frequency Distribution (MFD)</CardTitle>
+                    <TechnicalTermTooltip term="magnitudeFrequencyDistribution" />
+                  </div>
                   <CardDescription>
                     Compare frequency-magnitude relationships across multiple catalogues
                   </CardDescription>
@@ -3100,9 +3316,12 @@ export default function AnalyticsPage() {
                           checked={mfdShowCumulative}
                           onCheckedChange={(checked) => setMfdShowCumulative(checked as boolean)}
                         />
-                        <label htmlFor="mfd-cumulative" className="text-xs cursor-pointer">
-                          Show cumulative (N≥M)
-                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <label htmlFor="mfd-cumulative" className="text-xs cursor-pointer">
+                            Show cumulative (N≥M)
+                          </label>
+                          <InfoTooltip content="Shows cumulative counts of events with magnitude greater than or equal to M." />
+                        </div>
                       </div>
                       <div className="flex items-center space-x-2">
                         <Checkbox
@@ -3110,9 +3329,12 @@ export default function AnalyticsPage() {
                           checked={mfdShowHistogram}
                           onCheckedChange={(checked) => setMfdShowHistogram(checked as boolean)}
                         />
-                        <label htmlFor="mfd-histogram" className="text-xs cursor-pointer">
-                          Show histogram (filled)
-                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <label htmlFor="mfd-histogram" className="text-xs cursor-pointer">
+                            Show histogram (filled)
+                          </label>
+                          <InfoTooltip content="Adds filled bars behind the line for visual density." />
+                        </div>
                       </div>
                       <div className="flex items-center space-x-2">
                         <Checkbox
@@ -3120,15 +3342,21 @@ export default function AnalyticsPage() {
                           checked={mfdLogScale}
                           onCheckedChange={(checked) => setMfdLogScale(checked as boolean)}
                         />
-                        <label htmlFor="mfd-log-scale" className="text-xs cursor-pointer">
-                          Logarithmic Y-axis
-                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <label htmlFor="mfd-log-scale" className="text-xs cursor-pointer">
+                            Logarithmic Y-axis
+                          </label>
+                          <InfoTooltip content="Uses log scale to emphasize low-frequency bins." />
+                        </div>
                       </div>
 
                       {/* Cumulative line style */}
                       {mfdShowCumulative && (
                         <div className="pt-2 border-t space-y-1">
-                          <label className="text-xs text-muted-foreground">Cumulative line style</label>
+                          <div className="flex items-center gap-1.5">
+                            <label className="text-xs text-muted-foreground">Cumulative line style</label>
+                            <InfoTooltip content="Controls the line style for the cumulative curve." />
+                          </div>
                           <Select
                             value={mfdCumulativeStyle}
                             onValueChange={(value) => setMfdCumulativeStyle(value as 'solid' | 'dotted')}
@@ -3146,7 +3374,10 @@ export default function AnalyticsPage() {
 
                       {/* Bin width */}
                       <div className="pt-2 border-t space-y-1">
-                        <label className="text-xs text-muted-foreground">Magnitude bin width</label>
+                        <div className="flex items-center gap-1.5">
+                          <label className="text-xs text-muted-foreground">Magnitude bin width</label>
+                          <InfoTooltip content="Smaller bins show more detail but can be noisier." />
+                        </div>
                         <Select
                           value={mfdBinWidth.toString()}
                           onValueChange={(value) => setMfdBinWidth(parseFloat(value))}
@@ -3164,7 +3395,10 @@ export default function AnalyticsPage() {
 
                       {/* Min magnitude truncation */}
                       <div className="pt-2 border-t space-y-1">
-                        <label className="text-xs text-muted-foreground">Min magnitude cutoff</label>
+                        <div className="flex items-center gap-1.5">
+                          <label className="text-xs text-muted-foreground">Min magnitude cutoff</label>
+                          <InfoTooltip content="Exclude events below this magnitude for the analysis." />
+                        </div>
                         <Select
                           value={mfdMinMagnitude?.toString() || 'none'}
                           onValueChange={(value) => setMfdMinMagnitude(value === 'none' ? undefined : parseFloat(value))}
@@ -3233,6 +3467,10 @@ export default function AnalyticsPage() {
                                 ? 'Cumulative distribution (N ≥ M)'
                                 : 'Incremental histogram'}
                           </CardDescription>
+                          <AxisLegendHints
+                            axes="X: magnitude. Y: event count (log scale when enabled)."
+                            legend="Colors map to catalogues; lines are cumulative and bars are incremental when enabled."
+                          />
                         </div>
                         {mfdComparison && (
                           <ChartExportButton

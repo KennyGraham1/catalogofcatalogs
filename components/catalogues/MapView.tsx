@@ -12,6 +12,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Calendar, Ruler, Activity, Zap, Layers, MapPin, Info } from 'lucide-react';
+import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
 import { useNearbyFaults } from '@/hooks/use-nearby-faults';
 import { useMapColors } from '@/hooks/use-map-theme';
@@ -301,7 +302,11 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
         {/* Earthquake markers - using intelligent sampling for performance */}
         {/* Sort by magnitude (small to large) so larger events render on top */}
         {[...sampledEvents].sort((a, b) => a.magnitude - b.magnitude).map((event) => {
-          const eventDate = new Date(event.time).toLocaleDateString();
+          const eventDate = new Date(event.time).toLocaleDateString('en-GB', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+          });
           const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
 
           return (
@@ -340,9 +345,18 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
 const LegendPanel = memo(function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string; showFaults: boolean; faultCount?: number }) {
   return (
     <Card className="absolute bottom-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[220px]">
-      <h4 className="font-semibold text-sm mb-3">
-        {colorMode === 'quality' ? 'Quality Score' : colorMode === 'depth' ? 'Depth Scale' : 'Magnitude Scale'}
-      </h4>
+      <div className="flex items-center gap-1.5 mb-3">
+        <h4 className="font-semibold text-sm">
+          {colorMode === 'quality' ? 'Quality Score' : colorMode === 'depth' ? 'Depth Scale' : 'Magnitude Scale'}
+        </h4>
+        {colorMode === 'quality' ? (
+          <TechnicalTermTooltip term="qualityScore" />
+        ) : colorMode === 'depth' ? (
+          <TechnicalTermTooltip term="depth" />
+        ) : (
+          <TechnicalTermTooltip term="magnitude" />
+        )}
+      </div>
 
       {colorMode === 'quality' ? (
         <div className="space-y-1.5 text-xs">
@@ -413,7 +427,10 @@ const LegendPanel = memo(function LegendPanel({ colorMode, showFaults, faultCoun
 
       {showFaults && (
         <div className="mt-3 pt-3 border-t">
-          <h4 className="font-semibold text-xs mb-2">Fault Lines</h4>
+          <div className="flex items-center gap-1.5 mb-2">
+            <h4 className="font-semibold text-xs">Fault Lines</h4>
+            <InfoTooltip content="Active fault traces from the GNS Science dataset." />
+          </div>
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-xs">
               <div className="w-6 h-0.5 bg-red-500"></div>
@@ -471,25 +488,47 @@ const EventPopupWithFaults = memo(function EventPopupWithFaults({ event, quality
       <div className="space-y-2">
         <div className="flex items-center gap-2 text-sm">
           <Activity className="h-4 w-4 text-primary" />
-          <span className="font-medium">M {event.magnitude?.toFixed(1) || 'N/A'}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">M {event.magnitude?.toFixed(1) || 'N/A'}</span>
+            <TechnicalTermTooltip term="magnitude" />
+          </div>
         </div>
         <div className="flex items-center gap-2 text-sm">
           <Ruler className="h-4 w-4 text-primary" />
-          <span>Depth: {event.depth?.toFixed(1) || 'N/A'} km</span>
+          <div className="flex items-center gap-1.5">
+            <span>Depth: {event.depth?.toFixed(1) || 'N/A'} km</span>
+            <TechnicalTermTooltip term="depth" />
+          </div>
         </div>
         <div className="flex items-center gap-2 text-sm">
           <Calendar className="h-4 w-4 text-primary" />
-          <span className="text-xs">{new Date(event.time).toLocaleString()}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs">{new Date(event.time).toLocaleString('en-GB', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            })}</span>
+            <InfoTooltip content="Event origin time in local timezone." />
+          </div>
         </div>
         <div className="flex items-center gap-2 text-sm">
           <MapPin className="h-4 w-4 text-primary" />
-          <span className="text-xs">{event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs">{event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°</span>
+            <InfoTooltip content="Epicenter coordinates in decimal degrees." />
+          </div>
         </div>
 
         {quality && (
           <div className="pt-2 border-t">
             <div className="flex items-center justify-between text-sm">
-              <span className="font-medium">Quality Score:</span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-medium">Quality Score:</span>
+                <TechnicalTermTooltip term="qualityScore" />
+              </div>
               <Badge
                 variant="outline"
                 style={{
@@ -509,7 +548,10 @@ const EventPopupWithFaults = memo(function EventPopupWithFaults({ event, quality
           <div className="pt-2 border-t mt-2">
             <div className="flex items-center gap-2 mb-2">
               <Zap className="h-4 w-4 text-orange-500" />
-              <span className="font-medium text-sm">Nearby Faults ({faultCount})</span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-medium text-sm">Nearby Faults ({faultCount})</span>
+                <InfoTooltip content="Closest faults within 50 km of the epicenter." />
+              </div>
             </div>
             <div className="space-y-1.5">
               {faults.map((fault, idx) => (

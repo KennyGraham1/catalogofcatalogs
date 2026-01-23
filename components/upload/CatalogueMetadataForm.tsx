@@ -15,7 +15,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Info, Plus, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
 
 export interface CatalogueMetadata {
   // Basic metadata
@@ -185,7 +186,10 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="time_period_start">Time Period Start</Label>
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="time_period_start">Time Period Start</Label>
+                  <InfoTooltip content="Earliest event time covered by this catalogue." />
+                </div>
                 <Input
                   id="time_period_start"
                   type="datetime-local"
@@ -195,7 +199,10 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="time_period_end">Time Period End</Label>
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="time_period_end">Time Period End</Label>
+                  <InfoTooltip content="Latest event time covered by this catalogue." />
+                </div>
                 <Input
                   id="time_period_end"
                   type="datetime-local"
@@ -206,10 +213,16 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
             </div>
 
             <div className="space-y-2">
-              <Label>Data Quality Assessment</Label>
+              <div className="flex items-center gap-1.5">
+                <Label>Data Quality Assessment</Label>
+                <InfoTooltip content="Subjective quality ratings to document known strengths or gaps." />
+              </div>
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="completeness" className="text-sm text-muted-foreground">Completeness</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="completeness" className="text-sm text-muted-foreground">Completeness</Label>
+                    <InfoTooltip content="How fully fields are populated across events." />
+                  </div>
                   <Select
                     value={metadata.data_quality?.completeness || ''}
                     onValueChange={(value) => updateQualityField('completeness', value)}
@@ -227,7 +240,10 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="accuracy" className="text-sm text-muted-foreground">Accuracy</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="accuracy" className="text-sm text-muted-foreground">Accuracy</Label>
+                    <InfoTooltip content="Confidence in event locations and magnitudes." />
+                  </div>
                   <Select
                     value={metadata.data_quality?.accuracy || ''}
                     onValueChange={(value) => updateQualityField('accuracy', value)}
@@ -245,7 +261,10 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="reliability" className="text-sm text-muted-foreground">Reliability</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="reliability" className="text-sm text-muted-foreground">Reliability</Label>
+                    <InfoTooltip content="Consistency of the data over time or across sources." />
+                  </div>
                   <Select
                     value={metadata.data_quality?.reliability || ''}
                     onValueChange={(value) => updateQualityField('reliability', value)}
@@ -470,4 +489,3 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
     </Tabs>
   );
 }
-

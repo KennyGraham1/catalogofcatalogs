@@ -165,10 +165,10 @@ export function SavedFiltersDialog({ currentFilters, onLoadFilter }: SavedFilter
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
+    return new Date(dateString).toLocaleDateString('en-GB', {
       year: 'numeric',
-      month: 'short',
-      day: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
     });
   };
 
@@ -344,4 +344,3 @@ export function SavedFiltersDialog({ currentFilters, onLoadFilter }: SavedFilter
     </>
   );
 }
-

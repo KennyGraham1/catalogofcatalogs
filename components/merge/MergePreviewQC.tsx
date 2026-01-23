@@ -91,44 +91,44 @@ export function MergePreviewQC({ previewData, onProceedWithMerge, onCancel }: Me
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div className="text-center p-4 bg-blue-50 rounded-lg">
-              <div className="text-2xl font-bold text-blue-700">{statistics.totalEventsBefore.toLocaleString()}</div>
-              <div className="text-xs text-blue-600 mt-1">Events Before</div>
+            <div className="text-center p-4 bg-blue-50 dark:bg-blue-950/50 rounded-lg border border-blue-200 dark:border-blue-800">
+              <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">{statistics.totalEventsBefore.toLocaleString()}</div>
+              <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">Events Before</div>
             </div>
-            <div className="text-center p-4 bg-green-50 rounded-lg">
-              <div className="text-2xl font-bold text-green-700">{statistics.totalEventsAfter.toLocaleString()}</div>
-              <div className="text-xs text-green-600 mt-1">Events After</div>
+            <div className="text-center p-4 bg-green-50 dark:bg-green-950/50 rounded-lg border border-green-200 dark:border-green-800">
+              <div className="text-2xl font-bold text-green-700 dark:text-green-300">{statistics.totalEventsAfter.toLocaleString()}</div>
+              <div className="text-xs text-green-600 dark:text-green-400 mt-1">Events After</div>
             </div>
-            <div className="text-center p-4 bg-purple-50 rounded-lg">
-              <div className="text-2xl font-bold text-purple-700">{statistics.duplicateGroupsCount.toLocaleString()}</div>
-              <div className="text-xs text-purple-600 mt-1">Duplicate Groups</div>
+            <div className="text-center p-4 bg-purple-50 dark:bg-purple-950/50 rounded-lg border border-purple-200 dark:border-purple-800">
+              <div className="text-2xl font-bold text-purple-700 dark:text-purple-300">{statistics.duplicateGroupsCount.toLocaleString()}</div>
+              <div className="text-xs text-purple-600 dark:text-purple-400 mt-1">Duplicate Groups</div>
             </div>
-            <div className="text-center p-4 bg-orange-50 rounded-lg">
-              <div className="text-2xl font-bold text-orange-700">{statistics.duplicatesRemoved.toLocaleString()}</div>
-              <div className="text-xs text-orange-600 mt-1">Duplicates Removed</div>
+            <div className="text-center p-4 bg-orange-50 dark:bg-orange-950/50 rounded-lg border border-orange-200 dark:border-orange-800">
+              <div className="text-2xl font-bold text-orange-700 dark:text-orange-300">{statistics.duplicatesRemoved.toLocaleString()}</div>
+              <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">Duplicates Removed</div>
             </div>
-            <div className="text-center p-4 bg-red-50 rounded-lg">
-              <div className="text-2xl font-bold text-red-700">{statistics.suspiciousGroupsCount.toLocaleString()}</div>
-              <div className="text-xs text-red-600 mt-1">Suspicious Matches</div>
+            <div className="text-center p-4 bg-red-50 dark:bg-red-950/50 rounded-lg border border-red-200 dark:border-red-800">
+              <div className="text-2xl font-bold text-red-700 dark:text-red-300">{statistics.suspiciousGroupsCount.toLocaleString()}</div>
+              <div className="text-xs text-red-600 dark:text-red-400 mt-1">Suspicious Matches</div>
             </div>
           </div>
 
           {statistics.suspiciousGroupsCount > 0 && (
-            <Alert className="mt-4 border-orange-300 bg-orange-50">
-              <AlertTriangle className="h-4 w-4 text-orange-600" />
-              <AlertTitle className="text-orange-900">Suspicious Matches Detected</AlertTitle>
-              <AlertDescription className="text-orange-800">
-                {statistics.suspiciousGroupsCount} duplicate group(s) have validation warnings. 
+            <Alert className="mt-4 border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-950/50">
+              <AlertTriangle className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+              <AlertTitle className="text-orange-900 dark:text-orange-200">Suspicious Matches Detected</AlertTitle>
+              <AlertDescription className="text-orange-800 dark:text-orange-300">
+                {statistics.suspiciousGroupsCount} duplicate group(s) have validation warnings.
                 Review these carefully before proceeding with the merge.
               </AlertDescription>
             </Alert>
           )}
 
           {statistics.suspiciousGroupsCount === 0 && statistics.duplicateGroupsCount > 0 && (
-            <Alert className="mt-4 border-green-300 bg-green-50">
-              <CheckCircle2 className="h-4 w-4 text-green-600" />
-              <AlertTitle className="text-green-900">All Matches Look Good</AlertTitle>
-              <AlertDescription className="text-green-800">
+            <Alert className="mt-4 border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950/50">
+              <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+              <AlertTitle className="text-green-900 dark:text-green-200">All Matches Look Good</AlertTitle>
+              <AlertDescription className="text-green-800 dark:text-green-300">
                 All duplicate groups passed validation checks. The merge appears to be working correctly.
               </AlertDescription>
             </Alert>

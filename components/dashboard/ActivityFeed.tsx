@@ -76,7 +76,11 @@ export function ActivityFeed() {
       } else if (diffDays < 30) {
         timeAgo = `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
       } else {
-        timeAgo = createdDate.toLocaleDateString();
+        timeAgo = createdDate.toLocaleDateString('en-GB', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+        });
       }
 
       // Determine activity type and description

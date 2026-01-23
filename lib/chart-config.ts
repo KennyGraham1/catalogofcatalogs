@@ -309,8 +309,19 @@ export const TOOLTIP_FORMATTERS = {
   count: (value: number) => value.toLocaleString(),
   percentage: (value: number) => `${value.toFixed(1)}%`,
   moment: (value: number) => `${value.toExponential(2)} N·m`,
-  date: (value: string) => new Date(value).toLocaleDateString(),
-  dateTime: (value: string) => new Date(value).toLocaleString(),
+  date: (value: string) => new Date(value).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }),
+  dateTime: (value: string) => new Date(value).toLocaleString('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }),
 };
 
 // Axis label formatters
@@ -323,10 +334,11 @@ export const AXIS_FORMATTERS = {
     if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
     return value.toString();
   },
-  date: (value: string) => {
-    const date = new Date(value);
-    return `${date.getMonth() + 1}/${date.getDate()}`;
-  },
+  date: (value: string) => new Date(value).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }),
 };
 
 // Get color for magnitude value

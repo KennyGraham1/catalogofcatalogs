@@ -11,6 +11,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Download, CheckCircle, XCircle } from 'lucide-react';
 import { IndeterminateProgress } from '@/components/ui/progress-indicator';
 import { ProgressOverlay } from '@/components/ui/ProgressOverlay';
+import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 
 interface ImportResult {
   success: boolean;
@@ -135,7 +136,10 @@ export function ImportForm() {
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Time Range */}
             <div className="space-y-4">
-              <Label>Time Range</Label>
+              <div className="flex items-center gap-1.5">
+                <Label>Time Range</Label>
+                <InfoTooltip content="Choose a rolling window or specify exact start and end times." />
+              </div>
               <Select value={timeRange} onValueChange={(value: 'hours' | 'custom') => setTimeRange(value)}>
                 <SelectTrigger>
                   <SelectValue />
@@ -148,7 +152,10 @@ export function ImportForm() {
 
               {timeRange === 'hours' ? (
                 <div className="space-y-2">
-                  <Label htmlFor="hours">Hours</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="hours">Hours</Label>
+                    <InfoTooltip content="Relative lookback window from now." />
+                  </div>
                   <Select value={hours} onValueChange={setHours}>
                     <SelectTrigger id="hours">
                       <SelectValue />
@@ -167,7 +174,10 @@ export function ImportForm() {
               ) : (
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="startDate">Start Date</Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label htmlFor="startDate">Start Date</Label>
+                      <InfoTooltip content="Earliest event time to include (UTC)." />
+                    </div>
                     <Input
                       id="startDate"
                       type="datetime-local"
@@ -177,7 +187,10 @@ export function ImportForm() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="endDate">End Date</Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label htmlFor="endDate">End Date</Label>
+                      <InfoTooltip content="Latest event time to include (UTC)." />
+                    </div>
                     <Input
                       id="endDate"
                       type="datetime-local"
@@ -192,10 +205,16 @@ export function ImportForm() {
 
             {/* Magnitude Filters */}
             <div className="space-y-4">
-              <Label>Magnitude Filters (Optional)</Label>
+              <div className="flex items-center gap-1.5">
+                <Label>Magnitude Filters (Optional)</Label>
+                <InfoTooltip content="Limit imports by earthquake magnitude range." />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="minMagnitude">Minimum Magnitude</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="minMagnitude">Minimum Magnitude</Label>
+                    <TechnicalTermTooltip term="magnitude" />
+                  </div>
                   <Input
                     id="minMagnitude"
                     type="number"
@@ -206,7 +225,10 @@ export function ImportForm() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="maxMagnitude">Maximum Magnitude</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="maxMagnitude">Maximum Magnitude</Label>
+                    <TechnicalTermTooltip term="magnitude" />
+                  </div>
                   <Input
                     id="maxMagnitude"
                     type="number"
@@ -221,10 +243,16 @@ export function ImportForm() {
 
             {/* Geographic Filters */}
             <div className="space-y-4">
-              <Label>Geographic Bounds (Optional)</Label>
+              <div className="flex items-center gap-1.5">
+                <Label>Geographic Bounds (Optional)</Label>
+                <InfoTooltip content="Limit imports to a bounding box in decimal degrees." />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="minLatitude">Minimum Latitude</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="minLatitude">Minimum Latitude</Label>
+                    <InfoTooltip content="Southern boundary (-90 to 90)." />
+                  </div>
                   <Input
                     id="minLatitude"
                     type="number"
@@ -235,7 +263,10 @@ export function ImportForm() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="maxLatitude">Maximum Latitude</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="maxLatitude">Maximum Latitude</Label>
+                    <InfoTooltip content="Northern boundary (-90 to 90)." />
+                  </div>
                   <Input
                     id="maxLatitude"
                     type="number"
@@ -246,7 +277,10 @@ export function ImportForm() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="minLongitude">Minimum Longitude</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="minLongitude">Minimum Longitude</Label>
+                    <InfoTooltip content="Western boundary (-180 to 180)." />
+                  </div>
                   <Input
                     id="minLongitude"
                     type="number"
@@ -257,7 +291,10 @@ export function ImportForm() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="maxLongitude">Maximum Longitude</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="maxLongitude">Maximum Longitude</Label>
+                    <InfoTooltip content="Eastern boundary (-180 to 180)." />
+                  </div>
                   <Input
                     id="maxLongitude"
                     type="number"
@@ -272,7 +309,10 @@ export function ImportForm() {
 
             {/* Catalogue Name */}
             <div className="space-y-2">
-              <Label htmlFor="catalogueName">Catalogue Name</Label>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="catalogueName">Catalogue Name</Label>
+                <InfoTooltip content="Name of the catalogue that will receive the imported events." />
+              </div>
               <Input
                 id="catalogueName"
                 type="text"
@@ -289,9 +329,12 @@ export function ImportForm() {
                 checked={updateExisting}
                 onCheckedChange={setUpdateExisting}
               />
-              <Label htmlFor="updateExisting" className="cursor-pointer">
-                Update existing events if data has changed
-              </Label>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="updateExisting" className="cursor-pointer">
+                  Update existing events if data has changed
+                </Label>
+                <InfoTooltip content="Re-imports events that already exist when GeoNet has updated them." />
+              </div>
             </div>
 
             {/* Submit Button */}
@@ -384,4 +427,3 @@ export function ImportForm() {
     </div>
   );
 }
-

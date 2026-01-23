@@ -37,6 +37,9 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
   const layerControlRef = useRef<L.Control.Layers | null>(null);
   const [isDark, setIsDark] = useState(false);
 
+  // Guard against empty events array
+  const hasEvents = group.events && group.events.length > 0;
+
   // Check for dark mode
   useEffect(() => {
     const checkDarkMode = () => {
@@ -57,6 +60,12 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
 
   useEffect(() => {
     if (!mapContainerRef.current) return;
+
+    // Guard against empty events array - can't initialize map without a center point
+    if (!hasEvents) {
+      console.warn('[DuplicateGroupMap] Cannot initialize map: no events in group');
+      return;
+    }
 
     // Initialize map
     if (!mapRef.current) {
@@ -137,7 +146,14 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
               ${event.catalogueName}
             </div>
             <div style="font-size: 12px;">
-              <div><strong>Time:</strong> ${new Date(event.time).toISOString().substring(0, 19).replace('T', ' ')}</div>
+              <div><strong>Time:</strong> ${new Date(event.time).toLocaleString('en-GB', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+              })}</div>
               <div><strong>Magnitude:</strong> ${event.magnitude.toFixed(2)}</div>
               <div><strong>Depth:</strong> ${event.depth != null ? event.depth.toFixed(1) + ' km' : 'N/A'}</div>
               <div><strong>Location:</strong> ${event.latitude.toFixed(4)}, ${event.longitude.toFixed(4)}</div>
@@ -154,7 +170,7 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
     if (group.events.length > 1) {
       const referenceEvent = group.events[0];
       group.events.slice(1).forEach((event) => {
-        const line = L.polyline(
+        L.polyline(
           [
             [referenceEvent.latitude, referenceEvent.longitude],
             [event.latitude, event.longitude],
@@ -183,13 +199,33 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
         layerControlRef.current = null;
       }
     };
-  }, [group, catalogueColors, isDark]);
+  }, [group, catalogueColors, isDark, hasEvents]);
+
+  // Fallback UI for empty groups
+  if (!hasEvents) {
+    return (
+      <div
+        style={{
+          height,
+          width: '100%',
+          borderRadius: '8px',
+          overflow: 'hidden',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: 'var(--muted)',
+          color: 'var(--muted-foreground)',
+        }}
+      >
+        <span>No events to display</span>
+      </div>
+    );
+  }
 
   return (
-    <div 
-      ref={mapContainerRef} 
+    <div
+      ref={mapContainerRef}
       style={{ height, width: '100%', borderRadius: '8px', overflow: 'hidden' }}
     />
   );
 }
-

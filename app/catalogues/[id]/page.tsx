@@ -209,10 +209,10 @@ export default function CatalogueDetailPage() {
             </Badge>
           </div>
           <p className="text-muted-foreground ml-12">
-            Created {new Date(catalogue.created_at).toLocaleDateString('en-NZ', {
+            Created {new Date(catalogue.created_at).toLocaleDateString('en-GB', {
               year: 'numeric',
-              month: 'long',
-              day: 'numeric',
+              month: '2-digit',
+              day: '2-digit',
             })}
           </p>
         </div>
@@ -324,4 +324,3 @@ export default function CatalogueDetailPage() {
     </div>
   );
 }
-

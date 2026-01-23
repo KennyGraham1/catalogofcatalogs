@@ -57,7 +57,11 @@ export function CatalogueList() {
               </Badge>
             </div>
             <CardDescription>
-              {new Date(catalogue.created_at).toLocaleDateString()}
+              {new Date(catalogue.created_at).toLocaleDateString('en-GB', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+              })}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -72,4 +76,3 @@ export function CatalogueList() {
     </div>
   );
 }
-

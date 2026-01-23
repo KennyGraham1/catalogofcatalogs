@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { calculateCompleteness } from '@/lib/data-quality-checker';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
 
 interface DataCompletenessMetricsProps {
   events: any[];
@@ -69,7 +70,10 @@ export function DataCompletenessMetrics({
         {/* Overall Completeness */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Overall Completeness</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm font-medium">Overall Completeness</span>
+              <InfoTooltip content="Coverage of required and optional fields across all events." />
+            </div>
             <Badge variant="outline" className={getCompletenessColor(completeness.overall)}>
               {getCompletenessLabel(completeness.overall)}
             </Badge>
@@ -87,7 +91,10 @@ export function DataCompletenessMetrics({
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium">Required Fields</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium">Required Fields</span>
+                <InfoTooltip content="Essential fields needed for valid events." />
+              </div>
               <span className={`text-xs font-semibold ${getCompletenessColor(completeness.required)}`}>
                 {completeness.required}%
               </span>
@@ -96,7 +103,10 @@ export function DataCompletenessMetrics({
           </div>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium">Optional Fields</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium">Optional Fields</span>
+                <InfoTooltip content="Additional metadata fields that improve analysis quality." />
+              </div>
               <span className={`text-xs font-semibold ${getCompletenessColor(completeness.optional)}`}>
                 {completeness.optional}%
               </span>
@@ -243,4 +253,3 @@ export function DataCompletenessMetrics({
     </Card>
   );
 }
-

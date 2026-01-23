@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
 import { MapPin, Search, X, Map as MapIcon, Edit3, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import dynamic from 'next/dynamic';
@@ -212,7 +213,10 @@ export const GeographicSearchPanel = memo(function GeographicSearchPanel({
               <TabsContent value="manual" className="space-y-4 mt-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="minLat">Min Latitude</Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label htmlFor="minLat">Min Latitude</Label>
+                      <InfoTooltip content="Southern boundary in degrees (-90 to 90)." />
+                    </div>
                     <Input
                       id="minLat"
                       type="number"
@@ -225,7 +229,10 @@ export const GeographicSearchPanel = memo(function GeographicSearchPanel({
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="maxLat">Max Latitude</Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label htmlFor="maxLat">Max Latitude</Label>
+                      <InfoTooltip content="Northern boundary in degrees (-90 to 90)." />
+                    </div>
                     <Input
                       id="maxLat"
                       type="number"
@@ -238,7 +245,10 @@ export const GeographicSearchPanel = memo(function GeographicSearchPanel({
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="minLon">Min Longitude</Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label htmlFor="minLon">Min Longitude</Label>
+                      <InfoTooltip content="Western boundary in degrees (-180 to 180)." />
+                    </div>
                     <Input
                       id="minLon"
                       type="number"
@@ -251,7 +261,10 @@ export const GeographicSearchPanel = memo(function GeographicSearchPanel({
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="maxLon">Max Longitude</Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label htmlFor="maxLon">Max Longitude</Label>
+                      <InfoTooltip content="Eastern boundary in degrees (-180 to 180)." />
+                    </div>
                     <Input
                       id="maxLon"
                       type="number"
@@ -300,4 +313,3 @@ export const GeographicSearchPanel = memo(function GeographicSearchPanel({
     </Collapsible>
   );
 });
-

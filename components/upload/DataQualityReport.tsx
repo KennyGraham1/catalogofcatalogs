@@ -6,6 +6,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { QualityCheckResult } from '@/lib/data-quality-checker';
 import { getQualityGrade } from '@/lib/data-quality-checker';
+import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 
 interface DataQualityReportProps {
   result: QualityCheckResult;
@@ -90,7 +91,10 @@ export function DataQualityReport({ result }: DataQualityReportProps) {
         {/* Overall Score */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Overall Quality Score</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm font-medium">Overall Quality Score</span>
+              <TechnicalTermTooltip term="qualityScore" />
+            </div>
             <Badge className={gradeColors[grade.color]}>
               {grade.grade} - {grade.label}
             </Badge>
@@ -103,21 +107,30 @@ export function DataQualityReport({ result }: DataQualityReportProps) {
         <div className="grid grid-cols-3 gap-4">
           <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium">Completeness</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium">Completeness</span>
+                <InfoTooltip content="Percent of expected fields populated across events." />
+              </div>
               <span className="text-xs text-muted-foreground">{result.report.completeness}%</span>
             </div>
             <Progress value={result.report.completeness} className="h-1.5" />
           </div>
           <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium">Consistency</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium">Consistency</span>
+                <InfoTooltip content="How well values align with expected ranges and formats." />
+              </div>
               <span className="text-xs text-muted-foreground">{result.report.consistency}%</span>
             </div>
             <Progress value={result.report.consistency} className="h-1.5" />
           </div>
           <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium">Accuracy</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium">Accuracy</span>
+                <InfoTooltip content="Estimated correctness based on validation rules and anomalies." />
+              </div>
               <span className="text-xs text-muted-foreground">{result.report.accuracy}%</span>
             </div>
             <Progress value={result.report.accuracy} className="h-1.5" />
@@ -144,13 +157,19 @@ export function DataQualityReport({ result }: DataQualityReportProps) {
           </div>
           {result.report.statistics.averageMagnitude > 0 && (
             <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Avg Magnitude</p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-xs text-muted-foreground">Avg Magnitude</p>
+                <TechnicalTermTooltip term="magnitude" />
+              </div>
               <p className="text-sm font-medium">{result.report.statistics.averageMagnitude.toFixed(1)}</p>
             </div>
           )}
           {result.report.statistics.averageDepth > 0 && (
             <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Avg Depth</p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-xs text-muted-foreground">Avg Depth</p>
+                <TechnicalTermTooltip term="depth" />
+              </div>
               <p className="text-sm font-medium">{result.report.statistics.averageDepth.toFixed(1)} km</p>
             </div>
           )}
@@ -161,7 +180,15 @@ export function DataQualityReport({ result }: DataQualityReportProps) {
           <div className="p-3 bg-muted/50 rounded-lg">
             <p className="text-xs font-medium mb-1">Time Range</p>
             <p className="text-xs text-muted-foreground">
-              {new Date(result.report.statistics.timeRange.start).toLocaleDateString()} - {new Date(result.report.statistics.timeRange.end).toLocaleDateString()}
+              {new Date(result.report.statistics.timeRange.start).toLocaleDateString('en-GB', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+              })} - {new Date(result.report.statistics.timeRange.end).toLocaleDateString('en-GB', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+              })}
             </p>
           </div>
         )}
@@ -268,4 +295,3 @@ export function DataQualityReport({ result }: DataQualityReportProps) {
     </Card>
   );
 }
-

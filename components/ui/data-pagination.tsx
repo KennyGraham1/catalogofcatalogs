@@ -24,7 +24,7 @@ interface DataPaginationProps {
   pageSize: number;
   onPageChange: (page: number) => void;
   onPageSizeChange?: (size: number) => void;
-  pageSizeOptions?: number[];
+  pageSizeOptions?: Array<number | { value: number; label: string }>;
   showPageSize?: boolean;
 }
 
@@ -39,9 +39,15 @@ export function DataPagination({
   showPageSize = true
 }: DataPaginationProps) {
   const pages = generatePageNumbers(currentPage, totalPages);
-  
-  const startItem = (currentPage - 1) * pageSize + 1;
-  const endItem = Math.min(currentPage * pageSize, totalItems);
+
+  const normalizedOptions = pageSizeOptions.map((option) =>
+    typeof option === 'number'
+      ? { value: option, label: option.toString() }
+      : option
+  );
+
+  const startItem = totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const endItem = totalItems === 0 ? 0 : Math.min(currentPage * pageSize, totalItems);
 
   return (
     <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-2 py-4">
@@ -61,9 +67,9 @@ export function DataPagination({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {pageSizeOptions.map((size) => (
-                  <SelectItem key={size} value={size.toString()}>
-                    {size}
+                {normalizedOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value.toString()}>
+                    {option.label}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -111,7 +117,7 @@ export function DataPagination({
                 variant="outline"
                 size="sm"
                 onClick={() => onPageChange(currentPage + 1)}
-                disabled={currentPage === totalPages}
+                disabled={currentPage >= totalPages}
               >
                 Next
               </Button>
@@ -122,4 +128,3 @@ export function DataPagination({
     </div>
   );
 }
-

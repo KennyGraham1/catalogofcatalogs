@@ -996,17 +996,291 @@ if (typeof window === 'undefined') {
       const eventsCollection = await getCollection(COLLECTIONS.EVENTS);
       const cataloguesCollection = await getCollection(COLLECTIONS.CATALOGUES);
 
-      const searchQuery: any = {
-        $or: [
-          { event_public_id: { $regex: searchTerm, $options: 'i' } },
-          { event_type: { $regex: searchTerm, $options: 'i' } },
-          { id: { $regex: searchTerm, $options: 'i' } }
-        ]
-      };
+      const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      const tokenRegex = /(\w+):("(?:[^"\\]|\\.)*"|\S+)/g;
+      const tokens: Array<{ field: string; value: string }> = [];
+      const normalizedQuery = searchTerm.replace(tokenRegex, ' ');
+      let match: RegExpExecArray | null;
+
+      tokenRegex.lastIndex = 0;
+      while ((match = tokenRegex.exec(searchTerm)) !== null) {
+        const rawValue = match[2];
+        const value = rawValue.startsWith('"') && rawValue.endsWith('"')
+          ? rawValue.slice(1, -1)
+          : rawValue;
+        tokens.push({ field: match[1].toLowerCase(), value });
+      }
+
+      const terms = normalizedQuery.split(/\s+/).filter(Boolean);
+      const andConditions: any[] = [];
 
       if (catalogueId) {
-        searchQuery.catalogue_id = catalogueId;
+        andConditions.push({ catalogue_id: catalogueId });
       }
+
+      const textFields = [
+        'event_public_id',
+        'event_type',
+        'id',
+        'region',
+        'location_name',
+        'magnitude_type',
+        'agency_id',
+        'author'
+      ];
+
+      for (const term of terms) {
+        const regex = new RegExp(escapeRegex(term), 'i');
+        andConditions.push({
+          $or: textFields.map((field) => ({ [field]: regex }))
+        });
+      }
+
+      const numericFilter = {
+        magnitude: {
+          min: undefined as number | undefined,
+          max: undefined as number | undefined,
+          minInclusive: true,
+          maxInclusive: true,
+        },
+        depth: {
+          min: undefined as number | undefined,
+          max: undefined as number | undefined,
+          minInclusive: true,
+          maxInclusive: true,
+        }
+      };
+
+      const updateMin = (field: 'magnitude' | 'depth', value: number, inclusive: boolean) => {
+        const filter = numericFilter[field];
+        if (filter.min === undefined || value > filter.min) {
+          filter.min = value;
+          filter.minInclusive = inclusive;
+        } else if (value === filter.min) {
+          filter.minInclusive = filter.minInclusive && inclusive;
+        }
+      };
+
+      const updateMax = (field: 'magnitude' | 'depth', value: number, inclusive: boolean) => {
+        const filter = numericFilter[field];
+        if (filter.max === undefined || value < filter.max) {
+          filter.max = value;
+          filter.maxInclusive = inclusive;
+        } else if (value === filter.max) {
+          filter.maxInclusive = filter.maxInclusive && inclusive;
+        }
+      };
+
+      const applyNumericFilter = (field: 'magnitude' | 'depth', value: string) => {
+        const rangeMatch = value.match(/^(\d+(?:\.\d+)?)\.\.(\d+(?:\.\d+)?)$/);
+        if (rangeMatch) {
+          const minValue = parseFloat(rangeMatch[1]);
+          const maxValue = parseFloat(rangeMatch[2]);
+          if (!Number.isNaN(minValue)) {
+            updateMin(field, minValue, true);
+          }
+          if (!Number.isNaN(maxValue)) {
+            updateMax(field, maxValue, true);
+          }
+          return;
+        }
+
+        const compMatch = value.match(/^(>=|<=|>|<|=)?\s*(\d+(?:\.\d+)?)$/);
+        if (!compMatch) return;
+
+        const op = compMatch[1] || '=';
+        const num = parseFloat(compMatch[2]);
+        if (Number.isNaN(num)) return;
+
+        if (op === '>') {
+          updateMin(field, num, false);
+        } else if (op === '>=') {
+          updateMin(field, num, true);
+        } else if (op === '<') {
+          updateMax(field, num, false);
+        } else if (op === '<=') {
+          updateMax(field, num, true);
+        } else {
+          updateMin(field, num, true);
+          updateMax(field, num, true);
+        }
+      };
+
+      const parseDateRange = (value: string): { start: string; end: string } | null => {
+        const normalized = value.trim().replace(/\//g, '-');
+        const rangeParts = normalized.split('..').map(part => part.trim()).filter(Boolean);
+        const parseSingleDate = (dateValue: string): { start: Date; end: Date } | null => {
+          const parts = dateValue.split('-').map((part) => part.trim());
+          if (!parts[0] || parts[0].length !== 4) return null;
+          const year = parseInt(parts[0], 10);
+          if (Number.isNaN(year)) return null;
+
+          if (parts.length === 1) {
+            const start = new Date(Date.UTC(year, 0, 1));
+            const end = new Date(Date.UTC(year + 1, 0, 1));
+            return { start, end };
+          }
+
+          const month = parseInt(parts[1], 10);
+          if (Number.isNaN(month) || month < 1 || month > 12) return null;
+
+          if (parts.length === 2) {
+            const start = new Date(Date.UTC(year, month - 1, 1));
+            const end = new Date(Date.UTC(year, month, 1));
+            return { start, end };
+          }
+
+          const day = parseInt(parts[2], 10);
+          if (Number.isNaN(day) || day < 1 || day > 31) return null;
+          const start = new Date(Date.UTC(year, month - 1, day));
+          const end = new Date(Date.UTC(year, month - 1, day + 1));
+          return { start, end };
+        };
+
+        if (rangeParts.length === 2) {
+          const startRange = parseSingleDate(rangeParts[0]);
+          const endRange = parseSingleDate(rangeParts[1]);
+          if (!startRange || !endRange) return null;
+          return {
+            start: startRange.start.toISOString(),
+            end: endRange.end.toISOString()
+          };
+        }
+
+        const single = parseSingleDate(normalized);
+        if (!single) return null;
+        return {
+          start: single.start.toISOString(),
+          end: single.end.toISOString()
+        };
+      };
+
+      const catalogueFilters: string[] = [];
+
+      for (const token of tokens) {
+        const tokenValue = token.value.trim();
+        if (!tokenValue) continue;
+
+        if (token.field === 'id') {
+          const regex = new RegExp(escapeRegex(tokenValue), 'i');
+          andConditions.push({
+            $or: [
+              { id: regex },
+              { event_public_id: regex }
+            ]
+          });
+          continue;
+        }
+
+        if (token.field === 'public') {
+          const regex = new RegExp(escapeRegex(tokenValue), 'i');
+          andConditions.push({ event_public_id: regex });
+          continue;
+        }
+
+        if (token.field === 'type' || token.field === 'event') {
+          const regex = new RegExp(escapeRegex(tokenValue), 'i');
+          andConditions.push({ event_type: regex });
+          continue;
+        }
+
+        if (token.field === 'region' || token.field === 'loc' || token.field === 'location') {
+          const regex = new RegExp(escapeRegex(tokenValue), 'i');
+          andConditions.push({
+            $or: [
+              { region: regex },
+              { location_name: regex }
+            ]
+          });
+          continue;
+        }
+
+        if (token.field === 'mag' || token.field === 'magnitude') {
+          applyNumericFilter('magnitude', tokenValue);
+          continue;
+        }
+
+        if (token.field === 'depth') {
+          applyNumericFilter('depth', tokenValue);
+          continue;
+        }
+
+        if (token.field === 'date' || token.field === 'time') {
+          const dateRange = parseDateRange(tokenValue);
+          if (dateRange) {
+            andConditions.push({
+              time: {
+                $gte: dateRange.start,
+                $lt: dateRange.end
+              }
+            });
+          }
+          continue;
+        }
+
+        if (token.field === 'catalogue' || token.field === 'source') {
+          catalogueFilters.push(tokenValue);
+        }
+      }
+
+      if (catalogueFilters.length > 0) {
+        let matchedCatalogueIds: string[] | null = null;
+        for (const filter of catalogueFilters) {
+          const regex = new RegExp(escapeRegex(filter), 'i');
+          const matches = await cataloguesCollection
+            .find({ name: { $regex: regex } })
+            .toArray() as any[];
+          const ids = matches.map((c: any) => c.id);
+          if (!matchedCatalogueIds) {
+            matchedCatalogueIds = ids;
+          } else {
+            matchedCatalogueIds = matchedCatalogueIds.filter((id) => ids.includes(id));
+          }
+        }
+        if (!matchedCatalogueIds || matchedCatalogueIds.length === 0) {
+          return [];
+        }
+        andConditions.push({ catalogue_id: { $in: matchedCatalogueIds } });
+      }
+
+      const buildNumericQuery = (field: 'magnitude' | 'depth') => {
+        const filter = numericFilter[field];
+        if (filter.min === undefined && filter.max === undefined) return null;
+        if (filter.min !== undefined && filter.max !== undefined && filter.min > filter.max) {
+          return { invalid: true } as const;
+        }
+        const query: Record<string, number> = {};
+        if (filter.min !== undefined) {
+          query[filter.minInclusive ? '$gte' : '$gt'] = filter.min;
+        }
+        if (filter.max !== undefined) {
+          query[filter.maxInclusive ? '$lte' : '$lt'] = filter.max;
+        }
+        return query;
+      };
+
+      const magnitudeQuery = buildNumericQuery('magnitude');
+      if (magnitudeQuery && 'invalid' in magnitudeQuery) {
+        return [];
+      }
+      if (magnitudeQuery) {
+        andConditions.push({ magnitude: magnitudeQuery });
+      }
+
+      const depthQuery = buildNumericQuery('depth');
+      if (depthQuery && 'invalid' in depthQuery) {
+        return [];
+      }
+      if (depthQuery) {
+        andConditions.push({ depth: depthQuery });
+      }
+
+      if (andConditions.length === 0) {
+        return [];
+      }
+
+      const searchQuery = { $and: andConditions };
 
       const events = await eventsCollection
         .find(searchQuery)
@@ -1033,6 +1307,8 @@ if (typeof window === 'undefined') {
         magnitude: e.magnitude,
         magnitude_type: e.magnitude_type,
         event_type: e.event_type,
+        region: e.region || null,
+        location_name: e.location_name || null,
         catalogue_name: catalogueMap.get(e.catalogue_id) || null
       }));
     }

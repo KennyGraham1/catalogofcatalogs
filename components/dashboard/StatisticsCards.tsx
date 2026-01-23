@@ -38,7 +38,11 @@ export function StatisticsCards() {
       title: 'Last Updated',
       value: lastUpdated ? new Date(lastUpdated).toLocaleTimeString() : '--:--',
       icon: RefreshCw,
-      description: lastUpdated ? new Date(lastUpdated).toLocaleDateString() : 'Never',
+      description: lastUpdated ? new Date(lastUpdated).toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      }) : 'Never',
       trend: 'Auto-refresh: 30s',
       trendUp: true
     }

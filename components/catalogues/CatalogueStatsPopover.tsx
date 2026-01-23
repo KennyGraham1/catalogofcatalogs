@@ -49,10 +49,10 @@ export function CatalogueStatsPopover({ catalogueId, catalogueName }: CatalogueS
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-NZ', {
+    return new Date(dateString).toLocaleDateString('en-GB', {
       year: 'numeric',
-      month: 'short',
-      day: 'numeric'
+      month: '2-digit',
+      day: '2-digit'
     });
   };
 
@@ -224,4 +224,3 @@ export function CatalogueStatsPopover({ catalogueId, catalogueName }: CatalogueS
     </Popover>
   );
 }
-

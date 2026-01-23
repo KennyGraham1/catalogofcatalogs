@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { Logger, NotFoundError, DatabaseError, formatErrorResponse } from '@/lib/errors';
 import { apiCache } from '@/lib/cache';
+import { requireEditor } from '@/lib/auth/middleware';
 
 const logger = new Logger('CatalogueAPI');
 
@@ -42,6 +43,12 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    // Require Editor role or higher
+    const authResult = await requireEditor(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     logger.info('Updating catalogue', { id: params.id });
 
     const body = await request.json();
@@ -95,6 +102,12 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    // Require Editor role or higher
+    const authResult = await requireEditor(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     logger.info('Deleting catalogue', { id: params.id });
 
     if (!dbQueries) {

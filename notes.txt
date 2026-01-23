@@ -21,43 +21,90 @@ there are some empty folders in the codebase. Please check them if they are need
 
 
 
+I want to implement user authentication and role-based access control (RBAC) for the Earthquake Catalogue Platform. The system should:
 
-The Analytics page (`app/analytics/page.tsx`) currently loads all catalogues and their events on page load, which causes performance issues. Please optimize this by implementing:
+1. **User Authentication:**
+   - Allow users to register and log in securely
+   - Support session management
+   - Integrate with the existing NextAuth.js setup (already configured in the codebase)
 
-1. **Lazy loading**: Only load catalogue metadata initially, not all events
-2. **On-demand event fetching**: Load events only when a specific catalogue is selected for analysis
-3. **Pagination or limits**: If events must be loaded, implement pagination or reasonable limits (e.g., latest 1000 events)
-4. **Caching**: Use the existing `useCachedFetch` hook instead of manual fetch calls
-5. **Loading states**: Add proper loading indicators for better UX
+2. **Role-Based Access Control:**
+   - Define different user roles (e.g., Admin, Editor, Viewer, Guest)
+   - Control access to specific features based on user roles:
+     - **Admin**: Full access to all features, user management, system settings
+     - **Editor**: Can upload, import, merge, and export catalogues
+     - **Viewer**: Can only view and export catalogues (read-only access)
+     - **Guest**: Limited access to public catalogues only
 
-The catalogue edit page (`app/catalogues/[id]/edit/page.tsx`) currently only allows editing the catalogue name, but users need access to edit all metadata fields that are available during catalogue import/creation. Please enhance the edit functionality to include:
+3. **Feature-Level Permissions:**
+   - Protect API endpoints based on user roles
+   - Control UI elements (hide/show buttons, menus based on permissions)
+   - Secure operations like:
+     - Catalogue upload and creation
+     - Data import from GeoNet
+     - Catalogue merging
+     - Data export
+     - System settings access
+
+4. **Implementation Requirements:**
+   - Use the existing MongoDB database to store user roles and permissions
+   - Integrate with the current API rate limiting system
+   - Maintain compatibility with the existing codebase architecture
+   - Provide a user management interface for admins
+
+Can you help me implement this authentication and authorization system for the platform?
 
 
+I need to implement a comprehensive user authentication and role-based access control (RBAC) system for the Earthquake Catalogue Platform. Based on the existing codebase that already has NextAuth.js configured and MongoDB collections defined, please help me build the following components:
 
+**1. User Authentication System:**
+- Create user registration and login pages using NextAuth.js
+- Implement secure session management with JWT tokens
+- Add password hashing and validation
+- Create user profile management functionality
+- Integrate with the existing MongoDB `users` and `sessions` collections
 
-Analyze the codebase to identify performance bottlenecks and optimization opportunities, focusing on the following areas:
+**2. Role-Based Access Control (4 distinct roles):**
+- **Admin**: Full system access including user management, system settings, all CRUD operations
+- **Editor**: Can create, upload, import, merge, and export catalogues; cannot manage users or system settings
+- **Viewer**: Read-only access to all catalogues with export capabilities; cannot create or modify data
+- **Guest**: Limited access to only public/demo catalogues; no export or modification rights
 
-1. **Database Operations**: Review queries, indexing, and bulk operations in files like `lib/db.ts`, `lib/geonet-import-service.ts`, and API routes to identify slow database calls
+**3. Database Schema Extensions:**
+- Extend the existing MongoDB `users` collection with role and permissions fields
+- Create a `user_roles` collection to define role capabilities
+- Add user assignment functionality for admins to manage user roles
+- Ensure compatibility with existing collections (`merged_catalogues`, `merged_events`, etc.)
 
-2. **Frontend Performance**: Examine React components, especially data-heavy pages like:
-   - Analytics page (`app/analytics/page.tsx`) - currently loads all catalogues and events on page load
-   - Catalogue detail pages with large event datasets
-   - Map components that render thousands of earthquake markers
+**4. API Security Implementation:**
+- Add authentication middleware to protect all API routes in `/app/api/`
+- Implement role-based authorization checks for each endpoint
+- Integrate with the existing rate limiting system in `lib/rate-limiter.ts`
+- Secure specific operations:
+  - POST/PUT/DELETE `/api/catalogues/*` (Editor+ only)
+  - POST `/api/import/geonet` (Editor+ only)
+  - POST `/api/merge` (Editor+ only)
+  - GET `/api/catalogues/*/export` (Viewer+ only)
+  - User management endpoints (Admin only)
 
-3. **API Endpoints**: Check for inefficient data fetching patterns, missing pagination, or lack of caching in API routes
+**5. Frontend Access Control:**
+- Create a permissions context/hook for role-based UI rendering
+- Hide/show navigation items, buttons, and pages based on user roles
+- Add role-based route protection using Next.js middleware
+- Implement user management interface for admins (assign roles, view users, etc.)
 
-4. **User Experience Improvements**: Implement loading states and progress indicators for long-running operations such as:
-   - Data imports from GeoNet API
-   - File uploads and parsing
-   - Catalogue merging operations
-   - Large dataset queries and map rendering
+**6. Integration Requirements:**
+- Maintain compatibility with existing codebase architecture
+- Work with current MongoDB connection in `lib/mongodb.ts`
+- Integrate with existing error handling in `lib/errors.ts`
+- Preserve all existing functionality while adding security layers
 
-5. **Specific Optimizations to Consider**:
-   - Implement pagination or virtual scrolling for large datasets
-   - Add lazy loading for components and data
-   - Use React.memo() and useMemo() for expensive computations
-   - Implement proper loading skeletons and progress bars
-   - Consider data sampling for map visualizations (e.g., show 2000 random events out of 20K+ with transparency about total count)
+**7. Specific Implementation Deliverables:**
+- Authentication pages (`/login`, `/register`, `/profile`)
+- Admin user management page (`/admin/users`)
+- Role-based middleware for API routes
+- Frontend permission hooks and components
+- Database migration scripts for user roles
+- Updated API documentation with authentication requirements
 
-Provide specific code examples and implementation suggestions for the most impactful optimizations, prioritizing user experience improvements that prevent the application from appearing frozen during heavy operations.
-
+Please provide step-by-step implementation with code examples, starting with the database schema and authentication setup, then moving to API protection and frontend integration.

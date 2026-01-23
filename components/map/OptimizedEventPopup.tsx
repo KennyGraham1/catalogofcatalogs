@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Activity, Ruler, Calendar, MapPin, AlertTriangle, Radio, Target } from 'lucide-react';
 import { getQualityColor } from '@/lib/quality-scoring';
+import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 
 interface EarthquakeEvent {
   id: number | string;
@@ -67,27 +68,46 @@ const QuickPopupContent = memo(function QuickPopupContent({
       <div className="space-y-1.5 text-sm">
         <div className="flex items-center gap-2">
           <Activity className="h-3.5 w-3.5 text-primary flex-shrink-0" />
-          <span className="font-medium">
-            M {event.magnitude.toFixed(1)}
-            {event.magnitude_type ? ` ${event.magnitude_type}` : ''}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">
+              M {event.magnitude.toFixed(1)}
+              {event.magnitude_type ? ` ${event.magnitude_type}` : ''}
+            </span>
+            <TechnicalTermTooltip term="magnitude" />
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
           <Ruler className="h-3.5 w-3.5 text-primary flex-shrink-0" />
-          <span>{event.depth !== null ? `${event.depth.toFixed(1)} km depth` : 'Depth N/A'}</span>
+          <div className="flex items-center gap-1.5">
+            <span>{event.depth !== null ? `${event.depth.toFixed(1)} km depth` : 'Depth N/A'}</span>
+            <TechnicalTermTooltip term="depth" />
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
           <Calendar className="h-3.5 w-3.5 text-primary flex-shrink-0" />
-          <span className="text-xs">{new Date(event.time).toLocaleString()}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs">{new Date(event.time).toLocaleString('en-GB', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            })}</span>
+            <InfoTooltip content="Event origin time in local timezone." />
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
           <MapPin className="h-3.5 w-3.5 text-primary flex-shrink-0" />
-          <span className="text-xs">
-            {event.latitude.toFixed(4)}°, {event.longitude.toFixed(4)}°
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs">
+              {event.latitude.toFixed(4)}°, {event.longitude.toFixed(4)}°
+            </span>
+            <InfoTooltip content="Epicenter coordinates in decimal degrees." />
+          </div>
         </div>
       </div>
     </div>
@@ -113,18 +133,25 @@ const ExtendedDetails = memo(function ExtendedDetails({
       {event.azimuthal_gap != null && (
         <div className="flex items-center gap-2">
           <Target className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-          <span>Azimuthal gap: {event.azimuthal_gap.toFixed(1)}°</span>
+          <div className="flex items-center gap-1.5">
+            <span>Azimuthal gap: {event.azimuthal_gap.toFixed(1)}°</span>
+            <TechnicalTermTooltip term="azimuthalGap" />
+          </div>
         </div>
       )}
       {event.used_station_count != null && (
         <div className="flex items-center gap-2">
           <Radio className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-          <span>Stations: {event.used_station_count}</span>
+          <div className="flex items-center gap-1.5">
+            <span>Stations: {event.used_station_count}</span>
+            <TechnicalTermTooltip term="stationCount" />
+          </div>
         </div>
       )}
       {event.catalogue && (
-        <div className="flex items-center gap-2 text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-muted-foreground">
           <span>Source: {event.catalogue}</span>
+          <InfoTooltip content="Catalogue or agency that reported the event." />
         </div>
       )}
     </div>
@@ -189,7 +216,10 @@ function NearbyFaultsSection({ latitude, longitude }: { latitude: number; longit
     <div className="mt-2 pt-2 border-t">
       <div className="flex items-center gap-1 text-xs font-medium mb-1">
         <AlertTriangle className="h-3 w-3 text-red-500" />
-        <span>Nearby Faults ({faults.length})</span>
+        <div className="flex items-center gap-1.5">
+          <span>Nearby Faults ({faults.length})</span>
+          <InfoTooltip content="Closest faults within 50 km of the epicenter." />
+        </div>
       </div>
       <div className="space-y-0.5 text-xs text-muted-foreground">
         {faults.map((fault, idx) => (
@@ -260,24 +290,43 @@ export const SimpleEventPopup = memo(function SimpleEventPopup({
             ? 'Light'
             : 'Minor'}
         </Badge>
-        <span className="text-sm font-semibold">M {event.magnitude.toFixed(1)}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-semibold">M {event.magnitude.toFixed(1)}</span>
+          <TechnicalTermTooltip term="magnitude" />
+        </div>
       </div>
 
       <div className="space-y-1 text-sm">
         <div className="flex items-center gap-2">
           <Calendar className="h-3 w-3 text-muted-foreground" />
-          <span>{new Date(event.time).toLocaleString()}</span>
+          <div className="flex items-center gap-1.5">
+            <span>{new Date(event.time).toLocaleString('en-GB', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            })}</span>
+            <InfoTooltip content="Event origin time in local timezone." />
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <MapPin className="h-3 w-3 text-muted-foreground" />
-          <span>
-            {event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span>
+              {event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°
+            </span>
+            <InfoTooltip content="Epicenter coordinates in decimal degrees." />
+          </div>
         </div>
         {event.depth !== null && (
           <div className="flex items-center gap-2">
             <Ruler className="h-3 w-3 text-muted-foreground" />
-            <span>{event.depth.toFixed(1)} km depth</span>
+            <div className="flex items-center gap-1.5">
+              <span>{event.depth.toFixed(1)} km depth</span>
+              <TechnicalTermTooltip term="depth" />
+            </div>
           </div>
         )}
       </div>

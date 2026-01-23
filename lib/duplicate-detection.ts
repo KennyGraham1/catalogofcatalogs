@@ -110,7 +110,30 @@ function getMagnitudeDependentThreshold(magnitude: number, baseThreshold: number
 }
 
 /**
+ * Calculate a similarity component using a scaled exponential decay.
+ *
+ * Uses the formula: exp(-k * (value / threshold)^2)
+ * This produces:
+ * - At value = 0: score = 1.0
+ * - At value = threshold/2: score ≈ 0.88
+ * - At value = threshold: score ≈ 0.5
+ * - At value = 2*threshold: score ≈ 0.02
+ *
+ * The decay constant k = ln(2) ≈ 0.693 ensures score = 0.5 at threshold.
+ */
+function calculateSimilarityComponent(value: number, threshold: number): number {
+  if (threshold <= 0) return value === 0 ? 1.0 : 0.0;
+  const k = Math.LN2; // ~0.693, ensures 0.5 at threshold
+  const ratio = value / threshold;
+  return Math.exp(-k * ratio * ratio);
+}
+
+/**
  * Calculate similarity score between two events (0-1)
+ *
+ * Uses Gaussian-style decay where events AT the threshold get 50% similarity,
+ * events well within the threshold get high similarity (>0.9),
+ * and events beyond the threshold rapidly decay to 0.
  */
 export function calculateSimilarityScore(
   event1: any,
@@ -118,65 +141,95 @@ export function calculateSimilarityScore(
   config: DuplicateDetectionConfig
 ): number {
   const weights = config.weights || { time: 0.3, location: 0.4, magnitude: 0.2, depth: 0.1 };
-  
-  // Time similarity (exponential decay)
+
+  // Time similarity (Gaussian-style decay)
   const timeDiff = calculateTimeDifference(event1.time, event2.time);
-  const timeSimilarity = Math.exp(-timeDiff / config.timeThresholdSeconds);
-  
-  // Location similarity (exponential decay based on distance)
+  const timeSimilarity = calculateSimilarityComponent(timeDiff, config.timeThresholdSeconds);
+
+  // Location similarity (Gaussian-style decay based on distance)
   const distance = calculateDistance(
     event1.latitude,
     event1.longitude,
     event2.latitude,
     event2.longitude
   );
-  
+
   const distanceThreshold = config.useMagnitudeDependentThreshold
     ? getMagnitudeDependentThreshold(Math.max(event1.magnitude, event2.magnitude), config.distanceThresholdKm)
     : config.distanceThresholdKm;
-  
-  const locationSimilarity = Math.exp(-distance / distanceThreshold);
-  
-  // Magnitude similarity
+
+  const locationSimilarity = calculateSimilarityComponent(distance, distanceThreshold);
+
+  // Magnitude similarity (Gaussian-style decay)
   const magDiff = Math.abs(event1.magnitude - event2.magnitude);
   const magThreshold = config.magnitudeThreshold || 0.5;
-  const magnitudeSimilarity = Math.exp(-magDiff / magThreshold);
-  
+  const magnitudeSimilarity = calculateSimilarityComponent(magDiff, magThreshold);
+
   // Depth similarity (if both have depth)
   let depthSimilarity = 1.0; // Default if depth not available
-  if (event1.depth !== null && event1.depth !== undefined && 
+  let effectiveDepthWeight = weights.depth;
+
+  if (event1.depth !== null && event1.depth !== undefined &&
       event2.depth !== null && event2.depth !== undefined) {
     const depthDiff = Math.abs(event1.depth - event2.depth);
     const depthThreshold = config.depthThresholdKm || 20;
-    depthSimilarity = Math.exp(-depthDiff / depthThreshold);
+    depthSimilarity = calculateSimilarityComponent(depthDiff, depthThreshold);
+  } else {
+    // If depth is not available, redistribute its weight to other components
+    // This ensures the total weight still sums to 1.0
+    effectiveDepthWeight = 0;
   }
-  
+
+  // Normalize weights if depth was excluded
+  const totalWeight = weights.time + weights.location + weights.magnitude + effectiveDepthWeight;
+  const normalizedWeights = {
+    time: weights.time / totalWeight,
+    location: weights.location / totalWeight,
+    magnitude: weights.magnitude / totalWeight,
+    depth: effectiveDepthWeight / totalWeight,
+  };
+
   // Weighted combination
   const totalScore = (
-    timeSimilarity * weights.time +
-    locationSimilarity * weights.location +
-    magnitudeSimilarity * weights.magnitude +
-    depthSimilarity * weights.depth
+    timeSimilarity * normalizedWeights.time +
+    locationSimilarity * normalizedWeights.location +
+    magnitudeSimilarity * normalizedWeights.magnitude +
+    depthSimilarity * normalizedWeights.depth
   );
-  
+
   return totalScore;
 }
 
 /**
+ * Get the event ID, with fallback to generated ID
+ */
+function getEventId(event: any, fallbackIndex?: number): string {
+  return event.id || event.event_public_id || `event_${fallbackIndex ?? Math.random().toString(36).substring(2, 11)}`;
+}
+
+/**
  * Check if two events are duplicates
+ *
+ * Returns a DuplicateMatch object if the events are similar enough to be
+ * considered duplicates, or null if they are not.
  */
 export function areDuplicates(
   event1: any,
   event2: any,
   config: DuplicateDetectionConfig
 ): DuplicateMatch | null {
+  // Guard against invalid input
+  if (!event1 || !event2 || !event1.time || !event2.time) {
+    return null;
+  }
+
   const similarityScore = calculateSimilarityScore(event1, event2, config);
   const minimumScore = config.minimumSimilarityScore || 0.70;
-  
+
   if (similarityScore < minimumScore) {
     return null;
   }
-  
+
   const timeDiff = calculateTimeDifference(event1.time, event2.time);
   const distance = calculateDistance(
     event1.latitude,
@@ -185,14 +238,18 @@ export function areDuplicates(
     event2.longitude
   );
   const magDiff = Math.abs(event1.magnitude - event2.magnitude);
-  
+
   let depthDiff: number | null = null;
-  if (event1.depth !== null && event1.depth !== undefined && 
+  if (event1.depth !== null && event1.depth !== undefined &&
       event2.depth !== null && event2.depth !== undefined) {
     depthDiff = Math.abs(event1.depth - event2.depth);
   }
-  
-  // Determine confidence level
+
+  // Determine confidence level based on similarity score
+  // With the Gaussian-style decay:
+  // - 0.90+ means all components are well within half their thresholds
+  // - 0.75-0.90 means components are within thresholds but not very close
+  // - 0.60-0.75 means some components are at or beyond their thresholds
   let confidence: 'high' | 'medium' | 'low';
   if (similarityScore >= 0.90) {
     confidence = 'high';
@@ -201,26 +258,28 @@ export function areDuplicates(
   } else {
     confidence = 'low';
   }
-  
-  // Generate match reason
+
+  // Generate match reason with more detail
   const reasons: string[] = [];
   if (timeDiff < 5) reasons.push('very close in time');
   else if (timeDiff < 30) reasons.push('close in time');
-  
+
   if (distance < 5) reasons.push('very close in location');
   else if (distance < 20) reasons.push('close in location');
-  
+
   if (magDiff < 0.2) reasons.push('similar magnitude');
-  
+  else if (magDiff < 0.5) reasons.push('close magnitude');
+
   if (depthDiff !== null && depthDiff < 5) reasons.push('similar depth');
-  
-  const matchReason = reasons.length > 0 
+  else if (depthDiff !== null && depthDiff < 15) reasons.push('close depth');
+
+  const matchReason = reasons.length > 0
     ? reasons.join(', ')
     : 'matches within thresholds';
-  
+
   return {
-    event1Id: event1.id || event1.event_public_id,
-    event2Id: event2.id || event2.event_public_id,
+    event1Id: getEventId(event1),
+    event2Id: getEventId(event2),
     similarityScore,
     timeDifferenceSeconds: timeDiff,
     distanceKm: distance,
@@ -232,42 +291,197 @@ export function areDuplicates(
 }
 
 /**
+ * Assign stable IDs to events that don't have them.
+ * This ensures consistent ID usage across all duplicate detection functions.
+ */
+function ensureEventIds(events: any[]): any[] {
+  return events.map((event, index) => {
+    if (event.id || event.event_public_id) {
+      return event;
+    }
+    // Create a new object with a stable generated ID
+    return {
+      ...event,
+      _generated_id: `generated_${index}`,
+    };
+  });
+}
+
+/**
+ * Get the event ID, checking for generated fallback IDs
+ */
+function getStableEventId(event: any): string {
+  return event.id || event.event_public_id || event._generated_id || 'unknown';
+}
+
+/**
  * Find all duplicate pairs in a set of events
+ *
+ * Performance note: This is O(n²) in the worst case. For large datasets (>1000 events),
+ * consider using spatial indexing similar to the merge algorithm.
+ *
+ * Optimization: Events are first sorted by time, allowing early termination
+ * when time difference exceeds threshold.
  */
 export function findDuplicatePairs(
   events: any[],
   config: DuplicateDetectionConfig
 ): DuplicateMatch[] {
   const duplicates: DuplicateMatch[] = [];
-  
+
+  // Guard: empty or single event array
+  if (events.length < 2) {
+    return duplicates;
+  }
+
+  // Ensure all events have stable IDs
+  const eventsWithIds = ensureEventIds(events);
+
+  // Sort events by time for early termination optimization
+  const sortedEvents = [...eventsWithIds].sort((a, b) => {
+    const timeA = new Date(a.time).getTime();
+    const timeB = new Date(b.time).getTime();
+    return timeA - timeB;
+  });
+
+  // Calculate maximum time threshold (for early termination)
+  // For magnitude-dependent thresholds, use the maximum possible multiplier (4x for M7+)
+  const maxTimeThreshold = config.timeThresholdSeconds * (config.useMagnitudeDependentThreshold ? 4 : 1);
+
   // Compare each event with every other event
-  for (let i = 0; i < events.length; i++) {
-    for (let j = i + 1; j < events.length; j++) {
-      const match = areDuplicates(events[i], events[j], config);
+  for (let i = 0; i < sortedEvents.length; i++) {
+    const event1 = sortedEvents[i];
+    const time1 = new Date(event1.time).getTime();
+
+    for (let j = i + 1; j < sortedEvents.length; j++) {
+      const event2 = sortedEvents[j];
+      const time2 = new Date(event2.time).getTime();
+
+      // Early termination: if time difference exceeds max threshold,
+      // all subsequent events will also exceed it (since sorted by time)
+      const timeDiffMs = time2 - time1;
+      if (timeDiffMs > maxTimeThreshold * 1000) {
+        break;
+      }
+
+      const match = areDuplicatesWithIds(event1, event2, config);
       if (match) {
         duplicates.push(match);
       }
     }
   }
-  
+
   return duplicates;
 }
 
 /**
- * Group duplicate events together
+ * Internal function that uses stable IDs (used by findDuplicatePairs)
+ */
+function areDuplicatesWithIds(
+  event1: any,
+  event2: any,
+  config: DuplicateDetectionConfig
+): DuplicateMatch | null {
+  // Guard against invalid input
+  if (!event1 || !event2 || !event1.time || !event2.time) {
+    return null;
+  }
+
+  const similarityScore = calculateSimilarityScore(event1, event2, config);
+  const minimumScore = config.minimumSimilarityScore || 0.70;
+
+  if (similarityScore < minimumScore) {
+    return null;
+  }
+
+  const timeDiff = calculateTimeDifference(event1.time, event2.time);
+  const distance = calculateDistance(
+    event1.latitude,
+    event1.longitude,
+    event2.latitude,
+    event2.longitude
+  );
+  const magDiff = Math.abs(event1.magnitude - event2.magnitude);
+
+  let depthDiff: number | null = null;
+  if (event1.depth !== null && event1.depth !== undefined &&
+      event2.depth !== null && event2.depth !== undefined) {
+    depthDiff = Math.abs(event1.depth - event2.depth);
+  }
+
+  // Determine confidence level
+  let confidence: 'high' | 'medium' | 'low';
+  if (similarityScore >= 0.90) {
+    confidence = 'high';
+  } else if (similarityScore >= 0.75) {
+    confidence = 'medium';
+  } else {
+    confidence = 'low';
+  }
+
+  // Generate match reason
+  const reasons: string[] = [];
+  if (timeDiff < 5) reasons.push('very close in time');
+  else if (timeDiff < 30) reasons.push('close in time');
+
+  if (distance < 5) reasons.push('very close in location');
+  else if (distance < 20) reasons.push('close in location');
+
+  if (magDiff < 0.2) reasons.push('similar magnitude');
+  else if (magDiff < 0.5) reasons.push('close magnitude');
+
+  if (depthDiff !== null && depthDiff < 5) reasons.push('similar depth');
+  else if (depthDiff !== null && depthDiff < 15) reasons.push('close depth');
+
+  const matchReason = reasons.length > 0
+    ? reasons.join(', ')
+    : 'matches within thresholds';
+
+  return {
+    event1Id: getStableEventId(event1),
+    event2Id: getStableEventId(event2),
+    similarityScore,
+    timeDifferenceSeconds: timeDiff,
+    distanceKm: distance,
+    magnitudeDifference: magDiff,
+    depthDifferenceKm: depthDiff,
+    matchReason,
+    confidence,
+  };
+}
+
+/**
+ * Group duplicate events together using connected component analysis.
+ *
+ * Events are grouped transitively: if A matches B and B matches C,
+ * then A, B, and C are all in the same group, even if A doesn't match C directly.
  */
 export function groupDuplicates(
   events: any[],
   config: DuplicateDetectionConfig
 ): DuplicateGroup[] {
+  // Guard: empty or single event array
+  if (events.length < 2) {
+    return [];
+  }
+
+  // Ensure all events have stable IDs (same as findDuplicatePairs)
+  const eventsWithIds = ensureEventIds(events);
+
   const duplicatePairs = findDuplicatePairs(events, config);
-  
-  // Build adjacency list
+
+  // If no duplicates found, return empty array
+  if (duplicatePairs.length === 0) {
+    return [];
+  }
+
+  // Build adjacency list using the same stable IDs
   const adjacency = new Map<string, Set<string>>();
   const eventMap = new Map<string, any>();
-  
-  events.forEach(event => {
-    const id = event.id || event.event_public_id;
+
+  eventsWithIds.forEach((event) => {
+    // Use the same ID generation as findDuplicatePairs
+    const id = getStableEventId(event);
     eventMap.set(id, event);
     adjacency.set(id, new Set());
   });

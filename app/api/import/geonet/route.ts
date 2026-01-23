@@ -9,11 +9,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { geonetImportService } from '@/lib/geonet-import-service';
 import { Logger } from '@/lib/errors';
 import { apiCache } from '@/lib/cache';
+import { requireEditor } from '@/lib/auth/middleware';
 
 const logger = new Logger('GeoNetImport');
 
 export async function POST(request: NextRequest) {
   try {
+    // Require Editor role or higher
+    const authResult = await requireEditor(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     const body = await request.json();
 
     // Parse and validate request body

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { VirtualizedEventTable } from './VirtualizedEventTable';
+import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 
 interface Event {
   id: string | number;
@@ -150,10 +151,10 @@ export function EventTable({
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleString('en-NZ', {
+    return date.toLocaleString('en-GB', {
       year: 'numeric',
-      month: 'short',
-      day: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
     });
@@ -188,34 +189,43 @@ export function EventTable({
         <TableHeader>
           <TableRow>
             <TableHead className="w-[180px]">
-              <Button
-                variant="ghost"
-                onClick={() => handleSort('time')}
-                className="h-auto p-0 font-medium hover:bg-transparent"
-              >
-                Time
-                {renderSortIcon('time')}
-              </Button>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="ghost"
+                  onClick={() => handleSort('time')}
+                  className="h-auto p-0 font-medium hover:bg-transparent"
+                >
+                  Time
+                  {renderSortIcon('time')}
+                </Button>
+                <InfoTooltip content="Origin time of the event." />
+              </div>
             </TableHead>
             <TableHead>
-              <Button
-                variant="ghost"
-                onClick={() => handleSort('magnitude')}
-                className="h-auto p-0 font-medium hover:bg-transparent"
-              >
-                Magnitude
-                {renderSortIcon('magnitude')}
-              </Button>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="ghost"
+                  onClick={() => handleSort('magnitude')}
+                  className="h-auto p-0 font-medium hover:bg-transparent"
+                >
+                  Magnitude
+                  {renderSortIcon('magnitude')}
+                </Button>
+                <TechnicalTermTooltip term="magnitude" />
+              </div>
             </TableHead>
             <TableHead>
-              <Button
-                variant="ghost"
-                onClick={() => handleSort('depth')}
-                className="h-auto p-0 font-medium hover:bg-transparent"
-              >
-                Depth (km)
-                {renderSortIcon('depth')}
-              </Button>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="ghost"
+                  onClick={() => handleSort('depth')}
+                  className="h-auto p-0 font-medium hover:bg-transparent"
+                >
+                  Depth (km)
+                  {renderSortIcon('depth')}
+                </Button>
+                <TechnicalTermTooltip term="depth" />
+              </div>
             </TableHead>
             <TableHead>Location</TableHead>
             <TableHead>
@@ -229,16 +239,24 @@ export function EventTable({
               </Button>
             </TableHead>
             <TableHead>
-              <Button
-                variant="ghost"
-                onClick={() => handleSort('quality')}
-                className="h-auto p-0 font-medium hover:bg-transparent"
-              >
-                Quality
-                {renderSortIcon('quality')}
-              </Button>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="ghost"
+                  onClick={() => handleSort('quality')}
+                  className="h-auto p-0 font-medium hover:bg-transparent"
+                >
+                  Quality
+                  {renderSortIcon('quality')}
+                </Button>
+                <TechnicalTermTooltip term="qualityScore" />
+              </div>
             </TableHead>
-            <TableHead>Type</TableHead>
+            <TableHead>
+              <div className="flex items-center gap-1.5">
+                <span>Type</span>
+                <InfoTooltip content="Event classification (e.g., earthquake, quarry blast)." />
+              </div>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -313,4 +331,3 @@ export function EventTable({
     </div>
   );
 }
-

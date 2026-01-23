@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 
 export interface PaginationOptions {
   initialPage?: number;
@@ -43,27 +43,40 @@ export function usePagination<T>(
   const hasNextPage = currentPage < totalPages;
   const hasPreviousPage = currentPage > 1;
 
-  const goToPage = (page: number) => {
-    const validPage = Math.max(1, Math.min(page, totalPages));
-    setCurrentPage(validPage);
-  };
+  useEffect(() => {
+    if (totalPages === 0 && currentPage !== 1) {
+      setCurrentPage(1);
+      return;
+    }
+    if (totalPages > 0 && currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
-  const nextPage = () => {
+  const goToPage = useCallback(
+    (page: number) => {
+      const validPage = Math.max(1, Math.min(page, totalPages || 1));
+      setCurrentPage(validPage);
+    },
+    [totalPages]
+  );
+
+  const nextPage = useCallback(() => {
     if (hasNextPage) {
       setCurrentPage(prev => prev + 1);
     }
-  };
+  }, [hasNextPage]);
 
-  const previousPage = () => {
+  const previousPage = useCallback(() => {
     if (hasPreviousPage) {
       setCurrentPage(prev => prev - 1);
     }
-  };
+  }, [hasPreviousPage]);
 
-  const handleSetPageSize = (size: number) => {
+  const handleSetPageSize = useCallback((size: number) => {
     setPageSize(size);
     setCurrentPage(1); // Reset to first page when changing page size
-  };
+  }, []);
 
   return {
     currentPage,
@@ -133,4 +146,3 @@ export function generatePageNumbers(
 
   return pages;
 }
-

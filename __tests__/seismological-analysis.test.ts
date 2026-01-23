@@ -301,9 +301,10 @@ describe('Edge Cases and Error Handling', () => {
       depth: 10,
       magnitude: 3.0 + Math.random()
     }));
-    
+
     const result = analyzeTemporalPattern(events);
-    expect(result.timeSpanDays).toBeLessThan(1);
+    // timeSpanDays has a minimum of 1 to avoid division by zero in rate calculations
+    expect(result.timeSpanDays).toBe(1);
     expect(result.timeSeries.length).toBe(1);
   });
 });

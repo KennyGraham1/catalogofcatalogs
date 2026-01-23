@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Activity, Ruler, Calendar, Info } from 'lucide-react';
+import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { getMagnitudeColor, getMagnitudeRadius, getMagnitudeLabel, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
@@ -74,7 +75,11 @@ export default function MapComponent({ events }: MapComponentProps) {
         {/* Earthquake markers - using intelligent sampling for performance */}
         {/* Sort by magnitude (small to large) so larger events render on top */}
         {[...sampledEvents].sort((a, b) => a.magnitude - b.magnitude).map((event, index) => {
-          const eventDate = new Date(event.time).toLocaleDateString();
+          const eventDate = new Date(event.time).toLocaleDateString('en-GB', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+          });
           const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
 
           return (
@@ -103,33 +108,48 @@ export default function MapComponent({ events }: MapComponentProps) {
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-sm">
                       <Activity className="h-4 w-4 text-primary" />
-                      <span className="font-medium">Magnitude:</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium">Magnitude:</span>
+                        <TechnicalTermTooltip term="magnitude" />
+                      </div>
                       <span>{event.magnitude.toFixed(1)}</span>
                     </div>
 
                     {event.depth !== undefined && (
                       <div className="flex items-center gap-2 text-sm">
                         <Ruler className="h-4 w-4 text-primary" />
-                        <span className="font-medium">Depth:</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-medium">Depth:</span>
+                          <TechnicalTermTooltip term="depth" />
+                        </div>
                         <span>{event.depth} km</span>
                       </div>
                     )}
 
                     <div className="flex items-center gap-2 text-sm">
                       <Calendar className="h-4 w-4 text-primary" />
-                      <span className="font-medium">Time:</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium">Time:</span>
+                        <InfoTooltip content="Event origin time in local timezone." />
+                      </div>
                       <span className="text-xs">{event.time}</span>
                     </div>
 
                     {event.source && (
                       <div className="flex items-center gap-2 text-sm pt-2 border-t">
-                        <span className="font-medium">Source:</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-medium">Source:</span>
+                          <InfoTooltip content="Catalogue or agency that reported the event." />
+                        </div>
                         <span className="text-xs">{event.source}</span>
                       </div>
                     )}
 
                     <div className="flex items-center gap-2 text-sm">
-                      <span className="font-medium">Location:</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium">Location:</span>
+                        <InfoTooltip content="Epicenter coordinates in decimal degrees." />
+                      </div>
                       <span className="text-xs">
                         {event.latitude.toFixed(4)}°, {event.longitude.toFixed(4)}°
                       </span>
@@ -144,7 +164,10 @@ export default function MapComponent({ events }: MapComponentProps) {
 
       {/* Legend */}
       <Card className="absolute bottom-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[220px]">
-        <h4 className="font-semibold text-sm mb-3">Magnitude Scale</h4>
+        <div className="flex items-center gap-1.5 mb-3">
+          <h4 className="font-semibold text-sm">Magnitude Scale</h4>
+          <TechnicalTermTooltip term="magnitude" />
+        </div>
         <div className="space-y-1.5 text-xs">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>

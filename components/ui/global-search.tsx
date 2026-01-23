@@ -15,11 +15,12 @@ interface SearchResult {
   time: string;
   latitude: number;
   longitude: number;
-  depth: number;
-  magnitude: number;
-  magnitudeType: string;
-  locationName: string;
-  eventType: string;
+  depth: number | null;
+  magnitude: number | null;
+  magnitudeType?: string | null;
+  locationName?: string | null;
+  region?: string | null;
+  eventType?: string | null;
   label: string;
   description: string;
 }
@@ -32,7 +33,7 @@ interface GlobalSearchProps {
 }
 
 export function GlobalSearch({ 
-  placeholder = 'Search events by ID, location, magnitude...', 
+  placeholder = 'Search events (e.g., id:us1234 mag:>=4 region:wellington)', 
   catalogueId,
   onResultSelect,
   className 
@@ -140,12 +141,10 @@ export function GlobalSearch({
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-NZ', { 
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+    return date.toLocaleDateString('en-GB', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
     });
   };
 
@@ -208,7 +207,7 @@ export function GlobalSearch({
                         <Calendar className="h-3 w-3" />
                         {formatDate(result.time)}
                       </span>
-                      {result.depth && (
+                      {result.depth !== null && result.depth !== undefined && (
                         <span>
                           Depth: {result.depth.toFixed(1)} km
                         </span>
@@ -233,4 +232,3 @@ export function GlobalSearch({
     </div>
   );
 }
-

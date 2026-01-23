@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,6 +14,9 @@ import { MergeActions } from '@/components/merge/MergeActions';
 import { MergeMetadataForm, MergeMetadata } from '@/components/merge/MergeMetadataForm';
 import { MergeProgressIndicator, MergeStep } from '@/components/merge/MergeProgressIndicator';
 import { useCatalogues } from '@/contexts/CatalogueContext';
+import { InfoTooltip, LabelWithTooltip } from '@/components/ui/info-tooltip';
+import { useDebounce } from '@/hooks/use-debounce';
+import { usePagination } from '@/hooks/use-pagination';
 
 // Dynamically import MergePreviewQC to avoid SSR issues with Leaflet
 const MergePreviewQC = dynamic(
@@ -39,15 +42,35 @@ import {
   Clock,
   MapPin,
   Loader2,
-  FileDown
+  FileDown,
+  Search,
+  Info,
+  Calendar,
+  Activity,
+  Database,
+  GitMerge,
+  Globe,
+  Upload
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { GeographicSearchPanel, GeographicBounds } from '@/components/catalogues/GeographicSearchPanel';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { DataPagination } from '@/components/ui/data-pagination';
 
 type CatalogueStatus = 'all' | 'complete' | 'processing' | 'incomplete';
-type SortField = 'name' | 'date' | 'events' | 'source';
+type SortField = 'name' | 'date' | 'events' | 'sourceType' | 'source';
 type SortDirection = 'asc' | 'desc';
 type MergeStatus = 'idle' | 'merging' | 'complete' | 'error';
+type SearchToken = { field?: string; value: string };
+type SearchFields = {
+  name: string;
+  id: string;
+  status: string;
+  source: string;
+  sourceType: string;
+  events: string;
+  created: string;
+};
 
 // Type that supports API data with optional legacy field names
 type CatalogueItem = {
@@ -56,6 +79,10 @@ type CatalogueItem = {
   events?: number;      // Legacy field name
   event_count?: number; // API field name
   source?: string;
+  created_at?: string;
+  status?: string;
+  source_catalogues?: string;
+  merge_config?: string;
 };
 
 // Status labels for merge status
@@ -99,6 +126,12 @@ export default function MergePage() {
   const [geoSearching, setGeoSearching] = useState(false);
   const [geoSearchBounds, setGeoSearchBounds] = useState<GeographicBounds | null>(null);
   const [filteredCatalogues, setFilteredCatalogues] = useState<CatalogueItem[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortField, setSortField] = useState<SortField>('date');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [showAllResults, setShowAllResults] = useState(false);
+
+  const debouncedSearchQuery = useDebounce(searchQuery, 300);
 
   // New state for metadata and export-only mode
   const [mergeMetadata, setMergeMetadata] = useState<MergeMetadata>({});
@@ -115,12 +148,35 @@ export default function MergePage() {
   const [previewData, setPreviewData] = useState<any>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
 
+  // Ref to track progress interval for cleanup
+  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
   // Initialize filtered catalogues with real data from context
   useEffect(() => {
     if (!geoSearchActive && realCatalogues.length > 0) {
       setFilteredCatalogues(realCatalogues);
     }
   }, [realCatalogues, geoSearchActive]);
+
+  // Clear preview data when configuration changes (prevents stale preview)
+  useEffect(() => {
+    setPreviewData(null);
+  }, [timeThreshold, distanceThreshold, mergeStrategy, priority]);
+
+  // Clear preview data when selected catalogues change
+  useEffect(() => {
+    setPreviewData(null);
+  }, [selectedCatalogues]);
+
+  // Cleanup progress interval on unmount
+  useEffect(() => {
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   // Memoized catalogue selection handler
   const handleCatalogueSelect = useCallback((id: number | string) => {
@@ -138,9 +194,18 @@ export default function MergePage() {
     if (activeTab === 'select') {
       setActiveTab('configure');
     } else if (activeTab === 'configure') {
+      // Validate merged catalogue name before proceeding to preview
+      if (!mergedName.trim()) {
+        toast({
+          title: "Name Required",
+          description: "Please enter a name for the merged catalogue.",
+          variant: "destructive"
+        });
+        return;
+      }
       setActiveTab('preview');
     }
-  }, [activeTab]);
+  }, [activeTab, mergedName]);
 
   const handlePreviousStep = useCallback(() => {
     if (activeTab === 'configure') {
@@ -233,17 +298,35 @@ export default function MergePage() {
       return;
     }
 
+    // Validate merged catalogue name
+    if (!mergedName.trim()) {
+      toast({
+        title: "Name Required",
+        description: "Please enter a name for the merged catalogue.",
+        variant: "destructive"
+      });
+      return;
+    }
+
     setMergeStatus('merging');
     setMergeProgress(0);
 
     // Reset all steps to pending
     setMergeSteps(steps => steps.map(s => ({ ...s, status: 'pending' as const })));
 
-    // Simulate progress updates (in real implementation, this would come from the API)
-    const progressInterval = setInterval(() => {
+    // Clear any existing progress interval
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+    }
+
+    // Simulate progress updates using ref for proper cleanup
+    progressIntervalRef.current = setInterval(() => {
       setMergeProgress(prev => {
         if (prev >= 95) {
-          clearInterval(progressInterval);
+          if (progressIntervalRef.current) {
+            clearInterval(progressIntervalRef.current);
+            progressIntervalRef.current = null;
+          }
           return prev;
         }
         return prev + 5;
@@ -254,11 +337,13 @@ export default function MergePage() {
       const selectedCatalogueData = getSelectedCatalogues;
 
       // Transform catalogue data to match validation schema
+      // Keep this in sync with the payload used for preview (handleGeneratePreview)
       const sourceCatalogues = selectedCatalogueData.map(cat => ({
         id: cat.id,
         name: cat.name,
-        events: cat.event_count || 0,
-        source: cat.name || 'unknown'
+        // Prefer exact events count if available, fall back to event_count
+        events: (cat as any).events || cat.event_count || 0,
+        source: (cat as any).source || cat.name || 'unknown',
       }));
 
       // Update step 1
@@ -332,7 +417,12 @@ export default function MergePage() {
       // Mark all steps as complete
       setMergeSteps(steps => steps.map(s => ({ ...s, status: 'complete' as const })));
       setMergeProgress(100);
-      clearInterval(progressInterval);
+
+      // Clear progress interval using ref
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
 
       // Invalidate cache and refresh catalogues across all pages (only if not export-only)
       if (!exportOnly) {
@@ -347,7 +437,12 @@ export default function MergePage() {
           : `Successfully merged ${selectedCatalogues.length} catalogues into "${mergedName}"`,
       });
     } catch (error) {
-      clearInterval(progressInterval);
+      // Clear progress interval using ref on error
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+
       setMergeStatus('error');
       setMergeSteps(steps => steps.map(s =>
         s.status === 'in-progress' ? { ...s, status: 'error' as const } : s
@@ -432,6 +527,522 @@ export default function MergePage() {
     setGeoSearchBounds(null);
     setFilteredCatalogues(realCatalogues);
   }, [realCatalogues]);
+
+  const normalizeSearchValue = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim();
+
+  const parseSearchTokens = (query: string): SearchToken[] => {
+    const tokens: SearchToken[] = [];
+    const normalizedQuery = query.replace(/([a-zA-Z][\w-]*):"/g, '$1: "').trim();
+    const pattern = /"([^"]+)"|(\S+)/g;
+    const rawTokens: string[] = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = pattern.exec(normalizedQuery)) !== null) {
+      const rawToken = (match[1] ?? match[2]).trim();
+      if (rawToken) rawTokens.push(rawToken);
+    }
+
+    for (let i = 0; i < rawTokens.length; i += 1) {
+      const rawToken = rawTokens[i];
+      const fieldMatch = rawToken.match(/^([a-zA-Z][\w-]*):(.*)$/);
+
+      if (fieldMatch) {
+        const field = fieldMatch[1].toLowerCase();
+        let value = fieldMatch[2].trim();
+
+        if (!value && i + 1 < rawTokens.length) {
+          const nextToken = rawTokens[i + 1];
+          if (!nextToken.includes(':')) {
+            value = nextToken;
+            i += 1;
+          }
+        }
+
+        const opTokens = ['>', '<', '=', '>=', '<='];
+        if (opTokens.includes(value) && i + 1 < rawTokens.length) {
+          const nextToken = rawTokens[i + 1];
+          if (field === 'events' && /^\d+(?:\.\d+)?$/.test(nextToken)) {
+            value = `${value}${nextToken}`;
+            i += 1;
+          } else if (
+            (field === 'date' || field === 'created' || field === 'created_at' || field === 'createdat') &&
+            !nextToken.includes(':')
+          ) {
+            value = `${value}${nextToken}`;
+            i += 1;
+          }
+        }
+
+        if (
+          (field === 'date' || field === 'created' || field === 'created_at' || field === 'createdat') &&
+          value.endsWith('..') &&
+          i + 1 < rawTokens.length
+        ) {
+          const nextToken = rawTokens[i + 1];
+          if (!nextToken.includes(':')) {
+            value = `${value}${nextToken}`;
+            i += 1;
+          }
+        }
+
+        if (
+          (field === 'date' || field === 'created' || field === 'created_at' || field === 'createdat') &&
+          value === '..' &&
+          i + 1 < rawTokens.length
+        ) {
+          const nextToken = rawTokens[i + 1];
+          if (!nextToken.includes(':')) {
+            value = `${value}${nextToken}`;
+            i += 1;
+          }
+        }
+
+        if (value) tokens.push({ field, value });
+        continue;
+      }
+
+      if (rawToken.endsWith(':')) continue;
+      tokens.push({ value: rawToken });
+    }
+
+    return tokens;
+  };
+
+  const statusAliases: Record<string, string> = {
+    complete: 'complete',
+    completed: 'complete',
+    done: 'complete',
+    processing: 'processing',
+    inprogress: 'processing',
+    running: 'processing',
+    error: 'error',
+    errored: 'error',
+    failed: 'error',
+    failure: 'error',
+    incomplete: 'incomplete',
+  };
+
+  const parseNumericFilter = (value: string): { op: string; amount: number } | null => {
+    const match = value.match(/^(>=|<=|>|<|=)?\s*(\d+(?:\.\d+)?)$/);
+    if (!match) return null;
+    return { op: match[1] ?? '=', amount: Number(match[2]) };
+  };
+
+  const compareNumber = (actual: number, op: string, expected: number) => {
+    switch (op) {
+      case '>':
+        return actual > expected;
+      case '>=':
+        return actual >= expected;
+      case '<':
+        return actual < expected;
+      case '<=':
+        return actual <= expected;
+      default:
+        return actual === expected;
+    }
+  };
+
+  const parseDateValue = (rawValue: string): { timestamp: number; dayOnly: boolean; normalized: string } | null => {
+    const trimmed = rawValue.trim();
+    if (!trimmed) return null;
+
+    const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
+    if (slashMatch) {
+      const day = Number(slashMatch[1]);
+      const month = Number(slashMatch[2]);
+      let year = Number(slashMatch[3]);
+      if (slashMatch[3].length === 2) {
+        year += 2000;
+      }
+
+      if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+        const normalized = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const timestamp = Date.parse(normalized);
+        if (!Number.isNaN(timestamp)) {
+          return { timestamp, dayOnly: true, normalized };
+        }
+      }
+    }
+
+    const normalized = trimmed.replace(/\//g, '-');
+    const timestamp = Date.parse(normalized);
+    if (Number.isNaN(timestamp)) return null;
+
+    const dayOnly = !/[T\s]\d{2}:\d{2}/.test(normalized) && /^\d{4}-\d{2}-\d{2}$/.test(normalized);
+    return { timestamp, dayOnly, normalized };
+  };
+
+  const parseDateFilter = (value: string): { op: string; timestamp: number; dayOnly: boolean; normalized: string } | null => {
+    const match = value.match(/^(>=|<=|>|<|=)?\s*(.+)$/);
+    if (!match) return null;
+    const op = match[1] ?? '=';
+    const dateValue = parseDateValue(match[2]);
+    if (!dateValue) return null;
+    return { op, ...dateValue };
+  };
+
+  const parseDateRange = (value: string): { start?: { timestamp: number; dayOnly: boolean; normalized: string }; end?: { timestamp: number; dayOnly: boolean; normalized: string } } | null => {
+    if (!value.includes('..')) return null;
+    const [startRaw, endRaw] = value.split('..');
+    const start = parseDateValue(startRaw);
+    const end = parseDateValue(endRaw);
+    if (!start && !end) return null;
+    return { start: start ?? undefined, end: end ?? undefined };
+  };
+
+  const compareDate = (
+    actualTimestamp: number,
+    filter: { op: string; timestamp: number; dayOnly: boolean; normalized: string }
+  ) => {
+    if (filter.dayOnly && filter.op === '=') {
+      const actualDate = new Date(actualTimestamp).toISOString().slice(0, 10);
+      return actualDate === filter.normalized;
+    }
+
+    switch (filter.op) {
+      case '>':
+        return actualTimestamp > filter.timestamp;
+      case '>=':
+        return actualTimestamp >= filter.timestamp;
+      case '<':
+        return actualTimestamp < filter.timestamp;
+      case '<=':
+        return actualTimestamp <= filter.timestamp;
+      default:
+        return actualTimestamp === filter.timestamp;
+    }
+  };
+
+  const matchesDateRange = (
+    actualTimestamp: number,
+    range: { start?: { timestamp: number; dayOnly: boolean; normalized: string }; end?: { timestamp: number; dayOnly: boolean; normalized: string } }
+  ) => {
+    if (!range.start && !range.end) return true;
+    const actualDate = new Date(actualTimestamp).toISOString().slice(0, 10);
+
+    if (range.start) {
+      if (range.start.dayOnly) {
+        if (actualDate < range.start.normalized) return false;
+      } else if (actualTimestamp < range.start.timestamp) {
+        return false;
+      }
+    }
+
+    if (range.end) {
+      if (range.end.dayOnly) {
+        if (actualDate > range.end.normalized) return false;
+      } else if (actualTimestamp > range.end.timestamp) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  const getEventCount = (catalogue: CatalogueItem): number => {
+    return catalogue.event_count ?? catalogue.events ?? 0;
+  };
+
+  const getSourceNamesForSearch = (catalogue: CatalogueItem): string[] => {
+    const sources: string[] = [];
+    if (catalogue.source) sources.push(catalogue.source);
+
+    try {
+      const sourceCatalogues = JSON.parse(catalogue.source_catalogues || '[]');
+      if (!Array.isArray(sourceCatalogues)) return sources;
+      sourceCatalogues.forEach((source: any) => {
+        const entries = [source.source, source.name, source.id];
+        entries.filter(Boolean).forEach((entry) => sources.push(String(entry)));
+      });
+    } catch {
+      return sources;
+    }
+
+    return sources;
+  };
+
+  const getSourceType = (catalogue: CatalogueItem): 'merged' | 'imported' | 'uploaded' => {
+    try {
+      const sources = JSON.parse(catalogue.source_catalogues || '[]');
+
+      if (Array.isArray(sources) && sources.length > 1) {
+        const hasMultipleSourceCatalogues = sources.some((s: any) => s.id && s.name && s.events !== undefined);
+        if (hasMultipleSourceCatalogues) {
+          return 'merged';
+        }
+      }
+
+      if (Array.isArray(sources) && sources.length > 0) {
+        const firstSource = sources[0];
+        const sourceName = (firstSource.source || '').toLowerCase();
+
+        if (sourceName === 'geonet' || sourceName === 'iris fdsn' || sourceName.includes('fdsn') || sourceName.includes('api')) {
+          return 'imported';
+        }
+
+        if (sourceName === 'upload') {
+          return 'uploaded';
+        }
+      }
+
+      if (catalogue.merge_config) {
+        try {
+          const mergeConfig = JSON.parse(catalogue.merge_config);
+          if (mergeConfig && mergeConfig.sourceCatalogues && mergeConfig.sourceCatalogues.length > 1) {
+            return 'merged';
+          }
+        } catch {
+          // ignore invalid merge config
+        }
+      }
+
+      return 'uploaded';
+    } catch {
+      return 'uploaded';
+    }
+  };
+
+  const getSourceNamesForSort = (catalogue: CatalogueItem): string => {
+    const sourceNames = getSourceNamesForSearch(catalogue);
+    return sourceNames.length > 0 ? sourceNames.join(', ') : 'Unknown';
+  };
+
+  const getSourceTypeBadge = (catalogue: CatalogueItem) => {
+    const sourceType = getSourceType(catalogue);
+
+    const badgeConfig = {
+      merged: {
+        icon: <GitMerge className="h-3 w-3" />,
+        label: 'Merged',
+        tooltip: 'Created by merging multiple source catalogues',
+        className: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300 border-purple-300 dark:border-purple-700',
+      },
+      imported: {
+        icon: <Globe className="h-3 w-3" />,
+        label: 'Imported',
+        tooltip: 'Imported from external API (e.g., GeoNet FDSN)',
+        className: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 border-blue-300 dark:border-blue-700',
+      },
+      uploaded: {
+        icon: <Upload className="h-3 w-3" />,
+        label: 'Uploaded',
+        tooltip: 'Created by uploading a data file (CSV, JSON, QuakeML, etc.)',
+        className: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 border-gray-300 dark:border-gray-600',
+      },
+    };
+
+    const config = badgeConfig[sourceType];
+
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge variant="outline" className={`gap-1 cursor-help ${config.className}`}>
+              {config.icon}
+              {config.label}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>{config.tooltip}</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  };
+
+  function formatDate(dateString: string | undefined): string {
+    if (!dateString) return '—';
+    try {
+      return new Date(dateString).toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+    } catch {
+      return dateString;
+    }
+  }
+
+  const buildSearchFields = (catalogue: CatalogueItem): SearchFields => {
+    const eventCount = getEventCount(catalogue);
+    const createdAt = catalogue.created_at || '';
+    const sourceNames = getSourceNamesForSearch(catalogue);
+
+    return {
+      name: catalogue.name,
+      id: String(catalogue.id),
+      status: catalogue.status || 'unknown',
+      source: sourceNames.join(' '),
+      sourceType: getSourceType(catalogue),
+      events: `${eventCount} ${eventCount.toLocaleString()}`,
+      created: createdAt ? `${createdAt} ${formatDate(createdAt)}` : '',
+    };
+  };
+
+  const fieldAliases: Record<string, keyof SearchFields> = {
+    name: 'name',
+    id: 'id',
+    status: 'status',
+    source: 'source',
+    sourcetype: 'sourceType',
+    type: 'sourceType',
+    events: 'events',
+    event: 'events',
+    count: 'events',
+    created: 'created',
+    createdat: 'created',
+    created_at: 'created',
+    date: 'created',
+  };
+
+  const matchesSearchQuery = (catalogue: CatalogueItem, tokens: SearchToken[]): boolean => {
+    if (tokens.length === 0) return true;
+
+    const fields = buildSearchFields(catalogue);
+    const haystack = normalizeSearchValue(Object.values(fields).join(' '));
+
+    return tokens.every((token) => {
+      const value = normalizeSearchValue(token.value);
+      if (!value) return true;
+
+      if (!token.field) {
+        const dateRange = parseDateRange(value);
+        const dateFilter = parseDateFilter(value);
+        const actualTimestamp = Date.parse(catalogue.created_at || '');
+
+        if (!Number.isNaN(actualTimestamp)) {
+          if (dateRange) {
+            return matchesDateRange(actualTimestamp, dateRange);
+          }
+          if (dateFilter) {
+            return compareDate(actualTimestamp, dateFilter);
+          }
+        }
+
+        return haystack.includes(value);
+      }
+
+      const fieldKey = fieldAliases[token.field];
+      if (!fieldKey) {
+        return haystack.includes(value);
+      }
+
+      if (fieldKey === 'status') {
+        const normalizedStatus = statusAliases[value] ?? value;
+        return normalizeSearchValue(fields.status).includes(normalizedStatus);
+      }
+
+      if (fieldKey === 'events') {
+        const numericFilter = parseNumericFilter(value);
+        if (numericFilter) {
+          return compareNumber(getEventCount(catalogue), numericFilter.op, numericFilter.amount);
+        }
+      }
+
+      if (fieldKey === 'created') {
+        const dateRange = parseDateRange(value);
+        const dateFilter = parseDateFilter(value);
+        const actualTimestamp = Date.parse(catalogue.created_at || '');
+        if (!Number.isNaN(actualTimestamp)) {
+          if (dateRange) {
+            return matchesDateRange(actualTimestamp, dateRange);
+          }
+          if (dateFilter) {
+            return compareDate(actualTimestamp, dateFilter);
+          }
+        }
+      }
+
+      return normalizeSearchValue(fields[fieldKey]).includes(value);
+    });
+  };
+
+  const baseCatalogues = filteredCatalogues;
+
+  const searchTokens = useMemo(
+    () => parseSearchTokens(debouncedSearchQuery),
+    [debouncedSearchQuery]
+  );
+
+  const searchedCatalogues = useMemo(() => {
+    return baseCatalogues.filter((catalogue) => matchesSearchQuery(catalogue, searchTokens));
+  }, [baseCatalogues, searchTokens]);
+
+  const sortedCatalogues = useMemo(() => {
+    return [...searchedCatalogues].sort((a, b) => {
+      let comparison = 0;
+
+      if (sortField === 'name') {
+        comparison = a.name.localeCompare(b.name);
+      } else if (sortField === 'date') {
+        comparison = Date.parse(a.created_at || '') - Date.parse(b.created_at || '');
+      } else if (sortField === 'events') {
+        comparison = getEventCount(a) - getEventCount(b);
+      } else if (sortField === 'sourceType') {
+        comparison = getSourceType(a).localeCompare(getSourceType(b));
+      } else if (sortField === 'source') {
+        comparison = getSourceNamesForSort(a).localeCompare(getSourceNamesForSort(b));
+      }
+
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  }, [searchedCatalogues, sortField, sortDirection]);
+
+  const {
+    currentPage,
+    pageSize,
+    totalPages,
+    totalItems,
+    paginatedData,
+    goToPage,
+    setPageSize
+  } = usePagination(sortedCatalogues, { pageSize: 10 });
+
+  const pageSizeOptions = useMemo(() => {
+    const baseOptions = [10, 25, 50, 100];
+    const options: Array<number | { value: number; label: string }> = baseOptions.filter(
+      (size) => size !== totalItems
+    );
+
+    if (totalItems > 0) {
+      options.push({ value: totalItems, label: 'Show All' });
+    }
+
+    return options;
+  }, [totalItems]);
+
+  useEffect(() => {
+    if (!showAllResults || totalItems === 0) return;
+    if (pageSize !== totalItems) {
+      setPageSize(totalItems);
+    }
+  }, [showAllResults, totalItems, pageSize, setPageSize]);
+
+  useEffect(() => {
+    goToPage(1);
+  }, [debouncedSearchQuery, geoSearchActive, geoSearchBounds, goToPage]);
+
+  const handlePageSizeChange = (size: number) => {
+    setShowAllResults(size === totalItems && totalItems > 0);
+    setPageSize(size);
+  };
+
+  const paginatedCatalogues = paginatedData;
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  const renderSortIndicator = (field: SortField) => {
+    if (sortField !== field) return null;
+    return sortDirection === 'asc' ? ' ↑' : ' ↓';
+  };
 
   const renderMergeButton = () => {
     if (mergeStatus === 'merging') {
@@ -545,51 +1156,148 @@ export default function MergePage() {
                 )}
 
                 <div className="border rounded-lg overflow-hidden mt-4">
-                  <div className="bg-muted/50 px-4 py-2 text-sm font-medium flex items-center justify-between">
-                    <span>Available Catalogues</span>
-                    {geoSearchActive && (
-                      <span className="text-xs text-muted-foreground">
-                        Showing {filteredCatalogues.length} of {realCatalogues.length} catalogues
-                      </span>
-                    )}
-                  </div>
-                  <div className="divide-y">
-                    {cataloguesLoading ? (
-                      <div className="p-8 text-center text-muted-foreground">
-                        <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
-                        <p>Loading catalogues...</p>
+                  <div className="bg-muted/50 px-4 py-3 text-sm font-medium space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span>Available Catalogues</span>
+                      {(geoSearchActive || searchQuery) && (
+                        <span className="text-xs text-muted-foreground">
+                          Showing {sortedCatalogues.length} of {baseCatalogues.length} catalogues
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                      <div className="relative flex-1">
+                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          type="search"
+                          placeholder="Search catalogues..."
+                          className="pl-8"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                        />
                       </div>
-                    ) : filteredCatalogues.length === 0 ? (
-                      <div className="p-8 text-center text-muted-foreground">
-                        <Layers className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                        <p>No catalogues available</p>
-                        <p className="text-sm mt-1">Import or create catalogues to merge them</p>
-                      </div>
-                    ) : (
-                      filteredCatalogues.map(catalogue => (
-                        <div key={catalogue.id} className="flex items-center space-x-2 p-4">
-                          <Checkbox
-                            id={`catalogue-${catalogue.id}`}
-                            checked={selectedCatalogues.includes(catalogue.id)}
-                            onCheckedChange={() => handleCatalogueSelect(catalogue.id)}
-                          />
-                          <div className="grid gap-1.5 leading-none">
-                            <Label
-                              htmlFor={`catalogue-${catalogue.id}`}
-                              className="text-base font-medium flex items-center gap-1.5"
-                            >
-                              <Layers className="h-4 w-4 text-muted-foreground" />
-                              {catalogue.name}
-                            </Label>
-                            <p className="text-sm text-muted-foreground">
-                              {(catalogue.events || catalogue.event_count || 0).toLocaleString()} events
-                              {catalogue.source && ` • Source: ${catalogue.source}`}
-                            </p>
+                      <InfoTooltip
+                        content={
+                          <div className="space-y-1 text-xs">
+                            <p>Field tokens: name:, id:, status:, source:, type:, events:, date:.</p>
+                            <p>Example: <span className="font-medium">status:complete events:&gt;10000 "New Zealand"</span></p>
                           </div>
-                        </div>
-                      ))
-                    )}
+                        }
+                      >
+                        <button type="button" className="inline-flex items-center justify-center h-9 w-9 text-muted-foreground hover:text-foreground">
+                          <Info className="h-4 w-4" />
+                          <span className="sr-only">Search help</span>
+                        </button>
+                      </InfoTooltip>
+                    </div>
                   </div>
+                  <div className="overflow-x-auto">
+                    <div className="divide-y min-w-[720px]">
+                      <div className="px-4 py-2 text-xs font-semibold text-muted-foreground">
+                        <div className="grid grid-cols-[auto_minmax(0,2fr)_120px_120px_120px_minmax(0,1fr)] items-center gap-3">
+                          <div className="w-4" aria-hidden="true" />
+                          <button
+                            type="button"
+                            className="flex items-center justify-start gap-1.5 text-left w-full"
+                            onClick={() => handleSort('name')}
+                          >
+                            <Layers className="h-3.5 w-3.5" />
+                            Name{renderSortIndicator('name')}
+                          </button>
+                          <button
+                            type="button"
+                            className="flex items-center justify-start gap-1.5 text-left w-full"
+                            onClick={() => handleSort('date')}
+                          >
+                            <Calendar className="h-3.5 w-3.5" />
+                            Date{renderSortIndicator('date')}
+                          </button>
+                          <button
+                            type="button"
+                            className="flex items-center justify-start gap-1.5 text-left w-full"
+                            onClick={() => handleSort('events')}
+                          >
+                            <Activity className="h-3.5 w-3.5" />
+                            Events{renderSortIndicator('events')}
+                          </button>
+                          <button
+                            type="button"
+                            className="flex items-center justify-start gap-1.5 text-left w-full"
+                            onClick={() => handleSort('sourceType')}
+                          >
+                            <GitMerge className="h-3.5 w-3.5" />
+                            Source Type{renderSortIndicator('sourceType')}
+                          </button>
+                          <button
+                            type="button"
+                            className="flex items-center justify-start gap-1.5 text-left w-full"
+                            onClick={() => handleSort('source')}
+                          >
+                            <Database className="h-3.5 w-3.5" />
+                            Source{renderSortIndicator('source')}
+                          </button>
+                        </div>
+                      </div>
+                      {cataloguesLoading ? (
+                        <div className="p-8 text-center text-muted-foreground">
+                          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
+                          <p>Loading catalogues...</p>
+                        </div>
+                      ) : sortedCatalogues.length === 0 ? (
+                        <div className="p-8 text-center text-muted-foreground">
+                          <Layers className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                          <p>{searchQuery ? 'No catalogues match your search' : 'No catalogues available'}</p>
+                          <p className="text-sm mt-1">
+                            {searchQuery ? 'Try adjusting your search terms.' : 'Import or create catalogues to merge them.'}
+                          </p>
+                        </div>
+                      ) : (
+                        paginatedCatalogues.map(catalogue => (
+                          <div key={catalogue.id} className="px-4 py-3">
+                            <div className="grid grid-cols-[auto_minmax(0,2fr)_120px_120px_120px_minmax(0,1fr)] items-center gap-3">
+                              <Checkbox
+                                id={`catalogue-${catalogue.id}`}
+                                checked={selectedCatalogues.includes(catalogue.id)}
+                                onCheckedChange={() => handleCatalogueSelect(catalogue.id)}
+                              />
+                              <div className="min-w-0">
+                                <Label
+                                  htmlFor={`catalogue-${catalogue.id}`}
+                                  className="text-sm font-medium flex items-center gap-1.5"
+                                >
+                                  <Layers className="h-4 w-4 text-muted-foreground" />
+                                  <span className="truncate">{catalogue.name}</span>
+                                </Label>
+                              </div>
+                              <span className="text-sm text-muted-foreground">
+                                {formatDate(catalogue.created_at)}
+                              </span>
+                              <span className="text-sm text-muted-foreground tabular-nums">
+                                {getEventCount(catalogue).toLocaleString()}
+                              </span>
+                              <div className="text-sm text-muted-foreground">
+                                {getSourceTypeBadge(catalogue)}
+                              </div>
+                              <span className="text-sm text-muted-foreground truncate" title={getSourceNamesForSort(catalogue)}>
+                                {getSourceNamesForSort(catalogue)}
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  {totalItems > 0 && (
+                    <DataPagination
+                      currentPage={currentPage}
+                      totalPages={totalPages}
+                      totalItems={totalItems}
+                      pageSize={pageSize}
+                      onPageChange={goToPage}
+                      onPageSizeChange={handlePageSizeChange}
+                      pageSizeOptions={pageSizeOptions}
+                    />
+                  )}
                 </div>
                 
                 {selectedCatalogues.length > 0 && (
@@ -616,9 +1324,12 @@ export default function MergePage() {
               <TabsContent value="configure" className="pt-6">
                 <div className="space-y-6">
                   <div>
-                    <Label htmlFor="merged-name" className="text-base font-medium">
-                      Merged Catalogue Name
-                    </Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label htmlFor="merged-name" className="text-base font-medium">
+                        Merged Catalogue Name
+                      </Label>
+                      <InfoTooltip content="Name used when saving or exporting the merged catalogue." />
+                    </div>
                     <div className="flex items-center gap-2 mt-1.5">
                       <Tag className="h-4 w-4 text-muted-foreground" />
                       <Input
@@ -664,7 +1375,7 @@ export default function MergePage() {
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5">
                             <Clock className="h-4 w-4 text-muted-foreground" />
-                            <Label>Time Window (seconds)</Label>
+                            <LabelWithTooltip label="Time Window (seconds)" term="timeWindow" />
                           </div>
                           <span className="text-sm font-medium">{timeThreshold}s</span>
                         </div>
@@ -684,7 +1395,7 @@ export default function MergePage() {
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5">
                             <MapPin className="h-4 w-4 text-muted-foreground" />
-                            <Label>Distance Threshold (km)</Label>
+                            <LabelWithTooltip label="Distance Threshold (km)" term="distanceThreshold" />
                           </div>
                           <span className="text-sm font-medium">{distanceThreshold} km</span>
                         </div>
@@ -713,7 +1424,12 @@ export default function MergePage() {
                       
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <Label htmlFor="merge-strategy">Merge Strategy</Label>
+                          <div className="flex items-center gap-1.5">
+                            <Label htmlFor="merge-strategy">Merge Strategy</Label>
+                            <InfoTooltip
+                              content="Controls how conflicting event fields are resolved across sources (quality-based, priority, average, newest, or most complete)."
+                            />
+                          </div>
                           <Select
                             value={mergeStrategy}
                             onValueChange={value => setMergeStrategy(value)}
@@ -740,7 +1456,12 @@ export default function MergePage() {
 
                         {mergeStrategy === 'priority' && (
                           <div className="space-y-2">
-                            <Label htmlFor="source-priority">Source Priority</Label>
+                            <div className="flex items-center gap-1.5">
+                              <Label htmlFor="source-priority">Source Priority</Label>
+                              <InfoTooltip
+                                content="Determines which source takes precedence when values conflict. Falls back to quality-based if the preferred source is missing."
+                              />
+                            </div>
                             <Select
                               value={priority}
                               onValueChange={value => setPriority(value)}

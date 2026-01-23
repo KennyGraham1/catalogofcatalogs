@@ -2,7 +2,7 @@
 
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Info } from 'lucide-react';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
 
 export type DelimiterOption = 'auto' | 'comma' | 'tab' | 'semicolon' | 'pipe' | 'space';
 
@@ -15,7 +15,10 @@ interface DelimiterSelectorProps {
 export function DelimiterSelector({ value, onChange, disabled }: DelimiterSelectorProps) {
   return (
     <div className="space-y-2">
-      <Label htmlFor="delimiter-select">Text File Delimiter</Label>
+      <div className="flex items-center gap-1.5">
+        <Label htmlFor="delimiter-select">Text File Delimiter</Label>
+        <InfoTooltip content="Character that separates columns in your file (e.g., comma or tab)." />
+      </div>
       <Select value={value} onValueChange={onChange} disabled={disabled}>
         <SelectTrigger id="delimiter-select">
           <SelectValue placeholder="Select delimiter" />
@@ -29,13 +32,9 @@ export function DelimiterSelector({ value, onChange, disabled }: DelimiterSelect
           <SelectItem value="space">Space</SelectItem>
         </SelectContent>
       </Select>
-      <div className="flex items-start gap-2 text-xs text-muted-foreground">
-        <Info className="h-3 w-3 mt-0.5 flex-shrink-0" />
-        <p>
-          Select the delimiter used in your CSV/TXT files. Auto-detect will analyze the file to determine the delimiter automatically.
-        </p>
-      </div>
+      <p className="text-xs text-muted-foreground">
+        Auto-detect will analyze the file to determine the delimiter automatically.
+      </p>
     </div>
   );
 }
-

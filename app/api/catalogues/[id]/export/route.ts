@@ -9,6 +9,7 @@ import { eventsToGeoJSON, eventsToKML, eventsToJSON } from '@/lib/exporters';
 import { eventsToQuakeMLDocument } from '@/lib/quakeml-exporter';
 import { generateExportFilename, createDownloadHeaders } from '@/lib/export-utils';
 import { safeJSONParse } from '@/lib/errors';
+import { requireViewer } from '@/lib/auth/middleware';
 
 // Force dynamic rendering for this API route
 export const dynamic = 'force-dynamic';
@@ -20,6 +21,12 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    // Require Viewer role or higher
+    const authResult = await requireViewer(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     const catalogueId = params.id;
     const searchParams = request.nextUrl.searchParams;
     const format = (searchParams.get('format') || 'csv').toLowerCase() as ExportFormat;

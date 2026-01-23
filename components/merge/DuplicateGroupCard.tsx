@@ -171,7 +171,14 @@ export function DuplicateGroupCard({ group, groupIndex, catalogueColors, onViewO
                         </div>
                       </td>
                       <td className="py-2 px-2">
-                        <div>{new Date(event.time).toISOString().substring(0, 19).replace('T', ' ')}</div>
+                        <div>{new Date(event.time).toLocaleString('en-GB', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                        })}</div>
                         {idx > 0 && <div className="text-muted-foreground">+{timeDiff.toFixed(1)}s</div>}
                       </td>
                       <td className="py-2 px-2 text-right">{event.latitude.toFixed(4)}</td>
@@ -209,4 +216,3 @@ export function DuplicateGroupCard({ group, groupIndex, catalogueColors, onViewO
     </Card>
   );
 }
-

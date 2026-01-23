@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import { Layout } from '@/components/layout/Layout';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { SessionProvider } from '@/components/auth/SessionProvider';
 
 
 const inter = Inter({ subsets: ['latin'] });
@@ -20,11 +21,13 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
-        <ErrorBoundary>
-          <Layout>
-            {children}
-          </Layout>
-        </ErrorBoundary>
+        <SessionProvider>
+          <ErrorBoundary>
+            <Layout>
+              {children}
+            </Layout>
+          </ErrorBoundary>
+        </SessionProvider>
       </body>
     </html>
   );

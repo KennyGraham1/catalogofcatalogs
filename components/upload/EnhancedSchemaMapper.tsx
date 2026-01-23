@@ -62,6 +62,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 import {
@@ -462,7 +463,11 @@ export function EnhancedSchemaMapper({
                             </p>
                           )}
                           <p className="text-xs text-muted-foreground mt-2">
-                            Created: {new Date(template.created_at).toLocaleDateString()}
+                            Created: {new Date(template.created_at).toLocaleDateString('en-GB', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric',
+                            })}
                           </p>
                         </div>
                         <div className="flex gap-1">
@@ -568,7 +573,10 @@ export function EnhancedSchemaMapper({
                 checked={autoMapping}
                 onCheckedChange={setAutoMapping}
               />
-              <Label htmlFor="auto-mapping">Auto-detect field mappings</Label>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="auto-mapping">Auto-detect field mappings</Label>
+                <InfoTooltip content="Uses fuzzy matching and built-in aliases to map common fields automatically." />
+              </div>
             </div>
             <Input
               placeholder="Search fields..."
@@ -581,7 +589,10 @@ export function EnhancedSchemaMapper({
           {/* Source fields mapping */}
           <div className="border rounded-md overflow-hidden">
             <div className="bg-muted/50 px-4 py-2 text-sm font-medium flex items-center justify-between">
-              <span>Source Fields → Target Schema</span>
+              <div className="flex items-center gap-1.5">
+                <span>Source Fields → Target Schema</span>
+                <InfoTooltip content="Map columns from your file to the QuakeML 1.2 schema fields." />
+              </div>
               <Badge variant="secondary">
                 {Object.keys(fieldMappings).length} / {sourceFields.length} mapped
               </Badge>
@@ -788,4 +799,3 @@ export function EnhancedSchemaMapper({
     </TooltipProvider>
   );
 }
-

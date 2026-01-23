@@ -212,11 +212,17 @@ export class GeoNetImportService {
       const endTime = new Date();
       const duration = endTime.getTime() - startTime.getTime();
 
-      // 4. Update geographic bounds for the catalogue
+      // 4. Update geographic bounds and event count for the catalogue
       if (newEvents > 0 || updatedEvents > 0) {
         try {
           const catalogueEvents = await getDbQueries().getEventsByCatalogueId(catalogueId);
           const eventsArray = Array.isArray(catalogueEvents) ? catalogueEvents : catalogueEvents.data;
+
+          // Update event count to reflect actual number of events in the catalogue
+          const totalEventCount = eventsArray.length;
+          await getDbQueries().updateCatalogueEventCount(catalogueId, totalEventCount);
+          console.log(`[GeoNetImportService] Updated event count for catalogue ${catalogueId}: ${totalEventCount}`);
+
           const bounds = extractBoundsFromMergedEvents(eventsArray);
           if (bounds) {
             await getDbQueries().updateCatalogueGeoBounds(
@@ -229,8 +235,8 @@ export class GeoNetImportService {
             console.log(`[GeoNetImportService] Updated geographic bounds for catalogue ${catalogueId}`);
           }
         } catch (error) {
-          console.error(`[GeoNetImportService] Failed to update geographic bounds:`, error);
-          // Don't fail the import if bounds update fails
+          console.error(`[GeoNetImportService] Failed to update catalogue metadata:`, error);
+          // Don't fail the import if metadata update fails
         }
       }
 
