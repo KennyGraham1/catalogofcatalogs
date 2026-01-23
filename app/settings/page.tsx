@@ -17,6 +17,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DefaultFieldMappings } from '@/components/settings/DefaultFieldMappings';
+import { useAuth } from '@/lib/auth/hooks';
 import {
   Settings,
   Database,
@@ -26,6 +27,9 @@ import {
 } from 'lucide-react';
 
 export default function SettingsPage() {
+  const { isAuthenticated } = useAuth();
+  const isReadOnly = !isAuthenticated;
+
   return (
     <div className="container py-6 max-w-7xl mx-auto">
       <div className="flex flex-col gap-6">
@@ -142,7 +146,7 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="flex justify-end">
-                  <Button>
+                  <Button disabled={isReadOnly}>
                     <Save className="mr-2 h-4 w-4" />
                     Save Changes
                   </Button>
@@ -163,7 +167,7 @@ export default function SettingsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <DefaultFieldMappings />
+                <DefaultFieldMappings readOnly={isReadOnly} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -291,7 +295,7 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="flex justify-end">
-                  <Button>
+                  <Button disabled={isReadOnly}>
                     <Save className="mr-2 h-4 w-4" />
                     Save Changes
                   </Button>
@@ -419,7 +423,7 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="flex justify-end">
-                  <Button>
+                  <Button disabled={isReadOnly}>
                     <Save className="mr-2 h-4 w-4" />
                     Save Changes
                   </Button>

@@ -59,17 +59,20 @@ interface CatalogueMetadataFormProps {
   metadata: CatalogueMetadata;
   onChange: (metadata: CatalogueMetadata) => void;
   showMergeFields?: boolean;
+  readOnly?: boolean;
 }
 
-export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = false }: CatalogueMetadataFormProps) {
+export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = false, readOnly = false }: CatalogueMetadataFormProps) {
   const [newKeyword, setNewKeyword] = useState('');
   const [newReference, setNewReference] = useState('');
 
   const updateField = (field: keyof CatalogueMetadata, value: any) => {
+    if (readOnly) return;
     onChange({ ...metadata, [field]: value });
   };
 
   const updateQualityField = (field: string, value: string) => {
+    if (readOnly) return;
     onChange({
       ...metadata,
       data_quality: {
@@ -80,6 +83,7 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
   };
 
   const addKeyword = () => {
+    if (readOnly) return;
     if (newKeyword.trim()) {
       const keywords = metadata.keywords || [];
       onChange({ ...metadata, keywords: [...keywords, newKeyword.trim()] });
@@ -88,11 +92,13 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
   };
 
   const removeKeyword = (index: number) => {
+    if (readOnly) return;
     const keywords = metadata.keywords || [];
     onChange({ ...metadata, keywords: keywords.filter((_, i) => i !== index) });
   };
 
   const addReference = () => {
+    if (readOnly) return;
     if (newReference.trim()) {
       const references = metadata.reference_links || [];
       onChange({ ...metadata, reference_links: [...references, newReference.trim()] });
@@ -101,6 +107,7 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
   };
 
   const removeReference = (index: number) => {
+    if (readOnly) return;
     const references = metadata.reference_links || [];
     onChange({ ...metadata, reference_links: references.filter((_, i) => i !== index) });
   };
@@ -412,8 +419,9 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
                 value={newKeyword}
                 onChange={(e) => setNewKeyword(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addKeyword())}
+                disabled={readOnly}
               />
-              <Button type="button" onClick={addKeyword} size="sm">
+              <Button type="button" onClick={addKeyword} size="sm" disabled={readOnly}>
                 <Plus className="h-4 w-4" />
               </Button>
             </div>
@@ -424,7 +432,8 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
                   <button
                     type="button"
                     onClick={() => removeKeyword(index)}
-                    className="ml-1 hover:text-destructive"
+                    className="ml-1 hover:text-destructive disabled:opacity-50"
+                    disabled={readOnly}
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -446,8 +455,9 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
                 value={newReference}
                 onChange={(e) => setNewReference(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addReference())}
+                disabled={readOnly}
               />
-              <Button type="button" onClick={addReference} size="sm">
+              <Button type="button" onClick={addReference} size="sm" disabled={readOnly}>
                 <Plus className="h-4 w-4" />
               </Button>
             </div>
@@ -462,6 +472,7 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
                     variant="ghost"
                     size="sm"
                     onClick={() => removeReference(index)}
+                    disabled={readOnly}
                   >
                     <X className="h-4 w-4" />
                   </Button>

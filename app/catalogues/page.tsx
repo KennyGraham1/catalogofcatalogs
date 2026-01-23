@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useCatalogues } from '@/contexts/CatalogueContext';
@@ -65,7 +65,7 @@ import { InfoTooltip } from '@/components/ui/info-tooltip';
 import { Database } from 'lucide-react';
 import { CatalogueStatsPopover } from '@/components/catalogues/CatalogueStatsPopover';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
-import { useRef } from 'react';
+import { useAuth } from '@/lib/auth/hooks';
 
 interface Catalogue {
   id: string;
@@ -98,6 +98,8 @@ type SearchFields = {
 export default function CataloguesPage() {
   const router = useRouter();
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const isReadOnly = !authLoading && !isAuthenticated;
 
   // Use global catalogue context
   const { catalogues: contextCatalogues, loading: contextLoading, refreshCatalogues } = useCatalogues();
@@ -836,6 +838,14 @@ export default function CataloguesPage() {
   };
 
   const handleEdit = (catalogue: Catalogue) => {
+    if (isReadOnly) {
+      toast({
+        title: 'Read-only mode',
+        description: 'Log in to edit catalogues.',
+        variant: 'destructive',
+      });
+      return;
+    }
     router.push(`/catalogues/${catalogue.id}/edit`);
   };
 
@@ -858,11 +868,27 @@ export default function CataloguesPage() {
   };
 
   const handleDelete = async (catalogue: Catalogue) => {
+    if (isReadOnly) {
+      toast({
+        title: 'Read-only mode',
+        description: 'Log in to delete catalogues.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setSelectedCatalogue(catalogue);
     setDeleteDialogOpen(true);
   };
 
   const confirmDelete = async () => {
+    if (isReadOnly) {
+      toast({
+        title: 'Read-only mode',
+        description: 'Log in to delete catalogues.',
+        variant: 'destructive',
+      });
+      return;
+    }
     if (!selectedCatalogue) return;
 
     try {
@@ -1036,7 +1062,7 @@ export default function CataloguesPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleEdit(catalogue)}>
+                        <DropdownMenuItem onClick={() => handleEdit(catalogue)} disabled={isReadOnly}>
                           <Edit className="h-4 w-4 mr-2" />
                           Edit Metadata
                         </DropdownMenuItem>
@@ -1047,6 +1073,7 @@ export default function CataloguesPage() {
                         <DropdownMenuItem
                           onClick={() => handleDelete(catalogue)}
                           className="text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400"
+                          disabled={isReadOnly}
                         >
                           <Trash2 className="h-4 w-4 mr-2" />
                           Delete
@@ -1245,6 +1272,7 @@ export default function CataloguesPage() {
             <AlertDialogAction 
               onClick={confirmDelete}
               className="bg-red-600 hover:bg-red-700 dark:bg-red-900 dark:hover:bg-red-800"
+              disabled={isReadOnly}
             >
               Delete
             </AlertDialogAction>

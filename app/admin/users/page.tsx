@@ -6,11 +6,11 @@
  */
 
 import { useEffect, useState } from 'react';
-import { useSession } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
+import { useAuth } from '@/lib/auth/hooks';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import {
   Table,
   TableBody,
@@ -30,26 +30,17 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { SafeUser, UserRole } from '@/lib/auth/types';
 
 export default function AdminUsersPage() {
-  const { data: session, status } = useSession();
-  const router = useRouter();
+  const { user, isLoading } = useAuth();
   const [users, setUsers] = useState<SafeUser[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (status === 'unauthenticated') {
-      router.push('/login');
-    } else if (status === 'authenticated' && session?.user?.role !== UserRole.ADMIN) {
-      router.push('/');
-    }
-  }, [status, session, router]);
-
-  useEffect(() => {
-    if (status === 'authenticated' && session?.user?.role === UserRole.ADMIN) {
+    if (user?.role === UserRole.ADMIN) {
       fetchUsers();
     }
-  }, [status, session]);
+  }, [user?.role]);
 
   const fetchUsers = async () => {
     try {
@@ -150,7 +141,7 @@ export default function AdminUsersPage() {
     }
   };
 
-  if (status === 'loading' || loading) {
+  if (isLoading || loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p>Loading...</p>
@@ -158,8 +149,26 @@ export default function AdminUsersPage() {
     );
   }
 
-  if (!session?.user || session.user.role !== UserRole.ADMIN) {
-    return null;
+  if (!user) {
+    return (
+      <AuthGateCard
+        title="Login required"
+        description="Please log in to manage users."
+        action={{ label: 'Log in', href: '/login' }}
+        secondaryAction={{ label: 'Back to Home', href: '/' }}
+      />
+    );
+  }
+
+  if (user.role !== UserRole.ADMIN) {
+    return (
+      <AuthGateCard
+        title="Admin access required"
+        description="This area is restricted to administrators."
+        requiredRole={UserRole.ADMIN}
+        action={{ label: 'Back to Dashboard', href: '/dashboard' }}
+      />
+    );
   }
 
   return (
@@ -190,15 +199,15 @@ export default function AdminUsersPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.map((user) => (
-                <TableRow key={user.id}>
-                  <TableCell className="font-medium">{user.name}</TableCell>
-                  <TableCell>{user.email}</TableCell>
+              {users.map((account) => (
+                <TableRow key={account.id}>
+                  <TableCell className="font-medium">{account.name}</TableCell>
+                  <TableCell>{account.email}</TableCell>
                   <TableCell>
                     <Select
-                      value={user.role}
-                      onValueChange={(value) => handleRoleChange(user.id, value as UserRole)}
-                      disabled={updatingUserId === user.id || user.id === session.user.id}
+                      value={account.role}
+                      onValueChange={(value) => handleRoleChange(account.id, value as UserRole)}
+                      disabled={updatingUserId === account.id || account.id === user.id}
                     >
                       <SelectTrigger className="w-32">
                         <SelectValue />
@@ -212,12 +221,12 @@ export default function AdminUsersPage() {
                     </Select>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={user.is_active ? 'default' : 'secondary'}>
-                      {user.is_active ? 'Active' : 'Inactive'}
+                    <Badge variant={account.is_active ? 'default' : 'secondary'}>
+                      {account.is_active ? 'Active' : 'Inactive'}
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    {new Date(user.created_at).toLocaleDateString('en-GB', {
+                    {new Date(account.created_at).toLocaleDateString('en-GB', {
                       day: '2-digit',
                       month: '2-digit',
                       year: 'numeric',
@@ -228,16 +237,16 @@ export default function AdminUsersPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleToggleActive(user.id, user.is_active)}
-                        disabled={updatingUserId === user.id || user.id === session.user.id}
+                        onClick={() => handleToggleActive(account.id, account.is_active)}
+                        disabled={updatingUserId === account.id || account.id === user.id}
                       >
-                        {user.is_active ? 'Deactivate' : 'Activate'}
+                        {account.is_active ? 'Deactivate' : 'Activate'}
                       </Button>
                       <Button
                         size="sm"
                         variant="destructive"
-                        onClick={() => handleDeleteUser(user.id)}
-                        disabled={updatingUserId === user.id || user.id === session.user.id}
+                        onClick={() => handleDeleteUser(account.id)}
+                        disabled={updatingUserId === account.id || account.id === user.id}
                       >
                         Delete
                       </Button>

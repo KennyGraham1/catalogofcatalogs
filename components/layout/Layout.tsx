@@ -9,6 +9,7 @@ import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { CommandPalette } from '@/components/ui/command-palette';
 import { KeyboardShortcutsHelp } from '@/components/ui/keyboard-shortcuts-help';
 import { GlobalSearchDialog } from '@/components/ui/global-search-dialog';
+import { ReadOnlyBanner } from '@/components/ui/read-only-banner';
 import { useRouter } from 'next/navigation';
 
 interface LayoutProps {
@@ -83,6 +84,7 @@ export function Layout({ children }: LayoutProps) {
             onShowShortcuts={() => setShortcutsHelpOpen(true)}
             onShowSearch={() => setGlobalSearchOpen(true)}
           />
+          <ReadOnlyBanner />
           <main className="flex-1 pt-20">
             {children}
           </main>

@@ -16,14 +16,23 @@ import { ValidationResults } from '@/components/upload/ValidationResults';
 import { DataQualityReport } from '@/components/upload/DataQualityReport';
 import { DataCompletenessMetrics } from '@/components/upload/DataCompletenessMetrics';
 import { CatalogueMetadataForm, CatalogueMetadata } from '@/components/upload/CatalogueMetadataForm';
+import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import { toast } from '@/hooks/use-toast';
 import { performQualityCheck } from '@/lib/data-quality-checker';
 import { validateEventsCrossFields } from '@/lib/cross-field-validation';
+import { useAuth } from '@/lib/auth/hooks';
+import { UserRole } from '@/lib/auth/types';
 
 type UploadStatus = 'idle' | 'uploading' | 'validating' | 'mapping' | 'metadata' | 'processing' | 'complete' | 'error';
 
 export default function UploadPage() {
   const router = useRouter();
+  const { user, isAuthenticated } = useAuth();
+  const canUpload = user?.role === UserRole.EDITOR || user?.role === UserRole.ADMIN;
+  const isReadOnly = !canUpload;
+  const uploadBlockedMessage = !user
+    ? 'Log in to upload files and create catalogues.'
+    : 'Editor or Admin access is required to upload catalogues.';
   const [activeTab, setActiveTab] = useState('upload');
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
   const [files, setFiles] = useState<File[]>([]);
@@ -45,6 +54,26 @@ export default function UploadPage() {
     filesCompleted: 0,
     totalFiles: 0
   });
+
+  if (!canUpload) {
+    return (
+      <AuthGateCard
+        title={isAuthenticated ? 'Editor access required' : 'Login required'}
+        description={uploadBlockedMessage}
+        requiredRole={UserRole.EDITOR}
+        action={
+          isAuthenticated
+            ? { label: 'Back to Dashboard', href: '/dashboard' }
+            : { label: 'Log in', href: '/login' }
+        }
+        secondaryAction={
+          isAuthenticated
+            ? { label: 'View Catalogues', href: '/catalogues' }
+            : { label: 'Back to Home', href: '/' }
+        }
+      />
+    );
+  }
 
   const handleFilesAdded = (newFiles: File[]) => {
     setFiles([...files, ...newFiles]);
@@ -78,6 +107,14 @@ export default function UploadPage() {
   };
 
   const handleUpload = async () => {
+    if (isReadOnly) {
+      toast({
+        title: 'Read-only mode',
+        description: uploadBlockedMessage,
+        variant: 'destructive',
+      });
+      return;
+    }
     if (files.length === 0) {
       toast({
         title: "No files selected",
@@ -138,8 +175,14 @@ export default function UploadPage() {
         });
 
         if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error || 'Upload failed');
+          if (response.status === 401) {
+            throw new Error('Please log in to upload files.');
+          }
+          if (response.status === 403) {
+            throw new Error('Editor or Admin access is required to upload files.');
+          }
+          const error = await response.json().catch(() => null);
+          throw new Error(error?.error || 'Upload failed');
         }
 
         const result = await response.json();
@@ -236,11 +279,27 @@ export default function UploadPage() {
   };
 
   const handleSchemaSubmit = () => {
+    if (isReadOnly) {
+      toast({
+        title: 'Read-only mode',
+        description: uploadBlockedMessage,
+        variant: 'destructive',
+      });
+      return;
+    }
     setUploadStatus('metadata');
     setActiveTab('metadata');
   };
 
   const handleMetadataSubmit = async () => {
+    if (isReadOnly) {
+      toast({
+        title: 'Read-only mode',
+        description: uploadBlockedMessage,
+        variant: 'destructive',
+      });
+      return;
+    }
     if (!catalogueName.trim()) {
       toast({
         title: "Catalogue name required",
@@ -267,8 +326,14 @@ export default function UploadPage() {
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to create catalogue');
+        if (response.status === 401) {
+          throw new Error('Please log in to create catalogues.');
+        }
+        if (response.status === 403) {
+          throw new Error('Editor or Admin access is required to create catalogues.');
+        }
+        const error = await response.json().catch(() => null);
+        throw new Error(error?.error || 'Failed to create catalogue');
       }
 
       const createdCatalogue = await response.json();
@@ -445,6 +510,7 @@ export default function UploadPage() {
                     onFileRemoved={handleFileRemoved}
                     uploading={uploadStatus === 'uploading' || uploadStatus === 'validating'}
                     progressInfo={uploadProgress}
+                    disabled={isReadOnly}
                   />
                 </div>
 
@@ -499,6 +565,7 @@ export default function UploadPage() {
                   isProcessing={uploadStatus === 'processing'}
                   validationResults={validationResults}
                   onSchemaReady={setIsSchemaReady}
+                  readOnly={isReadOnly}
                 />
               </TabsContent>
 
@@ -524,6 +591,7 @@ export default function UploadPage() {
                 <CatalogueMetadataForm
                   metadata={metadata}
                   onChange={setMetadata}
+                  readOnly={isReadOnly}
                 />
               </TabsContent>
 
@@ -571,7 +639,7 @@ export default function UploadPage() {
               {activeTab === 'upload' && (
                 <Button
                   onClick={handleUpload}
-                  disabled={files.length === 0 || uploadStatus === 'uploading' || uploadStatus === 'validating' || uploadStatus === 'mapping' || uploadStatus === 'metadata' || uploadStatus === 'processing' || uploadStatus === 'complete'}
+                  disabled={isReadOnly || files.length === 0 || uploadStatus === 'uploading' || uploadStatus === 'validating' || uploadStatus === 'mapping' || uploadStatus === 'metadata' || uploadStatus === 'processing' || uploadStatus === 'complete'}
                 >
                   {uploadStatus === 'error' ? 'Retry Upload' : 'Upload and Validate'}
                 </Button>
@@ -579,7 +647,7 @@ export default function UploadPage() {
               {activeTab === 'schema' && (
                 <Button
                   onClick={handleSchemaSubmit}
-                  disabled={!isSchemaReady || uploadStatus === 'metadata' || uploadStatus === 'processing' || uploadStatus === 'complete'}
+                  disabled={isReadOnly || !isSchemaReady || uploadStatus === 'metadata' || uploadStatus === 'processing' || uploadStatus === 'complete'}
                 >
                   Continue to Metadata
                 </Button>
@@ -587,7 +655,7 @@ export default function UploadPage() {
               {activeTab === 'metadata' && (
                 <Button
                   onClick={handleMetadataSubmit}
-                  disabled={uploadStatus === 'processing' || uploadStatus === 'complete'}
+                  disabled={isReadOnly || uploadStatus === 'processing' || uploadStatus === 'complete'}
                 >
                   Process Catalogue
                 </Button>

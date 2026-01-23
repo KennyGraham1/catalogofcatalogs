@@ -10,6 +10,9 @@ import { toast } from '@/hooks/use-toast';
 import { ArrowLeft } from 'lucide-react';
 import { GeographicBoundsDisplay } from '@/components/catalogues/GeographicBoundsDisplay';
 import { CatalogueMetadataForm, CatalogueMetadata } from '@/components/upload/CatalogueMetadataForm';
+import { useAuth } from '@/lib/auth/hooks';
+import { AuthGateCard } from '@/components/auth/AuthGateCard';
+import { UserRole } from '@/lib/auth/types';
 
 interface Catalogue {
   id: string;
@@ -52,6 +55,12 @@ interface Catalogue {
 
 export default function EditCataloguePage({ params }: { params: { id: string } }) {
   const router = useRouter();
+  const { user, isLoading: authLoading } = useAuth();
+  const canEdit = user?.role === UserRole.EDITOR || user?.role === UserRole.ADMIN;
+  const isReadOnly = !canEdit;
+  const editBlockedMessage = !user
+    ? 'Log in to edit catalogues.'
+    : 'Editor or Admin access is required to edit catalogues.';
   const [catalogue, setCatalogue] = useState<Catalogue | null>(null);
   const [name, setName] = useState('');
   const [metadata, setMetadata] = useState<CatalogueMetadata>({});
@@ -59,8 +68,11 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (!canEdit) {
+      return;
+    }
     fetchCatalogue();
-  }, [params.id]);
+  }, [params.id, canEdit]);
 
   const fetchCatalogue = async () => {
     try {
@@ -133,6 +145,14 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
   };
 
   const handleSave = async () => {
+    if (isReadOnly) {
+      toast({
+        title: 'Read-only mode',
+        description: editBlockedMessage,
+        variant: 'destructive',
+      });
+      return;
+    }
     if (!name.trim()) {
       toast({
         title: "Validation error",
@@ -173,6 +193,36 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
       setSaving(false);
     }
   };
+
+  if (authLoading) {
+    return (
+      <div className="container py-8">
+        <div className="max-w-4xl mx-auto">
+          <p className="text-center text-muted-foreground">Checking access...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!canEdit) {
+    return (
+      <AuthGateCard
+        title={user ? 'Editor access required' : 'Login required'}
+        description={editBlockedMessage}
+        requiredRole={UserRole.EDITOR}
+        action={
+          user
+            ? { label: 'Back to Catalogues', href: '/catalogues' }
+            : { label: 'Log in', href: '/login' }
+        }
+        secondaryAction={
+          user
+            ? { label: 'View Catalogue', href: `/catalogues/${params.id}` }
+            : { label: 'Back to Home', href: '/' }
+        }
+      />
+    );
+  }
 
   if (loading) {
     return (
@@ -215,6 +265,7 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Enter catalogue name"
+                disabled={isReadOnly}
               />
             </div>
 
@@ -262,10 +313,11 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
         <CatalogueMetadataForm
           metadata={metadata}
           onChange={setMetadata}
+          readOnly={isReadOnly}
         />
 
         <div className="flex gap-3 pt-6">
-          <Button onClick={handleSave} disabled={saving}>
+          <Button onClick={handleSave} disabled={saving || isReadOnly}>
             {saving ? 'Saving...' : 'Save Changes'}
           </Button>
           <Button

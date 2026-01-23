@@ -231,9 +231,10 @@ const DEFAULT_CONFIG: DefaultFieldMappingsConfig = {
 
 interface DefaultFieldMappingsProps {
   onSave?: (config: DefaultFieldMappingsConfig) => void;
+  readOnly?: boolean;
 }
 
-export function DefaultFieldMappings({ onSave }: DefaultFieldMappingsProps) {
+export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldMappingsProps) {
   const [config, setConfig] = useState<DefaultFieldMappingsConfig>(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -288,6 +289,10 @@ export function DefaultFieldMappings({ onSave }: DefaultFieldMappingsProps) {
   };
 
   const handleSave = async () => {
+    if (readOnly) {
+      toast({ title: 'Read-only mode', description: 'Log in to save settings.', variant: 'destructive' });
+      return;
+    }
     try {
       setSaving(true);
       const response = await fetch('/api/settings/field-mappings', {
@@ -604,7 +609,7 @@ export function DefaultFieldMappings({ onSave }: DefaultFieldMappingsProps) {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
-            <Button onClick={handleSave} disabled={saving || !hasChanges}>
+            <Button onClick={handleSave} disabled={readOnly || saving || !hasChanges}>
               <Save className="h-4 w-4 mr-2" />{saving ? 'Saving...' : 'Save Changes'}
             </Button>
           </div>

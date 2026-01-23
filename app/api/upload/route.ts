@@ -3,11 +3,17 @@ import { parseFile } from '@/lib/parsers';
 import { type Delimiter } from '@/lib/delimiter-detector';
 import { type DateFormat } from '@/lib/date-format-detector';
 import { apiCache } from '@/lib/cache';
+import { requireEditor } from '@/lib/auth/middleware';
 
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
 
 export async function POST(request: NextRequest) {
   try {
+    const authResult = await requireEditor(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     const formData = await request.formData();
     const file = formData.get('file') as File;
     const delimiterParam = formData.get('delimiter') as string | null;
@@ -88,4 +94,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

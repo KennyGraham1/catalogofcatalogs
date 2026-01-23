@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getAllCacheStats, apiCache, catalogueCache, eventCache, statisticsCache } from '@/lib/cache';
+import { requireAdmin } from '@/lib/auth/middleware';
 
 /**
  * GET /api/cache/stats
@@ -25,8 +26,13 @@ export async function GET() {
  * DELETE /api/cache/stats
  * Clears all caches - useful when data is out of sync
  */
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
   try {
+    const authResult = await requireAdmin(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     // Clear all caches
     apiCache.clearAll();
     catalogueCache.clearAll();
@@ -47,4 +53,3 @@ export async function DELETE() {
     );
   }
 }
-

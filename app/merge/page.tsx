@@ -17,6 +17,9 @@ import { useCatalogues } from '@/contexts/CatalogueContext';
 import { InfoTooltip, LabelWithTooltip } from '@/components/ui/info-tooltip';
 import { useDebounce } from '@/hooks/use-debounce';
 import { usePagination } from '@/hooks/use-pagination';
+import { useAuth } from '@/lib/auth/hooks';
+import { AuthGateCard } from '@/components/auth/AuthGateCard';
+import { UserRole } from '@/lib/auth/types';
 
 // Dynamically import MergePreviewQC to avoid SSR issues with Leaflet
 const MergePreviewQC = dynamic(
@@ -110,6 +113,12 @@ const getStatusColor = (status: MergeStatus): string => {
 };
 
 export default function MergePage() {
+  const { user, isAuthenticated } = useAuth();
+  const canMerge = user?.role === UserRole.EDITOR || user?.role === UserRole.ADMIN;
+  const isReadOnly = !canMerge;
+  const mergeBlockedMessage = !user
+    ? 'Log in to merge catalogues.'
+    : 'Editor or Admin access is required to merge catalogues.';
   // Use global catalogue context
   const { catalogues: realCatalogues, loading: cataloguesLoading, invalidateCache } = useCatalogues();
 
@@ -216,6 +225,14 @@ export default function MergePage() {
   }, [activeTab]);
 
   const handleGeneratePreview = async () => {
+    if (isReadOnly) {
+      toast({
+        title: 'Read-only mode',
+        description: 'Log in to generate merge previews.',
+        variant: 'destructive'
+      });
+      return;
+    }
     if (selectedCatalogues.length < 2) {
       toast({
         title: "Not enough catalogues selected",
@@ -289,6 +306,14 @@ export default function MergePage() {
   };
 
   const handleStartMerge = async () => {
+    if (isReadOnly) {
+      toast({
+        title: 'Read-only mode',
+        description: 'Log in to merge catalogues.',
+        variant: 'destructive'
+      });
+      return;
+    }
     if (selectedCatalogues.length < 2) {
       toast({
         title: "Not enough catalogues selected",
@@ -1067,12 +1092,32 @@ export default function MergePage() {
     }
 
     return (
-      <Button onClick={handleStartMerge}>
+      <Button onClick={handleStartMerge} disabled={isReadOnly}>
         <Save className="mr-2 h-4 w-4" />
-        Start Merge
+        {isReadOnly ? 'Login to Merge' : 'Start Merge'}
       </Button>
     );
   };
+
+  if (!canMerge) {
+    return (
+      <AuthGateCard
+        title={isAuthenticated ? 'Editor access required' : 'Login required'}
+        description={mergeBlockedMessage}
+        requiredRole={UserRole.EDITOR}
+        action={
+          isAuthenticated
+            ? { label: 'Back to Dashboard', href: '/dashboard' }
+            : { label: 'Log in', href: '/login' }
+        }
+        secondaryAction={
+          isAuthenticated
+            ? { label: 'View Catalogues', href: '/catalogues' }
+            : { label: 'Back to Home', href: '/' }
+        }
+      />
+    );
+  }
 
   return (
     <div className="container py-6 max-w-7xl mx-auto">
@@ -1622,7 +1667,7 @@ export default function MergePage() {
                       </p>
                       <Button
                         onClick={handleGeneratePreview}
-                        disabled={isLoadingPreview}
+                        disabled={isLoadingPreview || isReadOnly}
                         size="lg"
                       >
                         {isLoadingPreview ? 'Generating Preview...' : 'Generate QC Preview'}

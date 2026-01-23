@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
+import { requireEditor } from '@/lib/auth/middleware';
 
 /**
  * GET /api/mapping-templates/[id]
@@ -48,6 +49,11 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
+    const authResult = await requireEditor(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     if (!dbQueries) {
       return NextResponse.json(
         { error: 'Database not initialized' },
@@ -124,6 +130,11 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    const authResult = await requireEditor(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     if (!dbQueries) {
       return NextResponse.json(
         { error: 'Database not initialized' },
@@ -151,4 +162,3 @@ export async function DELETE(
     );
   }
 }
-

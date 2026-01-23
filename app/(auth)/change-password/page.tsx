@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth/hooks';
+import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -23,12 +24,6 @@ export default function ChangePasswordPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Redirect if not authenticated
-  if (!isLoading && !user) {
-    router.push('/login');
-    return null;
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,6 +93,17 @@ export default function ChangePasswordPage() {
       <div className="flex min-h-screen items-center justify-center">
         <p>Loading...</p>
       </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <AuthGateCard
+        title="Login required"
+        description="Please log in to change your password."
+        action={{ label: 'Log in', href: '/login' }}
+        secondaryAction={{ label: 'Back to Home', href: '/' }}
+      />
     );
   }
 
@@ -243,4 +249,3 @@ export default function ChangePasswordPage() {
     </div>
   );
 }
-

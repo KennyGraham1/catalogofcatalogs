@@ -41,9 +41,10 @@ interface SavedFilter {
 interface SavedFiltersDialogProps {
   currentFilters: any;
   onLoadFilter: (filterConfig: any) => void;
+  readOnly?: boolean;
 }
 
-export function SavedFiltersDialog({ currentFilters, onLoadFilter }: SavedFiltersDialogProps) {
+export function SavedFiltersDialog({ currentFilters, onLoadFilter, readOnly = false }: SavedFiltersDialogProps) {
   const [open, setOpen] = useState(false);
   const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([]);
   const [loading, setLoading] = useState(false);
@@ -86,6 +87,14 @@ export function SavedFiltersDialog({ currentFilters, onLoadFilter }: SavedFilter
   };
 
   const handleSaveFilter = async () => {
+    if (readOnly) {
+      toast({
+        title: 'Read-only mode',
+        description: 'Log in to save filters.',
+        variant: 'destructive',
+      });
+      return;
+    }
     if (!newFilterName.trim()) {
       toast({
         title: 'Error',
@@ -129,6 +138,14 @@ export function SavedFiltersDialog({ currentFilters, onLoadFilter }: SavedFilter
 
   const handleDeleteFilter = async () => {
     if (!filterToDelete) return;
+    if (readOnly) {
+      toast({
+        title: 'Read-only mode',
+        description: 'Log in to delete saved filters.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     try {
       const response = await fetch(`/api/saved-filters/${filterToDelete}`, {
@@ -313,7 +330,7 @@ export function SavedFiltersDialog({ currentFilters, onLoadFilter }: SavedFilter
               <Button variant="outline" onClick={() => setShowSaveDialog(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleSaveFilter}>
+              <Button onClick={handleSaveFilter} disabled={readOnly}>
                 <Save className="mr-2 h-4 w-4" />
                 Save Filter
               </Button>
@@ -335,7 +352,7 @@ export function SavedFiltersDialog({ currentFilters, onLoadFilter }: SavedFilter
             <AlertDialogCancel onClick={() => setFilterToDelete(null)}>
               Cancel
             </AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteFilter}>
+            <AlertDialogAction onClick={handleDeleteFilter} disabled={readOnly}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

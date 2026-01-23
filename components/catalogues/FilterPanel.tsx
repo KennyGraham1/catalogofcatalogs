@@ -41,9 +41,10 @@ interface FilterPanelProps {
   onFiltersChange: (filters: any) => void;
   onSaveFilter?: () => void;
   onClearFilters: () => void;
+  readOnly?: boolean;
 }
 
-export function FilterPanel({ onFiltersChange, onSaveFilter, onClearFilters }: FilterPanelProps) {
+export function FilterPanel({ onFiltersChange, onSaveFilter, onClearFilters, readOnly = false }: FilterPanelProps) {
   const [magnitudeRange, setMagnitudeRange] = useState([-2, 10]);
   const [depthRange, setDepthRange] = useState([0, 700]);
   const [startDate, setStartDate] = useState<Date | null>(null);
@@ -213,6 +214,7 @@ export function FilterPanel({ onFiltersChange, onSaveFilter, onClearFilters }: F
           <SavedFiltersDialog
             currentFilters={getCurrentFilters()}
             onLoadFilter={handleLoadFilter}
+            readOnly={readOnly}
           />
 
           <div className="flex items-center gap-2">

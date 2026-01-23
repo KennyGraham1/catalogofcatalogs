@@ -83,6 +83,7 @@ interface EnhancedSchemaMapperProps {
   onSchemaReady: (isReady: boolean) => void;
   onMappingsChange?: (mappings: Record<string, string>) => void;
   fileFormat?: FileFormat; // Detected file format for format-specific mappings
+  readOnly?: boolean;
 }
 
 interface MappingTemplate {
@@ -99,7 +100,8 @@ export function EnhancedSchemaMapper({
   isProcessing,
   onSchemaReady,
   onMappingsChange,
-  fileFormat = 'csv'
+  fileFormat = 'csv',
+  readOnly = false
 }: EnhancedSchemaMapperProps) {
   const [fieldMappings, setFieldMappings] = useState<Record<string, string>>({});
   const [autoMapping, setAutoMapping] = useState(true);
@@ -273,6 +275,14 @@ export function EnhancedSchemaMapper({
   
   // Save current mapping as template
   const saveTemplate = async () => {
+    if (readOnly) {
+      toast({
+        title: 'Read-only mode',
+        description: 'Log in to save mapping templates.',
+        variant: 'destructive'
+      });
+      return;
+    }
     if (!templateName.trim()) {
       toast({
         title: 'Template name required',
@@ -337,6 +347,14 @@ export function EnhancedSchemaMapper({
   // Delete a template
   const confirmDeleteTemplate = async () => {
     if (!templateToDelete) return;
+    if (readOnly) {
+      toast({
+        title: 'Read-only mode',
+        description: 'Log in to delete mapping templates.',
+        variant: 'destructive'
+      });
+      return;
+    }
 
     try {
       const response = await fetch(`/api/mapping-templates/${templateToDelete}`, {
@@ -482,6 +500,7 @@ export function EnhancedSchemaMapper({
                             size="sm"
                             variant="ghost"
                             onClick={() => handleDeleteTemplate(template.id)}
+                            disabled={readOnly}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -496,7 +515,7 @@ export function EnhancedSchemaMapper({
           
           <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" disabled={readOnly}>
                 <Save className="h-4 w-4 mr-2" />
                 Save Template
               </Button>
@@ -533,7 +552,7 @@ export function EnhancedSchemaMapper({
                 <Button variant="outline" onClick={() => setSaveDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button onClick={saveTemplate}>
+                <Button onClick={saveTemplate} disabled={readOnly}>
                   Save Template
                 </Button>
               </DialogFooter>

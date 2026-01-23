@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
+import { requireEditor } from '@/lib/auth/middleware';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
@@ -39,6 +40,11 @@ export async function GET() {
  */
 export async function POST(request: NextRequest) {
   try {
+    const authResult = await requireEditor(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     if (!dbQueries) {
       return NextResponse.json(
         { error: 'Database not initialized' },
@@ -97,4 +103,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

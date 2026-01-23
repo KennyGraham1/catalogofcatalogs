@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { Logger, formatErrorResponse } from '@/lib/errors';
+import { requireViewer } from '@/lib/auth/middleware';
 import { v4 as uuidv4 } from 'uuid';
 
 const logger = new Logger('SavedFiltersAPI');
@@ -33,6 +34,11 @@ export async function GET() {
  */
 export async function POST(request: NextRequest) {
   try {
+    const authResult = await requireViewer(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     const body = await request.json();
     const { name, description, filterConfig } = body;
 
@@ -65,4 +71,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

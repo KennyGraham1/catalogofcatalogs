@@ -204,8 +204,11 @@ export function normalizeTimestamp(time: string | number, dateFormat?: 'US' | 'I
   const trimmed = time.trim();
 
   // Try parsing as-is first (handles ISO 8601 and other standard formats)
+  // Allow historical dates (earthquakes can be from centuries ago)
+  // Minimum valid date: year 1000 CE (reasonable lower bound for historical seismology)
+  const minValidDate = new Date('1000-01-01T00:00:00.000Z').getTime();
   let date = new Date(trimmed);
-  if (!isNaN(date.getTime()) && date.getTime() > 0) {
+  if (!isNaN(date.getTime()) && date.getTime() >= minValidDate) {
     return date.toISOString();
   }
 

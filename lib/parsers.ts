@@ -439,6 +439,72 @@ export function parseQuakeML(content: string): ParseResult {
 }
 
 /**
+ * Synthesize a timestamp from separate date/time component columns
+ * Supports common variations: year/month/day/hour/minute/second, yr/mo/dy/hr/mn/sc, etc.
+ * @param event - The event object with potential date/time component fields
+ * @returns ISO 8601 formatted timestamp string, or null if components are missing
+ */
+function synthesizeTimestamp(event: any): string | null {
+  // Define possible field name variations for each component (case-insensitive matching)
+  const yearFields = ['year', 'yr', 'yyyy', 'yy'];
+  const monthFields = ['month', 'mon', 'mo', 'mm'];
+  const dayFields = ['day', 'dy', 'dd', 'dom'];
+  const hourFields = ['hour', 'hr', 'hh', 'hours'];
+  const minuteFields = ['minute', 'min', 'mn', 'minutes'];
+  const secondFields = ['second', 'sec', 'ss', 'seconds'];
+
+  // Helper to find a field value by checking multiple possible names
+  const findField = (fieldNames: string[]): number | null => {
+    for (const name of fieldNames) {
+      // Check exact match and case-insensitive match
+      for (const key of Object.keys(event)) {
+        if (key.toLowerCase() === name.toLowerCase()) {
+          const value = event[key];
+          if (value !== undefined && value !== null && value !== '' && !isNaN(Number(value))) {
+            return Number(value);
+          }
+        }
+      }
+    }
+    return null;
+  };
+
+  // Extract date/time components
+  const year = findField(yearFields);
+  const month = findField(monthFields);
+  const day = findField(dayFields);
+  const hour = findField(hourFields);
+  const minute = findField(minuteFields);
+  const second = findField(secondFields);
+
+  // Require at least year, month, and day to synthesize a timestamp
+  if (year === null || month === null || day === null) {
+    return null;
+  }
+
+  // Default time components to 0 if not present
+  const h = hour ?? 0;
+  const m = minute ?? 0;
+  const s = second ?? 0;
+
+  // Handle fractional seconds
+  const wholeSeconds = Math.floor(s);
+  const milliseconds = Math.round((s - wholeSeconds) * 1000);
+
+  // Construct ISO 8601 timestamp
+  // Pad components appropriately
+  const yearStr = String(year).padStart(4, '0');
+  const monthStr = String(month).padStart(2, '0');
+  const dayStr = String(day).padStart(2, '0');
+  const hourStr = String(h).padStart(2, '0');
+  const minStr = String(m).padStart(2, '0');
+  const secStr = String(wholeSeconds).padStart(2, '0');
+  const msStr = String(milliseconds).padStart(3, '0');
+
+  return `${yearStr}-${monthStr}-${dayStr}T${hourStr}:${minStr}:${secStr}.${msStr}Z`;
+}
+
+/**
  * Map common field name variations to standard names
  * Supports QuakeML 1.2, GeoNet, ISC, and common CSV/JSON field variations
  * @param event - The event object to map
@@ -454,6 +520,16 @@ function mapCommonFields(event: any, dateFormat?: DateFormat): ParsedEvent {
                   event.ot || event.otime || event.timestamp;
   }
 
+  // Synthesize timestamp from separate date/time component columns if no combined time field exists
+  if (!mapped.time) {
+    const synthesized = synthesizeTimestamp(event);
+    console.log('[DEBUG] synthesizeTimestamp input keys:', Object.keys(event).slice(0, 10));
+    console.log('[DEBUG] synthesizeTimestamp result:', synthesized);
+    if (synthesized) {
+      mapped.time = synthesized;
+    }
+  }
+
   // Normalize timestamp to ISO 8601 format with date format hint
   if (mapped.time) {
     const { normalizeTimestamp } = require('./earthquake-utils');
@@ -467,11 +543,13 @@ function mapCommonFields(event: any, dateFormat?: DateFormat): ParsedEvent {
 
   // Map latitude variations
   if (mapped.lat !== undefined) mapped.latitude = parseFloat(mapped.lat);
+  if (mapped.lats !== undefined) mapped.latitude = parseFloat(mapped.lats);
   if (mapped.evla !== undefined) mapped.latitude = parseFloat(mapped.evla);
   if (mapped.latitude !== undefined) mapped.latitude = parseFloat(mapped.latitude);
 
   // Map longitude variations
   if (mapped.lon !== undefined) mapped.longitude = parseFloat(mapped.lon);
+  if (mapped.lons !== undefined) mapped.longitude = parseFloat(mapped.lons);
   if (mapped.lng !== undefined) mapped.longitude = parseFloat(mapped.lng);
   if (mapped.long !== undefined) mapped.longitude = parseFloat(mapped.long);
   if (mapped.evlo !== undefined) mapped.longitude = parseFloat(mapped.evlo);
@@ -479,12 +557,18 @@ function mapCommonFields(event: any, dateFormat?: DateFormat): ParsedEvent {
 
   // Map depth variations
   if (mapped.dep !== undefined) mapped.depth = parseFloat(mapped.dep);
+  if (mapped.depths !== undefined) mapped.depth = parseFloat(mapped.depths);
   if (mapped.evdp !== undefined) mapped.depth = parseFloat(mapped.evdp);
   if (mapped.depth_km !== undefined) mapped.depth = parseFloat(mapped.depth_km);
   if (mapped.depth !== undefined) mapped.depth = parseFloat(mapped.depth);
 
   // Map magnitude variations
   if (mapped.mag !== undefined) mapped.magnitude = parseFloat(mapped.mag);
+  if (mapped.Mpref !== undefined) mapped.magnitude = parseFloat(mapped.Mpref);
+  if (mapped.mpref !== undefined) mapped.magnitude = parseFloat(mapped.mpref);
+  if (mapped.prefmag !== undefined) mapped.magnitude = parseFloat(mapped.prefmag);
+  if (mapped.pref_mag !== undefined) mapped.magnitude = parseFloat(mapped.pref_mag);
+  if (mapped.preferred_magnitude !== undefined) mapped.magnitude = parseFloat(mapped.preferred_magnitude);
   if (mapped.m !== undefined && mapped.magnitude === undefined) mapped.magnitude = parseFloat(mapped.m);
   if (mapped.magnitude !== undefined) mapped.magnitude = parseFloat(mapped.magnitude);
 

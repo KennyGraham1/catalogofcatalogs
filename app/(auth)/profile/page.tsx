@@ -5,31 +5,27 @@
  * Display and manage user profile information
  */
 
-import { useEffect, useState } from 'react';
-import { useSession, signOut } from 'next-auth/react';
+import { useState } from 'react';
+import { signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/lib/auth/hooks';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import { UserRole } from '@/lib/auth/types';
 
 export default function ProfilePage() {
-  const { data: session, status } = useSession();
+  const { user, isLoading } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (status === 'unauthenticated') {
-      router.push('/login');
-    }
-  }, [status, router]);
 
   const handleSignOut = async () => {
     setLoading(true);
     await signOut({ callbackUrl: '/login' });
   };
 
-  if (status === 'loading') {
+  if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p>Loading...</p>
@@ -37,8 +33,15 @@ export default function ProfilePage() {
     );
   }
 
-  if (!session?.user) {
-    return null;
+  if (!user) {
+    return (
+      <AuthGateCard
+        title="Login required"
+        description="Please log in to view your profile."
+        action={{ label: 'Log in', href: '/login' }}
+        secondaryAction={{ label: 'Back to Home', href: '/' }}
+      />
+    );
   }
 
   const getRoleBadgeVariant = (role: UserRole) => {
@@ -69,33 +72,33 @@ export default function ProfilePage() {
           <div className="space-y-4">
             <div>
               <h3 className="text-sm font-medium text-gray-500">Name</h3>
-              <p className="mt-1 text-lg">{session.user.name}</p>
+              <p className="mt-1 text-lg">{user.name}</p>
             </div>
             
             <div>
               <h3 className="text-sm font-medium text-gray-500">Email</h3>
-              <p className="mt-1 text-lg">{session.user.email}</p>
+              <p className="mt-1 text-lg">{user.email}</p>
             </div>
             
             <div>
               <h3 className="text-sm font-medium text-gray-500">Role</h3>
               <div className="mt-1">
-                <Badge variant={getRoleBadgeVariant(session.user.role)}>
-                  {session.user.role.toUpperCase()}
+                <Badge variant={getRoleBadgeVariant(user.role)}>
+                  {user.role.toUpperCase()}
                 </Badge>
               </div>
             </div>
             
             <div>
               <h3 className="text-sm font-medium text-gray-500">User ID</h3>
-              <p className="mt-1 font-mono text-sm text-gray-600">{session.user.id}</p>
+              <p className="mt-1 font-mono text-sm text-gray-600">{user.id}</p>
             </div>
           </div>
           
           <div className="border-t pt-6">
             <h3 className="mb-4 text-lg font-medium">Permissions</h3>
             <div className="space-y-2 text-sm">
-              {session.user.role === UserRole.ADMIN && (
+              {user.role === UserRole.ADMIN && (
                 <>
                   <p>✓ Full system access</p>
                   <p>✓ User management</p>
@@ -103,20 +106,20 @@ export default function ProfilePage() {
                   <p>✓ All catalogue operations</p>
                 </>
               )}
-              {session.user.role === UserRole.EDITOR && (
+              {user.role === UserRole.EDITOR && (
                 <>
                   <p>✓ Create and edit catalogues</p>
                   <p>✓ Import and merge data</p>
                   <p>✓ Export catalogues</p>
                 </>
               )}
-              {session.user.role === UserRole.VIEWER && (
+              {user.role === UserRole.VIEWER && (
                 <>
                   <p>✓ View all catalogues</p>
                   <p>✓ Export catalogues</p>
                 </>
               )}
-              {session.user.role === UserRole.GUEST && (
+              {user.role === UserRole.GUEST && (
                 <>
                   <p>✓ View public catalogues</p>
                 </>
@@ -144,4 +147,3 @@ export default function ProfilePage() {
     </div>
   );
 }
-

@@ -12,6 +12,7 @@ import { Loader2, Download, CheckCircle, XCircle } from 'lucide-react';
 import { IndeterminateProgress } from '@/components/ui/progress-indicator';
 import { ProgressOverlay } from '@/components/ui/ProgressOverlay';
 import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
+import { toast } from '@/hooks/use-toast';
 
 interface ImportResult {
   success: boolean;
@@ -27,7 +28,11 @@ interface ImportResult {
   duration: number;
 }
 
-export function ImportForm() {
+interface ImportFormProps {
+  readOnly?: boolean;
+}
+
+export function ImportForm({ readOnly = false }: ImportFormProps) {
   const [isImporting, setIsImporting] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +54,14 @@ export function ImportForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (readOnly) {
+      toast({
+        title: 'Read-only mode',
+        description: 'Log in to run GeoNet imports.',
+        variant: 'destructive'
+      });
+      return;
+    }
     setIsImporting(true);
     setResult(null);
     setError(null);
@@ -338,7 +351,7 @@ export function ImportForm() {
             </div>
 
             {/* Submit Button */}
-            <Button type="submit" disabled={isImporting} className="w-full">
+            <Button type="submit" disabled={readOnly || isImporting} className="w-full">
               {isImporting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

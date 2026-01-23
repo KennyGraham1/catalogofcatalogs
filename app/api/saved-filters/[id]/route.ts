@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { Logger, formatErrorResponse } from '@/lib/errors';
+import { requireViewer } from '@/lib/auth/middleware';
 
 const logger = new Logger('SavedFilterAPI');
 
@@ -53,6 +54,11 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
+    const authResult = await requireViewer(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     if (!dbQueries) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
@@ -94,6 +100,11 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    const authResult = await requireViewer(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     if (!dbQueries) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
@@ -113,4 +124,3 @@ export async function DELETE(
     );
   }
 }
-

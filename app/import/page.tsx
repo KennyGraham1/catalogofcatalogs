@@ -8,6 +8,9 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Database, History, Info } from 'lucide-react';
+import { useAuth } from '@/lib/auth/hooks';
+import { AuthGateCard } from '@/components/auth/AuthGateCard';
+import { UserRole } from '@/lib/auth/types';
 
 interface Catalogue {
   id: string;
@@ -15,6 +18,12 @@ interface Catalogue {
 }
 
 export default function ImportPage() {
+  const { user, isAuthenticated } = useAuth();
+  const canImport = user?.role === UserRole.EDITOR || user?.role === UserRole.ADMIN;
+  const isReadOnly = !canImport;
+  const importBlockedMessage = !user
+    ? 'Log in to import GeoNet data.'
+    : 'Editor or Admin access is required to import GeoNet data.';
   const [catalogues, setCatalogues] = useState<Catalogue[]>([]);
   const [selectedCatalogueId, setSelectedCatalogueId] = useState<string>('');
   const [isLoadingCatalogues, setIsLoadingCatalogues] = useState(true);
@@ -71,7 +80,25 @@ export default function ImportPage() {
         </TabsList>
         
         <TabsContent value="import" className="space-y-6">
-          <ImportForm />
+          {canImport ? (
+            <ImportForm readOnly={isReadOnly} />
+          ) : (
+            <AuthGateCard
+              title={isAuthenticated ? 'Editor access required' : 'Login required'}
+              description={importBlockedMessage}
+              requiredRole={UserRole.EDITOR}
+              action={
+                isAuthenticated
+                  ? { label: 'Back to Dashboard', href: '/dashboard' }
+                  : { label: 'Log in', href: '/login' }
+              }
+              secondaryAction={
+                isAuthenticated
+                  ? { label: 'View Catalogues', href: '/catalogues' }
+                  : { label: 'Back to Home', href: '/' }
+              }
+            />
+          )}
         </TabsContent>
         
         <TabsContent value="history" className="space-y-4">
@@ -188,4 +215,3 @@ export default function ImportPage() {
     </div>
   );
 }
-

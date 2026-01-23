@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/mongodb';
+import { requireAdmin } from '@/lib/auth/middleware';
 
 const SETTINGS_COLLECTION = 'settings';
 const FIELD_MAPPINGS_KEY = 'default_field_mappings';
@@ -51,6 +52,11 @@ export async function GET() {
  */
 export async function PUT(request: NextRequest) {
   try {
+    const authResult = await requireAdmin(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     const db = await getDb();
     if (!db) {
       return NextResponse.json(
@@ -131,4 +137,3 @@ export async function PUT(request: NextRequest) {
     );
   }
 }
-

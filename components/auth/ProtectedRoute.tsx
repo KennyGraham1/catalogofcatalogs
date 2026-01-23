@@ -5,10 +5,10 @@
  * Redirects to login if not authenticated or authorized
  */
 
-import { ReactNode, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { ReactNode } from 'react';
 import { useAuth, usePermission, useAnyPermission, useRole, useAnyRole } from '@/lib/auth/hooks';
 import { Permission, UserRole } from '@/lib/auth/types';
+import { AuthGateCard } from '@/components/auth/AuthGateCard';
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -17,6 +17,8 @@ interface ProtectedRouteProps {
   role?: UserRole;
   anyRole?: UserRole[];
   redirectTo?: string;
+  title?: string;
+  description?: string;
 }
 
 /**
@@ -29,8 +31,9 @@ export function ProtectedRoute({
   role,
   anyRole,
   redirectTo = '/login',
+  title,
+  description,
 }: ProtectedRouteProps) {
-  const router = useRouter();
   const { isAuthenticated, isLoading } = useAuth();
   const hasPermission = permission ? usePermission(permission) : true;
   const hasAnyPermission = anyPermission ? useAnyPermission(anyPermission) : true;
@@ -39,28 +42,34 @@ export function ProtectedRoute({
 
   const isAuthorized = hasPermission && hasAnyPermission && hasRole && hasAnyRole;
 
-  useEffect(() => {
-    if (!isLoading) {
-      if (!isAuthenticated) {
-        router.push(redirectTo);
-      } else if (!isAuthorized) {
-        router.push('/');
-      }
-    }
-  }, [isAuthenticated, isAuthorized, isLoading, router, redirectTo]);
-
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p>Loading...</p>
-      </div>
+      <AuthGateCard title="Checking access" description="Verifying your session..." />
     );
   }
 
-  if (!isAuthenticated || !isAuthorized) {
-    return null;
+  if (!isAuthenticated) {
+    return (
+      <AuthGateCard
+        title={title}
+        description={description ?? 'Please log in to access this page.'}
+        action={{ label: 'Log in', href: redirectTo }}
+        secondaryAction={{ label: 'Back to Home', href: '/' }}
+      />
+    );
+  }
+
+  if (!isAuthorized) {
+    return (
+      <AuthGateCard
+        title={title ?? 'Access restricted'}
+        description={description ?? 'Your account does not have permission to view this page.'}
+        requiredRole={role}
+        requiredPermission={permission}
+        action={{ label: 'Back to Dashboard', href: '/dashboard' }}
+      />
+    );
   }
 
   return <>{children}</>;
 }
-

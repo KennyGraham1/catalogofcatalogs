@@ -25,6 +25,7 @@ interface FileUploaderProps {
   onFileRemoved: (fileName: string) => void;
   uploading?: boolean;
   progressInfo?: UploadProgressInfo;
+  disabled?: boolean;
 }
 
 const stageLabels: Record<UploadStage, string> = {
@@ -56,7 +57,8 @@ export function FileUploader({
   onFilesAdded,
   onFileRemoved,
   uploading = false,
-  progressInfo
+  progressInfo,
+  disabled = false
 }: FileUploaderProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [simulatedProgress, setSimulatedProgress] = useState(0);
@@ -98,15 +100,18 @@ export function FileUploader({
   const isActive = uploading || (progressInfo && progressInfo.stage !== 'idle' && progressInfo.stage !== 'complete');
 
   const handleDragOver = (e: React.DragEvent) => {
+    if (disabled) return;
     e.preventDefault();
     setIsDragging(true);
   };
 
   const handleDragLeave = () => {
+    if (disabled) return;
     setIsDragging(false);
   };
 
   const handleDrop = (e: React.DragEvent) => {
+    if (disabled) return;
     e.preventDefault();
     setIsDragging(false);
     
@@ -116,12 +121,14 @@ export function FileUploader({
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (disabled) return;
     if (e.target.files && e.target.files.length > 0) {
       onFilesAdded(Array.from(e.target.files));
     }
   };
 
   const openFileDialog = () => {
+    if (disabled) return;
     if (fileInputRef.current) {
       fileInputRef.current.click();
     }
@@ -149,7 +156,7 @@ export function FileUploader({
       <div
         className={`border-2 border-dashed rounded-lg p-8 transition-colors ${
           isDragging ? 'border-primary bg-primary/5' : 'border-border'
-        }`}
+        } ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -170,7 +177,7 @@ export function FileUploader({
           <Button
             type="button"
             onClick={openFileDialog}
-            disabled={uploading}
+            disabled={uploading || disabled}
             variant="outline"
             className="relative"
           >
@@ -185,7 +192,7 @@ export function FileUploader({
             style={{ display: 'none' }}
             multiple
             accept=".csv,.txt,.qml,.json,.geojson,.xml"
-            disabled={uploading}
+            disabled={uploading || disabled}
           />
         </div>
       </div>
