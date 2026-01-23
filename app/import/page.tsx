@@ -8,9 +8,11 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Database, History, Info } from 'lucide-react';
+import { toast } from '@/hooks/use-toast';
 import { useAuth } from '@/lib/auth/hooks';
 import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import { UserRole } from '@/lib/auth/types';
+import { getApiError } from '@/lib/api';
 
 interface Catalogue {
   id: string;
@@ -32,20 +34,28 @@ export default function ImportPage() {
     const fetchCatalogues = async () => {
       try {
         const response = await fetch('/api/catalogues');
-        if (response.ok) {
-          const data = await response.json();
-          setCatalogues(data);
-          
-          // Auto-select GeoNet catalogue if it exists
-          const geonetCatalogue = data.find((c: Catalogue) => 
-            c.name.includes('GeoNet') || c.name.includes('Automated Import')
-          );
-          if (geonetCatalogue) {
-            setSelectedCatalogueId(geonetCatalogue.id);
-          }
+        if (!response.ok) {
+          const errorInfo = await getApiError(response, 'Failed to load catalogues');
+          throw new Error(errorInfo.message);
+        }
+        const data = await response.json();
+        setCatalogues(data);
+        
+        // Auto-select GeoNet catalogue if it exists
+        const geonetCatalogue = data.find((c: Catalogue) => 
+          c.name.includes('GeoNet') || c.name.includes('Automated Import')
+        );
+        if (geonetCatalogue) {
+          setSelectedCatalogueId(geonetCatalogue.id);
         }
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to fetch catalogues.';
         console.error('Failed to fetch catalogues:', error);
+        toast({
+          title: 'Failed to load catalogues',
+          description: errorMessage,
+          variant: 'destructive',
+        });
       } finally {
         setIsLoadingCatalogues(false);
       }

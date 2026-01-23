@@ -6,6 +6,8 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Select,
   SelectContent,
@@ -18,14 +20,14 @@ import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DefaultFieldMappings } from '@/components/settings/DefaultFieldMappings';
 import { useAuth } from '@/lib/auth/hooks';
-import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import { UserRole } from '@/lib/auth/types';
 import {
   Settings,
   Database,
   Sliders,
   Save,
-  Map
+  Map,
+  Lock
 } from 'lucide-react';
 
 export default function SettingsPage() {
@@ -33,21 +35,29 @@ export default function SettingsPage() {
   const canManageSettings = user?.role === UserRole.ADMIN;
   const isReadOnly = !canManageSettings;
 
-  if (!canManageSettings) {
-    return (
-      <AuthGateCard
-        title={user ? 'Admin access required' : 'Login required'}
-        description={
-          user
-            ? 'Only administrators can manage application settings.'
-            : 'Log in with an Admin account to manage settings.'
-        }
-        requiredRole={UserRole.ADMIN}
-        action={user ? { label: 'Back to Dashboard', href: '/dashboard' } : { label: 'Log in', href: '/login' }}
-        secondaryAction={user ? { label: 'View Catalogues', href: '/catalogues' } : { label: 'Back to Home', href: '/' }}
-      />
+  const renderSaveButton = () => {
+    const button = (
+      <Button disabled={isReadOnly}>
+        <Save className="mr-2 h-4 w-4" />
+        Save Changes
+      </Button>
     );
-  }
+
+    if (!isReadOnly) {
+      return button;
+    }
+
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">{button}</span>
+          </TooltipTrigger>
+          <TooltipContent>Admin access required to save settings.</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  };
 
   return (
     <div className="container py-6 max-w-7xl mx-auto">
@@ -58,6 +68,16 @@ export default function SettingsPage() {
             Manage application settings and preferences
           </p>
         </div>
+
+        {isReadOnly && (
+          <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+            <Lock className="h-4 w-4" />
+            <AlertTitle>View-only settings</AlertTitle>
+            <AlertDescription>
+              Only administrators can change settings. Log in with an Admin account to make updates.
+            </AlertDescription>
+          </Alert>
+        )}
 
         <Tabs defaultValue="general" className="space-y-4">
           <TabsList>
@@ -86,7 +106,7 @@ export default function SettingsPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <Label htmlFor="language">Language</Label>
-                      <Select defaultValue="en">
+                      <Select defaultValue="en" disabled={isReadOnly}>
                         <SelectTrigger id="language">
                           <SelectValue placeholder="Select language" />
                         </SelectTrigger>
@@ -103,7 +123,7 @@ export default function SettingsPage() {
                     <div className="space-y-2">
                       <Label>Theme</Label>
                       <div className="flex items-center gap-2">
-                        <ThemeToggle />
+                        <ThemeToggle disabled={isReadOnly} />
                         <span className="text-sm text-muted-foreground">
                           Select your preferred theme
                         </span>
@@ -116,7 +136,7 @@ export default function SettingsPage() {
                       <Label htmlFor="notifications" className="text-base">
                         Email Notifications
                       </Label>
-                      <Switch id="notifications" />
+                      <Switch id="notifications" disabled={isReadOnly} />
                     </div>
                     <p className="text-sm text-muted-foreground">
                       Receive email notifications for completed catalogue processing
@@ -132,7 +152,7 @@ export default function SettingsPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <Label htmlFor="import-format">Default Import Format</Label>
-                      <Select defaultValue="csv">
+                      <Select defaultValue="csv" disabled={isReadOnly}>
                         <SelectTrigger id="import-format">
                           <SelectValue placeholder="Select format" />
                         </SelectTrigger>
@@ -148,7 +168,7 @@ export default function SettingsPage() {
 
                     <div className="space-y-2">
                       <Label htmlFor="export-format">Default Export Format</Label>
-                      <Select defaultValue="csv">
+                      <Select defaultValue="csv" disabled={isReadOnly}>
                         <SelectTrigger id="export-format">
                           <SelectValue placeholder="Select format" />
                         </SelectTrigger>
@@ -165,10 +185,7 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="flex justify-end">
-                  <Button disabled={isReadOnly}>
-                    <Save className="mr-2 h-4 w-4" />
-                    Save Changes
-                  </Button>
+                  {renderSaveButton()}
                 </div>
               </CardContent>
             </Card>
@@ -209,7 +226,7 @@ export default function SettingsPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <Label htmlFor="map-provider">Map Provider</Label>
-                      <Select defaultValue="leaflet">
+                      <Select defaultValue="leaflet" disabled={isReadOnly}>
                         <SelectTrigger id="map-provider">
                           <SelectValue placeholder="Select provider" />
                         </SelectTrigger>
@@ -223,7 +240,7 @@ export default function SettingsPage() {
 
                     <div className="space-y-2">
                       <Label htmlFor="default-view">Default Map View</Label>
-                      <Select defaultValue="global">
+                      <Select defaultValue="global" disabled={isReadOnly}>
                         <SelectTrigger id="default-view">
                           <SelectValue placeholder="Select view" />
                         </SelectTrigger>
@@ -239,7 +256,7 @@ export default function SettingsPage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="api-key">Map API Key (if applicable)</Label>
-                    <Input id="api-key" type="password" placeholder="Enter your API key" />
+                    <Input id="api-key" type="password" placeholder="Enter your API key" disabled={isReadOnly} />
                     <p className="text-xs text-muted-foreground">
                       Required for some map providers like Mapbox or Google Maps
                     </p>
@@ -250,7 +267,7 @@ export default function SettingsPage() {
                       <Label htmlFor="cluster-events" className="text-base">
                         Cluster Nearby Events
                       </Label>
-                      <Switch id="cluster-events" defaultChecked />
+                      <Switch id="cluster-events" defaultChecked disabled={isReadOnly} />
                     </div>
                     <p className="text-sm text-muted-foreground">
                       Group nearby earthquake events when zoomed out
@@ -286,7 +303,7 @@ export default function SettingsPage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="depth-scale">Depth Visualization Scale</Label>
-                    <Select defaultValue="rainbow">
+                    <Select defaultValue="rainbow" disabled={isReadOnly}>
                       <SelectTrigger id="depth-scale">
                         <SelectValue placeholder="Select scale" />
                       </SelectTrigger>
@@ -300,7 +317,7 @@ export default function SettingsPage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="symbol-size">Symbol Size Based On</Label>
-                    <Select defaultValue="magnitude">
+                    <Select defaultValue="magnitude" disabled={isReadOnly}>
                       <SelectTrigger id="symbol-size">
                         <SelectValue placeholder="Select property" />
                       </SelectTrigger>
@@ -314,10 +331,7 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="flex justify-end">
-                  <Button disabled={isReadOnly}>
-                    <Save className="mr-2 h-4 w-4" />
-                    Save Changes
-                  </Button>
+                  {renderSaveButton()}
                 </div>
               </CardContent>
             </Card>
@@ -340,7 +354,7 @@ export default function SettingsPage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="batch-size">Processing Batch Size</Label>
-                    <Select defaultValue="1000">
+                    <Select defaultValue="1000" disabled={isReadOnly}>
                       <SelectTrigger id="batch-size">
                         <SelectValue placeholder="Select batch size" />
                       </SelectTrigger>
@@ -358,7 +372,7 @@ export default function SettingsPage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="cache-limit">Cache Limit</Label>
-                    <Select defaultValue="256">
+                    <Select defaultValue="256" disabled={isReadOnly}>
                       <SelectTrigger id="cache-limit">
                         <SelectValue placeholder="Select cache limit" />
                       </SelectTrigger>
@@ -379,7 +393,7 @@ export default function SettingsPage() {
                       <Label htmlFor="parallel-processing" className="text-base">
                         Parallel Processing
                       </Label>
-                      <Switch id="parallel-processing" defaultChecked />
+                      <Switch id="parallel-processing" defaultChecked disabled={isReadOnly} />
                     </div>
                     <p className="text-sm text-muted-foreground">
                       Enable multi-threaded processing for faster catalogue operations
@@ -397,6 +411,7 @@ export default function SettingsPage() {
                     <Input
                       id="api-endpoint"
                       defaultValue="https://api.example.com/earthquake-service"
+                      disabled={isReadOnly}
                     />
                     <p className="text-xs text-muted-foreground">
                       URL for the backend API service
@@ -405,7 +420,7 @@ export default function SettingsPage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="external-fetch">External Data Fetch Interval</Label>
-                    <Select defaultValue="12">
+                    <Select defaultValue="12" disabled={isReadOnly}>
                       <SelectTrigger id="external-fetch">
                         <SelectValue placeholder="Select interval" />
                       </SelectTrigger>
@@ -434,6 +449,7 @@ export default function SettingsPage() {
                       id="custom-script"
                       placeholder="Enter custom processing script (Python)"
                       className="font-mono h-32"
+                      disabled={isReadOnly}
                     />
                     <p className="text-xs text-muted-foreground">
                       Custom Python script to run after catalogue processing
@@ -442,10 +458,7 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="flex justify-end">
-                  <Button disabled={isReadOnly}>
-                    <Save className="mr-2 h-4 w-4" />
-                    Save Changes
-                  </Button>
+                  {renderSaveButton()}
                 </div>
               </CardContent>
             </Card>

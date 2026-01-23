@@ -580,6 +580,18 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
     );
   }
 
+  const wrapWithReadOnlyTooltip = (action: JSX.Element) => {
+    if (!readOnly) return action;
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex">{action}</span>
+        </TooltipTrigger>
+        <TooltipContent>Admin access required to modify settings.</TooltipContent>
+      </Tooltip>
+    );
+  };
+
   return (
     <TooltipProvider>
       <div className="space-y-6">
@@ -592,33 +604,54 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => { setImportExportMode('export'); setImportExportDialogOpen(true); }}>
-              <Download className="h-4 w-4 mr-2" />Export
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => { setImportExportMode('import'); setImportExportDialogOpen(true); }}>
-              <Upload className="h-4 w-4 mr-2" />Import
-            </Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="outline" size="sm"><RotateCcw className="h-4 w-4 mr-2" />Reset All</Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Reset to default mappings?</AlertDialogTitle>
-                  <AlertDialogDescription>This will replace all your custom mappings with the defaults.</AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleReset}>Reset</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-            <Button onClick={handleSave} disabled={readOnly || saving || !hasChanges}>
-              <Save className="h-4 w-4 mr-2" />{saving ? 'Saving...' : 'Save Changes'}
-            </Button>
+            {wrapWithReadOnlyTooltip(
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setImportExportMode('export'); setImportExportDialogOpen(true); }}
+                disabled={readOnly}
+              >
+                <Download className="h-4 w-4 mr-2" />Export
+              </Button>
+            )}
+            {wrapWithReadOnlyTooltip(
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setImportExportMode('import'); setImportExportDialogOpen(true); }}
+                disabled={readOnly}
+              >
+                <Upload className="h-4 w-4 mr-2" />Import
+              </Button>
+            )}
+            {wrapWithReadOnlyTooltip(
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={readOnly}>
+                    <RotateCcw className="h-4 w-4 mr-2" />Reset All
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Reset to default mappings?</AlertDialogTitle>
+                    <AlertDialogDescription>This will replace all your custom mappings with the defaults.</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleReset}>Reset</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+            {wrapWithReadOnlyTooltip(
+              <Button onClick={handleSave} disabled={readOnly || saving || !hasChanges}>
+                <Save className="h-4 w-4 mr-2" />{saving ? 'Saving...' : 'Save Changes'}
+              </Button>
+            )}
           </div>
         </div>
 
+        <div className={readOnly ? 'pointer-events-none opacity-60 space-y-6' : 'space-y-6'}>
         {hasChanges && (
           <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
             <AlertTriangle className="h-4 w-4 text-amber-600" />
@@ -1170,6 +1203,7 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
     </TooltipProvider>
   );

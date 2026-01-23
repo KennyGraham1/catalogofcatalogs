@@ -33,7 +33,8 @@ import {
   GitMerge,
   Upload,
   Globe,
-  Info
+  Info,
+  Bug
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -68,6 +69,7 @@ import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { useAuth } from '@/lib/auth/hooks';
 import { UserRole } from '@/lib/auth/types';
 import { ToastAction } from '@/components/ui/toast';
+import { getApiError } from '@/lib/api';
 
 interface Catalogue {
   id: string;
@@ -96,6 +98,17 @@ type SearchFields = {
   events: string;
   created: string;
 };
+type CatalogueSourceType = 'merged' | 'imported' | 'uploaded';
+type CatalogueMeta = {
+  catalogue: Catalogue;
+  sourceType: CatalogueSourceType;
+  sourceNamesDisplay: string;
+  searchFields: SearchFields;
+  haystack: string;
+  createdTimestamp: number;
+  eventCount: number;
+  formattedDate: string;
+};
 
 export default function CataloguesPage() {
   const router = useRouter();
@@ -118,6 +131,8 @@ export default function CataloguesPage() {
   const [geoSearchActive, setGeoSearchActive] = useState(false);
   const [geoSearching, setGeoSearching] = useState(false);
   const [geoSearchBounds, setGeoSearchBounds] = useState<GeographicBounds | null>(null);
+  const [geoSearchRequestId, setGeoSearchRequestId] = useState<string | null>(null);
+  const [showGeoDebug, setShowGeoDebug] = useState(false);
 
   // Debounce search query to avoid filtering on every keystroke
   const debouncedSearchQuery = useDebounce(searchQuery, 300);
@@ -164,6 +179,10 @@ export default function CataloguesPage() {
   const handleGeoSearch = useCallback(async (bounds: GeographicBounds) => {
     try {
       setGeoSearching(true);
+      const requestId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2);
+      setGeoSearchRequestId(requestId);
       const params = new URLSearchParams({
         minLat: bounds.minLatitude.toString(),
         maxLat: bounds.maxLatitude.toString(),
@@ -171,19 +190,22 @@ export default function CataloguesPage() {
         maxLon: bounds.maxLongitude.toString(),
       });
 
-      const response = await fetch(`/api/catalogues/search/region?${params}`);
+      const response = await fetch(`/api/catalogues/search/region?${params}`, {
+        headers: {
+          'X-Request-Id': requestId,
+        },
+      });
       if (!response.ok) {
-        const error = await response.json().catch(() => null);
-        const message = error?.details
-          ? `${error.error}: ${error.details}`
-          : error?.error || 'Failed to search catalogues';
-        throw new Error(message);
+        const errorInfo = await getApiError(response, 'Failed to search catalogues');
+        setGeoSearchRequestId(errorInfo.requestId ?? requestId);
+        throw new Error(errorInfo.message);
       }
 
       const data = await response.json();
       setCatalogues(data.catalogues);
       setGeoSearchActive(true);
       setGeoSearchBounds(bounds);
+      setGeoSearchRequestId(data.requestId ?? requestId);
 
       toast({
         title: "Search complete",
@@ -204,6 +226,7 @@ export default function CataloguesPage() {
   const handleClearGeoSearch = useCallback(() => {
     setGeoSearchActive(false);
     setGeoSearchBounds(null);
+    setGeoSearchRequestId(null);
     fetchCatalogues();
   }, []);
 
@@ -418,34 +441,74 @@ export default function CataloguesPage() {
     return true;
   };
 
-  const getSourceNamesForSearch = (catalogue: Catalogue): string[] => {
+  const parseSourceCatalogues = (sourceCatalogues: string): any[] => {
+    if (!sourceCatalogues) return [];
     try {
-      const sources = JSON.parse(catalogue.source_catalogues);
-      if (!Array.isArray(sources)) return [];
-
-      return sources.flatMap((source: any) => {
-        const entries = [source.source, source.name, source.id];
-        return entries.filter(Boolean).map((entry) => String(entry));
-      });
+      const sources = JSON.parse(sourceCatalogues);
+      return Array.isArray(sources) ? sources : [];
     } catch {
       return [];
     }
   };
 
-  const buildSearchFields = (catalogue: Catalogue): SearchFields => {
-    const sourceNames = getSourceNamesForSearch(catalogue);
-    const eventCount = catalogue.event_count;
-    const createdAt = catalogue.created_at;
+  const getSourceNamesForSearch = (sources: any[]): string[] => {
+    if (!Array.isArray(sources)) return [];
+    return sources.flatMap((source: any) => {
+      const entries = [source.source, source.name, source.id];
+      return entries.filter(Boolean).map((entry) => String(entry));
+    });
+  };
 
-    return {
-      name: catalogue.name,
-      id: String(catalogue.id),
-      status: catalogue.status,
-      source: sourceNames.join(' '),
-      sourceType: getSourceType(catalogue),
-      events: `${eventCount} ${eventCount.toLocaleString()}`,
-      created: `${createdAt} ${formatDate(createdAt)}`,
-    };
+  const getSourceNamesDisplay = (sources: any[]): string => {
+    if (!Array.isArray(sources) || sources.length === 0) return 'Unknown';
+    return sources.map((source: any) => source.source || source.name || 'Unknown').join(', ');
+  };
+
+  const getSourceType = (sources: any[], mergeConfigRaw: string): CatalogueSourceType => {
+    // Merged catalogues have multiple source entries with 'id' fields (references to other catalogues)
+    if (Array.isArray(sources) && sources.length > 1) {
+      const hasMultipleSourceCatalogues = sources.some((source: any) => source.id && source.name && source.events !== undefined);
+      if (hasMultipleSourceCatalogues) {
+        return 'merged';
+      }
+    }
+
+    // Check for single source type
+    if (Array.isArray(sources) && sources.length > 0) {
+      const firstSource = sources[0];
+      const sourceName = (firstSource.source || '').toLowerCase();
+
+      // Imported catalogues have specific source names like 'GeoNet', 'IRIS', 'FDSN'
+      if (sourceName === 'geonet' || sourceName === 'iris fdsn' || sourceName.includes('fdsn') || sourceName.includes('api')) {
+        return 'imported';
+      }
+
+      // Uploaded catalogues have source: 'upload'
+      if (sourceName === 'upload') {
+        return 'uploaded';
+      }
+    }
+
+    // Check merge_config for additional hints
+    if (mergeConfigRaw) {
+      try {
+        const mergeConfig = JSON.parse(mergeConfigRaw);
+        if (mergeConfig.mergeStrategy || mergeConfig.timeThreshold !== undefined) {
+          return 'merged';
+        }
+        if (mergeConfig.source === 'GeoNet' || mergeConfig.importDate) {
+          return 'imported';
+        }
+        if (mergeConfig.uploadDate) {
+          return 'uploaded';
+        }
+      } catch {
+        // Ignore merge_config parse errors
+      }
+    }
+
+    // Default to uploaded if we can't determine
+    return 'uploaded';
   };
 
   const fieldAliases: Record<string, keyof SearchFields> = {
@@ -464,11 +527,44 @@ export default function CataloguesPage() {
     date: 'created',
   };
 
-  const matchesSearchQuery = (catalogue: Catalogue, tokens: SearchToken[]): boolean => {
+  const cataloguesWithMeta = useMemo(() => {
+    return catalogues.map((catalogue) => {
+      const sources = parseSourceCatalogues(catalogue.source_catalogues);
+      const sourceType = getSourceType(sources, catalogue.merge_config);
+      const sourceNamesForSearch = getSourceNamesForSearch(sources);
+      const sourceNamesDisplay = getSourceNamesDisplay(sources);
+      const eventCount = catalogue.event_count ?? 0;
+      const createdAt = catalogue.created_at ?? '';
+      const formattedDate = createdAt ? formatDate(createdAt) : '—';
+      const createdTimestamp = createdAt ? Date.parse(createdAt) : Number.NaN;
+      const searchFields: SearchFields = {
+        name: catalogue.name,
+        id: String(catalogue.id),
+        status: catalogue.status,
+        source: sourceNamesForSearch.join(' '),
+        sourceType,
+        events: `${eventCount} ${eventCount.toLocaleString()}`,
+        created: createdAt ? `${createdAt} ${formattedDate}` : '',
+      };
+      const haystack = normalizeSearchValue(Object.values(searchFields).join(' '));
+
+      return {
+        catalogue,
+        sourceType,
+        sourceNamesDisplay,
+        searchFields,
+        haystack,
+        createdTimestamp,
+        eventCount,
+        formattedDate,
+      };
+    });
+  }, [catalogues]);
+
+  const matchesSearchQuery = (catalogueMeta: CatalogueMeta, tokens: SearchToken[]): boolean => {
     if (tokens.length === 0) return true;
 
-    const fields = buildSearchFields(catalogue);
-    const haystack = normalizeSearchValue(Object.values(fields).join(' '));
+    const { searchFields, haystack, createdTimestamp, eventCount } = catalogueMeta;
 
     return tokens.every((token) => {
       const value = normalizeSearchValue(token.value);
@@ -477,14 +573,12 @@ export default function CataloguesPage() {
       if (!token.field) {
         const dateRange = parseDateRange(value);
         const dateFilter = parseDateFilter(value);
-        const actualTimestamp = Date.parse(catalogue.created_at);
-
-        if (!Number.isNaN(actualTimestamp)) {
+        if (!Number.isNaN(createdTimestamp)) {
           if (dateRange) {
-            return matchesDateRange(actualTimestamp, dateRange);
+            return matchesDateRange(createdTimestamp, dateRange);
           }
           if (dateFilter) {
-            return compareDate(actualTimestamp, dateFilter);
+            return compareDate(createdTimestamp, dateFilter);
           }
         }
 
@@ -498,31 +592,30 @@ export default function CataloguesPage() {
 
       if (fieldKey === 'status') {
         const normalizedStatus = statusAliases[value] ?? value;
-        return normalizeSearchValue(fields.status).includes(normalizedStatus);
+        return normalizeSearchValue(searchFields.status).includes(normalizedStatus);
       }
 
       if (fieldKey === 'events') {
         const numericFilter = parseNumericFilter(value);
         if (numericFilter) {
-          return compareNumber(catalogue.event_count, numericFilter.op, numericFilter.amount);
+          return compareNumber(eventCount, numericFilter.op, numericFilter.amount);
         }
       }
 
       if (fieldKey === 'created') {
         const dateRange = parseDateRange(value);
         const dateFilter = parseDateFilter(value);
-        const actualTimestamp = Date.parse(catalogue.created_at);
-        if (!Number.isNaN(actualTimestamp)) {
+        if (!Number.isNaN(createdTimestamp)) {
           if (dateRange) {
-            return matchesDateRange(actualTimestamp, dateRange);
+            return matchesDateRange(createdTimestamp, dateRange);
           }
           if (dateFilter) {
-            return compareDate(actualTimestamp, dateFilter);
+            return compareDate(createdTimestamp, dateFilter);
           }
         }
       }
 
-      return normalizeSearchValue(fields[fieldKey]).includes(value);
+      return normalizeSearchValue(searchFields[fieldKey]).includes(value);
     });
   };
 
@@ -533,47 +626,13 @@ export default function CataloguesPage() {
 
   // Memoized filtered catalogues (using debounced search query)
   const filteredCatalogues = useMemo(() => {
-    return catalogues.filter(catalogue => {
-      const matchesStatus = statusFilter === 'all' || catalogue.status === statusFilter;
-      const matchesSearch = matchesSearchQuery(catalogue, searchTokens);
+    return cataloguesWithMeta.filter((catalogueMeta) => {
+      const matchesStatus = statusFilter === 'all' || catalogueMeta.catalogue.status === statusFilter;
+      const matchesSearch = matchesSearchQuery(catalogueMeta, searchTokens);
 
       return matchesSearch && matchesStatus;
     });
-  }, [catalogues, searchTokens, statusFilter]);
-
-  // Helper to get source type for sorting (inline to avoid hook ordering issues)
-  const getSourceTypeForSort = (catalogue: Catalogue): string => {
-    try {
-      const sources = JSON.parse(catalogue.source_catalogues);
-      if (Array.isArray(sources) && sources.length > 1) {
-        const hasMultipleSourceCatalogues = sources.some((s: any) => s.id && s.name && s.events !== undefined);
-        if (hasMultipleSourceCatalogues) return 'merged';
-      }
-      if (Array.isArray(sources) && sources.length > 0) {
-        const sourceName = (sources[0].source || '').toLowerCase();
-        if (sourceName === 'geonet' || sourceName === 'iris fdsn' || sourceName.includes('fdsn') || sourceName.includes('api')) {
-          return 'imported';
-        }
-        if (sourceName === 'upload') return 'uploaded';
-      }
-      return 'uploaded';
-    } catch {
-      return 'uploaded';
-    }
-  };
-
-  // Helper to get source names for sorting
-  const getSourceNamesForSort = (catalogue: Catalogue): string => {
-    try {
-      const sources = JSON.parse(catalogue.source_catalogues);
-      if (Array.isArray(sources) && sources.length > 0) {
-        return sources.map((s: any) => s.source || s.name || 'Unknown').join(', ');
-      }
-      return 'Unknown';
-    } catch {
-      return 'Unknown';
-    }
-  };
+  }, [cataloguesWithMeta, searchTokens, statusFilter]);
 
   // Memoized sorted catalogues
   const sortedCatalogues = useMemo(() => {
@@ -581,15 +640,17 @@ export default function CataloguesPage() {
       let comparison = 0;
 
       if (sortField === 'name') {
-        comparison = a.name.localeCompare(b.name);
+        comparison = a.catalogue.name.localeCompare(b.catalogue.name);
       } else if (sortField === 'date') {
-        comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        const aTimestamp = Number.isNaN(a.createdTimestamp) ? 0 : a.createdTimestamp;
+        const bTimestamp = Number.isNaN(b.createdTimestamp) ? 0 : b.createdTimestamp;
+        comparison = aTimestamp - bTimestamp;
       } else if (sortField === 'events') {
-        comparison = a.event_count - b.event_count;
+        comparison = a.eventCount - b.eventCount;
       } else if (sortField === 'sourceType') {
-        comparison = getSourceTypeForSort(a).localeCompare(getSourceTypeForSort(b));
+        comparison = a.sourceType.localeCompare(b.sourceType);
       } else if (sortField === 'source') {
-        comparison = getSourceNamesForSort(a).localeCompare(getSourceNamesForSort(b));
+        comparison = a.sourceNamesDisplay.localeCompare(b.sourceNamesDisplay);
       }
 
       return sortDirection === 'asc' ? comparison : -comparison;
@@ -660,77 +721,7 @@ export default function CataloguesPage() {
     }
   };
 
-  const getSourceNames = (catalogue: Catalogue): string => {
-    try {
-      const sources = JSON.parse(catalogue.source_catalogues);
-      if (Array.isArray(sources) && sources.length > 0) {
-        return sources.map((s: any) => s.source || s.name || 'Unknown').join(', ');
-      }
-      return 'Unknown';
-    } catch {
-      return 'Unknown';
-    }
-  };
-
-  /**
-   * Determine the source type of a catalogue based on its source_catalogues and merge_config.
-   * Returns 'merged' | 'imported' | 'uploaded'
-   */
-  function getSourceType(catalogue: Catalogue): 'merged' | 'imported' | 'uploaded' {
-    try {
-      const sources = JSON.parse(catalogue.source_catalogues);
-
-      // Merged catalogues have multiple source entries with 'id' fields (references to other catalogues)
-      if (Array.isArray(sources) && sources.length > 1) {
-        // Check if sources have catalogue IDs (merged) vs just source names
-        const hasMultipleSourceCatalogues = sources.some((s: any) => s.id && s.name && s.events !== undefined);
-        if (hasMultipleSourceCatalogues) {
-          return 'merged';
-        }
-      }
-
-      // Check for single source type
-      if (Array.isArray(sources) && sources.length > 0) {
-        const firstSource = sources[0];
-        const sourceName = (firstSource.source || '').toLowerCase();
-
-        // Imported catalogues have specific source names like 'GeoNet', 'IRIS', 'FDSN'
-        if (sourceName === 'geonet' || sourceName === 'iris fdsn' || sourceName.includes('fdsn') || sourceName.includes('api')) {
-          return 'imported';
-        }
-
-        // Uploaded catalogues have source: 'upload'
-        if (sourceName === 'upload') {
-          return 'uploaded';
-        }
-      }
-
-      // Check merge_config for additional hints
-      try {
-        const mergeConfig = JSON.parse(catalogue.merge_config);
-        if (mergeConfig.mergeStrategy || mergeConfig.timeThreshold !== undefined) {
-          return 'merged';
-        }
-        if (mergeConfig.source === 'GeoNet' || mergeConfig.importDate) {
-          return 'imported';
-        }
-        if (mergeConfig.uploadDate) {
-          return 'uploaded';
-        }
-      } catch {
-        // Ignore merge_config parse errors
-      }
-
-      // Default to uploaded if we can't determine
-      return 'uploaded';
-    } catch {
-      return 'uploaded';
-    }
-  }
-
-  const getSourceTypeBadge = (catalogue: Catalogue) => {
-    const sourceType = getSourceType(catalogue);
-
+  const getSourceTypeBadge = (sourceType: CatalogueSourceType) => {
     const badgeConfig = {
       merged: {
         icon: <GitMerge className="h-3 w-3" />,
@@ -805,7 +796,10 @@ export default function CataloguesPage() {
 
       // Fetch the file using unified export endpoint
       const response = await fetch(`/api/catalogues/${catalogue.id}/export?format=${format}`);
-      if (!response.ok) throw new Error('Export failed');
+      if (!response.ok) {
+        const errorInfo = await getApiError(response, 'Export failed');
+        throw new Error(errorInfo.message);
+      }
 
       // Get filename from Content-Disposition header or generate one
       const contentDisposition = response.headers.get('Content-Disposition');
@@ -958,8 +952,8 @@ export default function CataloguesPage() {
           setSelectedCatalogue(null);
           return;
         }
-        const error = await response.json().catch(() => null);
-        throw new Error(error?.error || 'Delete failed');
+        const errorInfo = await getApiError(response, 'Delete failed');
+        throw new Error(errorInfo.message);
       }
 
       toast({
@@ -981,7 +975,7 @@ export default function CataloguesPage() {
     }
   };
 
-  const renderCatalogueTable = (catalogues: Catalogue[]) => (
+  const renderCatalogueTable = (catalogues: CatalogueMeta[]) => (
     <div className="rounded-md border">
       <Table>
         <TableHeader>
@@ -1058,8 +1052,10 @@ export default function CataloguesPage() {
               }
             />
           ) : (
-            catalogues.map((catalogue) => (
-              <TableRow key={catalogue.id}>
+            catalogues.map((catalogueMeta) => {
+              const { catalogue, sourceType, sourceNamesDisplay, eventCount, formattedDate } = catalogueMeta;
+              return (
+                <TableRow key={catalogue.id}>
                 <TableCell className="font-medium">
                   <div className="flex items-center gap-2">
                     <FileText className="h-4 w-4 text-muted-foreground" />
@@ -1069,12 +1065,12 @@ export default function CataloguesPage() {
                 <TableCell>
                   <div className="flex items-center gap-1.5">
                     <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <span>{formatDate(catalogue.created_at)}</span>
+                    <span>{formattedDate}</span>
                   </div>
                 </TableCell>
-                <TableCell>{getSourceTypeBadge(catalogue)}</TableCell>
-                <TableCell>{catalogue.event_count.toLocaleString()}</TableCell>
-                <TableCell>{getSourceNames(catalogue)}</TableCell>
+                <TableCell>{getSourceTypeBadge(sourceType)}</TableCell>
+                <TableCell>{eventCount.toLocaleString()}</TableCell>
+                <TableCell>{sourceNamesDisplay}</TableCell>
                 <TableCell>{getStatusBadge(catalogue.status)}</TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-1">
@@ -1185,7 +1181,8 @@ export default function CataloguesPage() {
                   </div>
                 </TableCell>
               </TableRow>
-            ))
+              );
+            })
           )}
         </TableBody>
       </Table>
@@ -1233,13 +1230,31 @@ export default function CataloguesPage() {
                     {geoSearchBounds.minLongitude > geoSearchBounds.maxLongitude ? ' (crosses date line)' : ''}
                   </span>
                 </div>
-                <Button variant="ghost" size="sm" onClick={handleClearGeoSearch}>
-                  Clear Filter
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowGeoDebug((prev) => !prev)}
+                    className="gap-1"
+                  >
+                    <Bug className="h-3.5 w-3.5" />
+                    {showGeoDebug ? 'Hide Debug' : 'Show Debug'}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={handleClearGeoSearch}>
+                    Clear Filter
+                  </Button>
+                </div>
               </div>
-              <div className="mt-2 text-xs text-blue-700 dark:text-blue-300">
-                Debug bounds: minLat={geoSearchBounds.minLatitude}, maxLat={geoSearchBounds.maxLatitude}, minLon={geoSearchBounds.minLongitude}, maxLon={geoSearchBounds.maxLongitude}
-              </div>
+              {showGeoDebug && (
+                <div className="mt-2 text-xs text-blue-700 dark:text-blue-300 space-y-1">
+                  <div>
+                    Debug bounds: minLat={geoSearchBounds.minLatitude}, maxLat={geoSearchBounds.maxLatitude}, minLon={geoSearchBounds.minLongitude}, maxLon={geoSearchBounds.maxLongitude}
+                  </div>
+                  {geoSearchRequestId && (
+                    <div>Request ID: {geoSearchRequestId}</div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

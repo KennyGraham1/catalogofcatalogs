@@ -22,6 +22,7 @@ import { performQualityCheck } from '@/lib/data-quality-checker';
 import { validateEventsCrossFields } from '@/lib/cross-field-validation';
 import { useAuth } from '@/lib/auth/hooks';
 import { UserRole } from '@/lib/auth/types';
+import { getApiError } from '@/lib/api';
 
 type UploadStatus = 'idle' | 'uploading' | 'validating' | 'mapping' | 'metadata' | 'processing' | 'complete' | 'error';
 
@@ -181,8 +182,8 @@ export default function UploadPage() {
           if (response.status === 403) {
             throw new Error('Editor or Admin access is required to upload files.');
           }
-          const error = await response.json().catch(() => null);
-          throw new Error(error?.error || 'Upload failed');
+          const errorInfo = await getApiError(response, 'Upload failed');
+          throw new Error(errorInfo.message);
         }
 
         const result = await response.json();
@@ -332,8 +333,8 @@ export default function UploadPage() {
         if (response.status === 403) {
           throw new Error('Editor or Admin access is required to create catalogues.');
         }
-        const error = await response.json().catch(() => null);
-        throw new Error(error?.error || 'Failed to create catalogue');
+        const errorInfo = await getApiError(response, 'Failed to create catalogue');
+        throw new Error(errorInfo.message);
       }
 
       const createdCatalogue = await response.json();

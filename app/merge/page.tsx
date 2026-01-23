@@ -59,6 +59,7 @@ import { toast } from '@/hooks/use-toast';
 import { GeographicSearchPanel, GeographicBounds } from '@/components/catalogues/GeographicSearchPanel';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { DataPagination } from '@/components/ui/data-pagination';
+import { getApiError } from '@/lib/api';
 
 type CatalogueStatus = 'all' | 'complete' | 'processing' | 'incomplete';
 type SortField = 'name' | 'date' | 'events' | 'sourceType' | 'source';
@@ -280,9 +281,9 @@ export default function MergePage() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        console.error('Preview API error:', errorData);
-        throw new Error(errorData.error || `HTTP ${response.status}`);
+        const errorInfo = await getApiError(response, 'Failed to generate preview');
+        console.error('Preview API error:', errorInfo);
+        throw new Error(errorInfo.message);
       }
 
       const result = await response.json();
@@ -403,7 +404,8 @@ export default function MergePage() {
       ));
 
       if (!response.ok) {
-        throw new Error('Failed to merge catalogues');
+        const errorInfo = await getApiError(response, 'Failed to merge catalogues');
+        throw new Error(errorInfo.message);
       }
 
       const result = await response.json();
@@ -425,7 +427,8 @@ export default function MergePage() {
             setMergedEvents(events);
           } else {
             // Fallback to empty array if fetch fails
-            console.warn('Failed to fetch merged events');
+            const errorInfo = await getApiError(eventsResponse, 'Failed to fetch merged events');
+            console.warn('Failed to fetch merged events:', errorInfo.message);
             setMergedEvents([]);
           }
         } catch (error) {
@@ -472,9 +475,12 @@ export default function MergePage() {
       setMergeSteps(steps => steps.map(s =>
         s.status === 'in-progress' ? { ...s, status: 'error' as const } : s
       ));
+      const errorMessage = error instanceof Error
+        ? error.message
+        : "An error occurred while merging the catalogues.";
       toast({
         title: "Merge Failed",
-        description: "An error occurred while merging the catalogues. Please try again.",
+        description: errorMessage,
         variant: "destructive"
       });
     }
@@ -523,7 +529,8 @@ export default function MergePage() {
       const response = await fetch(`/api/catalogues/search/region?${params}`);
 
       if (!response.ok) {
-        throw new Error('Failed to search catalogues by region');
+        const errorInfo = await getApiError(response, 'Failed to search catalogues by region');
+        throw new Error(errorInfo.message);
       }
 
       const data = await response.json();
@@ -536,9 +543,12 @@ export default function MergePage() {
       });
     } catch (error) {
       console.error('Geographic search error:', error);
+      const errorMessage = error instanceof Error
+        ? error.message
+        : 'Failed to search catalogues by region. Please try again.';
       toast({
         title: 'Search Failed',
-        description: 'Failed to search catalogues by region. Please try again.',
+        description: errorMessage,
         variant: 'destructive',
       });
     } finally {

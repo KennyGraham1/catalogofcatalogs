@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { Logger, formatErrorResponse } from '@/lib/errors';
 import { apiCache } from '@/lib/cache';
+import { randomUUID } from 'crypto';
 
 // Force dynamic rendering for this API route
 export const dynamic = 'force-dynamic';
@@ -13,9 +14,13 @@ export const dynamic = 'force-dynamic';
 const logger = new Logger('CatalogueRegionSearchAPI');
 
 export async function GET(request: NextRequest) {
+  const requestId = request.headers.get('x-request-id') || randomUUID();
   try {
     if (!dbQueries) {
-      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Database not available', requestId },
+        { status: 500 }
+      );
     }
 
     const searchParams = request.nextUrl.searchParams;
@@ -31,7 +36,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         { 
           error: 'Missing required parameters',
-          details: 'All of minLat, maxLat, minLon, and maxLon are required'
+          details: 'All of minLat, maxLat, minLon, and maxLon are required',
+          requestId
         },
         { status: 400 }
       );
@@ -48,7 +54,7 @@ export async function GET(request: NextRequest) {
 
     if (isNaN(minLatNum) || isNaN(maxLatNum) || isNaN(minLonNum) || isNaN(maxLonNum)) {
       return NextResponse.json(
-        { error: 'Invalid coordinate values. All coordinates must be valid numbers.' },
+        { error: 'Invalid coordinate values. All coordinates must be valid numbers.', requestId },
         { status: 400 }
       );
     }
@@ -56,14 +62,14 @@ export async function GET(request: NextRequest) {
     // Validate coordinate ranges (allow small epsilon over/under due to rounding)
     if (minLatNum < -90 - epsilon || minLatNum > 90 + epsilon || maxLatNum < -90 - epsilon || maxLatNum > 90 + epsilon) {
       return NextResponse.json(
-        { error: 'Latitude values must be between -90 and 90' },
+        { error: 'Latitude values must be between -90 and 90', requestId },
         { status: 400 }
       );
     }
 
     if (minLonNum < -180 - epsilon || minLonNum > 180 + epsilon || maxLonNum < -180 - epsilon || maxLonNum > 180 + epsilon) {
       return NextResponse.json(
-        { error: 'Longitude values must be between -180 and 180' },
+        { error: 'Longitude values must be between -180 and 180', requestId },
         { status: 400 }
       );
     }
@@ -75,7 +81,7 @@ export async function GET(request: NextRequest) {
 
     if (clampedMinLat > clampedMaxLat) {
       return NextResponse.json(
-        { error: 'Minimum latitude cannot be greater than maximum latitude' },
+        { error: 'Minimum latitude cannot be greater than maximum latitude', requestId },
         { status: 400 }
       );
     }
@@ -88,11 +94,12 @@ export async function GET(request: NextRequest) {
     // Check cache first
     const cachedResult = apiCache.get<any>(cacheKey);
     if (cachedResult) {
-      logger.info('Returning cached region search result', { cacheKey });
-      return NextResponse.json(cachedResult);
+      logger.info('Returning cached region search result', { cacheKey, requestId });
+      return NextResponse.json({ ...cachedResult, requestId });
     }
 
     logger.info('Searching catalogues by region', {
+      requestId,
       minLat: clampedMinLat,
       maxLat: clampedMaxLat,
       minLon: clampedMinLon,
@@ -108,7 +115,7 @@ export async function GET(request: NextRequest) {
       clampedMaxLon
     );
 
-    logger.info('Region search completed', { count: catalogues.length });
+    logger.info('Region search completed', { count: catalogues.length, requestId });
 
     const result = {
       catalogues,
@@ -124,14 +131,14 @@ export async function GET(request: NextRequest) {
     // Cache the result
     apiCache.set(cacheKey, result);
 
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, requestId });
 
   } catch (error) {
-    logger.error('Failed to search catalogues by region', error);
+    logger.error('Failed to search catalogues by region', error, { requestId });
     const errorResponse = formatErrorResponse(error);
 
     return NextResponse.json(
-      { error: errorResponse.error, code: errorResponse.code },
+      { error: errorResponse.error, code: errorResponse.code, requestId },
       { status: errorResponse.statusCode }
     );
   }
