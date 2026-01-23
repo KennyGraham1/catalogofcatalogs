@@ -6,6 +6,7 @@
  */
 
 import { MongoClient, Db, Collection, MongoClientOptions } from 'mongodb';
+import type { Document } from 'mongodb';
 
 // MongoDB connection URI from environment variable
 // Supports both local MongoDB and Atlas connection strings:
@@ -272,4 +273,3 @@ export const COLLECTIONS = {
 } as const;
 
 export { MongoClient, Db, Collection };
-

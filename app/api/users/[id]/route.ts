@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/middleware';
 import { getCollection, COLLECTIONS } from '@/lib/mongodb';
-import { User, UserRole } from '@/lib/auth/types';
+import { UserRole } from '@/lib/auth/types';
 import { Logger } from '@/lib/errors';
 
 const logger = new Logger('UserAPI');
@@ -24,7 +24,7 @@ export async function GET(
   }
 
   try {
-    const collection = await getCollection<User>(COLLECTIONS.USERS);
+    const collection = await getCollection(COLLECTIONS.USERS);
     const user = await collection.findOne({ id: params.id });
     
     if (!user) {
@@ -34,9 +34,11 @@ export async function GET(
       );
     }
     
-    const { _id, password_hash, ...safeUser } = user;
-    
-    return NextResponse.json({ user: safeUser });
+    const userData = { ...(user as Record<string, unknown>) };
+    delete userData._id;
+    delete userData.password_hash;
+
+    return NextResponse.json({ user: userData });
   } catch (error) {
     logger.error('Failed to retrieve user', error);
     
@@ -61,7 +63,7 @@ export async function PATCH(
     const body = await request.json();
     const { role, is_active, name } = body;
     
-    const collection = await getCollection<User>(COLLECTIONS.USERS);
+    const collection = await getCollection(COLLECTIONS.USERS);
     
     // Build update object
     const updateFields: any = {
@@ -103,9 +105,11 @@ export async function PATCH(
     
     // Fetch updated user
     const updatedUser = await collection.findOne({ id: params.id });
-    const { _id, password_hash, ...safeUser } = updatedUser!;
-    
-    return NextResponse.json({ user: safeUser });
+    const updatedUserData = { ...(updatedUser as Record<string, unknown>) };
+    delete updatedUserData._id;
+    delete updatedUserData.password_hash;
+
+    return NextResponse.json({ user: updatedUserData });
   } catch (error) {
     logger.error('Failed to update user', error);
     
@@ -127,7 +131,7 @@ export async function DELETE(
   }
 
   try {
-    const collection = await getCollection<User>(COLLECTIONS.USERS);
+    const collection = await getCollection(COLLECTIONS.USERS);
     
     // Prevent deleting yourself
     if (authResult.user.id === params.id) {
@@ -158,4 +162,3 @@ export async function DELETE(
     );
   }
 }
-

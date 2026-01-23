@@ -6,8 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/middleware';
 import { getCollection, COLLECTIONS } from '@/lib/mongodb';
-import { User, SafeUser } from '@/lib/auth/types';
-import { toSafeUser } from '@/lib/auth/utils';
+import { SafeUser, User } from '@/lib/auth/types';
 import { Logger } from '@/lib/errors';
 
 const logger = new Logger('UsersAPI');
@@ -21,13 +20,13 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const collection = await getCollection<User>(COLLECTIONS.USERS);
+    const collection = await getCollection(COLLECTIONS.USERS);
     const users = await collection.find({}).sort({ created_at: -1 }).toArray();
     
     // Convert to safe users (remove password hashes)
-    const safeUsers: SafeUser[] = users.map(user => {
-      const { _id, password_hash, ...userData } = user;
-      return userData as SafeUser;
+    const safeUsers: SafeUser[] = users.map((user) => {
+      const { _id, password_hash, ...safeUser } = user as unknown as User & { _id?: unknown };
+      return safeUser;
     });
     
     logger.info('Users list retrieved', { count: safeUsers.length });
@@ -42,4 +41,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

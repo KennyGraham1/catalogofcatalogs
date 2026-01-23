@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth/config';
 import { getUserById, hashPassword, verifyPassword } from '@/lib/auth/utils';
 import { getCollection, COLLECTIONS } from '@/lib/mongodb';
-import type { User } from '@/lib/auth/types';
+// User type import removed - using untyped collection
 import { AppError } from '@/lib/errors';
 
 /**
@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
     const newPasswordHash = await hashPassword(newPassword);
 
     // Update password in database
-    const usersCollection = await getCollection<User>(COLLECTIONS.USERS);
+    const usersCollection = await getCollection(COLLECTIONS.USERS);
     const result = await usersCollection.updateOne(
       { id: user.id },
       {
@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Change password error:', error);
-    
+
     if (error instanceof AppError) {
       return NextResponse.json(
         { error: error.message },

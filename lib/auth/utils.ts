@@ -34,26 +34,26 @@ export function toSafeUser(user: User): SafeUser {
  * Get user by email
  */
 export async function getUserByEmail(email: string): Promise<User | null> {
-  const collection = await getCollection<User>(COLLECTIONS.USERS);
+  const collection = await getCollection(COLLECTIONS.USERS);
   const user = await collection.findOne({ email });
   
   if (!user) return null;
   
-  const { _id, ...userData } = user;
-  return userData as User;
+  const { _id, ...userData } = user as unknown as User & { _id?: unknown };
+  return userData;
 }
 
 /**
  * Get user by ID
  */
 export async function getUserById(userId: string): Promise<User | null> {
-  const collection = await getCollection<User>(COLLECTIONS.USERS);
+  const collection = await getCollection(COLLECTIONS.USERS);
   const user = await collection.findOne({ id: userId });
   
   if (!user) return null;
   
-  const { _id, ...userData } = user;
-  return userData as User;
+  const { _id, ...userData } = user as unknown as User & { _id?: unknown };
+  return userData;
 }
 
 /**
@@ -65,7 +65,7 @@ export async function createUser(
   name: string,
   role: UserRole = UserRole.VIEWER
 ): Promise<SafeUser> {
-  const collection = await getCollection<User>(COLLECTIONS.USERS);
+  const collection = await getCollection(COLLECTIONS.USERS);
   
   // Check if user already exists
   const existing = await collection.findOne({ email });
@@ -97,7 +97,7 @@ export async function createUser(
  * Update user's last login timestamp
  */
 export async function updateLastLogin(userId: string): Promise<void> {
-  const collection = await getCollection<User>(COLLECTIONS.USERS);
+  const collection = await getCollection(COLLECTIONS.USERS);
   await collection.updateOne(
     { id: userId },
     { 
@@ -148,7 +148,7 @@ export async function createSession(
   ipAddress?: string,
   userAgent?: string
 ): Promise<Session> {
-  const collection = await getCollection<Session>(COLLECTIONS.SESSIONS);
+  const collection = await getCollection(COLLECTIONS.SESSIONS);
   
   const session: Session = {
     id: `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -169,20 +169,20 @@ export async function createSession(
  * Get session by token
  */
 export async function getSessionByToken(token: string): Promise<Session | null> {
-  const collection = await getCollection<Session>(COLLECTIONS.SESSIONS);
+  const collection = await getCollection(COLLECTIONS.SESSIONS);
   const session = await collection.findOne({ token });
   
   if (!session) return null;
   
-  const { _id, ...sessionData } = session;
-  return sessionData as Session;
+  const { _id, ...sessionData } = session as unknown as Session & { _id?: unknown };
+  return sessionData;
 }
 
 /**
  * Delete session by token
  */
 export async function deleteSession(token: string): Promise<void> {
-  const collection = await getCollection<Session>(COLLECTIONS.SESSIONS);
+  const collection = await getCollection(COLLECTIONS.SESSIONS);
   await collection.deleteOne({ token });
 }
 
@@ -190,7 +190,6 @@ export async function deleteSession(token: string): Promise<void> {
  * Delete all sessions for a user
  */
 export async function deleteUserSessions(userId: string): Promise<void> {
-  const collection = await getCollection<Session>(COLLECTIONS.SESSIONS);
+  const collection = await getCollection(COLLECTIONS.SESSIONS);
   await collection.deleteMany({ user_id: userId });
 }
-

@@ -54,8 +54,8 @@ const nextConfig = {
       };
     }
 
-    // Performance optimizations for production builds
-    if (!dev) {
+    // Performance optimizations for production client builds
+    if (!dev && !isServer) {
       // Enable webpack cache for faster builds (only in production)
       config.cache = {
         type: 'filesystem',
