@@ -344,9 +344,9 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
 // Legend panel component (memoized)
 const LegendPanel = memo(function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string; showFaults: boolean; faultCount?: number }) {
   return (
-    <Card className="absolute bottom-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[220px]">
-      <div className="flex items-center gap-1.5 mb-3">
-        <h4 className="font-semibold text-sm">
+    <Card className="absolute bottom-4 right-4 z-[1000] max-w-[240px] border-border/60 bg-background/90 px-3 py-2.5 text-[11px] leading-tight backdrop-blur-sm shadow-lg">
+      <div className="flex items-center justify-between gap-2">
+        <h4 className="text-[11px] font-semibold">
           {colorMode === 'quality' ? 'Quality Score' : colorMode === 'depth' ? 'Depth Scale' : 'Magnitude Scale'}
         </h4>
         {colorMode === 'quality' ? (
@@ -359,85 +359,83 @@ const LegendPanel = memo(function LegendPanel({ colorMode, showFaults, faultCoun
       </div>
 
       {colorMode === 'quality' ? (
-        <div className="space-y-1.5 text-xs">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#22c55e' }}></div>
+        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+          <div className="flex items-center gap-1.5">
+            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#22c55e' }}></div>
             <span>A+ / A (90-100)</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#84cc16' }}></div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#84cc16' }}></div>
             <span>B (80-89)</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#eab308' }}></div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#eab308' }}></div>
             <span>C (70-79)</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#f97316' }}></div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#f97316' }}></div>
             <span>D (60-69)</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#ef4444' }}></div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#ef4444' }}></div>
             <span>F (&lt; 60)</span>
           </div>
         </div>
       ) : colorMode === 'depth' ? (
-        <div className="space-y-1.5 text-xs">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#00CED1' }}></div>
+        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+          <div className="flex items-center gap-1.5">
+            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#00CED1' }}></div>
             <span>&lt; 15 km (Shallow)</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#20B2AA' }}></div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#20B2AA' }}></div>
             <span>15 - 40 km</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#008B8B' }}></div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#008B8B' }}></div>
             <span>40 - 100 km</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#006666' }}></div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#006666' }}></div>
             <span>100 - 200 km (Deep)</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#004D4D' }}></div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#004D4D' }}></div>
             <span>≥ 200 km (V. Deep)</span>
           </div>
         </div>
       ) : (
-        <div className="space-y-1.5 text-xs">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
+        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+          <div className="flex items-center gap-1.5">
+            <div className="h-2 w-2 rounded-full bg-blue-500 flex-shrink-0"></div>
             <span>M2</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0"></div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-3 w-3 rounded-full bg-blue-500 flex-shrink-0"></div>
             <span>M4</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-blue-500 flex-shrink-0"></div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-4 w-4 rounded-full bg-blue-500 flex-shrink-0"></div>
             <span>M6</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-full bg-blue-500 flex-shrink-0"></div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-5 w-5 rounded-full bg-blue-500 flex-shrink-0"></div>
             <span>M7+</span>
           </div>
         </div>
       )}
 
       {showFaults && (
-        <div className="mt-3 pt-3 border-t">
-          <div className="flex items-center gap-1.5 mb-2">
-            <h4 className="font-semibold text-xs">Fault Lines</h4>
+        <div className="mt-2 border-t border-border/60 pt-2">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-[11px] font-semibold">Fault Lines</h4>
             <InfoTooltip content="Active fault traces from the GNS Science dataset." />
           </div>
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-6 h-0.5 bg-red-500"></div>
-              <span>NZ Active Faults{faultCount ? ` (${faultCount.toLocaleString()})` : ''}</span>
-            </div>
+          <div className="mt-1 flex items-center gap-2">
+            <div className="h-0.5 w-6 rounded-full bg-red-500"></div>
+            <span>NZ Active Faults{faultCount ? ` (${faultCount.toLocaleString()})` : ''}</span>
           </div>
-          <p className="text-[10px] text-muted-foreground mt-2">
+          <p className="mt-1 text-[10px] text-muted-foreground">
             Data: GNS Science (CC-BY 3.0 NZ)
           </p>
         </div>

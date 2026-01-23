@@ -382,9 +382,9 @@ export function EnhancedMapView({
       </div>
 
       {/* Legend */}
-      <Card className="absolute bottom-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg">
-        <div className="flex items-center gap-1.5 mb-2">
-          <h4 className="font-semibold text-sm">
+      <Card className="absolute bottom-4 right-4 z-[1000] max-w-[240px] border-border/60 bg-background/90 px-3 py-2.5 text-[11px] leading-tight backdrop-blur-sm shadow-lg">
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="text-[11px] font-semibold">
             {showQualityColors ? 'Quality Score' : 'Magnitude Scale'}
           </h4>
           {showQualityColors ? (
@@ -394,40 +394,39 @@ export function EnhancedMapView({
           )}
         </div>
         {showQualityColors ? (
-          <div className="space-y-1 text-xs">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#22c55e' }}></div>
+          <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+            <div className="flex items-center gap-1.5">
+              <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#22c55e' }}></div>
               <span>A+ / A (90-100)</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#84cc16' }}></div>
+            <div className="flex items-center gap-1.5">
+              <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#84cc16' }}></div>
               <span>B (80-89)</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#eab308' }}></div>
+            <div className="flex items-center gap-1.5">
+              <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#eab308' }}></div>
               <span>C (70-79)</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#f97316' }}></div>
+            <div className="flex items-center gap-1.5">
+              <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#f97316' }}></div>
               <span>D (60-69)</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#ef4444' }}></div>
+            <div className="flex items-center gap-1.5">
+              <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#ef4444' }}></div>
               <span>F (&lt; 60)</span>
             </div>
           </div>
         ) : (
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
+          <div className="mt-2">
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
               <span>Circle size represents magnitude</span>
               <TechnicalTermTooltip term="magnitude" />
             </div>
-            <div className="flex items-center justify-center gap-1 py-2">
-              <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <div className="w-4 h-4 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <div className="w-5 h-5 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <div className="w-6 h-6 rounded-full bg-blue-500 flex-shrink-0"></div>
+            <div className="mt-1 flex items-end gap-2">
+              <div className="h-2 w-2 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <div className="h-3 w-3 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <div className="h-4 w-4 rounded-full bg-blue-500 flex-shrink-0"></div>
+              <div className="h-5 w-5 rounded-full bg-blue-500 flex-shrink-0"></div>
             </div>
           </div>
         )}
