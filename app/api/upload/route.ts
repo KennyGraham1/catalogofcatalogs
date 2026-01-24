@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate file type
-    const allowedExtensions = ['csv', 'txt', 'json', 'geojson', 'xml', 'qml'];
+    const allowedExtensions = ['csv', 'txt', 'dat', 'json', 'geojson', 'xml', 'qml'];
     const extension = file.name.split('.').pop()?.toLowerCase();
 
     if (!extension || !allowedExtensions.includes(extension)) {

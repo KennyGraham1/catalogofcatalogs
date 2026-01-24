@@ -46,6 +46,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!validation.data) {
+      return NextResponse.json(
+        {
+          error: 'Invalid request data',
+          code: 'VALIDATION_ERROR',
+          details: ['Request body is missing required fields.']
+        },
+        { status: 400 }
+      );
+    }
+
     const { requestedRole, justification } = validation.data;
     const user = await getUserById(authResult.user.id);
 
@@ -151,4 +162,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

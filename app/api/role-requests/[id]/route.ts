@@ -37,6 +37,17 @@ export async function PATCH(
       );
     }
 
+    if (!validation.data) {
+      return NextResponse.json(
+        {
+          error: 'Invalid request data',
+          code: 'VALIDATION_ERROR',
+          details: ['Request body is missing required fields.']
+        },
+        { status: 400 }
+      );
+    }
+
     const { status, adminNotes } = validation.data;
     const collection = await getCollection<RoleChangeRequest>(COLLECTIONS.ROLE_REQUESTS);
     const existing = await collection.findOne({ id: params.id });
@@ -151,4 +162,3 @@ export async function PATCH(
     );
   }
 }
-

@@ -523,8 +523,6 @@ function mapCommonFields(event: any, dateFormat?: DateFormat): ParsedEvent {
   // Synthesize timestamp from separate date/time component columns if no combined time field exists
   if (!mapped.time) {
     const synthesized = synthesizeTimestamp(event);
-    console.log('[DEBUG] synthesizeTimestamp input keys:', Object.keys(event).slice(0, 10));
-    console.log('[DEBUG] synthesizeTimestamp result:', synthesized);
     if (synthesized) {
       mapped.time = synthesized;
     }
@@ -712,6 +710,7 @@ export function parseFile(content: string, filename: string, delimiter?: Delimit
   switch (extension) {
     case 'csv':
     case 'txt':
+    case 'dat':
       console.log(`[Parser] Parsing ${filename} as delimited text based on extension`);
       return parseCSV(content, delimiter, dateFormat);
     case 'json':
