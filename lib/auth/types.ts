@@ -117,6 +117,45 @@ export interface Session {
 }
 
 /**
+ * Role change request status
+ */
+export type RoleRequestStatus = 'pending' | 'approved' | 'rejected';
+
+/**
+ * Role change request document
+ */
+export interface RoleChangeRequest {
+  id: string;
+  user_id: string;
+  user_email: string;
+  user_name: string;
+  current_role: UserRole;
+  requested_role: UserRole;
+  justification: string;
+  status: RoleRequestStatus;
+  admin_notes?: string | null;
+  created_at: string;
+  updated_at: string;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
+  reviewed_by_name?: string | null;
+}
+
+/**
+ * User notification document
+ */
+export interface UserNotification {
+  id: string;
+  user_id: string;
+  type: string;
+  title: string;
+  message: string;
+  created_at: string;
+  read_at?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+/**
  * User role definition document
  */
 export interface UserRoleDefinition {
@@ -149,4 +188,3 @@ export interface SafeUser {
 export interface SessionWithUser extends Session {
   user: SafeUser;
 }
-

@@ -21,6 +21,8 @@ const COLLECTIONS = {
   SAVED_FILTERS: 'saved_filters',
   USERS: 'users',
   SESSIONS: 'sessions',
+  ROLE_REQUESTS: 'role_requests',
+  NOTIFICATIONS: 'notifications',
   API_KEYS: 'api_keys',
   AUDIT_LOGS: 'audit_logs',
 };
@@ -142,6 +144,30 @@ async function initializeDatabase() {
     console.log(`✓ Created index: ${COLLECTIONS.SESSIONS}.idx_user_id`);
     console.log(`✓ Created index: ${COLLECTIONS.SESSIONS}.idx_token`);
     console.log(`✓ Created index: ${COLLECTIONS.SESSIONS}.idx_expires_at (TTL)`);
+    indexCount += 4;
+
+    // Role requests collection indexes
+    const roleRequestsCollection = db.collection(COLLECTIONS.ROLE_REQUESTS);
+    await roleRequestsCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
+    await roleRequestsCollection.createIndex({ user_id: 1 }, { name: 'idx_user_id' });
+    await roleRequestsCollection.createIndex({ status: 1 }, { name: 'idx_status' });
+    await roleRequestsCollection.createIndex({ created_at: -1 }, { name: 'idx_created_at' });
+    console.log(`✓ Created index: ${COLLECTIONS.ROLE_REQUESTS}.idx_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.ROLE_REQUESTS}.idx_user_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.ROLE_REQUESTS}.idx_status`);
+    console.log(`✓ Created index: ${COLLECTIONS.ROLE_REQUESTS}.idx_created_at`);
+    indexCount += 4;
+
+    // Notifications collection indexes
+    const notificationsCollection = db.collection(COLLECTIONS.NOTIFICATIONS);
+    await notificationsCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
+    await notificationsCollection.createIndex({ user_id: 1 }, { name: 'idx_user_id' });
+    await notificationsCollection.createIndex({ created_at: -1 }, { name: 'idx_created_at' });
+    await notificationsCollection.createIndex({ read_at: 1 }, { name: 'idx_read_at' });
+    console.log(`✓ Created index: ${COLLECTIONS.NOTIFICATIONS}.idx_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.NOTIFICATIONS}.idx_user_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.NOTIFICATIONS}.idx_created_at`);
+    console.log(`✓ Created index: ${COLLECTIONS.NOTIFICATIONS}.idx_read_at`);
     indexCount += 4;
 
     // API keys collection indexes

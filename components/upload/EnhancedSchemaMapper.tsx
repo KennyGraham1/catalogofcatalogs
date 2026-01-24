@@ -215,8 +215,18 @@ export function EnhancedSchemaMapper({
   
   // Check if required fields are mapped (internal function)
   const checkRequiredFieldsInternal = () => {
-    const { complete } = checkRequiredFieldsMapped(fieldMappings);
-    onSchemaReady(complete);
+    const { complete, missing } = checkRequiredFieldsMapped(fieldMappings);
+    if (complete) {
+      onSchemaReady(true);
+      return;
+    }
+
+    const sourceFields = getSourceFields();
+    const normalizedFields = new Set(sourceFields.map(field => field.toLowerCase()));
+    const hasSplitTimestamp = normalizedFields.has('year') && normalizedFields.has('month') && normalizedFields.has('day');
+    const adjustedMissing = hasSplitTimestamp ? missing.filter(field => field !== 'time') : missing;
+
+    onSchemaReady(adjustedMissing.length === 0);
   };
 
   // Update field mapping

@@ -474,19 +474,19 @@ export const FIELD_ALIASES: Record<string, { exactMatches: string[]; aliases: st
   },
   latitude: {
     exactMatches: ['latitude', 'Latitude', 'LATITUDE', 'Lat', 'LAT'],
-    aliases: ['lat', 'y', 'ylat', 'originlat', 'origin_latitude', 'evla']
+    aliases: ['lat', 'lats', 'y', 'ylat', 'originlat', 'origin_latitude', 'evla']
   },
   longitude: {
     exactMatches: ['longitude', 'Longitude', 'LONGITUDE', 'Lon', 'LON', 'Long', 'LONG'],
-    aliases: ['lon', 'lng', 'long', 'x', 'xlon', 'originlon', 'origin_longitude', 'evlo']
+    aliases: ['lon', 'lons', 'lng', 'long', 'x', 'xlon', 'originlon', 'origin_longitude', 'evlo']
   },
   depth: {
     exactMatches: ['depth', 'Depth', 'DEPTH', 'Depth/km'],
-    aliases: ['dep', 'z', 'depthkm', 'depth_km', 'evdp', 'origindepth', 'origin_depth']
+    aliases: ['dep', 'depths', 'z', 'depthkm', 'depth_km', 'evdp', 'origindepth', 'origin_depth']
   },
   magnitude: {
     exactMatches: ['magnitude', 'Magnitude', 'MAGNITUDE', 'Mag', 'MAG'],
-    aliases: ['mag', 'm', 'prefmag', 'pref_magnitude']
+    aliases: ['mag', 'm', 'mpref', 'prefmag', 'pref_magnitude']
   },
 
   // Region/Location
@@ -903,4 +903,3 @@ export function getDefaultFieldMappingsConfig() {
     customMappings: mappings.slice(0, 50) // Return first 50 as defaults
   };
 }
-

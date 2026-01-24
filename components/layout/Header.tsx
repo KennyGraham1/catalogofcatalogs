@@ -19,7 +19,8 @@ import {
   LogIn,
   UserPlus,
   Shield,
-  Key
+  Key,
+  ClipboardList
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -172,10 +173,16 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
                       Change Password
                     </DropdownMenuItem>
                     {user.role === 'admin' && (
-                      <DropdownMenuItem onClick={() => router.push('/admin/users')}>
-                        <Shield className="mr-2 h-4 w-4" />
-                        User Management
-                      </DropdownMenuItem>
+                      <>
+                        <DropdownMenuItem onClick={() => router.push('/admin/users')}>
+                          <Shield className="mr-2 h-4 w-4" />
+                          User Management
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => router.push('/admin/role-requests')}>
+                          <ClipboardList className="mr-2 h-4 w-4" />
+                          Role Requests
+                        </DropdownMenuItem>
+                      </>
                     )}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={handleSignOut}>
@@ -246,10 +253,16 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
                   Change Password
                 </DropdownMenuItem>
                 {user.role === 'admin' && (
-                  <DropdownMenuItem onClick={() => router.push('/admin/users')}>
-                    <Shield className="mr-2 h-4 w-4" />
-                    User Management
-                  </DropdownMenuItem>
+                  <>
+                    <DropdownMenuItem onClick={() => router.push('/admin/users')}>
+                      <Shield className="mr-2 h-4 w-4" />
+                      User Management
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => router.push('/admin/role-requests')}>
+                      <ClipboardList className="mr-2 h-4 w-4" />
+                      Role Requests
+                    </DropdownMenuItem>
+                  </>
                 )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleSignOut}>

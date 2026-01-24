@@ -268,6 +268,8 @@ export const COLLECTIONS = {
   SAVED_FILTERS: 'saved_filters',
   USERS: 'users',
   SESSIONS: 'sessions',
+  ROLE_REQUESTS: 'role_requests',
+  NOTIFICATIONS: 'notifications',
   API_KEYS: 'api_keys',
   AUDIT_LOGS: 'audit_logs',
 } as const;

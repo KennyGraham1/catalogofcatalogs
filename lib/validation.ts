@@ -114,6 +114,22 @@ export const mergeRequestSchema = z.object({
 
 export type MergeRequest = z.infer<typeof mergeRequestSchema>;
 
+// Role change request schema
+export const roleRequestSchema = z.object({
+  requestedRole: z.enum(['editor', 'admin']),
+  justification: z.string().trim().min(10, 'Justification must be at least 10 characters').max(1000, 'Justification must be 1000 characters or less'),
+});
+
+export type RoleRequestSubmission = z.infer<typeof roleRequestSchema>;
+
+// Role request review schema (admin)
+export const roleRequestReviewSchema = z.object({
+  status: z.enum(['approved', 'rejected']),
+  adminNotes: z.string().trim().max(1000, 'Admin notes must be 1000 characters or less').optional(),
+});
+
+export type RoleRequestReview = z.infer<typeof roleRequestReviewSchema>;
+
 // File upload schema
 export const fileUploadSchema = z.object({
   fileName: z.string().min(1),
@@ -290,6 +306,40 @@ export function validateMergeRequest(data: unknown): {
     return { success: true, data: result.data };
   }
   
+  return { success: false, errors: result.error };
+}
+
+/**
+ * Validate role request submission
+ */
+export function validateRoleRequestSubmission(data: unknown): {
+  success: boolean;
+  data?: RoleRequestSubmission;
+  errors?: z.ZodError;
+} {
+  const result = roleRequestSchema.safeParse(data);
+
+  if (result.success) {
+    return { success: true, data: result.data };
+  }
+
+  return { success: false, errors: result.error };
+}
+
+/**
+ * Validate role request review (admin)
+ */
+export function validateRoleRequestReview(data: unknown): {
+  success: boolean;
+  data?: RoleRequestReview;
+  errors?: z.ZodError;
+} {
+  const result = roleRequestReviewSchema.safeParse(data);
+
+  if (result.success) {
+    return { success: true, data: result.data };
+  }
+
   return { success: false, errors: result.error };
 }
 
@@ -690,4 +740,3 @@ export function detectAnomalies(events: any[]): DataQualityCheck[] {
 
   return checks;
 }
-
