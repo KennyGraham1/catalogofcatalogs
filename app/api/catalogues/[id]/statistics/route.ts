@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries, MergedEvent } from '@/lib/db';
 import { Logger, NotFoundError, formatErrorResponse } from '@/lib/errors';
+import { requireViewer } from '@/lib/auth/middleware';
 
 const logger = new Logger('CatalogueStatisticsAPI');
 
@@ -45,6 +46,11 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    const authResult = await requireViewer(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     if (!dbQueries) {
       return NextResponse.json(
         { error: 'Database not available' },
@@ -173,4 +179,3 @@ export async function GET(
     );
   }
 }
-

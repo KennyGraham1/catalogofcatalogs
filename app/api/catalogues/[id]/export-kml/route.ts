@@ -6,12 +6,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { eventsToKML } from '@/lib/exporters';
 import { generateExportFilename, createDownloadHeaders } from '@/lib/export-utils';
+import { requireViewer } from '@/lib/auth/middleware';
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    const authResult = await requireViewer(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     const catalogueId = params.id;
 
     if (!dbQueries) {
@@ -76,4 +82,3 @@ export async function GET(
     );
   }
 }
-

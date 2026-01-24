@@ -66,8 +66,8 @@ import { InfoTooltip } from '@/components/ui/info-tooltip';
 import { Database } from 'lucide-react';
 import { CatalogueStatsPopover } from '@/components/catalogues/CatalogueStatsPopover';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
-import { useAuth } from '@/lib/auth/hooks';
-import { UserRole } from '@/lib/auth/types';
+import { useAuth, usePermission } from '@/lib/auth/hooks';
+import { Permission, UserRole } from '@/lib/auth/types';
 import { ToastAction } from '@/components/ui/toast';
 import { getApiError } from '@/lib/api';
 
@@ -115,6 +115,10 @@ export default function CataloguesPage() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
   const canManageCatalogues = user?.role === UserRole.EDITOR || user?.role === UserRole.ADMIN;
+  const canExportCatalogues = usePermission(Permission.CATALOGUE_EXPORT);
+  const exportBlockedMessage = user
+    ? 'Viewer or higher access is required to export catalogues.'
+    : 'Log in to export catalogues.';
 
   // Use global catalogue context
   const { catalogues: contextCatalogues, loading: contextLoading, refreshCatalogues } = useCatalogues();
@@ -780,6 +784,23 @@ export default function CataloguesPage() {
 
   const handleExport = async (catalogue: Catalogue, format: 'csv' | 'json' | 'geojson' | 'kml' | 'quakeml') => {
     try {
+      if (!canExportCatalogues) {
+        toast({
+          title: user ? 'Insufficient permissions' : 'Login required',
+          description: exportBlockedMessage,
+          variant: 'destructive',
+          action: (
+            <ToastAction
+              altText={user ? 'View role' : 'Log in'}
+              onClick={() => router.push(user ? '/profile' : '/login')}
+            >
+              {user ? 'View role' : 'Log in'}
+            </ToastAction>
+          ),
+        });
+        return;
+      }
+
       const formatLabels = {
         csv: 'CSV',
         json: 'JSON',
@@ -1086,35 +1107,50 @@ export default function CataloguesPage() {
                     >
                       <Map className="h-4 w-4" />
                     </Button>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <Download className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-56">
-                        <DropdownMenuItem onClick={() => handleExport(catalogue, 'csv')}>
-                          <FileText className="h-4 w-4 mr-2" />
-                          CSV (Spreadsheet)
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleExport(catalogue, 'json')}>
-                          <FileText className="h-4 w-4 mr-2" />
-                          JSON (Structured)
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleExport(catalogue, 'geojson')}>
-                          <FileText className="h-4 w-4 mr-2" />
-                          GeoJSON (Geographic)
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleExport(catalogue, 'kml')}>
-                          <FileText className="h-4 w-4 mr-2" />
-                          KML (Google Earth)
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleExport(catalogue, 'quakeml')}>
-                          <FileText className="h-4 w-4 mr-2" />
-                          QuakeML (Seismology)
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    {canExportCatalogues ? (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <Download className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuItem onClick={() => handleExport(catalogue, 'csv')}>
+                            <FileText className="h-4 w-4 mr-2" />
+                            CSV (Spreadsheet)
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleExport(catalogue, 'json')}>
+                            <FileText className="h-4 w-4 mr-2" />
+                            JSON (Structured)
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleExport(catalogue, 'geojson')}>
+                            <FileText className="h-4 w-4 mr-2" />
+                            GeoJSON (Geographic)
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleExport(catalogue, 'kml')}>
+                            <FileText className="h-4 w-4 mr-2" />
+                            KML (Google Earth)
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleExport(catalogue, 'quakeml')}>
+                            <FileText className="h-4 w-4 mr-2" />
+                            QuakeML (Seismology)
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ) : (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" disabled>
+                              <Download className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{exportBlockedMessage}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    )}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" className="h-8 w-8">

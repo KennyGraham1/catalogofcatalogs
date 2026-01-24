@@ -6,12 +6,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries, MergedEvent } from '@/lib/db';
 import { eventsToQuakeMLDocument } from '@/lib/quakeml-exporter';
 import { generateExportFilename, createDownloadHeaders } from '@/lib/export-utils';
+import { requireViewer } from '@/lib/auth/middleware';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    const authResult = await requireViewer(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     if (!dbQueries) {
       return NextResponse.json(
         { error: 'Database not available' },

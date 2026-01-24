@@ -11,6 +11,11 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    const authResult = await requireEditor(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     if (!dbQueries) {
       return NextResponse.json(
         { error: 'Database not initialized' },

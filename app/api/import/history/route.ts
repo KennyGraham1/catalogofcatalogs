@@ -6,12 +6,18 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { geonetImportService } from '@/lib/geonet-import-service';
+import { requireEditor } from '@/lib/auth/middleware';
 
 // Force dynamic rendering for this API route
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
+    const authResult = await requireEditor(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     const { searchParams } = new URL(request.url);
     const catalogueId = searchParams.get('catalogueId');
     const limitParam = searchParams.get('limit');
@@ -47,4 +53,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

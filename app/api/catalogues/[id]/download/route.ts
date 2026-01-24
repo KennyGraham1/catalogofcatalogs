@@ -1,15 +1,21 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries, MergedEvent } from '@/lib/db';
 import { Logger, NotFoundError, formatErrorResponse, safeJSONParse } from '@/lib/errors';
 import { generateExportFilename, createDownloadHeaders } from '@/lib/export-utils';
+import { requireViewer } from '@/lib/auth/middleware';
 
 const logger = new Logger('DownloadAPI');
 
 export async function GET(
-  request: Request,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    const authResult = await requireViewer(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     logger.info('Downloading catalogue', { id: params.id });
 
     if (!dbQueries) {

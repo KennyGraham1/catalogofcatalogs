@@ -7,6 +7,7 @@ import { dbQueries } from '@/lib/db';
 import { Logger, formatErrorResponse } from '@/lib/errors';
 import { apiCache } from '@/lib/cache';
 import { randomUUID } from 'crypto';
+import { requireViewer } from '@/lib/auth/middleware';
 
 // Force dynamic rendering for this API route
 export const dynamic = 'force-dynamic';
@@ -16,6 +17,11 @@ const logger = new Logger('CatalogueRegionSearchAPI');
 export async function GET(request: NextRequest) {
   const requestId = request.headers.get('x-request-id') || randomUUID();
   try {
+    const authResult = await requireViewer(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     if (!dbQueries) {
       return NextResponse.json(
         { error: 'Database not available', requestId },

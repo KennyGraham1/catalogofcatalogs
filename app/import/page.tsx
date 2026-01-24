@@ -112,35 +112,55 @@ export default function ImportPage() {
         </TabsContent>
         
         <TabsContent value="history" className="space-y-4">
-          {!isLoadingCatalogues && catalogues.length > 0 && (
-            <Card className="shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Select Catalogue</CardTitle>
-                <CardDescription className="text-xs">
-                  Choose a catalogue to view its import history
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <Label htmlFor="catalogue-select" className="text-sm">Catalogue</Label>
-                  <Select value={selectedCatalogueId} onValueChange={setSelectedCatalogueId}>
-                    <SelectTrigger id="catalogue-select">
-                      <SelectValue placeholder="Select a catalogue" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {catalogues.map((catalogue) => (
-                        <SelectItem key={catalogue.id} value={catalogue.id}>
-                          {catalogue.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+          {canImport ? (
+            <>
+              {!isLoadingCatalogues && catalogues.length > 0 && (
+                <Card className="shadow-sm">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Select Catalogue</CardTitle>
+                    <CardDescription className="text-xs">
+                      Choose a catalogue to view its import history
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <Label htmlFor="catalogue-select" className="text-sm">Catalogue</Label>
+                      <Select value={selectedCatalogueId} onValueChange={setSelectedCatalogueId}>
+                        <SelectTrigger id="catalogue-select">
+                          <SelectValue placeholder="Select a catalogue" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {catalogues.map((catalogue) => (
+                            <SelectItem key={catalogue.id} value={catalogue.id}>
+                              {catalogue.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
-          <ImportHistory catalogueId={selectedCatalogueId} limit={20} />
+              <ImportHistory catalogueId={selectedCatalogueId} limit={20} />
+            </>
+          ) : (
+            <AuthGateCard
+              title={isAuthenticated ? 'Editor access required' : 'Login required'}
+              description={importBlockedMessage}
+              requiredRole={UserRole.EDITOR}
+              action={
+                isAuthenticated
+                  ? { label: 'Back to Dashboard', href: '/dashboard' }
+                  : { label: 'Log in', href: '/login' }
+              }
+              secondaryAction={
+                isAuthenticated
+                  ? { label: 'View Catalogues', href: '/catalogues' }
+                  : { label: 'Back to Home', href: '/' }
+              }
+            />
+          )}
         </TabsContent>
 
         <TabsContent value="info" className="space-y-4">

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { applyRateLimit, apiRateLimiter } from '@/lib/rate-limiter';
+import { requireViewer } from '@/lib/auth/middleware';
 
 // Force dynamic rendering for this API route
 export const dynamic = 'force-dynamic';
@@ -8,6 +9,11 @@ export const dynamic = 'force-dynamic';
 // Global search API endpoint for searching events across all catalogues
 export async function GET(request: NextRequest) {
   try {
+    const authResult = await requireViewer(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     // Apply rate limiting (60 requests per minute for search operations)
     const rateLimitResult = applyRateLimit(request, apiRateLimiter, 60);
 

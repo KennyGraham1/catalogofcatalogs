@@ -7,8 +7,13 @@ import { v4 as uuidv4 } from 'uuid';
  * GET /api/mapping-templates
  * Retrieve all mapping templates
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const authResult = await requireEditor(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     if (!dbQueries) {
       return NextResponse.json(
         { error: 'Database not initialized' },

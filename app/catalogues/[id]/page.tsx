@@ -27,6 +27,8 @@ import { EventTable } from '@/components/events/EventTable';
 import { toast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
+import { useAuth, usePermission } from '@/lib/auth/hooks';
+import { Permission } from '@/lib/auth/types';
 
 interface Event {
   id: string | number;
@@ -57,6 +59,11 @@ export default function CatalogueDetailPage() {
   const params = useParams();
   const router = useRouter();
   const catalogueId = params.id as string;
+  const { user } = useAuth();
+  const canExportCatalogues = usePermission(Permission.CATALOGUE_EXPORT);
+  const exportBlockedMessage = user
+    ? 'Viewer or higher access is required to export catalogues.'
+    : 'Log in to export catalogues.';
 
   // Use cached fetch for catalogues list
   const { data: catalogues, loading: cataloguesLoading, error: cataloguesError } = useCachedFetch<Catalogue[]>(
@@ -105,6 +112,15 @@ export default function CatalogueDetailPage() {
 
   const handleExport = async (format: 'csv' | 'json' | 'geojson' | 'kml' | 'quakeml') => {
     try {
+      if (!canExportCatalogues) {
+        toast({
+          title: user ? 'Insufficient permissions' : 'Login required',
+          description: exportBlockedMessage,
+          variant: 'destructive',
+        });
+        return;
+      }
+
       const response = await fetch(`/api/catalogues/${catalogueId}/export?format=${format}`);
       if (!response.ok) throw new Error('Export failed');
 
@@ -218,39 +234,47 @@ export default function CatalogueDetailPage() {
         </div>
 
         <div className="flex gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline">
-                <Download className="mr-2 h-4 w-4" />
-                Export
-                <ChevronDown className="ml-2 h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>Export Format</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => handleExport('csv')}>
-                <Download className="mr-2 h-4 w-4" />
-                CSV (Spreadsheet)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport('json')}>
-                <Download className="mr-2 h-4 w-4" />
-                JSON (Structured Data)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport('geojson')}>
-                <Download className="mr-2 h-4 w-4" />
-                GeoJSON (Geographic)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport('kml')}>
-                <Download className="mr-2 h-4 w-4" />
-                KML (Google Earth)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport('quakeml')}>
-                <Download className="mr-2 h-4 w-4" />
-                QuakeML (Seismology)
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {canExportCatalogues ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline">
+                  <Download className="mr-2 h-4 w-4" />
+                  Export
+                  <ChevronDown className="ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel>Export Format</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => handleExport('csv')}>
+                  <Download className="mr-2 h-4 w-4" />
+                  CSV (Spreadsheet)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('json')}>
+                  <Download className="mr-2 h-4 w-4" />
+                  JSON (Structured Data)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('geojson')}>
+                  <Download className="mr-2 h-4 w-4" />
+                  GeoJSON (Geographic)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('kml')}>
+                  <Download className="mr-2 h-4 w-4" />
+                  KML (Google Earth)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('quakeml')}>
+                  <Download className="mr-2 h-4 w-4" />
+                  QuakeML (Seismology)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <Button variant="outline" disabled title={exportBlockedMessage}>
+              <Download className="mr-2 h-4 w-4" />
+              Export
+              <ChevronDown className="ml-2 h-4 w-4" />
+            </Button>
+          )}
           <Button onClick={() => router.push(`/catalogues/${catalogueId}/map`)}>
             <MapIcon className="mr-2 h-4 w-4" />
             View Map
