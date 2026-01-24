@@ -156,6 +156,18 @@ export interface UserNotification {
 }
 
 /**
+ * Password reset token document
+ */
+export interface PasswordResetToken {
+  id: string;
+  user_id: string;
+  token_hash: string;
+  created_at: string;
+  expires_at: Date;
+  used_at?: Date | null;
+}
+
+/**
  * User role definition document
  */
 export interface UserRoleDefinition {

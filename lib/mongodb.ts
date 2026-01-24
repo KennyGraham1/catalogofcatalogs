@@ -270,6 +270,7 @@ export const COLLECTIONS = {
   SESSIONS: 'sessions',
   ROLE_REQUESTS: 'role_requests',
   NOTIFICATIONS: 'notifications',
+  PASSWORD_RESET_TOKENS: 'password_reset_tokens',
   API_KEYS: 'api_keys',
   AUDIT_LOGS: 'audit_logs',
 } as const;

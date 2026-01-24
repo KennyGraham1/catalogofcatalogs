@@ -87,6 +87,11 @@ export default function LoginPage() {
                 required
                 disabled={loading}
               />
+              <div className="text-right">
+                <Link href="/forgot-password" className="text-sm text-blue-600 hover:text-blue-500">
+                  Forgot Password?
+                </Link>
+              </div>
             </div>
           </CardContent>
           
@@ -111,4 +116,3 @@ export default function LoginPage() {
     </div>
   );
 }
-

@@ -23,6 +23,7 @@ const COLLECTIONS = {
   SESSIONS: 'sessions',
   ROLE_REQUESTS: 'role_requests',
   NOTIFICATIONS: 'notifications',
+  PASSWORD_RESET_TOKENS: 'password_reset_tokens',
   API_KEYS: 'api_keys',
   AUDIT_LOGS: 'audit_logs',
 };
@@ -144,6 +145,18 @@ async function initializeDatabase() {
     console.log(`✓ Created index: ${COLLECTIONS.SESSIONS}.idx_user_id`);
     console.log(`✓ Created index: ${COLLECTIONS.SESSIONS}.idx_token`);
     console.log(`✓ Created index: ${COLLECTIONS.SESSIONS}.idx_expires_at (TTL)`);
+    indexCount += 4;
+
+    // Password reset tokens collection indexes
+    const resetTokensCollection = db.collection(COLLECTIONS.PASSWORD_RESET_TOKENS);
+    await resetTokensCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
+    await resetTokensCollection.createIndex({ user_id: 1 }, { name: 'idx_user_id' });
+    await resetTokensCollection.createIndex({ token_hash: 1 }, { name: 'idx_token_hash', unique: true });
+    await resetTokensCollection.createIndex({ expires_at: 1 }, { name: 'idx_expires_at', expireAfterSeconds: 0 });
+    console.log(`✓ Created index: ${COLLECTIONS.PASSWORD_RESET_TOKENS}.idx_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.PASSWORD_RESET_TOKENS}.idx_user_id`);
+    console.log(`✓ Created index: ${COLLECTIONS.PASSWORD_RESET_TOKENS}.idx_token_hash`);
+    console.log(`✓ Created index: ${COLLECTIONS.PASSWORD_RESET_TOKENS}.idx_expires_at (TTL)`);
     indexCount += 4;
 
     // Role requests collection indexes
