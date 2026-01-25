@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { Logger, formatErrorResponse } from '@/lib/errors';
 import { eventCache, generateCacheKey } from '@/lib/cache';
-import { requireViewer } from '@/lib/auth/middleware';
 
 // Force dynamic rendering for this API route
 export const dynamic = 'force-dynamic';
@@ -14,11 +13,6 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const authResult = await requireViewer(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
-    }
-
     if (!dbQueries) {
       return NextResponse.json(
         { error: 'Database not available' },
