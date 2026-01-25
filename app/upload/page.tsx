@@ -16,6 +16,7 @@ import { ValidationResults } from '@/components/upload/ValidationResults';
 import { DataQualityReport } from '@/components/upload/DataQualityReport';
 import { DataCompletenessMetrics } from '@/components/upload/DataCompletenessMetrics';
 import { CatalogueMetadataForm, CatalogueMetadata } from '@/components/upload/CatalogueMetadataForm';
+import { ProcessingProgressIndicator, ProcessingProgressInfo } from '@/components/upload/ProcessingProgressIndicator';
 import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import { toast } from '@/hooks/use-toast';
 import { performQualityCheck } from '@/lib/data-quality-checker';
@@ -55,6 +56,10 @@ export default function UploadPage() {
     totalBytes: 0,
     filesCompleted: 0,
     totalFiles: 0
+  });
+  const [processingProgress, setProcessingProgress] = useState<ProcessingProgressInfo>({
+    stage: 'idle',
+    progress: 0,
   });
 
   if (!canUpload) {
@@ -105,6 +110,10 @@ export default function UploadPage() {
       totalBytes: 0,
       filesCompleted: 0,
       totalFiles: 0
+    });
+    setProcessingProgress({
+      stage: 'idle',
+      progress: 0,
     });
     setActiveTab('upload');
   };
@@ -433,9 +442,33 @@ export default function UploadPage() {
 
     setUploadStatus('processing');
 
+    // Initialize processing progress
+    setProcessingProgress({
+      stage: 'mapping',
+      progress: 0,
+      message: 'Applying field mappings...',
+      eventCount: parsedEvents.length,
+      eventsProcessed: 0,
+    });
+
     try {
-      // Apply UI field mappings before saving
+      // Step 1: Apply UI field mappings before saving
+      setProcessingProgress(prev => ({
+        ...prev,
+        stage: 'mapping',
+        progress: 10,
+        message: 'Applying field mappings to events...',
+      }));
+
       const finalEvents = applyUIMappings(parsedEvents);
+
+      setProcessingProgress(prev => ({
+        ...prev,
+        progress: 25,
+        message: 'Building validation reports...',
+        eventsProcessed: finalEvents.length,
+      }));
+
       const validationSummary = buildValidationSummary();
       const validationReportStorage = buildValidationReportStorage();
       const validationTimestamp = validationSummary?.generatedAt || validationReportStorage?.generatedAt;
@@ -446,7 +479,14 @@ export default function UploadPage() {
         ...(validationTimestamp ? { validation_timestamp: validationTimestamp } : {}),
       };
 
-      // Create catalogue in database
+      // Step 2: Create catalogue in database
+      setProcessingProgress(prev => ({
+        ...prev,
+        stage: 'saving',
+        progress: 35,
+        message: `Saving catalogue with ${finalEvents.length.toLocaleString()} events...`,
+      }));
+
       const response = await fetch('/api/catalogues', {
         method: 'POST',
         headers: {
@@ -458,6 +498,12 @@ export default function UploadPage() {
           metadata: metadataPayload
         }),
       });
+
+      setProcessingProgress(prev => ({
+        ...prev,
+        progress: 75,
+        message: 'Waiting for database confirmation...',
+      }));
 
       if (!response.ok) {
         if (response.status === 401) {
@@ -472,7 +518,14 @@ export default function UploadPage() {
 
       const createdCatalogue = await response.json();
 
-      // Generate processing report
+      // Step 3: Generate processing report
+      setProcessingProgress(prev => ({
+        ...prev,
+        stage: 'report',
+        progress: 90,
+        message: 'Generating processing report...',
+      }));
+
       const report = {
         catalogueId: createdCatalogue.id,
         catalogueName,
@@ -489,6 +542,15 @@ export default function UploadPage() {
         metadata
       };
       setProcessingReport(report);
+
+      // Mark as complete
+      setProcessingProgress(prev => ({
+        ...prev,
+        stage: 'complete',
+        progress: 100,
+        message: 'Processing complete!',
+      }));
+
       setUploadStatus('complete');
 
       // Auto-navigate to Results tab after successful processing
@@ -501,6 +563,11 @@ export default function UploadPage() {
       });
     } catch (error) {
       console.error('Catalogue creation error:', error);
+      setProcessingProgress(prev => ({
+        ...prev,
+        stage: 'error',
+        message: error instanceof Error ? error.message : 'An error occurred',
+      }));
       setUploadStatus('error');
       toast({
         title: "Failed to create catalogue",
@@ -729,6 +796,11 @@ export default function UploadPage() {
                   onChange={setMetadata}
                   readOnly={isReadOnly}
                 />
+
+                {/* Processing progress indicator */}
+                {uploadStatus === 'processing' && (
+                  <ProcessingProgressIndicator progressInfo={processingProgress} />
+                )}
               </TabsContent>
 
               <TabsContent value="results" className="pt-6">
