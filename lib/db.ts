@@ -37,6 +37,11 @@ export interface MergedCatalogue {
   data_quality?: string | null; // JSON: {completeness, accuracy, reliability}
   quality_notes?: string | null;
 
+  // Validation reporting
+  validation_summary?: string | null; // JSON summary from upload validation
+  validation_report?: string | null; // JSON report (may be truncated)
+  validation_timestamp?: string | null;
+
   // Contact and attribution
   contact_name?: string | null;
   contact_email?: string | null;
@@ -406,6 +411,7 @@ if (typeof window === 'undefined') {
         const metadataFields = [
           'description', 'data_source', 'provider', 'geographic_region',
           'time_period_start', 'time_period_end', 'data_quality', 'quality_notes',
+          'validation_summary', 'validation_report', 'validation_timestamp',
           'contact_name', 'contact_email', 'contact_organization',
           'license', 'usage_terms', 'citation', 'doi', 'version',
           'keywords', 'reference_links', 'notes',

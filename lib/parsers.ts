@@ -6,6 +6,8 @@
  */
 
 import { validateEvent } from './earthquake-utils';
+import { summarizeValidationFailures, validateEventWithDetails, type FieldMappingTrace, type ValidationEventContext, type ValidationFailureDetail, type ValidationFailureReport } from './validation';
+import { validateEventCrossFields } from './cross-field-validation';
 import { parseQuakeMLEvent } from './quakeml-parser';
 import type { QuakeMLEvent } from './types/quakeml';
 import { createReadStream } from 'fs';
@@ -37,7 +39,66 @@ export interface ParseResult {
   errors: Array<{ line: number; message: string }>;
   warnings: Array<{ line: number; message: string }>;
   detectedFields: string[];
+  validationReport?: ValidationFailureReport;
 }
+
+interface ValidationAccumulator {
+  totalEvents: number;
+  validEvents: number;
+  invalidEvents: number;
+  failures: ValidationFailureDetail[];
+}
+
+const createValidationAccumulator = (): ValidationAccumulator => ({
+  totalEvents: 0,
+  validEvents: 0,
+  invalidEvents: 0,
+  failures: [],
+});
+
+const buildFailureDetail = (
+  context: ValidationEventContext,
+  detail: Omit<ValidationFailureDetail, 'line' | 'eventIndex' | 'eventId'>
+): ValidationFailureDetail => ({
+  line: context.line,
+  eventIndex: context.eventIndex,
+  eventId: context.eventId ?? null,
+  ...detail,
+});
+
+const appendParserFailure = (
+  accumulator: ValidationAccumulator,
+  context: ValidationEventContext,
+  message: string
+) => {
+  accumulator.failures.push(
+    buildFailureDetail(context, {
+      message,
+      category: 'parser',
+      severity: 'error',
+    })
+  );
+};
+
+const appendCrossFieldFailures = (
+  accumulator: ValidationAccumulator,
+  event: ParsedEvent,
+  context: ValidationEventContext
+) => {
+  const crossField = validateEventCrossFields(event, context.eventIndex);
+  crossField.checks.forEach(check => {
+    accumulator.failures.push(
+      buildFailureDetail(context, {
+        field: check.field,
+        value: check.field ? (event as any)[check.field] : undefined,
+        expected: check.suggestion,
+        message: check.message,
+        category: 'cross_field',
+        severity: check.severity,
+      })
+    );
+  });
+};
 
 /**
  * Parse CSV/delimited text format earthquake catalogue
@@ -49,14 +110,21 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
   const errors: Array<{ line: number; message: string }> = [];
   const warnings: Array<{ line: number; message: string }> = [];
   const events: ParsedEvent[] = [];
+  const validationAccumulator = createValidationAccumulator();
 
   if (!content || content.trim().length === 0) {
+    appendParserFailure(validationAccumulator, { line: 0 }, 'File is empty');
     return {
       success: false,
       events: [],
       errors: [{ line: 0, message: 'File is empty' }],
       warnings: [],
-      detectedFields: []
+      detectedFields: [],
+      validationReport: summarizeValidationFailures(validationAccumulator.failures, {
+        totalEvents: 0,
+        validEvents: 0,
+        invalidEvents: 0,
+      })
     };
   }
 
@@ -117,24 +185,34 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
   }
 
   if (headers.length === 0) {
+    appendParserFailure(validationAccumulator, { line: 0 }, 'No headers found in file');
     return {
       success: false,
       events: [],
       errors: [{ line: 0, message: 'No headers found in file' }],
       warnings: [],
-      detectedFields: []
+      detectedFields: [],
+      validationReport: summarizeValidationFailures(validationAccumulator.failures, {
+        totalEvents: 0,
+        validEvents: 0,
+        invalidEvents: 0,
+      })
     };
   }
 
   // Parse data rows
   for (let i = 0; i < rows.length; i++) {
     const values = rows[i];
+    const lineNumber = i + 2; // +2 because line 1 is header, and i is 0-based
+    validationAccumulator.totalEvents += 1;
 
     if (values.length !== headers.length) {
       errors.push({
-        line: i + 2, // +2 because line 1 is header, and i is 0-based
+        line: lineNumber,
         message: `Column count mismatch: expected ${headers.length}, got ${values.length}`
       });
+      validationAccumulator.invalidEvents += 1;
+      appendParserFailure(validationAccumulator, { line: lineNumber, eventIndex: i }, `Column count mismatch: expected ${headers.length}, got ${values.length}`);
       continue;
     }
 
@@ -145,24 +223,44 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
       });
 
       // Map common field names with date format hint
-      const mappedEvent = mapCommonFields(event, actualDateFormat);
+      const mappedEvent = mapCommonFields(event, actualDateFormat, true);
+      const mappingReport = (mappedEvent as any)._mappingReport as FieldMappingTrace[] | undefined;
+      const context: ValidationEventContext = {
+        line: lineNumber,
+        eventIndex: i,
+        eventId: (mappedEvent.eventId || mappedEvent.id || null) as string | null,
+        rawEvent: event,
+        mappingReport,
+      };
 
       // Validate the event
-      const validation = validateEvent(mappedEvent);
+      const validation = validateEventWithDetails(mappedEvent, context);
       if (!validation.valid) {
+        const errorMessages = validation.failures
+          .filter(failure => failure.severity === 'error')
+          .map(failure => failure.message);
         errors.push({
-          line: i + 2,
-          message: validation.errors.join('; ')
+          line: lineNumber,
+          message: errorMessages.join('; ')
         });
+        validationAccumulator.invalidEvents += 1;
+        validationAccumulator.failures.push(...validation.failures);
         continue;
       }
 
+      validationAccumulator.validEvents += 1;
+      validationAccumulator.failures.push(...validation.failures);
+      appendCrossFieldFailures(validationAccumulator, mappedEvent, context);
+      delete (mappedEvent as any)._mappingReport;
       events.push(mappedEvent);
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Parse error';
       errors.push({
-        line: i + 2,
-        message: error instanceof Error ? error.message : 'Parse error'
+        line: lineNumber,
+        message
       });
+      validationAccumulator.invalidEvents += 1;
+      appendParserFailure(validationAccumulator, { line: lineNumber, eventIndex: i }, message);
     }
   }
 
@@ -171,7 +269,12 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
     events,
     errors,
     warnings,
-    detectedFields
+    detectedFields,
+    validationReport: summarizeValidationFailures(validationAccumulator.failures, {
+      totalEvents: validationAccumulator.totalEvents,
+      validEvents: validationAccumulator.validEvents,
+      invalidEvents: validationAccumulator.invalidEvents,
+    })
   };
 }
 
@@ -194,6 +297,7 @@ export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult
   const warnings: Array<{ line: number; message: string }> = [];
   const events: ParsedEvent[] = [];
   let detectedFields: string[] = [];
+  const validationAccumulator = createValidationAccumulator();
 
   try {
     const data = JSON.parse(content);
@@ -234,20 +338,34 @@ export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult
         eventArray = data[arrayProps[0]];
         console.log(`[Parser] Auto-detected array property: ${arrayProps[0]}`);
       } else if (arrayProps.length > 1) {
+        const message = `Multiple array properties found: ${arrayProps.join(', ')}. Please use one of: events, data, features, earthquakes, results`;
+        appendParserFailure(validationAccumulator, { line: 0 }, message);
         return {
           success: false,
           events: [],
-          errors: [{ line: 0, message: `Multiple array properties found: ${arrayProps.join(', ')}. Please use one of: events, data, features, earthquakes, results` }],
+          errors: [{ line: 0, message }],
           warnings: [],
-          detectedFields: []
+          detectedFields: [],
+          validationReport: summarizeValidationFailures(validationAccumulator.failures, {
+            totalEvents: 0,
+            validEvents: 0,
+            invalidEvents: 0,
+          })
         };
       } else {
+        const message = 'Unrecognized JSON structure. Expected an array or object with events/data/features property';
+        appendParserFailure(validationAccumulator, { line: 0 }, message);
         return {
           success: false,
           events: [],
-          errors: [{ line: 0, message: 'Unrecognized JSON structure. Expected an array or object with events/data/features property' }],
+          errors: [{ line: 0, message }],
           warnings: [],
-          detectedFields: []
+          detectedFields: [],
+          validationReport: summarizeValidationFailures(validationAccumulator.failures, {
+            totalEvents: 0,
+            validEvents: 0,
+            invalidEvents: 0,
+          })
         };
       }
     }
@@ -260,33 +378,61 @@ export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult
     // Parse each event
     eventArray.forEach((item, index) => {
       try {
-        const mappedEvent = mapCommonFields(item, dateFormat);
-        const validation = validateEvent(mappedEvent);
+        const mappedEvent = mapCommonFields(item, dateFormat, true);
+        const mappingReport = (mappedEvent as any)._mappingReport as FieldMappingTrace[] | undefined;
+        const context: ValidationEventContext = {
+          line: index + 1,
+          eventIndex: index,
+          eventId: (mappedEvent.eventId || mappedEvent.id || null) as string | null,
+          rawEvent: item,
+          mappingReport,
+        };
+        validationAccumulator.totalEvents += 1;
+        const validation = validateEventWithDetails(mappedEvent, context);
 
         if (!validation.valid) {
+          const errorMessages = validation.failures
+            .filter(failure => failure.severity === 'error')
+            .map(failure => failure.message);
           errors.push({
             line: index + 1,
-            message: validation.errors.join('; ')
+            message: errorMessages.join('; ')
           });
+          validationAccumulator.invalidEvents += 1;
+          validationAccumulator.failures.push(...validation.failures);
           return;
         }
 
+        validationAccumulator.validEvents += 1;
+        validationAccumulator.failures.push(...validation.failures);
+        appendCrossFieldFailures(validationAccumulator, mappedEvent, context);
+        delete (mappedEvent as any)._mappingReport;
         events.push(mappedEvent);
       } catch (error) {
+        const message = error instanceof Error ? error.message : 'Parse error';
         errors.push({
           line: index + 1,
-          message: error instanceof Error ? error.message : 'Parse error'
+          message
         });
+        validationAccumulator.invalidEvents += 1;
+        appendParserFailure(validationAccumulator, { line: index + 1, eventIndex: index }, message);
       }
     });
 
   } catch (error) {
+    const message = 'Invalid JSON format';
+    appendParserFailure(validationAccumulator, { line: 0 }, message);
     return {
       success: false,
       events: [],
-      errors: [{ line: 0, message: 'Invalid JSON format' }],
+      errors: [{ line: 0, message }],
       warnings: [],
-      detectedFields: []
+      detectedFields: [],
+      validationReport: summarizeValidationFailures(validationAccumulator.failures, {
+        totalEvents: 0,
+        validEvents: 0,
+        invalidEvents: 0,
+      })
     };
   }
 
@@ -295,7 +441,12 @@ export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult
     events,
     errors,
     warnings,
-    detectedFields
+    detectedFields,
+    validationReport: summarizeValidationFailures(validationAccumulator.failures, {
+      totalEvents: validationAccumulator.totalEvents,
+      validEvents: validationAccumulator.validEvents,
+      invalidEvents: validationAccumulator.invalidEvents,
+    })
   };
 }
 
@@ -307,6 +458,7 @@ export function parseQuakeML(content: string): ParseResult {
   const warnings: Array<{ line: number; message: string }> = [];
   const events: ParsedEvent[] = [];
   const detectedFields = new Set<string>(['time', 'latitude', 'longitude', 'depth', 'magnitude']);
+  const validationAccumulator = createValidationAccumulator();
 
   try {
     // Extract all event elements
@@ -314,27 +466,36 @@ export function parseQuakeML(content: string): ParseResult {
     const eventMatches = content.match(eventRegex);
 
     if (!eventMatches || eventMatches.length === 0) {
+      appendParserFailure(validationAccumulator, { line: 0 }, 'No events found in QuakeML file');
       return {
         success: false,
         events: [],
         errors: [{ line: 0, message: 'No events found in QuakeML file' }],
         warnings: [],
-        detectedFields: []
+        detectedFields: [],
+        validationReport: summarizeValidationFailures(validationAccumulator.failures, {
+          totalEvents: 0,
+          validEvents: 0,
+          invalidEvents: 0,
+        })
       };
     }
 
     let index = 0;
     for (const eventXML of eventMatches) {
       index++;
+      validationAccumulator.totalEvents += 1;
       try {
         // Parse full QuakeML event structure
         const quakemlEvent = parseQuakeMLEvent(eventXML);
 
         if (!quakemlEvent) {
+          validationAccumulator.invalidEvents += 1;
           errors.push({
             line: index,
             message: 'Failed to parse QuakeML event'
           });
+          appendParserFailure(validationAccumulator, { line: index, eventIndex: index - 1 }, 'Failed to parse QuakeML event');
           continue;
         }
 
@@ -354,10 +515,12 @@ export function parseQuakeML(content: string): ParseResult {
         }
 
         if (!origin || !magnitude) {
+          validationAccumulator.invalidEvents += 1;
           errors.push({
             line: index,
             message: 'Event missing required origin or magnitude'
           });
+          appendParserFailure(validationAccumulator, { line: index, eventIndex: index - 1 }, 'Event missing required origin or magnitude');
           continue;
         }
 
@@ -388,12 +551,23 @@ export function parseQuakeML(content: string): ParseResult {
         }
 
         // Validate basic fields
-        const validation = validateEvent(event);
+        const context: ValidationEventContext = {
+          line: index,
+          eventIndex: index - 1,
+          eventId: (event.eventId || event.id || null) as string | null,
+          rawEvent: event,
+        };
+        const validation = validateEventWithDetails(event, context);
         if (!validation.valid) {
+          const errorMessages = validation.failures
+            .filter(failure => failure.severity === 'error')
+            .map(failure => failure.message);
           errors.push({
             line: index,
-            message: validation.errors.join('; ')
+            message: errorMessages.join('; ')
           });
+          validationAccumulator.invalidEvents += 1;
+          validationAccumulator.failures.push(...validation.failures);
           continue;
         }
 
@@ -412,21 +586,34 @@ export function parseQuakeML(content: string): ParseResult {
           });
         }
 
+        validationAccumulator.validEvents += 1;
+        validationAccumulator.failures.push(...validation.failures);
+        appendCrossFieldFailures(validationAccumulator, event, context);
         events.push(event);
       } catch (error) {
+        const message = error instanceof Error ? error.message : 'Parse error';
         errors.push({
           line: index,
-          message: error instanceof Error ? error.message : 'Parse error'
+          message
         });
+        validationAccumulator.invalidEvents += 1;
+        appendParserFailure(validationAccumulator, { line: index, eventIndex: index - 1 }, message);
       }
     }
   } catch (error) {
+    const message = 'Invalid QuakeML format: ' + (error instanceof Error ? error.message : 'Unknown error');
+    appendParserFailure(validationAccumulator, { line: 0 }, message);
     return {
       success: false,
       events: [],
-      errors: [{ line: 0, message: 'Invalid QuakeML format: ' + (error instanceof Error ? error.message : 'Unknown error') }],
+      errors: [{ line: 0, message }],
       warnings: [],
-      detectedFields: []
+      detectedFields: [],
+      validationReport: summarizeValidationFailures(validationAccumulator.failures, {
+        totalEvents: 0,
+        validEvents: 0,
+        invalidEvents: 0,
+      })
     };
   }
 
@@ -435,7 +622,12 @@ export function parseQuakeML(content: string): ParseResult {
     events,
     errors,
     warnings,
-    detectedFields: Array.from(detectedFields)
+    detectedFields: Array.from(detectedFields),
+    validationReport: summarizeValidationFailures(validationAccumulator.failures, {
+      totalEvents: validationAccumulator.totalEvents,
+      validEvents: validationAccumulator.validEvents,
+      invalidEvents: validationAccumulator.invalidEvents,
+    })
   };
 }
 
@@ -599,10 +791,11 @@ function mapCommonFields(event: any, dateFormat?: DateFormat, includeMappingRepo
       // Parse value (with NaN handling for numeric fields)
       if (NUMERIC_FIELDS.has(targetField)) {
         const numValue = safeParseFloat(value);
+        const hasValue = value !== undefined && value !== null && String(value).trim() !== '';
         // Always set numeric fields (null if invalid) to ensure proper validation
         mapped[targetField] = numValue;
         setTargetFields.add(targetField);
-        if (includeMappingReport && numValue !== null) {
+        if (includeMappingReport && hasValue) {
           mappingReport.push({ targetField, sourceField: sourceKey, matchType: isExact ? 'exact' : 'alias' });
         }
       } else if (value !== undefined && value !== null && value !== '') {

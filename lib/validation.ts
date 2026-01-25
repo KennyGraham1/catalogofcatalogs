@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { validateDepth, validateMagnitude, validateTimestamp } from './earthquake-utils';
 
 /**
  * Validation schemas for earthquake catalogue data
@@ -275,6 +276,78 @@ export const validationResultSchema = z.object({
 
 export type ValidationResult = z.infer<typeof validationResultSchema>;
 
+export type ValidationFailureSeverity = 'error' | 'warning' | 'info';
+export type ValidationFailureCategory =
+  | 'missing_required'
+  | 'out_of_range'
+  | 'invalid_format'
+  | 'invalid_type'
+  | 'cross_field'
+  | 'parser'
+  | 'other';
+
+export interface FieldMappingTrace {
+  targetField: string;
+  sourceField: string;
+  matchType?: 'exact' | 'alias' | 'synthesized';
+}
+
+export interface ValidationFailureDetail {
+  line?: number;
+  eventIndex?: number;
+  eventId?: string | null;
+  field?: string;
+  value?: unknown;
+  expected?: string;
+  message: string;
+  category: ValidationFailureCategory;
+  severity: ValidationFailureSeverity;
+}
+
+export interface ValidationFailureSummary {
+  totalEvents: number;
+  validEvents: number;
+  invalidEvents: number;
+  failureCount: number;
+  errorCount: number;
+  warningCount: number;
+  infoCount: number;
+  byCategory: Record<ValidationFailureCategory, number>;
+  byField: Record<string, number>;
+}
+
+export interface ValidationFailureReport {
+  generatedAt: string;
+  summary: ValidationFailureSummary;
+  failures: ValidationFailureDetail[];
+}
+
+export interface ValidationEventContext {
+  line?: number;
+  eventIndex?: number;
+  eventId?: string | null;
+  rawEvent?: Record<string, any>;
+  mappingReport?: FieldMappingTrace[];
+}
+
+const VALIDATION_CATEGORIES: ValidationFailureCategory[] = [
+  'missing_required',
+  'out_of_range',
+  'invalid_format',
+  'invalid_type',
+  'cross_field',
+  'parser',
+  'other',
+];
+
+const FIELD_EXPECTATIONS: Record<string, string> = {
+  time: 'ISO 8601 timestamp or supported date format (e.g. YYYY-MM-DDTHH:mm:ssZ)',
+  latitude: 'Number between -90 and 90',
+  longitude: 'Number between -180 and 180',
+  magnitude: 'Number between -3 and 10',
+  depth: 'Number between 0 and 1000 (km)',
+};
+
 /**
  * Validate earthquake event data
  */
@@ -373,6 +446,261 @@ export function formatZodErrors(error: z.ZodError): string[] {
     const path = err.path.join('.');
     return `${path}: ${err.message}`;
   });
+}
+
+const isValuePresent = (value: unknown): boolean => {
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'string') {
+    return value.trim().length > 0;
+  }
+  return true;
+};
+
+const isNumericValue = (value: unknown): boolean => {
+  if (!isValuePresent(value)) return false;
+  return !isNaN(Number(value));
+};
+
+const getRawValueForField = (context: ValidationEventContext, field: string): unknown => {
+  if (!context.rawEvent) return undefined;
+  const mapping = context.mappingReport?.find(entry => entry.targetField === field);
+  if (mapping && Object.prototype.hasOwnProperty.call(context.rawEvent, mapping.sourceField)) {
+    return context.rawEvent[mapping.sourceField];
+  }
+  if (Object.prototype.hasOwnProperty.call(context.rawEvent, field)) {
+    return context.rawEvent[field];
+  }
+  return undefined;
+};
+
+const buildFailure = (
+  context: ValidationEventContext,
+  detail: Omit<ValidationFailureDetail, 'line' | 'eventIndex' | 'eventId'>
+): ValidationFailureDetail => ({
+  line: context.line,
+  eventIndex: context.eventIndex,
+  eventId: context.eventId ?? null,
+  ...detail,
+});
+
+export function validateEventWithDetails(
+  event: Partial<EarthquakeEvent>,
+  context: ValidationEventContext = {}
+): { valid: boolean; failures: ValidationFailureDetail[] } {
+  const failures: ValidationFailureDetail[] = [];
+
+  const addFailure = (detail: Omit<ValidationFailureDetail, 'line' | 'eventIndex' | 'eventId'>) => {
+    failures.push(buildFailure(context, detail));
+  };
+
+  const latRaw = getRawValueForField(context, 'latitude');
+  const lonRaw = getRawValueForField(context, 'longitude');
+  const magRaw = getRawValueForField(context, 'magnitude');
+  const depthRaw = getRawValueForField(context, 'depth');
+  const timeRaw = getRawValueForField(context, 'time');
+
+  const latMissing = event.latitude === undefined || event.latitude === null;
+  const lonMissing = event.longitude === undefined || event.longitude === null;
+
+  if (latMissing) {
+    const hasLatRaw = isValuePresent(latRaw);
+    const isLatNumeric = isNumericValue(latRaw);
+    addFailure({
+      field: 'latitude',
+      value: latRaw,
+      expected: FIELD_EXPECTATIONS.latitude,
+      message: hasLatRaw && !isLatNumeric ? 'Latitude must be a number' : 'Latitude is required',
+      category: hasLatRaw && !isLatNumeric ? 'invalid_type' : 'missing_required',
+      severity: 'error',
+    });
+  } else {
+    if (typeof event.latitude !== 'number' || Number.isNaN(event.latitude)) {
+      addFailure({
+        field: 'latitude',
+        value: latRaw ?? event.latitude,
+        expected: FIELD_EXPECTATIONS.latitude,
+        message: 'Latitude must be a number',
+        category: 'invalid_type',
+        severity: 'error',
+      });
+    } else if (event.latitude < -90 || event.latitude > 90) {
+      addFailure({
+        field: 'latitude',
+        value: event.latitude,
+        expected: FIELD_EXPECTATIONS.latitude,
+        message: 'Latitude must be between -90 and 90',
+        category: 'out_of_range',
+        severity: 'error',
+      });
+    }
+  }
+
+  if (lonMissing) {
+    const hasLonRaw = isValuePresent(lonRaw);
+    const isLonNumeric = isNumericValue(lonRaw);
+    addFailure({
+      field: 'longitude',
+      value: lonRaw,
+      expected: FIELD_EXPECTATIONS.longitude,
+      message: hasLonRaw && !isLonNumeric ? 'Longitude must be a number' : 'Longitude is required',
+      category: hasLonRaw && !isLonNumeric ? 'invalid_type' : 'missing_required',
+      severity: 'error',
+    });
+  } else {
+    if (typeof event.longitude !== 'number' || Number.isNaN(event.longitude)) {
+      addFailure({
+        field: 'longitude',
+        value: lonRaw ?? event.longitude,
+        expected: FIELD_EXPECTATIONS.longitude,
+        message: 'Longitude must be a number',
+        category: 'invalid_type',
+        severity: 'error',
+      });
+    } else if (event.longitude < -180 || event.longitude > 180) {
+      addFailure({
+        field: 'longitude',
+        value: event.longitude,
+        expected: FIELD_EXPECTATIONS.longitude,
+        message: 'Longitude must be between -180 and 180',
+        category: 'out_of_range',
+        severity: 'error',
+      });
+    }
+  }
+
+  if (event.magnitude === undefined || event.magnitude === null) {
+    const hasMagRaw = isValuePresent(magRaw);
+    const isMagNumeric = isNumericValue(magRaw);
+    addFailure({
+      field: 'magnitude',
+      value: magRaw,
+      expected: FIELD_EXPECTATIONS.magnitude,
+      message: hasMagRaw && !isMagNumeric ? 'Magnitude must be a number' : 'Magnitude is required',
+      category: hasMagRaw && !isMagNumeric ? 'invalid_type' : 'missing_required',
+      severity: 'error',
+    });
+  } else {
+    if (typeof event.magnitude !== 'number' || Number.isNaN(event.magnitude)) {
+      addFailure({
+        field: 'magnitude',
+        value: magRaw ?? event.magnitude,
+        expected: FIELD_EXPECTATIONS.magnitude,
+        message: 'Magnitude must be a number',
+        category: 'invalid_type',
+        severity: 'error',
+      });
+    } else if (!validateMagnitude(event.magnitude)) {
+      addFailure({
+        field: 'magnitude',
+        value: event.magnitude,
+        expected: FIELD_EXPECTATIONS.magnitude,
+        message: 'Magnitude must be between -3 and 10',
+        category: 'out_of_range',
+        severity: 'error',
+      });
+    }
+  }
+
+  if (event.depth !== undefined && event.depth !== null) {
+    if (typeof event.depth !== 'number' || Number.isNaN(event.depth)) {
+      addFailure({
+        field: 'depth',
+        value: depthRaw ?? event.depth,
+        expected: FIELD_EXPECTATIONS.depth,
+        message: 'Depth must be a number',
+        category: 'invalid_type',
+        severity: 'warning',
+      });
+    } else if (!validateDepth(event.depth)) {
+      addFailure({
+        field: 'depth',
+        value: event.depth,
+        expected: FIELD_EXPECTATIONS.depth,
+        message: 'Depth must be between 0 and 1000 km',
+        category: 'out_of_range',
+        severity: 'error',
+      });
+    }
+  } else if (isValuePresent(depthRaw)) {
+    addFailure({
+      field: 'depth',
+      value: depthRaw,
+      expected: FIELD_EXPECTATIONS.depth,
+      message: 'Depth must be a number',
+      category: 'invalid_type',
+      severity: 'warning',
+    });
+  }
+
+  if (!event.time) {
+    addFailure({
+      field: 'time',
+      value: timeRaw,
+      expected: FIELD_EXPECTATIONS.time,
+      message: 'Timestamp is required',
+      category: 'missing_required',
+      severity: 'error',
+    });
+  } else if (!validateTimestamp(event.time)) {
+    addFailure({
+      field: 'time',
+      value: event.time,
+      expected: FIELD_EXPECTATIONS.time,
+      message: 'Invalid timestamp format',
+      category: 'invalid_format',
+      severity: 'error',
+    });
+  }
+
+  return {
+    valid: failures.filter(f => f.severity === 'error').length === 0,
+    failures,
+  };
+}
+
+export function summarizeValidationFailures(
+  failures: ValidationFailureDetail[],
+  totals: { totalEvents: number; validEvents: number; invalidEvents: number }
+): ValidationFailureReport {
+  const byCategory: Record<ValidationFailureCategory, number> = VALIDATION_CATEGORIES.reduce(
+    (acc, category) => {
+      acc[category] = 0;
+      return acc;
+    },
+    {} as Record<ValidationFailureCategory, number>
+  );
+
+  const byField: Record<string, number> = {};
+
+  let errorCount = 0;
+  let warningCount = 0;
+  let infoCount = 0;
+
+  failures.forEach(failure => {
+    byCategory[failure.category] = (byCategory[failure.category] || 0) + 1;
+    if (failure.field) {
+      byField[failure.field] = (byField[failure.field] || 0) + 1;
+    }
+    if (failure.severity === 'error') errorCount += 1;
+    if (failure.severity === 'warning') warningCount += 1;
+    if (failure.severity === 'info') infoCount += 1;
+  });
+
+  return {
+    generatedAt: new Date().toISOString(),
+    summary: {
+      totalEvents: totals.totalEvents,
+      validEvents: totals.validEvents,
+      invalidEvents: totals.invalidEvents,
+      failureCount: failures.length,
+      errorCount,
+      warningCount,
+      infoCount,
+      byCategory,
+      byField,
+    },
+    failures,
+  };
 }
 
 /**

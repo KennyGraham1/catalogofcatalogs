@@ -136,6 +136,87 @@ export default function UploadPage() {
     });
   };
 
+  const buildValidationReportStorage = () => {
+    if (!validationResults || validationResults.length === 0) {
+      return null;
+    }
+
+    const maxFailuresPerFile = 500;
+    const files = validationResults.map((result: any) => {
+      const report = result.validationReport;
+      const failures = report?.failures || [];
+
+      return {
+        fileName: result.fileName,
+        format: result.format,
+        summary: report?.summary || {
+          totalEvents: result.eventCount,
+          validEvents: result.eventCount,
+          invalidEvents: 0,
+          failureCount: (result.errors?.length || 0) + (result.warnings?.length || 0),
+          errorCount: result.errors?.length || 0,
+          warningCount: result.warnings?.length || 0,
+          infoCount: 0,
+          byCategory: {},
+          byField: {},
+        },
+        failures: failures.slice(0, maxFailuresPerFile),
+        truncated: failures.length > maxFailuresPerFile,
+      };
+    });
+
+    return {
+      generatedAt: new Date().toISOString(),
+      files,
+    };
+  };
+
+  const buildValidationSummary = () => {
+    if (!validationResults || validationResults.length === 0) {
+      return null;
+    }
+
+    const summary = {
+      generatedAt: new Date().toISOString(),
+      totalEvents: 0,
+      validEvents: 0,
+      invalidEvents: 0,
+      errorCount: 0,
+      warningCount: 0,
+      infoCount: 0,
+      byCategory: {} as Record<string, number>,
+      files: [] as Array<any>,
+    };
+
+    validationResults.forEach((result: any) => {
+      const reportSummary = result.validationReport?.summary;
+      if (!reportSummary) {
+        return;
+      }
+
+      summary.totalEvents += reportSummary.totalEvents || 0;
+      summary.validEvents += reportSummary.validEvents || 0;
+      summary.invalidEvents += reportSummary.invalidEvents || 0;
+      summary.errorCount += reportSummary.errorCount || 0;
+      summary.warningCount += reportSummary.warningCount || 0;
+      summary.infoCount += reportSummary.infoCount || 0;
+
+      if (reportSummary.byCategory) {
+        Object.entries(reportSummary.byCategory).forEach(([category, count]) => {
+          summary.byCategory[category] = (summary.byCategory[category] || 0) + (count as number);
+        });
+      }
+
+      summary.files.push({
+        fileName: result.fileName,
+        format: result.format,
+        summary: reportSummary,
+      });
+    });
+
+    return summary;
+  };
+
   const handleUpload = async () => {
     if (isReadOnly) {
       toast({
@@ -254,7 +335,8 @@ export default function UploadPage() {
         warnings: result.warnings || [],
         format: result.format || 'UNKNOWN',
         eventCount: result.events?.length || 0,
-        fields: result.detectedFields || ['time', 'latitude', 'longitude', 'depth', 'magnitude']
+        fields: result.detectedFields || ['time', 'latitude', 'longitude', 'depth', 'magnitude'],
+        validationReport: result.validationReport
       }));
 
       // Combine all events from all files
@@ -354,6 +436,15 @@ export default function UploadPage() {
     try {
       // Apply UI field mappings before saving
       const finalEvents = applyUIMappings(parsedEvents);
+      const validationSummary = buildValidationSummary();
+      const validationReportStorage = buildValidationReportStorage();
+      const validationTimestamp = validationSummary?.generatedAt || validationReportStorage?.generatedAt;
+      const metadataPayload = {
+        ...metadata,
+        ...(validationSummary ? { validation_summary: JSON.stringify(validationSummary) } : {}),
+        ...(validationReportStorage ? { validation_report: JSON.stringify(validationReportStorage) } : {}),
+        ...(validationTimestamp ? { validation_timestamp: validationTimestamp } : {}),
+      };
 
       // Create catalogue in database
       const response = await fetch('/api/catalogues', {
@@ -364,7 +455,7 @@ export default function UploadPage() {
         body: JSON.stringify({
           name: catalogueName.trim(),
           events: finalEvents,
-          metadata: metadata
+          metadata: metadataPayload
         }),
       });
 
@@ -394,6 +485,7 @@ export default function UploadPage() {
         totalEvents: parsedEvents.length,
         qualityScore: qualityCheckResult?.overallScore || 0,
         validationResults,
+        validationSummary,
         metadata
       };
       setProcessingReport(report);
@@ -559,7 +651,7 @@ export default function UploadPage() {
 
                 {validationResults && (
                   <div className="mt-6 space-y-6">
-                    <ValidationResults results={validationResults} />
+                    <ValidationResults results={validationResults} catalogueName={catalogueName} />
 
                     {qualityCheckResult && (
                       <DataQualityReport result={qualityCheckResult} />
