@@ -222,9 +222,9 @@ export function EnhancedSchemaMapper({
     }
 
     const sourceFields = getSourceFields();
-    const normalizedFields = new Set(sourceFields.map(field => field.toLowerCase()));
+    const normalizedFields = new Set(sourceFields.map((field: string) => field.toLowerCase()));
     const hasSplitTimestamp = normalizedFields.has('year') && normalizedFields.has('month') && normalizedFields.has('day');
-    const adjustedMissing = hasSplitTimestamp ? missing.filter(field => field !== 'time') : missing;
+    const adjustedMissing = hasSplitTimestamp ? missing.filter((field: string) => field !== 'time') : missing;
 
     onSchemaReady(adjustedMissing.length === 0);
   };
