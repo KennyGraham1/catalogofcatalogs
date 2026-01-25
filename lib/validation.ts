@@ -457,6 +457,30 @@ export function assessDataQuality(events: any[]): DataQualityReport {
   const lats = events.filter(e => typeof e.latitude === 'number').map(e => e.latitude);
   const lons = events.filter(e => typeof e.longitude === 'number').map(e => e.longitude);
 
+  const getMinMax = (values: number[]): { min: number; max: number } | null => {
+    if (values.length === 0) return null;
+    let min = values[0];
+    let max = values[0];
+    for (let i = 1; i < values.length; i++) {
+      const value = values[i];
+      if (value < min) min = value;
+      if (value > max) max = value;
+    }
+    return { min, max };
+  };
+
+  const getMinMaxDate = (dates: Date[]): { min: Date; max: Date } | null => {
+    if (dates.length === 0) return null;
+    let minTime = dates[0].getTime();
+    let maxTime = dates[0].getTime();
+    for (let i = 1; i < dates.length; i++) {
+      const time = dates[i].getTime();
+      if (time < minTime) minTime = time;
+      if (time > maxTime) maxTime = time;
+    }
+    return { min: new Date(minTime), max: new Date(maxTime) };
+  };
+
   const averageMagnitude = magnitudes.length > 0
     ? magnitudes.reduce((a, b) => a + b, 0) / magnitudes.length
     : 0;
@@ -465,16 +489,19 @@ export function assessDataQuality(events: any[]): DataQualityReport {
     ? depths.reduce((a, b) => a + b, 0) / depths.length
     : 0;
 
-  const timeRange = times.length > 0 ? {
-    start: new Date(Math.min(...times.map(t => t.getTime()))).toISOString(),
-    end: new Date(Math.max(...times.map(t => t.getTime()))).toISOString(),
+  const timeBounds = getMinMaxDate(times);
+  const timeRange = timeBounds ? {
+    start: timeBounds.min.toISOString(),
+    end: timeBounds.max.toISOString(),
   } : null;
 
-  const spatialExtent = lats.length > 0 && lons.length > 0 ? {
-    minLat: Math.min(...lats),
-    maxLat: Math.max(...lats),
-    minLon: Math.min(...lons),
-    maxLon: Math.max(...lons),
+  const latBounds = getMinMax(lats);
+  const lonBounds = getMinMax(lons);
+  const spatialExtent = latBounds && lonBounds ? {
+    minLat: latBounds.min,
+    maxLat: latBounds.max,
+    minLon: lonBounds.min,
+    maxLon: lonBounds.max,
   } : null;
 
   // Completeness checks

@@ -11,6 +11,15 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import { Switch } from '@/components/ui/switch';
 import {
   ArrowRight,
@@ -22,7 +31,9 @@ import {
   Download,
   Trash2,
   Plus,
+  Check,
   ChevronDown,
+  ChevronsUpDown,
   ChevronRight,
   Info,
   Settings
@@ -118,6 +129,8 @@ export function EnhancedSchemaMapper({
   const [expandedCategories, setExpandedCategories] = useState<string[]>(['basic']);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [templateToDelete, setTemplateToDelete] = useState<string | null>(null);
+  const [mappingDropdownOpen, setMappingDropdownOpen] = useState<string | null>(null);
+  const [mappingSearch, setMappingSearch] = useState('');
   const [savedMappingConfig, setSavedMappingConfig] = useState<DefaultFieldMappingsConfig | null>(null);
   const [configLoaded, setConfigLoaded] = useState(false);
 
@@ -666,6 +679,7 @@ export function EnhancedSchemaMapper({
                   .map((sourceField: string) => {
                     const targetField = fieldMappings[sourceField];
                     const targetDef = targetField ? getFieldById(targetField) : null;
+                    const isUnmapped = !targetField;
                     
                     return (
                       <div key={sourceField} className="grid grid-cols-12 gap-3 items-start">
@@ -677,39 +691,88 @@ export function EnhancedSchemaMapper({
                           <ArrowRight className="h-4 w-4 text-muted-foreground" />
                         </div>
                         <div className="col-span-6">
-                          <Select
-                            value={fieldMappings[sourceField] || 'unmapped'}
-                            onValueChange={(value) => updateMapping(sourceField, value)}
+                          <Popover
+                            open={mappingDropdownOpen === sourceField}
+                            onOpenChange={(open) => {
+                              setMappingDropdownOpen(open ? sourceField : null);
+                              if (open) {
+                                setMappingSearch('');
+                              }
+                            }}
                           >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select target field" />
-                            </SelectTrigger>
-                            <SelectContent className="max-h-96">
-                              <SelectItem value="unmapped">
-                                <span className="text-muted-foreground">Do not map</span>
-                              </SelectItem>
-                              {FIELD_CATEGORIES.map(category => (
-                                <div key={category.id}>
-                                  <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground bg-muted/50">
-                                    {category.name}
-                                  </div>
-                                  {getFieldsByCategory(category.id).map(field => (
-                                    <SelectItem key={field.id} value={field.id}>
-                                      <div className="flex items-center gap-2">
-                                        <span>{field.name}</span>
-                                        {field.required && (
-                                          <Badge variant="destructive" className="text-xs px-1">Required</Badge>
-                                        )}
-                                        {field.unit && (
-                                          <span className="text-xs text-muted-foreground">({field.unit})</span>
-                                        )}
-                                      </div>
-                                    </SelectItem>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                role="combobox"
+                                aria-expanded={mappingDropdownOpen === sourceField}
+                                className="w-full justify-between"
+                              >
+                                <span className={isUnmapped ? 'truncate text-muted-foreground' : 'truncate'}>
+                                  {targetDef?.name || targetField || 'Do not map'}
+                                </span>
+                                <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                              <Command>
+                                <CommandInput
+                                  placeholder="Search fields..."
+                                  value={mappingSearch}
+                                  onValueChange={setMappingSearch}
+                                />
+                                <CommandList>
+                                  <CommandEmpty>No fields found.</CommandEmpty>
+                                  <CommandGroup heading="Unmapped">
+                                    <CommandItem
+                                      value="unmapped do not map ignore skip"
+                                      onSelect={() => {
+                                        updateMapping(sourceField, 'unmapped');
+                                        setMappingDropdownOpen(null);
+                                      }}
+                                      className="flex items-center gap-2"
+                                    >
+                                      <Check className={`h-4 w-4 ${isUnmapped ? 'opacity-100' : 'opacity-0'}`} />
+                                      <span className="text-muted-foreground">Do not map</span>
+                                    </CommandItem>
+                                  </CommandGroup>
+                                  {FIELD_CATEGORIES.map(category => (
+                                    <CommandGroup key={category.id} heading={category.name}>
+                                      {getFieldsByCategory(category.id).map(field => (
+                                        <CommandItem
+                                          key={field.id}
+                                          value={`${field.name} ${field.id}`}
+                                          keywords={[
+                                            field.name,
+                                            field.id,
+                                            field.description || '',
+                                            field.unit || ''
+                                          ]}
+                                          onSelect={() => {
+                                            updateMapping(sourceField, field.id);
+                                            setMappingDropdownOpen(null);
+                                          }}
+                                          className="flex items-center gap-2"
+                                        >
+                                          <Check
+                                            className={`h-4 w-4 ${field.id === targetField ? 'opacity-100' : 'opacity-0'}`}
+                                          />
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span>{field.name}</span>
+                                            {field.required && (
+                                              <Badge variant="destructive" className="text-xs px-1">Required</Badge>
+                                            )}
+                                            {field.unit && (
+                                              <span className="text-xs text-muted-foreground">({field.unit})</span>
+                                            )}
+                                          </div>
+                                        </CommandItem>
+                                      ))}
+                                    </CommandGroup>
                                   ))}
-                                </div>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
                           {targetDef && (
                             <p className="text-xs text-muted-foreground mt-1">
                               {targetDef.description}
