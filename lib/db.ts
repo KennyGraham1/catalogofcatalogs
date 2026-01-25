@@ -4,7 +4,7 @@
  * Provides database operations for the earthquake catalogue application.
  */
 
-import { getDb, getCollection, COLLECTIONS } from './mongodb';
+import { getDb, getCollection, COLLECTIONS, withTransaction, ClientSession } from './mongodb';
 import { Db, WithId, Document } from 'mongodb';
 import { invalidateCatalogueCache } from './cache';
 
@@ -200,7 +200,7 @@ export interface CursorPaginatedResult<T> {
 }
 
 // Transaction callback type
-export type TransactionCallback<T> = () => Promise<T>;
+export type TransactionCallback<T> = (session: ClientSession) => Promise<T>;
 
 // Database query interface with proper typing
 export interface DbQueries {
@@ -211,7 +211,8 @@ export interface DbQueries {
     mergeConfig: string,
     eventCount: number,
     status: string,
-    metadata?: Partial<MergedCatalogue>
+    metadata?: Partial<MergedCatalogue>,
+    session?: ClientSession
   ) => Promise<void>;
 
   insertEvent: (event: Partial<MergedEvent> & {
@@ -222,7 +223,7 @@ export interface DbQueries {
     longitude: number;
     magnitude: number;
     source_events: string;
-  }) => Promise<void>;
+  }, session?: ClientSession) => Promise<void>;
 
   // Performance Optimization: Bulk insert for importing large datasets
   bulkInsertEvents: (events: Array<Partial<MergedEvent> & {
@@ -233,7 +234,7 @@ export interface DbQueries {
     longitude: number;
     magnitude: number;
     source_events: string;
-  }>) => Promise<void>;
+  }>, session?: ClientSession) => Promise<void>;
 
   getCatalogues: (params?: PaginationParams) => Promise<MergedCatalogue[] | PaginatedResult<MergedCatalogue>>;
 
@@ -244,13 +245,13 @@ export interface DbQueries {
   // Performance Optimization: Cursor-based pagination for better performance on large datasets
   getEventsByCatalogueIdCursor: (catalogueId: string, params?: CursorPaginationParams) => Promise<CursorPaginatedResult<MergedEvent>>;
 
-  updateCatalogueStatus: (status: string, id: string) => Promise<void>;
+  updateCatalogueStatus: (status: string, id: string, session?: ClientSession) => Promise<void>;
 
   updateCatalogueName: (name: string, id: string) => Promise<void>;
 
-  updateCatalogueEventCount: (id: string, eventCount: number) => Promise<void>;
+  updateCatalogueEventCount: (id: string, eventCount: number, session?: ClientSession) => Promise<void>;
 
-  updateCatalogueGeoBounds: (id: string, minLat: number, maxLat: number, minLon: number, maxLon: number) => Promise<void>;
+  updateCatalogueGeoBounds: (id: string, minLat: number, maxLat: number, minLon: number, maxLon: number, session?: ClientSession) => Promise<void>;
 
   updateCatalogueMetadata: (id: string, metadata: Partial<MergedCatalogue>) => Promise<void>;
 
@@ -258,7 +259,7 @@ export interface DbQueries {
 
   deleteCatalogue: (id: string) => Promise<void>;
 
-  getFilteredEvents: (catalogueId: string, filters: EventFilters) => Promise<MergedEvent[]>;
+  getFilteredEvents: (catalogueId: string, filters: EventFilters) => Promise<FilteredEventsResult>;
 
   // Transaction support
   transaction: <T>(callback: TransactionCallback<T>) => Promise<T>;
@@ -354,6 +355,12 @@ export interface EventFilters {
   maxLongitude?: number;
 }
 
+export interface FilteredEventsResult {
+  events: MergedEvent[];
+  truncated: boolean;
+  limit: number;
+}
+
 // Helper function to convert MongoDB document to plain object (remove _id)
 function toPlainObject<T>(doc: WithId<Document> | null): T | undefined {
   if (!doc) return undefined;
@@ -381,7 +388,8 @@ if (typeof window === 'undefined') {
       mergeConfig: string,
       eventCount: number,
       status: string,
-      metadata?: Partial<MergedCatalogue>
+      metadata?: Partial<MergedCatalogue>,
+      session?: ClientSession
     ): Promise<void> => {
       // Validate inputs
       if (!id || !name || !sourceCatalogues || !mergeConfig) {
@@ -426,7 +434,8 @@ if (typeof window === 'undefined') {
         }
       }
 
-      await collection.insertOne(doc);
+      const options = session ? { session } : undefined;
+      await collection.insertOne(doc, options);
     },
 
     insertEvent: async (event: Partial<MergedEvent> & {
@@ -437,7 +446,7 @@ if (typeof window === 'undefined') {
       longitude: number;
       magnitude: number;
       source_events: string;
-    }): Promise<void> => {
+    }, session?: ClientSession): Promise<void> => {
       // Validate coordinates
       if (event.latitude < -90 || event.latitude > 90) {
         throw new Error(`Invalid latitude: ${event.latitude}. Must be between -90 and 90`);
@@ -469,7 +478,8 @@ if (typeof window === 'undefined') {
         created_at: new Date().toISOString(),
       };
 
-      await collection.insertOne(doc);
+      const options = session ? { session } : undefined;
+      await collection.insertOne(doc, options);
 
       // Performance Optimization: Invalidate caches after insert
       invalidateCatalogueCache(event.catalogue_id);
@@ -487,7 +497,7 @@ if (typeof window === 'undefined') {
       longitude: number;
       magnitude: number;
       source_events: string;
-    }>): Promise<void> => {
+    }>, session?: ClientSession): Promise<void> => {
       if (!events || events.length === 0) {
         return;
       }
@@ -520,7 +530,8 @@ if (typeof window === 'undefined') {
         created_at: now,
       })) as any[];
 
-      await collection.insertMany(docs);
+      const options = session ? { session } : undefined;
+      await collection.insertMany(docs, options);
 
       // Invalidate caches
       const catalogueIds = new Set(events.map(e => e.catalogue_id));
@@ -662,9 +673,10 @@ if (typeof window === 'undefined') {
       };
     },
 
-    updateCatalogueStatus: async (status: string, id: string): Promise<void> => {
+    updateCatalogueStatus: async (status: string, id: string, session?: ClientSession): Promise<void> => {
       const collection = await getCollection(COLLECTIONS.CATALOGUES);
-      await collection.updateOne({ id }, { $set: { status } });
+      const options = session ? { session } : undefined;
+      await collection.updateOne({ id }, { $set: { status } }, options);
     },
 
     updateCatalogueName: async (name: string, id: string): Promise<void> => {
@@ -675,7 +687,7 @@ if (typeof window === 'undefined') {
       await collection.updateOne({ id }, { $set: { name } });
     },
 
-    updateCatalogueEventCount: async (id: string, eventCount: number): Promise<void> => {
+    updateCatalogueEventCount: async (id: string, eventCount: number, session?: ClientSession): Promise<void> => {
       if (!id) {
         throw new Error('Catalogue ID is required');
       }
@@ -683,10 +695,11 @@ if (typeof window === 'undefined') {
         throw new Error('Event count cannot be negative');
       }
       const collection = await getCollection(COLLECTIONS.CATALOGUES);
-      await collection.updateOne({ id }, { $set: { event_count: eventCount } });
+      const options = session ? { session } : undefined;
+      await collection.updateOne({ id }, { $set: { event_count: eventCount } }, options);
     },
 
-    updateCatalogueGeoBounds: async (id: string, minLat: number, maxLat: number, minLon: number, maxLon: number): Promise<void> => {
+    updateCatalogueGeoBounds: async (id: string, minLat: number, maxLat: number, minLon: number, maxLon: number, session?: ClientSession): Promise<void> => {
       if (!id) {
         throw new Error('Catalogue ID is required');
       }
@@ -704,6 +717,7 @@ if (typeof window === 'undefined') {
       }
 
       const collection = await getCollection(COLLECTIONS.CATALOGUES);
+      const options = session ? { session } : undefined;
       await collection.updateOne({ id }, {
         $set: {
           min_latitude: minLat,
@@ -711,7 +725,7 @@ if (typeof window === 'undefined') {
           min_longitude: minLon,
           max_longitude: maxLon
         }
-      });
+      }, options);
     },
 
     updateCatalogueMetadata: async (id: string, metadata: Partial<MergedCatalogue>): Promise<void> => {
@@ -791,17 +805,20 @@ if (typeof window === 'undefined') {
       await collection.deleteOne({ id });
     },
 
-    getFilteredEvents: async (catalogueId: string, filters: EventFilters): Promise<MergedEvent[]> => {
+    getFilteredEvents: async (catalogueId: string, filters: EventFilters): Promise<FilteredEventsResult> => {
       const collection = await getCollection(COLLECTIONS.EVENTS);
 
-      const query: any = { catalogue_id: catalogueId };
+      // Safety limit to prevent memory exhaustion
+      const MAX_FILTERED_EVENTS = 50000;
 
-      if (filters.minMagnitude !== undefined) query.magnitude = { ...query.magnitude, $gte: filters.minMagnitude };
-      if (filters.maxMagnitude !== undefined) query.magnitude = { ...query.magnitude, $lte: filters.maxMagnitude };
-      if (filters.minDepth !== undefined) query.depth = { ...query.depth, $gte: filters.minDepth };
-      if (filters.maxDepth !== undefined) query.depth = { ...query.depth, $lte: filters.maxDepth };
-      if (filters.startTime) query.time = { ...query.time, $gte: filters.startTime };
-      if (filters.endTime) query.time = { ...query.time, $lte: filters.endTime };
+      const query: Record<string, unknown> = { catalogue_id: catalogueId };
+
+      if (filters.minMagnitude !== undefined) query.magnitude = { ...(query.magnitude as object), $gte: filters.minMagnitude };
+      if (filters.maxMagnitude !== undefined) query.magnitude = { ...(query.magnitude as object), $lte: filters.maxMagnitude };
+      if (filters.minDepth !== undefined) query.depth = { ...(query.depth as object), $gte: filters.minDepth };
+      if (filters.maxDepth !== undefined) query.depth = { ...(query.depth as object), $lte: filters.maxDepth };
+      if (filters.startTime) query.time = { ...(query.time as object), $gte: filters.startTime };
+      if (filters.endTime) query.time = { ...(query.time as object), $lte: filters.endTime };
       if (filters.eventType) query.event_type = filters.eventType;
       if (filters.magnitudeType) query.magnitude_type = filters.magnitudeType;
       if (filters.evaluationStatus) query.evaluation_status = filters.evaluationStatus;
@@ -810,26 +827,34 @@ if (typeof window === 'undefined') {
       if (filters.minUsedPhaseCount !== undefined) query.used_phase_count = { $gte: filters.minUsedPhaseCount };
       if (filters.minUsedStationCount !== undefined) query.used_station_count = { $gte: filters.minUsedStationCount };
       if (filters.maxStandardError !== undefined) query.standard_error = { $lte: filters.maxStandardError };
-      if (filters.minLatitude !== undefined) query.latitude = { ...query.latitude, $gte: filters.minLatitude };
-      if (filters.maxLatitude !== undefined) query.latitude = { ...query.latitude, $lte: filters.maxLatitude };
-      if (filters.minLongitude !== undefined) query.longitude = { ...query.longitude, $gte: filters.minLongitude };
-      if (filters.maxLongitude !== undefined) query.longitude = { ...query.longitude, $lte: filters.maxLongitude };
+      if (filters.minLatitude !== undefined) query.latitude = { ...(query.latitude as object), $gte: filters.minLatitude };
+      if (filters.maxLatitude !== undefined) query.latitude = { ...(query.latitude as object), $lte: filters.maxLatitude };
+      if (filters.minLongitude !== undefined) query.longitude = { ...(query.longitude as object), $gte: filters.minLongitude };
+      if (filters.maxLongitude !== undefined) query.longitude = { ...(query.longitude as object), $lte: filters.maxLongitude };
 
-      const docs = await collection.find(query).sort({ time: -1 }).toArray();
-      return toPlainArray<MergedEvent>(docs);
+      const docs = await collection.find(query).sort({ time: -1 }).limit(MAX_FILTERED_EVENTS + 1).toArray();
+      const truncated = docs.length > MAX_FILTERED_EVENTS;
+      const limitedDocs = truncated ? docs.slice(0, MAX_FILTERED_EVENTS) : docs;
+
+      return {
+        events: toPlainArray<MergedEvent>(limitedDocs),
+        truncated,
+        limit: MAX_FILTERED_EVENTS,
+      };
     },
 
     // Transaction support using MongoDB sessions
     transaction: async <T>(callback: TransactionCallback<T>): Promise<T> => {
-      // MongoDB handles transactions differently - for now, just execute the callback
-      // For full transaction support, we'd need to use MongoDB sessions
-      try {
-        const result = await callback();
-        return result;
-      } catch (error) {
-        console.error('[Database] Transaction error:', error);
-        throw error;
-      }
+      // Use proper MongoDB transactions with session management
+      // This provides ACID guarantees for multi-document operations
+      return withTransaction(async (session: ClientSession) => {
+        try {
+          return await callback(session);
+        } catch (error) {
+          console.error('[Database] Transaction error:', error);
+          throw error;
+        }
+      });
     },
 
     // Mapping template methods

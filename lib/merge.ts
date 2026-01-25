@@ -1,4 +1,5 @@
 import { dbQueries, MergedEvent } from './db';
+import type { ClientSession } from './mongodb';
 import { v4 as uuidv4 } from 'uuid';
 import { calculateDistance, calculateTimeDifference } from './earthquake-utils';
 import type { SourceCatalogue, MergeConfig } from './validation';
@@ -208,8 +209,16 @@ export async function mergeCatalogues(
 
   // Use transaction for database writes
   try {
-    return await dbQueries.transaction(async () => {
-      return await executeMergeOperation(catalogueId, name, sourceCatalogues, config, metadata, exportOnly);
+    return await dbQueries.transaction(async (session) => {
+      return await executeMergeOperation(
+        catalogueId,
+        name,
+        sourceCatalogues,
+        config,
+        metadata,
+        exportOnly,
+        session
+      );
     });
   } catch (error) {
     console.error('[Merge] Transaction failed, changes rolled back:', error);
@@ -227,7 +236,8 @@ async function executeMergeOperation(
   sourceCatalogues: SourceCatalogue[],
   config: MergeConfig,
   metadata?: any,
-  exportOnly: boolean = false
+  exportOnly: boolean = false,
+  session?: ClientSession
 ) {
   if (!dbQueries) {
     throw new Error('Database not initialized');
@@ -265,7 +275,8 @@ async function executeMergeOperation(
         JSON.stringify(config),
         0,
         'processing',
-        dbMetadata
+        dbMetadata,
+        session
       );
     }
 
@@ -455,7 +466,7 @@ async function executeMergeOperation(
     // Bulk insert all events at once (Performance Optimization)
     // This is much faster than individual inserts and only triggers cache invalidation once
     if (dbEvents.length > 0) {
-      await dbQueries.bulkInsertEvents(dbEvents);
+      await dbQueries.bulkInsertEvents(dbEvents, session);
     }
 
     // Extract and update geographic bounds
@@ -466,13 +477,14 @@ async function executeMergeOperation(
         bounds.minLatitude,
         bounds.maxLatitude,
         bounds.minLongitude,
-        bounds.maxLongitude
+        bounds.maxLongitude,
+        session
       );
     }
 
     // Update catalogue with event count and status
-    await dbQueries.updateCatalogueEventCount(catalogueId, mergedEvents.length);
-    await dbQueries.updateCatalogueStatus('complete', catalogueId);
+    await dbQueries.updateCatalogueEventCount(catalogueId, mergedEvents.length, session);
+    await dbQueries.updateCatalogueStatus('complete', catalogueId, session);
 
     return {
       success: true,

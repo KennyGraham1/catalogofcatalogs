@@ -2,12 +2,41 @@
  * Custom error classes and error handling utilities
  */
 
+/**
+ * Error details for structured error reporting
+ */
+export interface ErrorDetails {
+  field?: string;
+  value?: unknown;
+  expected?: string;
+  received?: string;
+  line?: number;
+  column?: number;
+  lastError?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Metadata for structured logging
+ */
+export interface LogMetadata {
+  [key: string]: unknown;
+}
+
+/**
+ * Route context for API handlers
+ */
+export interface RouteContext {
+  params?: Record<string, string>;
+  [key: string]: unknown;
+}
+
 export class AppError extends Error {
   constructor(
     message: string,
     public statusCode: number = 500,
     public code?: string,
-    public details?: any
+    public details?: ErrorDetails
   ) {
     super(message);
     this.name = 'AppError';
@@ -16,7 +45,7 @@ export class AppError extends Error {
 }
 
 export class ValidationError extends AppError {
-  constructor(message: string, details?: any) {
+  constructor(message: string, details?: ErrorDetails) {
     super(message, 400, 'VALIDATION_ERROR', details);
     this.name = 'ValidationError';
   }
@@ -30,21 +59,21 @@ export class NotFoundError extends AppError {
 }
 
 export class DatabaseError extends AppError {
-  constructor(message: string, details?: any) {
+  constructor(message: string, details?: ErrorDetails) {
     super(message, 500, 'DATABASE_ERROR', details);
     this.name = 'DatabaseError';
   }
 }
 
 export class ParseError extends AppError {
-  constructor(message: string, details?: any) {
+  constructor(message: string, details?: ErrorDetails) {
     super(message, 400, 'PARSE_ERROR', details);
     this.name = 'ParseError';
   }
 }
 
 export class FileUploadError extends AppError {
-  constructor(message: string, details?: any) {
+  constructor(message: string, details?: ErrorDetails) {
     super(message, 400, 'FILE_UPLOAD_ERROR', details);
     this.name = 'FileUploadError';
   }
@@ -60,28 +89,28 @@ export class Logger {
     this.context = context;
   }
 
-  private formatMessage(level: string, message: string, meta?: any): string {
+  private formatMessage(level: string, message: string, meta?: LogMetadata): string {
     const timestamp = new Date().toISOString();
     const metaStr = meta ? ` ${JSON.stringify(meta)}` : '';
     return `[${timestamp}] [${level}] [${this.context}] ${message}${metaStr}`;
   }
 
-  info(message: string, meta?: any) {
+  info(message: string, meta?: LogMetadata): void {
     console.log(this.formatMessage('INFO', message, meta));
   }
 
-  warn(message: string, meta?: any) {
+  warn(message: string, meta?: LogMetadata): void {
     console.warn(this.formatMessage('WARN', message, meta));
   }
 
-  error(message: string, error?: Error | any, meta?: any) {
-    const errorMeta = error instanceof Error 
+  error(message: string, error?: Error | unknown, meta?: LogMetadata): void {
+    const errorMeta: LogMetadata = error instanceof Error
       ? { message: error.message, stack: error.stack, ...meta }
       : { error, ...meta };
     console.error(this.formatMessage('ERROR', message, errorMeta));
   }
 
-  debug(message: string, meta?: any) {
+  debug(message: string, meta?: LogMetadata): void {
     if (process.env.NODE_ENV === 'development') {
       console.debug(this.formatMessage('DEBUG', message, meta));
     }
@@ -94,7 +123,7 @@ export class Logger {
 export function formatErrorResponse(error: unknown): {
   error: string;
   code?: string;
-  details?: any;
+  details?: ErrorDetails;
   statusCode: number;
 } {
   if (error instanceof AppError) {
@@ -123,9 +152,9 @@ export function formatErrorResponse(error: unknown): {
  * Async error handler wrapper for API routes
  */
 export function asyncHandler(
-  handler: (request: Request, context?: any) => Promise<Response>
-) {
-  return async (request: Request, context?: any): Promise<Response> => {
+  handler: (request: Request, context?: RouteContext) => Promise<Response>
+): (request: Request, context?: RouteContext) => Promise<Response> {
+  return async (request: Request, context?: RouteContext): Promise<Response> => {
     try {
       return await handler(request, context);
     } catch (error) {

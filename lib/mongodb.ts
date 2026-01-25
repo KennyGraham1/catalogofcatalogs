@@ -5,7 +5,7 @@
  * Optimized for MongoDB Atlas with retry logic and resilient connections.
  */
 
-import { MongoClient, Db, Collection, MongoClientOptions } from 'mongodb';
+import { MongoClient, Db, Collection, MongoClientOptions, ClientSession } from 'mongodb';
 import type { Document } from 'mongodb';
 
 // MongoDB connection URI from environment variable
@@ -275,4 +275,64 @@ export const COLLECTIONS = {
   AUDIT_LOGS: 'audit_logs',
 } as const;
 
-export { MongoClient, Db, Collection };
+/**
+ * Execute a function within a MongoDB transaction
+ *
+ * This provides ACID guarantees for operations that modify multiple documents
+ * or need to be atomic. The transaction will be automatically committed on
+ * success or aborted on failure.
+ *
+ * Note: Transactions require a MongoDB replica set. Atlas always provides this,
+ * but local development may need to use a single-node replica set.
+ *
+ * @param callback Function to execute within the transaction
+ * @returns The result of the callback function
+ * @throws Error if the transaction fails
+ *
+ * @example
+ * const result = await withTransaction(async (session) => {
+ *   await collection.insertOne(doc1, { session });
+ *   await collection.insertOne(doc2, { session });
+ *   return { success: true };
+ * });
+ */
+export async function withTransaction<T>(
+  callback: (session: ClientSession) => Promise<T>
+): Promise<T> {
+  const client = await getMongoClient();
+  const session = client.startSession();
+
+  try {
+    let result: T;
+
+    await session.withTransaction(async () => {
+      result = await callback(session);
+    }, {
+      readConcern: { level: 'snapshot' },
+      writeConcern: { w: 'majority' },
+      readPreference: 'primary',
+    });
+
+    return result!;
+  } catch (error) {
+    console.error('[MongoDB] Transaction failed:', error);
+    throw error;
+  } finally {
+    await session.endSession();
+  }
+}
+
+/**
+ * Start a new client session for manual transaction control
+ *
+ * Use this when you need more control over transaction lifecycle,
+ * such as in long-running operations or when using cursor iteration.
+ *
+ * @returns A new MongoDB client session
+ */
+export async function startSession(): Promise<ClientSession> {
+  const client = await getMongoClient();
+  return client.startSession();
+}
+
+export { MongoClient, Db, Collection, ClientSession };

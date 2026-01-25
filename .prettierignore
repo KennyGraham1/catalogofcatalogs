@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+.next/
+out/
+dist/
+build/
+
+# Coverage
+coverage/
+
+# Lock files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Auto-generated files
+*.min.js
+*.min.css
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Cache
+.cache/
+*.cache
+
+# Environment
+.env*
+!.env.example
+
+# Logs
+*.log
+
+# Public assets that shouldn't be formatted
+public/

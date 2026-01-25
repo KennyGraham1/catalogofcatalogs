@@ -62,12 +62,30 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// Maximum request body size (100MB for events array)
+const MAX_BODY_SIZE = 100 * 1024 * 1024;
+
 export async function POST(request: NextRequest) {
   try {
     // Require Editor role or higher
     const authResult = await requireEditor(request);
     if (authResult instanceof NextResponse) {
       return authResult;
+    }
+
+    // Check Content-Length header for early rejection
+    const contentLength = request.headers.get('content-length');
+    if (contentLength) {
+      const parsedLength = Number.parseInt(contentLength, 10);
+      if (!Number.isNaN(parsedLength) && parsedLength > MAX_BODY_SIZE) {
+        return NextResponse.json(
+          {
+            error: `Request body too large. Maximum size is ${MAX_BODY_SIZE / 1024 / 1024}MB.`,
+            code: 'BODY_TOO_LARGE',
+          },
+          { status: 413 }
+        );
+      }
     }
 
     // Apply rate limiting (30 requests per minute for write operations)
@@ -86,7 +104,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = await request.json();
+    const rawBody = await request.text();
+    const rawBodySize = new TextEncoder().encode(rawBody).length;
+    if (rawBodySize > MAX_BODY_SIZE) {
+      return NextResponse.json(
+        {
+          error: `Request body too large. Maximum size is ${MAX_BODY_SIZE / 1024 / 1024}MB.`,
+          code: 'BODY_TOO_LARGE',
+        },
+        { status: 413 }
+      );
+    }
+
+    let body: any;
+    try {
+      body = rawBody ? JSON.parse(rawBody) : {};
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid JSON body', code: 'INVALID_JSON' },
+        { status: 400 }
+      );
+    }
     const { name, events, metadata } = body;
 
     // Validate required fields
@@ -231,4 +269,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

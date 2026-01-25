@@ -88,12 +88,14 @@ export async function GET(
     if (maxLongitude) filters.maxLongitude = parseFloat(maxLongitude);
 
     // Get filtered events
-    const events = await dbQueries.getFilteredEvents(catalogueId, filters);
+    const { events, truncated, limit } = await dbQueries.getFilteredEvents(catalogueId, filters);
     
     return NextResponse.json({
       success: true,
       events,
       count: events.length,
+      truncated,
+      limit,
       filters
     });
   } catch (error) {

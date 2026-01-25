@@ -4,6 +4,7 @@
  */
 
 import { calculateDistance, calculateTimeDifference } from './earthquake-utils';
+import { DuplicateDetectionEvent } from '@/types/earthquake';
 
 export interface DuplicateDetectionConfig {
   // Basic thresholds
@@ -46,8 +47,8 @@ export interface DuplicateMatch {
 
 export interface DuplicateGroup {
   groupId: string;
-  events: any[];
-  representativeEvent: any; // The "best" event to keep
+  events: DuplicateDetectionEvent[];
+  representativeEvent: DuplicateDetectionEvent;
   confidence: 'high' | 'medium' | 'low';
 }
 
@@ -136,8 +137,8 @@ function calculateSimilarityComponent(value: number, threshold: number): number 
  * and events beyond the threshold rapidly decay to 0.
  */
 export function calculateSimilarityScore(
-  event1: any,
-  event2: any,
+  event1: DuplicateDetectionEvent,
+  event2: DuplicateDetectionEvent,
   config: DuplicateDetectionConfig
 ): number {
   const weights = config.weights || { time: 0.3, location: 0.4, magnitude: 0.2, depth: 0.1 };
@@ -203,7 +204,7 @@ export function calculateSimilarityScore(
 /**
  * Get the event ID, with fallback to generated ID
  */
-function getEventId(event: any, fallbackIndex?: number): string {
+function getEventId(event: DuplicateDetectionEvent, fallbackIndex?: number): string {
   return event.id || event.event_public_id || `event_${fallbackIndex ?? Math.random().toString(36).substring(2, 11)}`;
 }
 
@@ -214,8 +215,8 @@ function getEventId(event: any, fallbackIndex?: number): string {
  * considered duplicates, or null if they are not.
  */
 export function areDuplicates(
-  event1: any,
-  event2: any,
+  event1: DuplicateDetectionEvent,
+  event2: DuplicateDetectionEvent,
   config: DuplicateDetectionConfig
 ): DuplicateMatch | null {
   // Guard against invalid input
@@ -294,7 +295,7 @@ export function areDuplicates(
  * Assign stable IDs to events that don't have them.
  * This ensures consistent ID usage across all duplicate detection functions.
  */
-function ensureEventIds(events: any[]): any[] {
+function ensureEventIds(events: DuplicateDetectionEvent[]): DuplicateDetectionEvent[] {
   return events.map((event, index) => {
     if (event.id || event.event_public_id) {
       return event;
@@ -310,7 +311,7 @@ function ensureEventIds(events: any[]): any[] {
 /**
  * Get the event ID, checking for generated fallback IDs
  */
-function getStableEventId(event: any): string {
+function getStableEventId(event: DuplicateDetectionEvent): string {
   return event.id || event.event_public_id || event._generated_id || 'unknown';
 }
 
@@ -324,7 +325,7 @@ function getStableEventId(event: any): string {
  * when time difference exceeds threshold.
  */
 export function findDuplicatePairs(
-  events: any[],
+  events: DuplicateDetectionEvent[],
   config: DuplicateDetectionConfig
 ): DuplicateMatch[] {
   const duplicates: DuplicateMatch[] = [];
@@ -378,8 +379,8 @@ export function findDuplicatePairs(
  * Internal function that uses stable IDs (used by findDuplicatePairs)
  */
 function areDuplicatesWithIds(
-  event1: any,
-  event2: any,
+  event1: DuplicateDetectionEvent,
+  event2: DuplicateDetectionEvent,
   config: DuplicateDetectionConfig
 ): DuplicateMatch | null {
   // Guard against invalid input
@@ -457,7 +458,7 @@ function areDuplicatesWithIds(
  * then A, B, and C are all in the same group, even if A doesn't match C directly.
  */
 export function groupDuplicates(
-  events: any[],
+  events: DuplicateDetectionEvent[],
   config: DuplicateDetectionConfig
 ): DuplicateGroup[] {
   // Guard: empty or single event array
@@ -477,7 +478,7 @@ export function groupDuplicates(
 
   // Build adjacency list using the same stable IDs
   const adjacency = new Map<string, Set<string>>();
-  const eventMap = new Map<string, any>();
+  const eventMap = new Map<string, DuplicateDetectionEvent>();
 
   eventsWithIds.forEach((event) => {
     // Use the same ID generation as findDuplicatePairs
@@ -538,7 +539,7 @@ export function groupDuplicates(
 /**
  * Select the best representative event from a group of duplicates
  */
-function selectRepresentativeEvent(events: any[]): any {
+function selectRepresentativeEvent(events: DuplicateDetectionEvent[]): DuplicateDetectionEvent {
   // Scoring criteria:
   // 1. Evaluation status (reviewed > manual > automatic)
   // 2. Number of stations used
@@ -581,7 +582,7 @@ function selectRepresentativeEvent(events: any[]): any {
  * Determine confidence level for a duplicate group
  */
 function determineGroupConfidence(
-  events: any[],
+  events: DuplicateDetectionEvent[],
   allPairs: DuplicateMatch[]
 ): 'high' | 'medium' | 'low' {
   const eventIds = new Set(events.map(e => e.id || e.event_public_id));
@@ -601,4 +602,3 @@ function determineGroupConfidence(
   if (avgConfidence >= 1.5) return 'medium';
   return 'low';
 }
-

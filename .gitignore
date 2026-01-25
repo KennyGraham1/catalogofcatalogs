@@ -56,3 +56,5 @@ test_export_*.csv
 .DS_Store
 Thumbs.db
 
+# NFS temporary files
+.nfs*

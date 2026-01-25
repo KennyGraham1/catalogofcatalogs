@@ -8,6 +8,27 @@ import CredentialsProvider from 'next-auth/providers/credentials';
 import { getUserByEmail, verifyPassword, updateLastLogin, toSafeUser } from './utils';
 import { UserRole } from './types';
 
+// Validate NEXTAUTH_SECRET at module load time
+// This ensures the application fails fast if the secret is not configured
+if (typeof window === 'undefined' && process.env.NODE_ENV !== 'test') {
+  const secret = process.env.NEXTAUTH_SECRET;
+
+  if (!secret) {
+    throw new Error(
+      'NEXTAUTH_SECRET environment variable is not set. ' +
+      'Please set a secure random string (at least 32 characters) for JWT signing. ' +
+      'You can generate one using: openssl rand -base64 32'
+    );
+  }
+
+  if (secret.length < 32) {
+    console.warn(
+      '[Auth] Warning: NEXTAUTH_SECRET should be at least 32 characters for security. ' +
+      'Current length: ' + secret.length
+    );
+  }
+}
+
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
@@ -96,4 +117,3 @@ export const authOptions: NextAuthOptions = {
  * Helper function to get server-side session
  */
 export { getServerSession } from 'next-auth';
-
