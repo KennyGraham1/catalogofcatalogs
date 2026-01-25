@@ -154,9 +154,11 @@ export async function POST(request: NextRequest) {
     // Insert events in bulk
     if (events.length > 0) {
       const eventsToInsert = events.map(event => ({
-        id: event.id || uuidv4(),
+        // Always generate a unique UUID for the primary ID to avoid duplicate key errors
+        // Store original IDs in source_id for reference
+        id: uuidv4(),
         catalogue_id: catalogueId,
-        source_id: event.source_id || event.eventId || event.id,
+        source_id: event.source_id || event.eventId || event.id || null,
         time: event.time,
         latitude: event.latitude,
         longitude: event.longitude,

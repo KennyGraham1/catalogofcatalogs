@@ -43,6 +43,7 @@ export default function UploadPage() {
   const [qualityCheckResult, setQualityCheckResult] = useState<any | null>(null);
   const [crossFieldValidation, setCrossFieldValidation] = useState<any | null>(null);
   const [parsedEvents, setParsedEvents] = useState<any[]>([]);
+  const [fieldMappings, setFieldMappings] = useState<Record<string, string>>({});
   const [isSchemaReady, setIsSchemaReady] = useState(false);
   const [catalogueName, setCatalogueName] = useState('');
   const [metadata, setMetadata] = useState<CatalogueMetadata>({});
@@ -91,6 +92,7 @@ export default function UploadPage() {
     setQualityCheckResult(null);
     setCrossFieldValidation(null);
     setParsedEvents([]);
+    setFieldMappings({});
     setIsSchemaReady(false);
     setCatalogueName('');
     setMetadata({});
@@ -105,6 +107,33 @@ export default function UploadPage() {
       totalFiles: 0
     });
     setActiveTab('upload');
+  };
+
+  /**
+   * Apply UI field mappings to events before saving
+   * This ensures user's manual mapping changes are respected
+   */
+  const applyUIMappings = (events: any[]): any[] => {
+    if (Object.keys(fieldMappings).length === 0) {
+      return events; // No custom mappings, return as-is
+    }
+
+    return events.map(event => {
+      const mappedEvent: any = { ...event };
+
+      // Apply each UI mapping
+      for (const [sourceField, targetField] of Object.entries(fieldMappings)) {
+        // Skip if no target or source field doesn't exist
+        if (!targetField || targetField === '' || event[sourceField] === undefined) {
+          continue;
+        }
+
+        // Copy value from source to target field
+        mappedEvent[targetField] = event[sourceField];
+      }
+
+      return mappedEvent;
+    });
   };
 
   const handleUpload = async () => {
@@ -313,6 +342,9 @@ export default function UploadPage() {
     setUploadStatus('processing');
 
     try {
+      // Apply UI field mappings before saving
+      const finalEvents = applyUIMappings(parsedEvents);
+
       // Create catalogue in database
       const response = await fetch('/api/catalogues', {
         method: 'POST',
@@ -321,7 +353,7 @@ export default function UploadPage() {
         },
         body: JSON.stringify({
           name: catalogueName.trim(),
-          events: parsedEvents,
+          events: finalEvents,
           metadata: metadata
         }),
       });
@@ -566,6 +598,7 @@ export default function UploadPage() {
                   isProcessing={uploadStatus === 'processing'}
                   validationResults={validationResults}
                   onSchemaReady={setIsSchemaReady}
+                  onMappingsChange={setFieldMappings}
                   readOnly={isReadOnly}
                 />
               </TabsContent>

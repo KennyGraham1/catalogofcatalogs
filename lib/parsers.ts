@@ -13,6 +13,7 @@ import { createInterface } from 'readline';
 import { detectDelimiter, parseLine, parseWithDelimiter, type Delimiter } from './delimiter-detector';
 import { parseGeoJSON } from './geojson-parser';
 import { detectDateFormat, type DateFormat } from './date-format-detector';
+import { FIELD_ALIASES } from './field-definitions';
 
 export interface ParsedEvent {
   time: string;
@@ -505,33 +506,130 @@ function synthesizeTimestamp(event: any): string | null {
 }
 
 /**
- * Map common field name variations to standard names
- * Supports QuakeML 1.2, GeoNet, ISC, and common CSV/JSON field variations
+ * Fields that should be parsed as numbers
+ */
+const NUMERIC_FIELDS = new Set([
+  'latitude', 'longitude', 'depth', 'magnitude',
+  'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty',
+  'depth_uncertainty', 'horizontal_uncertainty', 'magnitude_uncertainty',
+  'azimuthal_gap', 'used_phase_count', 'used_station_count', 'standard_error',
+  'minimum_distance', 'maximum_distance', 'associated_phase_count',
+  'associated_station_count', 'depth_phase_count', 'magnitude_station_count'
+]);
+
+/**
+ * Pre-computed alias lookup map for O(1) field matching
+ * Maps lowercase alias -> { targetField, isExact }
+ */
+let aliasLookupCache: Map<string, { targetField: string; isExact: boolean }> | null = null;
+
+function getAliasLookup(): Map<string, { targetField: string; isExact: boolean }> {
+  if (aliasLookupCache) return aliasLookupCache;
+
+  aliasLookupCache = new Map();
+  for (const [targetField, aliases] of Object.entries(FIELD_ALIASES)) {
+    // Add exact matches (case-sensitive, stored as-is and lowercase)
+    for (const exact of aliases.exactMatches) {
+      aliasLookupCache.set(exact, { targetField, isExact: true });
+      aliasLookupCache.set(exact.toLowerCase(), { targetField, isExact: false });
+    }
+    // Add aliases (case-insensitive, stored lowercase)
+    for (const alias of aliases.aliases) {
+      const key = alias.toLowerCase();
+      if (!aliasLookupCache.has(key)) {
+        aliasLookupCache.set(key, { targetField, isExact: false });
+      }
+    }
+  }
+  return aliasLookupCache;
+}
+
+/**
+ * Safely parse a numeric value, returning null for invalid values
+ */
+function safeParseFloat(value: any): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const str = String(value).trim();
+  if (str === '' || str.toLowerCase() === 'nan' || str.toLowerCase() === 'null') return null;
+  const num = parseFloat(str);
+  return isNaN(num) ? null : num;
+}
+
+/**
+ * Mapping report entry showing how a field was mapped
+ */
+export interface MappingReportEntry {
+  targetField: string;
+  sourceField: string;
+  matchType: 'exact' | 'alias' | 'synthesized';
+}
+
+/**
+ * Map common field name variations to standard names using FIELD_ALIASES
+ * This is the single source of truth for field mappings, shared with the UI
  * @param event - The event object to map
  * @param dateFormat - Optional date format hint for ambiguous dates
+ * @param includeMappingReport - Whether to include _mappingReport in the result
  */
-function mapCommonFields(event: any, dateFormat?: DateFormat): ParsedEvent {
+function mapCommonFields(event: any, dateFormat?: DateFormat, includeMappingReport: boolean = false): ParsedEvent {
   const mapped: any = { ...event };
+  const aliasLookup = getAliasLookup();
+  const mappingReport: MappingReportEntry[] = [];
 
-  // === Basic Fields ===
-  // Map time variations
-  if (!mapped.time) {
-    mapped.time = event.datetime || event.date || event.origin_time || event.origintime ||
-                  event.ot || event.otime || event.timestamp;
+  // Track which target fields have been set
+  const setTargetFields = new Set<string>();
+
+  // First pass: check for exact matches and aliases using pre-computed lookup
+  for (const [sourceKey, value] of Object.entries(event)) {
+    // Try exact match first, then lowercase
+    let lookup = aliasLookup.get(sourceKey);
+    if (!lookup) {
+      lookup = aliasLookup.get(sourceKey.toLowerCase());
+    }
+
+    if (lookup && !setTargetFields.has(lookup.targetField)) {
+      const { targetField, isExact } = lookup;
+
+      // Skip if target field already has a valid value (but not for numeric fields with empty values)
+      const existingValue = mapped[targetField];
+      if (existingValue !== undefined && existingValue !== null && existingValue !== '' && !NUMERIC_FIELDS.has(targetField)) {
+        continue;
+      }
+
+      // Parse value (with NaN handling for numeric fields)
+      if (NUMERIC_FIELDS.has(targetField)) {
+        const numValue = safeParseFloat(value);
+        // Always set numeric fields (null if invalid) to ensure proper validation
+        mapped[targetField] = numValue;
+        setTargetFields.add(targetField);
+        if (includeMappingReport && numValue !== null) {
+          mappingReport.push({ targetField, sourceField: sourceKey, matchType: isExact ? 'exact' : 'alias' });
+        }
+      } else if (value !== undefined && value !== null && value !== '') {
+        // For non-numeric fields, only set if value is not empty
+        mapped[targetField] = value;
+        setTargetFields.add(targetField);
+        if (includeMappingReport) {
+          mappingReport.push({ targetField, sourceField: sourceKey, matchType: isExact ? 'exact' : 'alias' });
+        }
+      }
+    }
   }
 
-  // Synthesize timestamp from separate date/time component columns if no combined time field exists
+  // Special handling for 'time' field - synthesize from split date/time columns if needed
   if (!mapped.time) {
     const synthesized = synthesizeTimestamp(event);
     if (synthesized) {
       mapped.time = synthesized;
+      if (includeMappingReport) {
+        mappingReport.push({ targetField: 'time', sourceField: 'year+month+day+hour+minute+second', matchType: 'synthesized' });
+      }
     }
   }
 
   // Normalize timestamp to ISO 8601 format with date format hint
   if (mapped.time) {
     const { normalizeTimestamp } = require('./earthquake-utils');
-    // Convert DateFormat to the format expected by normalizeTimestamp
     const formatHint = dateFormat === 'US' ? 'US' : dateFormat === 'International' ? 'International' : undefined;
     const normalized = normalizeTimestamp(mapped.time, formatHint);
     if (normalized) {
@@ -539,161 +637,9 @@ function mapCommonFields(event: any, dateFormat?: DateFormat): ParsedEvent {
     }
   }
 
-  // Map latitude variations
-  if (mapped.lat !== undefined) mapped.latitude = parseFloat(mapped.lat);
-  if (mapped.lats !== undefined) mapped.latitude = parseFloat(mapped.lats);
-  if (mapped.evla !== undefined) mapped.latitude = parseFloat(mapped.evla);
-  if (mapped.latitude !== undefined) mapped.latitude = parseFloat(mapped.latitude);
-
-  // Map longitude variations
-  if (mapped.lon !== undefined) mapped.longitude = parseFloat(mapped.lon);
-  if (mapped.lons !== undefined) mapped.longitude = parseFloat(mapped.lons);
-  if (mapped.lng !== undefined) mapped.longitude = parseFloat(mapped.lng);
-  if (mapped.long !== undefined) mapped.longitude = parseFloat(mapped.long);
-  if (mapped.evlo !== undefined) mapped.longitude = parseFloat(mapped.evlo);
-  if (mapped.longitude !== undefined) mapped.longitude = parseFloat(mapped.longitude);
-
-  // Map depth variations
-  if (mapped.dep !== undefined) mapped.depth = parseFloat(mapped.dep);
-  if (mapped.depths !== undefined) mapped.depth = parseFloat(mapped.depths);
-  if (mapped.evdp !== undefined) mapped.depth = parseFloat(mapped.evdp);
-  if (mapped.depth_km !== undefined) mapped.depth = parseFloat(mapped.depth_km);
-  if (mapped.depth !== undefined) mapped.depth = parseFloat(mapped.depth);
-
-  // Map magnitude variations
-  if (mapped.mag !== undefined) mapped.magnitude = parseFloat(mapped.mag);
-  if (mapped.Mpref !== undefined) mapped.magnitude = parseFloat(mapped.Mpref);
-  if (mapped.mpref !== undefined) mapped.magnitude = parseFloat(mapped.mpref);
-  if (mapped.prefmag !== undefined) mapped.magnitude = parseFloat(mapped.prefmag);
-  if (mapped.pref_mag !== undefined) mapped.magnitude = parseFloat(mapped.pref_mag);
-  if (mapped.preferred_magnitude !== undefined) mapped.magnitude = parseFloat(mapped.preferred_magnitude);
-  if (mapped.m !== undefined && mapped.magnitude === undefined) mapped.magnitude = parseFloat(mapped.m);
-  if (mapped.magnitude !== undefined) mapped.magnitude = parseFloat(mapped.magnitude);
-
-  // Map magnitude type variations
-  if (!mapped.magnitude_type) {
-    mapped.magnitude_type = event.magtype || event.mag_type || event.mtype || event.magnitudeType;
-  }
-
-  // === Uncertainty Fields ===
-  if (!mapped.horizontal_uncertainty) {
-    mapped.horizontal_uncertainty = event.horiz_unc || event.h_uncertainty || event.herr ||
-                                    event.horizontal_error || event.seh || event.horizontalUncertainty;
-  }
-  if (!mapped.depth_uncertainty) {
-    mapped.depth_uncertainty = event.deptherror || event.depth_error || event.sdepth ||
-                               event.sdep || event.z_error || event.depthUncertainty;
-  }
-  if (!mapped.time_uncertainty) {
-    mapped.time_uncertainty = event.timeerror || event.time_error || event.oterror ||
-                              event.stime || event.timeUncertainty;
-  }
-  if (!mapped.latitude_uncertainty) {
-    mapped.latitude_uncertainty = event.laterror || event.lat_error || event.slat || event.latitudeUncertainty;
-  }
-  if (!mapped.longitude_uncertainty) {
-    mapped.longitude_uncertainty = event.lonerror || event.lon_error || event.slon || event.longitudeUncertainty;
-  }
-
-  // === Origin Metadata ===
-  if (!mapped.depth_type) {
-    mapped.depth_type = event.depthtype || event.depth_method || event.depthflag || event.depthType;
-  }
-  if (!mapped.earth_model_id) {
-    mapped.earth_model_id = event.earthmodelid || event.velocity_model || event.earth_model ||
-                            event.velmodel || event.vmodel || event.earthModelID;
-  }
-  if (!mapped.method_id) {
-    mapped.method_id = event.methodid || event.location_method || event.locmethod ||
-                       event.algorithm || event.methodID;
-  }
-
-  // === Agency/Author ===
-  if (!mapped.agency_id) {
-    mapped.agency_id = event.agencyid || event.agency || event.source_agency ||
-                       event.contributor || event.source || event.network || event.agencyID;
-  }
-  if (!mapped.author) {
-    mapped.author = event.analyst || event.created_by || event.createdby || event.reporter;
-  }
-
-  // === Magnitude Details ===
-  if (!mapped.magnitude_uncertainty) {
-    mapped.magnitude_uncertainty = event.magerror || event.mag_error || event.smag ||
-                                   event.magnitude_error || event.magnitudeUncertainty;
-  }
-  if (!mapped.magnitude_station_count) {
-    mapped.magnitude_station_count = event.magstationcount || event.mag_nst || event.nstmag ||
-                                     event.magnitudeStationCount;
-  }
-  if (!mapped.magnitude_method_id) {
-    mapped.magnitude_method_id = event.magmethod || event.mag_method || event.magnitude_method ||
-                                 event.magnitudeMethodID;
-  }
-  if (!mapped.magnitude_evaluation_mode) {
-    mapped.magnitude_evaluation_mode = event.magevalmode || event.mag_eval_mode ||
-                                       event.magnitude_mode || event.magnitudeEvaluationMode;
-  }
-  if (!mapped.magnitude_evaluation_status) {
-    mapped.magnitude_evaluation_status = event.magevalstatus || event.mag_eval_status ||
-                                         event.magnitude_status || event.magnitudeEvaluationStatus;
-  }
-
-  // === Quality Metrics ===
-  if (!mapped.azimuthal_gap) {
-    mapped.azimuthal_gap = event.azgap || event.az_gap || event.gap || event.azimuthalGap;
-  }
-  if (!mapped.used_phase_count) {
-    mapped.used_phase_count = event.nph || event.ndef || event.phases_used ||
-                              event.usedphases || event.phasecount || event.usedPhaseCount;
-  }
-  if (!mapped.used_station_count) {
-    mapped.used_station_count = event.nst || event.nsta || event.stations_used ||
-                                event.usedstations || event.stationcount || event.usedStationCount;
-  }
-  if (!mapped.standard_error) {
-    mapped.standard_error = event.rms || event.rmserror || event.rms_error ||
-                            event.residual || event.standardError;
-  }
-  if (!mapped.minimum_distance) {
-    mapped.minimum_distance = event.mindist || event.min_dist || event.dmin ||
-                              event.nearest_station || event.minimumDistance;
-  }
-  if (!mapped.maximum_distance) {
-    mapped.maximum_distance = event.maxdist || event.max_dist || event.dmax ||
-                              event.farthest_station || event.maximumDistance;
-  }
-  if (!mapped.associated_phase_count) {
-    mapped.associated_phase_count = event.associatedphasecount || event.phase_count ||
-                                    event.nass || event.total_phases || event.associatedPhaseCount;
-  }
-  if (!mapped.associated_station_count) {
-    mapped.associated_station_count = event.associatedstationcount || event.station_count ||
-                                      event.total_stations || event.associatedStationCount;
-  }
-  if (!mapped.depth_phase_count) {
-    mapped.depth_phase_count = event.depthphasecount || event.depth_phases ||
-                               event.ndepthphases || event.depthPhaseCount;
-  }
-
-  // === Evaluation Metadata ===
-  if (!mapped.evaluation_mode) {
-    mapped.evaluation_mode = event.evalmode || event.eval_mode || event.mode ||
-                             event.analysismode || event.evaluationMode;
-  }
-  if (!mapped.evaluation_status) {
-    mapped.evaluation_status = event.evalstatus || event.eval_status || event.status ||
-                               event.reviewstatus || event.evaluationStatus;
-  }
-
-  // === Region/Location ===
-  if (!mapped.region) {
-    mapped.region = event.flinnengdahl || event.flinn_engdahl || event.fe_region ||
-                    event.geo_region || event.area;
-  }
-  if (!mapped.location_name) {
-    mapped.location_name = event.locationname || event.place || event.placename ||
-                           event.description || event.event_description;
+  // Attach mapping report if requested
+  if (includeMappingReport && mappingReport.length > 0) {
+    mapped._mappingReport = mappingReport;
   }
 
   return mapped as ParsedEvent;
@@ -766,7 +712,8 @@ export async function parseCSVStream(
   onEvent?: (event: ParsedEvent, lineNumber: number) => Promise<void> | void,
   onBatch?: (events: ParsedEvent[], startLine: number, endLine: number) => Promise<void> | void,
   batchSize: number = 100,
-  delimiter?: Delimiter
+  delimiter?: Delimiter,
+  dateFormat?: DateFormat
 ): Promise<{
   success: boolean;
   totalEvents: number;
@@ -834,7 +781,7 @@ export async function parseCSVStream(
       });
 
       // Map common field names
-      const mappedEvent = mapCommonFields(event);
+      const mappedEvent = mapCommonFields(event, dateFormat);
 
       // Validate the event
       const validation = validateEvent(mappedEvent);

@@ -414,7 +414,18 @@ export function EnhancedSchemaMapper({
   }
   
   const sourceFields = getSourceFields();
-  const unmappedRequiredFields = FIELD_DEFINITIONS.filter(f => f.required && isRequiredFieldUnmapped(f.id));
+
+  // Check if split timestamp columns exist (year/month/day)
+  const normalizedSourceFields = new Set(sourceFields.map((field: string) => field.toLowerCase()));
+  const hasSplitTimestamp = normalizedSourceFields.has('year') && normalizedSourceFields.has('month') && normalizedSourceFields.has('day');
+
+  // Filter unmapped required fields, excluding 'time' if split timestamp columns are present
+  const unmappedRequiredFields = FIELD_DEFINITIONS.filter(f => {
+    if (!f.required || !isRequiredFieldUnmapped(f.id)) return false;
+    // Don't show 'time' as unmapped if year/month/day columns exist (timestamp will be synthesized)
+    if (f.id === 'time' && hasSplitTimestamp) return false;
+    return true;
+  });
   
   // Count how many mappings came from saved config
   const getConfigMappingCount = () => {
@@ -581,6 +592,21 @@ export function EnhancedSchemaMapper({
             </p>
             <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
               {unmappedRequiredFields.map(f => f.name).join(', ')}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Info notice for split timestamp synthesis */}
+      {hasSplitTimestamp && (
+        <div className="flex items-start gap-2 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 p-3 rounded-md">
+          <Info className="h-5 w-5 text-blue-500 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
+              Origin time will be auto-synthesized
+            </p>
+            <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">
+              Detected year, month, day{normalizedSourceFields.has('hour') ? ', hour' : ''}{normalizedSourceFields.has('minute') ? ', minute' : ''}{normalizedSourceFields.has('second') ? ', second' : ''} columns - these will be combined into a single ISO 8601 timestamp.
             </p>
           </div>
         </div>

@@ -518,13 +518,13 @@ export function validateEvent(event: Partial<EarthquakeEvent>): {
 } {
   const errors: string[] = [];
 
-  if (event.latitude === undefined || event.longitude === undefined) {
+  if (event.latitude === undefined || event.latitude === null || event.longitude === undefined || event.longitude === null) {
     errors.push('Latitude and longitude are required');
   } else if (!validateCoordinates(event.latitude, event.longitude)) {
     errors.push('Invalid coordinates: latitude must be -90 to 90, longitude must be -180 to 180');
   }
 
-  if (event.magnitude === undefined) {
+  if (event.magnitude === undefined || event.magnitude === null) {
     errors.push('Magnitude is required');
   } else if (!validateMagnitude(event.magnitude)) {
     errors.push('Invalid magnitude: must be between -3 and 10');
