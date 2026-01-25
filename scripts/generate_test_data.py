@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-Generate realistic earthquake test data for the catalogue application.
+Generate earthquake test data for validation testing.
 Creates 3 example catalogues with 1000 events each:
 1. North Island Seismic Events (shallow subduction)
 2. South Island Seismic Events (shallow strike-slip)
 3. NZ Deep Seismic Events (deep subduction)
+
+By default, 60-80% of events are intentionally invalid to stress-test
+validation, error reporting, and data quality assessment.
 """
 
 import json
@@ -14,6 +17,68 @@ from datetime import datetime, timedelta
 
 # Seed for reproducibility
 random.seed(42)
+
+INVALID_RATIO_RANGE = (0.6, 0.8)
+CROSS_FIELD_ANOMALY_RATIO = 0.15
+
+INVALID_CASES = [
+    "missing_time",
+    "missing_latitude",
+    "missing_longitude",
+    "missing_magnitude",
+    "out_of_range_coords",
+    "out_of_range_magnitude",
+    "out_of_range_depth",
+    "invalid_timestamp",
+    "invalid_types",
+    "future_timestamp",
+]
+
+def introduce_invalid_event(event, event_datetime):
+    """
+    Mutate event data to create a variety of validation failures.
+    """
+    case = random.choice(INVALID_CASES)
+
+    if case == "missing_time":
+        event.pop("time", None)
+    elif case == "missing_latitude":
+        event.pop("latitude", None)
+    elif case == "missing_longitude":
+        event.pop("longitude", None)
+    elif case == "missing_magnitude":
+        event.pop("magnitude", None)
+    elif case == "out_of_range_coords":
+        event["latitude"] = random.choice([95, -95, 120])
+        event["longitude"] = random.choice([190, -190, 250])
+    elif case == "out_of_range_magnitude":
+        event["magnitude"] = random.choice([11.5, -4.0, 12.0])
+    elif case == "out_of_range_depth":
+        event["depth"] = random.choice([-10.0, -50.0, 1500.0])
+    elif case == "invalid_timestamp":
+        event["time"] = random.choice([
+            "not-a-date",
+            "2024-13-40T25:61:00Z",
+            "2024/99/99",
+        ])
+    elif case == "invalid_types":
+        field = random.choice(["latitude", "longitude", "magnitude", "depth", "time"])
+        event[field] = random.choice(["invalid", "NaN", {"bad": True}])
+    elif case == "future_timestamp":
+        future = event_datetime + timedelta(days=random.randint(365, 3650))
+        event["time"] = future.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+    event["validation_note"] = f"invalid:{case}"
+    return event
+
+def introduce_cross_field_anomaly(event):
+    """
+    Keep event valid but create cross-field inconsistencies for QA checks.
+    """
+    event["depth"] = round(random.uniform(0.1, 4.9), 1)
+    event["magnitude"] = round(random.uniform(8.1, 9.6), 1)
+    event["validation_note"] = "anomaly:shallow_large_magnitude"
+    return event
 
 def gutenberg_richter_magnitude(min_mag=1.0, max_mag=7.5, b_value=1.0):
     """
@@ -82,7 +147,9 @@ def generate_depth(region_type="shallow", magnitude=3.0):
 
 def generate_catalogue(name, region, bounds, num_events=1000, 
                       start_date="2024-01-01", end_date="2024-10-29",
-                      tectonic_type="subduction", depth_type="shallow"):
+                      tectonic_type="subduction", depth_type="shallow",
+                      invalid_ratio=None, invalid_ratio_range=INVALID_RATIO_RANGE,
+                      anomaly_ratio=CROSS_FIELD_ANOMALY_RATIO):
     """
     Generate a complete earthquake catalogue.
     """
@@ -91,6 +158,11 @@ def generate_catalogue(name, region, bounds, num_events=1000,
     time_range = (end - start).total_seconds()
     
     events = []
+    if invalid_ratio is None:
+        invalid_ratio = random.uniform(*invalid_ratio_range)
+    invalid_ratio = max(0, min(1, invalid_ratio))
+    invalid_count = int(num_events * invalid_ratio)
+    invalid_indices = set(random.sample(range(num_events), invalid_count))
     
     for i in range(num_events):
         # Generate magnitude (Gutenberg-Richter distribution)
@@ -128,11 +200,24 @@ def generate_catalogue(name, region, bounds, num_events=1000,
         # Add focal mechanism for M >= 5.0
         if magnitude >= 5.0:
             event["focal_mechanisms"] = [generate_focal_mechanism(tectonic_type)]
-        
+        if i in invalid_indices:
+            introduce_invalid_event(event, event_datetime)
+        elif random.random() < anomaly_ratio:
+            introduce_cross_field_anomaly(event)
+
         events.append(event)
     
     # Sort by time
-    events.sort(key=lambda x: x["time"])
+    events.sort(key=lambda x: x.get("time") or "")
+
+    numeric_magnitudes = [
+        e["magnitude"] for e in events
+        if isinstance(e.get("magnitude"), (int, float))
+    ]
+    magnitude_range = {
+        "min": min(numeric_magnitudes) if numeric_magnitudes else None,
+        "max": max(numeric_magnitudes) if numeric_magnitudes else None
+    }
     
     catalogue = {
         "catalogue_name": name,
@@ -145,11 +230,10 @@ def generate_catalogue(name, region, bounds, num_events=1000,
         },
         "statistics": {
             "total_events": num_events,
+            "invalid_events": invalid_count,
+            "invalid_ratio": round(invalid_ratio, 2),
             "events_with_focal_mechanisms": sum(1 for e in events if "focal_mechanisms" in e),
-            "magnitude_range": {
-                "min": min(e["magnitude"] for e in events),
-                "max": max(e["magnitude"] for e in events)
-            }
+            "magnitude_range": magnitude_range
         },
         "events": events
     }
@@ -227,6 +311,7 @@ for cat in [north_island_catalogue, south_island_catalogue, deep_events_catalogu
     print(f"\n{cat['catalogue_name']}:")
     print(f"  Region: {cat['region']}")
     print(f"  Total events: {cat['statistics']['total_events']}")
+    print(f"  Invalid events: {cat['statistics']['invalid_events']} ({cat['statistics']['invalid_ratio'] * 100:.0f}%)")
     print(f"  Events with focal mechanisms: {cat['statistics']['events_with_focal_mechanisms']}")
     print(f"  Magnitude range: {cat['statistics']['magnitude_range']['min']} - {cat['statistics']['magnitude_range']['max']}")
     print(f"  Geographic bounds:")
@@ -236,4 +321,3 @@ for cat in [north_island_catalogue, south_island_catalogue, deep_events_catalogu
 print("\n" + "="*60)
 print("3 example catalogues generated successfully!")
 print("="*60)
-

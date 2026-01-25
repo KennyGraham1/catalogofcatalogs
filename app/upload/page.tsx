@@ -260,6 +260,9 @@ export default function UploadPage() {
       // Combine all events from all files
       const allEvents = uploadResults.flatMap(result => result.events || []);
       setParsedEvents(allEvents);
+      const totalErrors = results.reduce((sum, result) => sum + result.errors.length, 0);
+      const hasValidEvents = allEvents.length > 0;
+      const hasErrors = totalErrors > 0;
 
       // Update progress
       setUploadProgress(prev => ({
@@ -285,9 +288,16 @@ export default function UploadPage() {
       }));
 
       setValidationResults(results);
-      setUploadStatus(results.some(r => !r.isValid) ? 'error' : 'mapping');
+      setUploadStatus(hasValidEvents ? 'mapping' : 'error');
 
-      if (!results.some(r => !r.isValid)) {
+      if (hasErrors && hasValidEvents) {
+        toast({
+          title: 'Validation issues detected',
+          description: `Skipped ${totalErrors} invalid event${totalErrors === 1 ? '' : 's'}; ${allEvents.length} valid event${allEvents.length === 1 ? '' : 's'} ready to map.`,
+        });
+      }
+
+      if (!hasErrors && hasValidEvents) {
         setTimeout(() => {
           setActiveTab('schema');
         }, 500);
