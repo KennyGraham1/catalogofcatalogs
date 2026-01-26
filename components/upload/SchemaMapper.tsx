@@ -15,6 +15,7 @@ import { Switch } from '@/components/ui/switch';
 import { ArrowRight, AlertTriangle, Loader2 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
 
 interface SchemaMapperProps {
   validationResults: any;
@@ -191,7 +192,12 @@ export function SchemaMapper({ validationResults, isProcessing, onSchemaReady }:
                       <SelectItem value="unmapped">Do not map</SelectItem>
                       {standardFields.map((field) => (
                         <SelectItem key={field.id} value={field.id}>
-                          {field.name} {field.required ? '*' : ''}
+                          <span className="flex items-center gap-2">
+                            {field.name}
+                            {field.required && (
+                              <Badge variant="destructive" className="text-xs px-1">Required</Badge>
+                            )}
+                          </span>
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -220,14 +226,16 @@ export function SchemaMapper({ validationResults, isProcessing, onSchemaReady }:
                     disabled={field.required}
                   />
                   <div className="grid gap-1">
-                    <Label 
+                    <Label
                       htmlFor={`select-${field.id}`}
-                      className="font-medium flex items-center"
+                      className="font-medium flex items-center gap-2"
                     >
                       {field.name}
-                      {field.required && <span className="text-red-500 ml-1">*</span>}
+                      {field.required && (
+                        <Badge variant="destructive" className="text-xs px-1">Required</Badge>
+                      )}
                       {isRequiredFieldUnmapped(field.id) && (
-                        <AlertTriangle className="h-4 w-4 text-amber-500 ml-2" />
+                        <AlertTriangle className="h-4 w-4 text-amber-500" />
                       )}
                     </Label>
                     <p className="text-xs text-muted-foreground">{field.description}</p>

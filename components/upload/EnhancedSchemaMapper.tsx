@@ -472,7 +472,7 @@ export function EnhancedSchemaMapper({
                 <TooltipContent>
                   <p>Field mappings from Settings are being applied.</p>
                   <p className="text-xs text-muted-foreground">
-                    Fuzzy threshold: {((savedMappingConfig.fuzzyMatchThreshold || 0.6) * 100).toFixed(0)}%
+                    Fuzzy threshold: {((savedMappingConfig?.fuzzyMatchThreshold ?? 0.6) * 100).toFixed(0)}%
                   </p>
                 </TooltipContent>
               </Tooltip>
@@ -774,9 +774,14 @@ export function EnhancedSchemaMapper({
                             </PopoverContent>
                           </Popover>
                           {targetDef && (
-                            <p className="text-xs text-muted-foreground mt-1">
-                              {targetDef.description}
-                            </p>
+                            <div className="mt-1">
+                              {targetDef.required && (
+                                <Badge variant="destructive" className="text-xs mr-1">Required</Badge>
+                              )}
+                              <span className="text-xs text-muted-foreground">
+                                {targetDef.description}
+                              </span>
+                            </div>
                           )}
                         </div>
                       </div>
