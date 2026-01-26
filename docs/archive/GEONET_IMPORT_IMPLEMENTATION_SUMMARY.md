@@ -60,6 +60,39 @@ A robust import service that handles the entire import workflow:
 
 **Lines of Code**: 380
 
+#### Import Workflow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Import Page
+    participant API as /api/import/geonet
+    participant GNS as GeoNet Service
+    participant DB as Database
+
+    User->>UI: Select Filter Options (Time, Mag, etc.)
+    User->>UI: Click "Start Import"
+    UI->>API: POST /api/import/geonet
+    API->>GNS: Fetch Events (FDSN Service)
+    GNS-->>API: Return QuakeML/Text Data
+    
+    loop Every Event
+        API->>DB: Check for Duplicates (source_id)
+        alt New Event
+            API->>DB: Insert Event
+        else Existing Event
+            API->>DB: Update Event (if newer)
+        else Unchanged
+            API->>DB: Skip
+        end
+    end
+    
+    API->>DB: Save Import History
+    API-->>UI: Return Stats (New, Updated, Skipped)
+    UI-->>User: Show Success & Stats
+```
+
+
 ### 3. Database Schema Updates (`lib/db.ts`)
 
 Extended the database schema to support import functionality:
@@ -199,17 +232,17 @@ Comprehensive user guide covering:
 
 ## 📊 Implementation Statistics
 
-| Component | Files Created | Lines of Code | Status |
-|-----------|---------------|---------------|--------|
-| GeoNet API Client | 1 | 240 | ✅ Complete |
-| Import Service | 1 | 380 | ✅ Complete |
-| Database Updates | 1 (modified) | 150+ | ✅ Complete |
-| API Endpoints | 2 | 175 | ✅ Complete |
-| UI Components | 3 | 600+ | ✅ Complete |
-| Testing | 1 | 130 | ✅ Complete |
-| Migration | 1 | 130 | ✅ Complete |
-| Documentation | 2 | 600+ | ✅ Complete |
-| **TOTAL** | **12** | **2,400+** | **✅ Complete** |
+| Component         | Files Created | Lines of Code | Status         |
+| ----------------- | ------------- | ------------- | -------------- |
+| GeoNet API Client | 1             | 240           | ✅ Complete     |
+| Import Service    | 1             | 380           | ✅ Complete     |
+| Database Updates  | 1 (modified)  | 150+          | ✅ Complete     |
+| API Endpoints     | 2             | 175           | ✅ Complete     |
+| UI Components     | 3             | 600+          | ✅ Complete     |
+| Testing           | 1             | 130           | ✅ Complete     |
+| Migration         | 1             | 130           | ✅ Complete     |
+| Documentation     | 2             | 600+          | ✅ Complete     |
+| **TOTAL**         | **12**        | **2,400+**    | **✅ Complete** |
 
 ---
 

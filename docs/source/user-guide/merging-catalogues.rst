@@ -31,32 +31,25 @@ Key Features
 Merge Process Overview
 ======================
 
-.. code-block:: text
+.. mermaid::
 
-   Catalogue A    Catalogue B    Catalogue C
-       |              |              |
-       v              v              v
-   +----------------------------------------+
-   |           COMBINE ALL EVENTS           |
-   +----------------------------------------+
-                     |
-                     v
-   +----------------------------------------+
-   |          DETECT DUPLICATES             |
-   |     (time + location + magnitude)      |
-   +----------------------------------------+
-                     |
-                     v
-   +----------------------------------------+
-   |          RESOLVE CONFLICTS             |
-   |     (apply selected merge strategy)    |
-   +----------------------------------------+
-                     |
-                     v
-   +----------------------------------------+
-   |          MERGED CATALOGUE              |
-   |     (unique events with provenance)    |
-   +----------------------------------------+
+   flowchart TD
+       subgraph Inputs ["Input Catalogues"]
+           A[Catalogue A]
+           B[Catalogue B]
+           C[Catalogue C]
+       end
+       
+       Combine[COMBINE ALL EVENTS]
+       Detect[DETECT DUPLICATES<br/>(time + location + magnitude)]
+       Resolve[RESOLVE CONFLICTS<br/>(apply selected merge strategy)]
+       Result[MERGED CATALOGUE<br/>(unique events with provenance)]
+       
+       A & B & C --> Combine
+       Combine --> Detect
+       Detect --> Resolve
+       Resolve --> Result
+
 
 --------------------------
 Understanding Duplicates
@@ -121,23 +114,18 @@ Choose the strategy that best fits your use case:
 Strategy Decision Guide
 =======================
 
-.. code-block:: text
+.. mermaid::
 
-   Do you have one authoritative source?
-   |
-   |-- YES --> Use "Priority-Based"
-   |           (keeps authoritative data)
-   |
-   |-- NO --> Is one catalogue more recent?
-              |
-              |-- YES --> Use "Newest Data"
-              |           (keeps latest revisions)
-              |
-              |-- NO --> Which matters more?
-                         |
-                         |-- Metadata completeness --> "Most Complete"
-                         |
-                         |-- Statistical accuracy --> "Average Values"
+   flowchart TD
+       Start{Do you have one<br/>authoritative source?} -- YES --> Priority[Use Priority-Based<br/>(keeps authoritative data)]
+       Start -- NO --> Recent{Is one catalogue<br/>more recent?}
+       
+       Recent -- YES --> Newest[Use Newest Data<br/>(keeps latest revisions)]
+       Recent -- NO --> Matter{Which matters more?}
+       
+       Matter -- Metadata completeness --> Complete[Use Most Complete]
+       Matter -- Statistical accuracy --> Average[Use Average Values]
+
 
 Priority-Based Strategy
 =======================

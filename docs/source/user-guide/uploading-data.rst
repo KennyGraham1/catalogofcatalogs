@@ -18,17 +18,24 @@ data quality and consistency.
 Upload Workflow
 ===============
 
-.. code-block:: text
+.. mermaid::
 
-   +--------+    +--------+    +----------+    +--------+
-   | UPLOAD |--->| PARSE  |--->| VALIDATE |--->|  MAP   |
-   | File   |    | Format |    | Data     |    | Fields |
-   +--------+    +--------+    +----------+    +--------+
-                                                    |
-   +--------+    +--------+    +----------+         |
-   | RESULT |<---| STORE  |<---| METADATA |<--------+
-   | Report |    | Events |    | & Name   |
-   +--------+    +--------+    +----------+
+   flowchart LR
+       Upload[UPLOAD] --> Parse[PARSE]
+       Parse --> Validate[VALIDATE]
+       Validate --> Map[MAP]
+       Map --> Meta[METADATA]
+       Meta --> Store[STORE]
+       Store --> Result[RESULT]
+       
+       Upload -.-> File[File Selection]
+       Parse -.-> Format[Format Detection]
+       Validate -.-> Check[Data Constraint Check]
+       Map -.-> Field[Field Mapping]
+       Meta -.-> Name[Catalogue Name]
+       Store -.-> DB[Database Insert]
+       Result -.-> Report[Analysis Report]
+
 
 **Seven Stages:**
 

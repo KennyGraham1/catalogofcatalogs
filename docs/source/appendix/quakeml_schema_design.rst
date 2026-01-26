@@ -22,6 +22,54 @@ QuakeML 1.2 Structure
 
 Based on ObsPy implementation and QuakeML BED specification:
 
+.. mermaid::
+
+    erDiagram
+        EVENT ||--o{ ORIGIN : contains
+        EVENT ||--o{ MAGNITUDE : contains
+        EVENT ||--o{ FOCAL_MECHANISM : contains
+        EVENT ||--o{ PICK : contains
+        EVENT ||--o{ AMPLITUDE : contains
+        
+        ORIGIN ||--o{ ARRIVAL : contains
+        ORIGIN }|..|| EVENT : "preferred for"
+        
+        MAGNITUDE }|--|| ORIGIN : "derived from"
+        MAGNITUDE }|..|| EVENT : "preferred for"
+        
+        FOCAL_MECHANISM }|--|| ORIGIN : "triggered by"
+        FOCAL_MECHANISM }|..|| EVENT : "preferred for"
+        
+        ARRIVAL }|--|| PICK : "based on"
+        
+        EVENT {
+            string publicID
+            string type
+            datetime creationTime
+        }
+        
+        ORIGIN {
+            datetime time
+            float latitude
+            float longitude
+            float depth
+            json quality
+        }
+        
+        MAGNITUDE {
+            float mag
+            string type
+            string methodID
+        }
+        
+        FOCAL_MECHANISM {
+            float strike
+            float dip
+            float rake
+            json momentTensor
+        }
+
+
 Event (Top Level)
 ^^^^^^^^^^^^^^^^^
 
