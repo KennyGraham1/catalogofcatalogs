@@ -25,13 +25,13 @@ Based on ObsPy implementation and QuakeML BED specification:
 .. mermaid::
 
     erDiagram
-        EVENT ||--o{ ORIGIN : contains
-        EVENT ||--o{ MAGNITUDE : contains
-        EVENT ||--o{ FOCAL_MECHANISM : contains
-        EVENT ||--o{ PICK : contains
-        EVENT ||--o{ AMPLITUDE : contains
+        EVENT ||--o{ ORIGIN : "contains"
+        EVENT ||--o{ MAGNITUDE : "contains"
+        EVENT ||--o{ FOCAL_MECHANISM : "contains"
+        EVENT ||--o{ PICK : "contains"
+        EVENT ||--o{ AMPLITUDE : "contains"
         
-        ORIGIN ||--o{ ARRIVAL : contains
+        ORIGIN ||--o{ ARRIVAL : "contains"
         ORIGIN }|..|| EVENT : "preferred for"
         
         MAGNITUDE }|--|| ORIGIN : "derived from"

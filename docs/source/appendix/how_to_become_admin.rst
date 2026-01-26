@@ -14,6 +14,22 @@ The system has 4 user roles:
 - **Editor** - Create, edit, delete catalogues, import/merge data
 - **Admin** - Full system access including user management
 
+.. mermaid::
+
+   flowchart TD
+       Start([User Needs Admin Access]) --> Method{Method?}
+       
+       Method -- "Script (Rec)" --> Script["Run: npx tsx scripts/promote-to-admin.ts"]
+       Method -- "Database" --> DB["Update 'role' to 'admin' in MongoDB"]
+       Method -- "GUI" --> GUI["Existing Admin uses User Management UI"]
+       
+       Script --> Logout[Log Out & Log Back In]
+       DB --> Logout
+       GUI --> Logout
+       
+       Logout --> Verify[Verify 'User Management'<br/>menu appears]
+       Verify --> End([Done])
+
 **New users are created as Viewers by default.** To access admin features, you need to be promoted to admin.
 
 

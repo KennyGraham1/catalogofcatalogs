@@ -132,36 +132,32 @@ enhance the usefulness of your data.
 Platform at a Glance
 ------------------------
 
-.. code-block:: text
+.. mermaid::
 
-   +------------------------------------------------------------------+
-   |                 EARTHQUAKE CATALOGUE PLATFORM                     |
-   +------------------------------------------------------------------+
-   |                                                                   |
-   |  +----------+    +----------+    +----------+    +----------+    |
-   |  |  UPLOAD  |    |  IMPORT  |    |  MERGE   |    | ANALYTICS|    |
-   |  |          |    |          |    |          |    |          |    |
-   |  | CSV/JSON |    |  GeoNet  |    | Combine  |    |   Maps   |    |
-   |  | QuakeML  |    |   FDSN   |    | Dedupe   |    |  Charts  |    |
-   |  | GeoJSON  |    |  Service |    | Resolve  |    |  Quality |    |
-   |  +----+-----+    +----+-----+    +----+-----+    +----+-----+    |
-   |       |              |               |               |           |
-   |       +------+-------+-------+-------+-------+-------+           |
-   |              |               |               |                   |
-   |              v               v               v                   |
-   |        +-----+---------------+---------------+-----+             |
-   |        |              CATALOGUES                   |             |
-   |        |            MongoDB Storage                |             |
-   |        +---------------------+---------------------+             |
-   |                              |                                   |
-   |                              v                                   |
-   |                     +--------+--------+                          |
-   |                     |     EXPORT      |                          |
-   |                     | CSV / QuakeML   |                          |
-   |                     | JSON / GeoJSON  |                          |
-   |                     +-----------------+                          |
-   |                                                                   |
-   +------------------------------------------------------------------+
+   flowchart TD
+       subgraph Inputs ["Data Ingestion"]
+           Upload["UPLOAD<br/>(CSV, JSON, QuakeML)"]
+           Import["IMPORT<br/>(GeoNet FDSN)"]
+       end
+
+       subgraph Core ["Core Platform"]
+           Merge["MERGE & DEDUPE"]
+           Store["MONGODB STORAGE"]
+           Quality["QUALITY ASSESSMENT"]
+       end
+
+       subgraph Outputs ["Analysis & Export"]
+           Analytics["ANALYTICS<br/>(Maps, Charts, Stats)"]
+           Export["EXPORT<br/>(CSV, QuakeML, GeoJSON)"]
+       end
+
+       Upload --> Quality
+       Import --> Quality
+       Quality --> Merge
+       Merge --> Store
+       
+       Store --> Analytics
+       Store --> Export
 
 -----------
 Quick Links
