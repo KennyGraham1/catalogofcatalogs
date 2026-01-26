@@ -1,0 +1,1879 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Importing from GeoNet &mdash; Earthquake Catalogue Platform 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+      <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=bf700d87" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+      <script src="../_static/copybutton.js?v=f281be69"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Merging Catalogues" href="merging-catalogues.html" />
+    <link rel="prev" title="Uploading Data" href="uploading-data.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            Earthquake Catalogue Platform
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">User Guide</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="index.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#what-you-ll-learn">What You’ll Learn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#supported-formats">Supported Formats</a></li>
+<li class="toctree-l2"><a class="reference internal" href="index.html#quick-links">Quick Links</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#next-steps">Next Steps</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="getting-started.html">Getting Started</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="getting-started.html#prerequisites">Prerequisites</a></li>
+<li class="toctree-l4"><a class="reference internal" href="getting-started.html#installation">Installation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="getting-started.html#first-time-setup">First-Time Setup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="getting-started.html#next-steps">Next Steps</a></li>
+<li class="toctree-l4"><a class="reference internal" href="getting-started.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="uploading-data.html">Uploading Data</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="uploading-data.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="uploading-data.html#supported-formats">Supported Formats</a></li>
+<li class="toctree-l4"><a class="reference internal" href="uploading-data.html#upload-process">Upload Process</a></li>
+<li class="toctree-l4"><a class="reference internal" href="uploading-data.html#field-mapping-tips">Field Mapping Tips</a></li>
+<li class="toctree-l4"><a class="reference internal" href="uploading-data.html#validation-errors">Validation Errors</a></li>
+<li class="toctree-l4"><a class="reference internal" href="uploading-data.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">Importing from GeoNet</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#data-source">Data Source</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#import-process">Import Process</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#import-results">Import Results</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#import-history">Import History</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#duplicate-detection">Duplicate Detection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#best-practices">Best Practices</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="merging-catalogues.html">Merging Catalogues</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="merging-catalogues.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="merging-catalogues.html#merge-strategies">Merge Strategies</a></li>
+<li class="toctree-l4"><a class="reference internal" href="merging-catalogues.html#merge-process">Merge Process</a></li>
+<li class="toctree-l4"><a class="reference internal" href="merging-catalogues.html#merge-results">Merge Results</a></li>
+<li class="toctree-l4"><a class="reference internal" href="merging-catalogues.html#source-tracking">Source Tracking</a></li>
+<li class="toctree-l4"><a class="reference internal" href="merging-catalogues.html#best-practices">Best Practices</a></li>
+<li class="toctree-l4"><a class="reference internal" href="merging-catalogues.html#advanced-features">Advanced Features</a></li>
+<li class="toctree-l4"><a class="reference internal" href="merging-catalogues.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="visualization.html">Visualization</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="visualization.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="visualization.html#interactive-maps">Interactive Maps</a></li>
+<li class="toctree-l4"><a class="reference internal" href="visualization.html#charts-and-graphs">Charts and Graphs</a></li>
+<li class="toctree-l4"><a class="reference internal" href="visualization.html#seismological-analytics">Seismological Analytics</a></li>
+<li class="toctree-l4"><a class="reference internal" href="visualization.html#filtering-data">Filtering Data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="visualization.html#export-visualizations">Export Visualizations</a></li>
+<li class="toctree-l4"><a class="reference internal" href="visualization.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="exporting-data.html">Exporting Data</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="exporting-data.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="exporting-data.html#export-formats">Export Formats</a></li>
+<li class="toctree-l4"><a class="reference internal" href="exporting-data.html#export-process">Export Process</a></li>
+<li class="toctree-l4"><a class="reference internal" href="exporting-data.html#filtered-exports">Filtered Exports</a></li>
+<li class="toctree-l4"><a class="reference internal" href="exporting-data.html#best-practices">Best Practices</a></li>
+<li class="toctree-l4"><a class="reference internal" href="exporting-data.html#file-naming">File Naming</a></li>
+<li class="toctree-l4"><a class="reference internal" href="exporting-data.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="exporting-data.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html">Quality Assessment</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="quality-assessment.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="quality-assessment.html#quality-grades">Quality Grades</a></li>
+<li class="toctree-l4"><a class="reference internal" href="quality-assessment.html#quality-components">Quality Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="quality-assessment.html#quality-filtering">Quality Filtering</a></li>
+<li class="toctree-l4"><a class="reference internal" href="quality-assessment.html#quality-visualization">Quality Visualization</a></li>
+<li class="toctree-l4"><a class="reference internal" href="quality-assessment.html#improving-quality">Improving Quality</a></li>
+<li class="toctree-l4"><a class="reference internal" href="quality-assessment.html#quality-metrics-reference">Quality Metrics Reference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="quality-assessment.html#best-practices">Best Practices</a></li>
+<li class="toctree-l4"><a class="reference internal" href="quality-assessment.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="getting-started.html">Getting Started</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started.html#prerequisites">Prerequisites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started.html#installation">Installation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="getting-started.html#step-1-clone-the-repository">Step 1: Clone the Repository</a></li>
+<li class="toctree-l3"><a class="reference internal" href="getting-started.html#step-2-install-dependencies">Step 2: Install Dependencies</a></li>
+<li class="toctree-l3"><a class="reference internal" href="getting-started.html#step-3-configure-environment-variables">Step 3: Configure Environment Variables</a></li>
+<li class="toctree-l3"><a class="reference internal" href="getting-started.html#step-4-set-up-mongodb">Step 4: Set Up MongoDB</a></li>
+<li class="toctree-l3"><a class="reference internal" href="getting-started.html#step-5-initialize-the-database">Step 5: Initialize the Database</a></li>
+<li class="toctree-l3"><a class="reference internal" href="getting-started.html#step-6-start-the-development-server">Step 6: Start the Development Server</a></li>
+<li class="toctree-l3"><a class="reference internal" href="getting-started.html#step-7-access-the-application">Step 7: Access the Application</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started.html#first-time-setup">First-Time Setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="getting-started.html#create-an-admin-user">Create an Admin User</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started.html#next-steps">Next Steps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="getting-started.html#mongodb-connection-issues">MongoDB Connection Issues</a></li>
+<li class="toctree-l3"><a class="reference internal" href="getting-started.html#port-already-in-use">Port Already in Use</a></li>
+<li class="toctree-l3"><a class="reference internal" href="getting-started.html#missing-dependencies">Missing Dependencies</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="uploading-data.html">Uploading Data</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="uploading-data.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="uploading-data.html#supported-formats">Supported Formats</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="uploading-data.html#csv-and-txt-files">CSV and TXT Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="uploading-data.html#json-files">JSON Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="uploading-data.html#geojson-files">GeoJSON Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="uploading-data.html#quakeml-files">QuakeML Files</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="uploading-data.html#upload-process">Upload Process</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="uploading-data.html#step-1-navigate-to-upload-page">Step 1: Navigate to Upload Page</a></li>
+<li class="toctree-l3"><a class="reference internal" href="uploading-data.html#step-2-configure-parsing-options-optional">Step 2: Configure Parsing Options (Optional)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="uploading-data.html#step-3-select-your-file">Step 3: Select Your File</a></li>
+<li class="toctree-l3"><a class="reference internal" href="uploading-data.html#step-4-map-fields-to-schema">Step 4: Map Fields to Schema</a></li>
+<li class="toctree-l3"><a class="reference internal" href="uploading-data.html#step-5-name-your-catalogue">Step 5: Name Your Catalogue</a></li>
+<li class="toctree-l3"><a class="reference internal" href="uploading-data.html#step-6-upload-and-create">Step 6: Upload and Create</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="uploading-data.html#field-mapping-tips">Field Mapping Tips</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="uploading-data.html#common-field-names">Common Field Names</a></li>
+<li class="toctree-l3"><a class="reference internal" href="uploading-data.html#saving-templates">Saving Templates</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="uploading-data.html#validation-errors">Validation Errors</a></li>
+<li class="toctree-l2"><a class="reference internal" href="uploading-data.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Importing from GeoNet</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#data-source">Data Source</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#import-process">Import Process</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#step-1-navigate-to-import-page">Step 1: Navigate to Import Page</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-2-configure-time-range">Step 2: Configure Time Range</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-3-set-magnitude-filters">Step 3: Set Magnitude Filters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-4-set-depth-filters-optional">Step 4: Set Depth Filters (Optional)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-5-define-geographic-bounds-optional">Step 5: Define Geographic Bounds (Optional)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-6-configure-duplicate-handling">Step 6: Configure Duplicate Handling</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-7-name-your-catalogue">Step 7: Name Your Catalogue</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#step-8-start-import">Step 8: Start Import</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#import-results">Import Results</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#import-history">Import History</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#duplicate-detection">Duplicate Detection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#regular-updates">Regular Updates</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#quality-filtering">Quality Filtering</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#large-imports">Large Imports</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#no-events-found">No Events Found</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#timeout-errors">Timeout Errors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#duplicate-issues">Duplicate Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="merging-catalogues.html">Merging Catalogues</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="merging-catalogues.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="merging-catalogues.html#merge-strategies">Merge Strategies</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="merging-catalogues.html#priority-based">Priority-Based</a></li>
+<li class="toctree-l3"><a class="reference internal" href="merging-catalogues.html#average-values">Average Values</a></li>
+<li class="toctree-l3"><a class="reference internal" href="merging-catalogues.html#newest-data">Newest Data</a></li>
+<li class="toctree-l3"><a class="reference internal" href="merging-catalogues.html#most-complete">Most Complete</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="merging-catalogues.html#merge-process">Merge Process</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="merging-catalogues.html#step-1-navigate-to-merge-page">Step 1: Navigate to Merge Page</a></li>
+<li class="toctree-l3"><a class="reference internal" href="merging-catalogues.html#step-2-select-source-catalogues">Step 2: Select Source Catalogues</a></li>
+<li class="toctree-l3"><a class="reference internal" href="merging-catalogues.html#step-3-configure-matching-rules">Step 3: Configure Matching Rules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="merging-catalogues.html#step-4-choose-merge-strategy">Step 4: Choose Merge Strategy</a></li>
+<li class="toctree-l3"><a class="reference internal" href="merging-catalogues.html#step-5-name-merged-catalogue">Step 5: Name Merged Catalogue</a></li>
+<li class="toctree-l3"><a class="reference internal" href="merging-catalogues.html#step-6-execute-merge">Step 6: Execute Merge</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="merging-catalogues.html#merge-results">Merge Results</a></li>
+<li class="toctree-l2"><a class="reference internal" href="merging-catalogues.html#source-tracking">Source Tracking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="merging-catalogues.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="merging-catalogues.html#catalogue-selection">Catalogue Selection</a></li>
+<li class="toctree-l3"><a class="reference internal" href="merging-catalogues.html#threshold-tuning">Threshold Tuning</a></li>
+<li class="toctree-l3"><a class="reference internal" href="merging-catalogues.html#quality-considerations">Quality Considerations</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="merging-catalogues.html#advanced-features">Advanced Features</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="merging-catalogues.html#partial-merges">Partial Merges</a></li>
+<li class="toctree-l3"><a class="reference internal" href="merging-catalogues.html#iterative-merging">Iterative Merging</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="merging-catalogues.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="visualization.html">Visualization</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="visualization.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="visualization.html#interactive-maps">Interactive Maps</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="visualization.html#basic-map-view">Basic Map View</a></li>
+<li class="toctree-l3"><a class="reference internal" href="visualization.html#enhanced-map-view">Enhanced Map View</a></li>
+<li class="toctree-l3"><a class="reference internal" href="visualization.html#uncertainty-visualization">Uncertainty Visualization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="visualization.html#focal-mechanisms">Focal Mechanisms</a></li>
+<li class="toctree-l3"><a class="reference internal" href="visualization.html#station-coverage">Station Coverage</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="visualization.html#charts-and-graphs">Charts and Graphs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="visualization.html#magnitude-frequency-distribution">Magnitude-Frequency Distribution</a></li>
+<li class="toctree-l3"><a class="reference internal" href="visualization.html#depth-distribution">Depth Distribution</a></li>
+<li class="toctree-l3"><a class="reference internal" href="visualization.html#temporal-patterns">Temporal Patterns</a></li>
+<li class="toctree-l3"><a class="reference internal" href="visualization.html#quality-score-distribution">Quality Score Distribution</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="visualization.html#seismological-analytics">Seismological Analytics</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="visualization.html#b-value-analysis">b-value Analysis</a></li>
+<li class="toctree-l3"><a class="reference internal" href="visualization.html#completeness-magnitude">Completeness Magnitude</a></li>
+<li class="toctree-l3"><a class="reference internal" href="visualization.html#seismic-moment">Seismic Moment</a></li>
+<li class="toctree-l3"><a class="reference internal" href="visualization.html#energy-release">Energy Release</a></li>
+<li class="toctree-l3"><a class="reference internal" href="visualization.html#cluster-detection">Cluster Detection</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="visualization.html#filtering-data">Filtering Data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="visualization.html#export-visualizations">Export Visualizations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="visualization.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="exporting-data.html">Exporting Data</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="exporting-data.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="exporting-data.html#export-formats">Export Formats</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="exporting-data.html#csv-export">CSV Export</a></li>
+<li class="toctree-l3"><a class="reference internal" href="exporting-data.html#quakeml-export">QuakeML Export</a></li>
+<li class="toctree-l3"><a class="reference internal" href="exporting-data.html#json-export">JSON Export</a></li>
+<li class="toctree-l3"><a class="reference internal" href="exporting-data.html#geojson-export">GeoJSON Export</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="exporting-data.html#export-process">Export Process</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="exporting-data.html#via-web-interface">Via Web Interface</a></li>
+<li class="toctree-l3"><a class="reference internal" href="exporting-data.html#via-api">Via API</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="exporting-data.html#filtered-exports">Filtered Exports</a></li>
+<li class="toctree-l2"><a class="reference internal" href="exporting-data.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="exporting-data.html#format-selection">Format Selection</a></li>
+<li class="toctree-l3"><a class="reference internal" href="exporting-data.html#data-validation">Data Validation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="exporting-data.html#large-catalogues">Large Catalogues</a></li>
+<li class="toctree-l3"><a class="reference internal" href="exporting-data.html#metadata-preservation">Metadata Preservation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="exporting-data.html#file-naming">File Naming</a></li>
+<li class="toctree-l2"><a class="reference internal" href="exporting-data.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="exporting-data.html#export-fails">Export Fails</a></li>
+<li class="toctree-l3"><a class="reference internal" href="exporting-data.html#invalid-data">Invalid Data</a></li>
+<li class="toctree-l3"><a class="reference internal" href="exporting-data.html#format-compatibility">Format Compatibility</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="exporting-data.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="quality-assessment.html">Quality Assessment</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="quality-assessment.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quality-assessment.html#quality-grades">Quality Grades</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#grade-definitions">Grade Definitions</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="quality-assessment.html#quality-components">Quality Components</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#location-quality-35">1. Location Quality (35%)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#network-geometry-30">2. Network Geometry (30%)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#solution-quality-25">3. Solution Quality (25%)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#magnitude-quality-10">4. Magnitude Quality (10%)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="quality-assessment.html#quality-filtering">Quality Filtering</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#filter-by-quality-grade">Filter by Quality Grade</a></li>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#filter-by-specific-metrics">Filter by Specific Metrics</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="quality-assessment.html#quality-visualization">Quality Visualization</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#quality-score-distribution">Quality Score Distribution</a></li>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#quality-on-map">Quality on Map</a></li>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#quality-trends">Quality Trends</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="quality-assessment.html#improving-quality">Improving Quality</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#for-data-uploads">For Data Uploads</a></li>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#for-geonet-imports">For GeoNet Imports</a></li>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#for-merged-catalogues">For Merged Catalogues</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="quality-assessment.html#quality-metrics-reference">Quality Metrics Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#azimuthal-gap">Azimuthal Gap</a></li>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#phase-count">Phase Count</a></li>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#station-count">Station Count</a></li>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#rms-residual">RMS Residual</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="quality-assessment.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#for-analysis">For Analysis</a></li>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#for-visualization">For Visualization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#for-export">For Export</a></li>
+<li class="toctree-l3"><a class="reference internal" href="quality-assessment.html#for-reporting">For Reporting</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="quality-assessment.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Developer Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../developer-guide/index.html">Developer Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/index.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/index.html#what-you-ll-learn">What You’ll Learn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/index.html#technology-stack">Technology Stack</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/index.html#frontend">Frontend</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/index.html#backend">Backend</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/index.html#testing">Testing</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/index.html#project-structure">Project Structure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/index.html#quick-links">Quick Links</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/index.html#next-steps">Next Steps</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/architecture.html">Architecture</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/architecture.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/architecture.html#system-architecture">System Architecture</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/architecture.html#data-flow-architecture">Data Flow Architecture</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/architecture.html#component-architecture">Component Architecture</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/architecture.html#database-architecture">Database Architecture</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/architecture.html#security-architecture">Security Architecture</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/architecture.html#performance-architecture">Performance Architecture</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/architecture.html#deployment-architecture">Deployment Architecture</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/architecture.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/setup.html">Development Setup</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/setup.html#prerequisites">Prerequisites</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/setup.html#clone-and-install">Clone and Install</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/setup.html#environment-configuration">Environment Configuration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/setup.html#start-the-development-server">Start the Development Server</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/setup.html#database-initialization">Database Initialization</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/setup.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/database-schema.html">Database Schema</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/database-schema.html#quakeml-1-2-database-schema-design">QuakeML 1.2 Database Schema Design</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/api-development.html">API Development</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/api-development.html#route-structure">Route Structure</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/api-development.html#recommended-conventions">Recommended Conventions</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/api-development.html#example-skeleton">Example Skeleton</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/api-development.html#testing-and-documentation">Testing and Documentation</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html">Testing</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#quick-test-guide-earthquake-catalogue-fixes">Quick Test Guide - Earthquake Catalogue Fixes</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#testing-reliability-implementation-complete">Testing &amp; Reliability Implementation - COMPLETE ✅</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/contributing.html">Contributing</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#contributing-to-earthquake-catalogue-platform">Contributing to Earthquake Catalogue Platform</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/implementation-notes/index.html">Implementation Notes</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/implementation-notes/geonet-baseline-setup.html">GeoNet Baseline Catalogue Setup Guide</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/implementation-notes/geonet-import-implementation-summary.html">GeoNet Import Feature - Implementation Summary</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/implementation-notes/geonet-quality-score-analysis.html">GeoNet Quality Score System - Analysis &amp; Implementation Plan</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/implementation-notes/geonet-qs-implementation-guide.html">GeoNet Quality Score Implementation Guide</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/implementation-notes/geonet-qs-implementation-summary.html">GeoNet Quality Score Implementation - Summary</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/implementation-notes/qc-visualization-implementation.html">QC Visualization Implementation for Merge Operations</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/implementation-notes/merge-improvements.html">Earthquake Catalogue Merge Algorithm Improvements</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/implementation-notes/upload-audit-report.html">File Upload Implementation Audit Report</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/implementation-notes/default-field-mappings.html">Default Field Mappings</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../developer-guide/architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/architecture.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/architecture.html#system-architecture">System Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/architecture.html#high-level-components">High-Level Components</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/architecture.html#data-flow-architecture">Data Flow Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/architecture.html#upload-data-flow">Upload Data Flow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/architecture.html#import-data-flow">Import Data Flow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/architecture.html#merge-data-flow">Merge Data Flow</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/architecture.html#component-architecture">Component Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/architecture.html#frontend-components">Frontend Components</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/architecture.html#backend-api-routes">Backend API Routes</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/architecture.html#core-libraries">Core Libraries</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/architecture.html#database-architecture">Database Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/architecture.html#collections">Collections</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/architecture.html#indexes">Indexes</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/architecture.html#security-architecture">Security Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/architecture.html#authentication">Authentication</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/architecture.html#authorization">Authorization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/architecture.html#api-protection">API Protection</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/architecture.html#performance-architecture">Performance Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/architecture.html#optimization-strategies">Optimization Strategies</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/architecture.html#scalability">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/architecture.html#deployment-architecture">Deployment Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/architecture.html#production-environment">Production Environment</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/architecture.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../developer-guide/setup.html">Development Setup</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/setup.html#prerequisites">Prerequisites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/setup.html#clone-and-install">Clone and Install</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/setup.html#environment-configuration">Environment Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/setup.html#start-the-development-server">Start the Development Server</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/setup.html#database-initialization">Database Initialization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/setup.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../developer-guide/database-schema.html">Database Schema</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/database-schema.html#quakeml-1-2-database-schema-design">QuakeML 1.2 Database Schema Design</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/database-schema.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/database-schema.html#design-principles">Design Principles</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/database-schema.html#quakeml-1-2-structure">QuakeML 1.2 Structure</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/database-schema.html#event-top-level">Event (Top Level)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/database-schema.html#origin-location-information">Origin (Location Information)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/database-schema.html#magnitude">Magnitude</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/database-schema.html#pick-phase-arrival-time">Pick (Phase Arrival Time)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/database-schema.html#arrival-association-of-pick-with-origin">Arrival (Association of Pick with Origin)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/database-schema.html#focalmechanism">FocalMechanism</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/database-schema.html#amplitude">Amplitude</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/database-schema.html#stationmagnitude">StationMagnitude</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/database-schema.html#proposed-database-schema">Proposed Database Schema</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/database-schema.html#core-columns-frequently-queried">Core Columns (Frequently Queried)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/database-schema.html#indexes-for-performance">Indexes for Performance</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/database-schema.html#typescript-interfaces">TypeScript Interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/database-schema.html#migration-strategy">Migration Strategy</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/database-schema.html#benefits">Benefits</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../developer-guide/api-development.html">API Development</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/api-development.html#route-structure">Route Structure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/api-development.html#recommended-conventions">Recommended Conventions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/api-development.html#example-skeleton">Example Skeleton</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/api-development.html#testing-and-documentation">Testing and Documentation</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../developer-guide/testing.html">Testing</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/testing.html#quick-test-guide-earthquake-catalogue-fixes">Quick Test Guide - Earthquake Catalogue Fixes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#what-was-fixed">🎯 What Was Fixed</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#test-data-available">📊 Test Data Available</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#quick-test-steps">🚀 Quick Test Steps</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#view-catalogues">1. View Catalogues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#test-geographic-filtering">2. Test Geographic Filtering</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#test-focal-mechanisms">3. Test Focal Mechanisms</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#catalogue-ids">📁 Catalogue IDs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#verification-queries">🔍 Verification Queries</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#count-events-by-region">Count events by region:</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#count-events-with-focal-mechanisms">Count events with focal mechanisms:</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#view-a-focal-mechanism">View a focal mechanism:</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#success-criteria">✅ Success Criteria</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#re-import-data">🔄 Re-import Data</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#clean-up">🗑️ Clean Up</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/testing.html#testing-reliability-implementation-complete">Testing &amp; Reliability Implementation - COMPLETE ✅</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#executive-summary">Executive Summary</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#task-1-fix-6-minor-test-failures">Task 1: Fix 6 Minor Test Failures ✅</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#issues-fixed">Issues Fixed</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#results">Results</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#task-2-add-api-route-tests">Task 2: Add API Route Tests ✅</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#tests-created">Tests Created</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#test-approach">Test Approach</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#id1">Results</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#task-3-add-component-tests">Task 3: Add Component Tests ✅</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#id2">Tests Created</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#id3">Test Approach</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#id4">Results</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#task-4-set-up-ci-cd-pipeline">Task 4: Set Up CI/CD Pipeline ✅</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#github-actions-workflows">GitHub Actions Workflows</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#documentation">Documentation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#id5">Results</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#overall-results">Overall Results</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#test-statistics">Test Statistics</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#test-breakdown">Test Breakdown</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#test-files">Test Files</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#documentation-created">Documentation Created</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#ci-cd-files-created">CI/CD Files Created</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#quality-metrics">Quality Metrics</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#test-coverage">Test Coverage</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#code-quality">Code Quality</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#ci-cd-quality">CI/CD Quality</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#production-readiness">Production Readiness</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#id6">Testing ✅</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#ci-cd">CI/CD ✅</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#reliability">Reliability ✅</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#id7">Documentation ✅</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#next-steps-optional-enhancements">Next Steps (Optional Enhancements)</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#implement-placeholder-tests-priority-medium">1. Implement Placeholder Tests (Priority: Medium)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#e2e-testing-priority-low">2. E2E Testing (Priority: Low)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#performance-testing-priority-low">3. Performance Testing (Priority: Low)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/testing.html#advanced-monitoring-priority-low">4. Advanced Monitoring (Priority: Low)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/testing.html#conclusion">Conclusion</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../developer-guide/contributing.html">Contributing</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../developer-guide/contributing.html#contributing-to-earthquake-catalogue-platform">Contributing to Earthquake Catalogue Platform</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/contributing.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/contributing.html#code-of-conduct">Code of Conduct</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/contributing.html#getting-started">Getting Started</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#prerequisites">Prerequisites</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#development-setup">Development Setup</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/contributing.html#development-workflow">Development Workflow</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#branch-naming">Branch Naming</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#local-development">Local Development</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/contributing.html#coding-standards">Coding Standards</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#typescript">TypeScript</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#react-components">React Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#file-organization">File Organization</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#styling">Styling</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/contributing.html#testing-guidelines">Testing Guidelines</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#test-structure">Test Structure</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#test-coverage">Test Coverage</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#running-tests">Running Tests</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/contributing.html#commit-guidelines">Commit Guidelines</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#commit-message-format">Commit Message Format</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#pre-commit-checks">Pre-commit Checks</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/contributing.html#pull-request-process">Pull Request Process</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#before-submitting">Before Submitting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#pr-description-template">PR Description Template</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#review-process">Review Process</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/contributing.html#issue-guidelines">Issue Guidelines</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#bug-reports">Bug Reports</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#feature-requests">Feature Requests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../developer-guide/contributing.html#questions">Questions</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../developer-guide/contributing.html#getting-help">Getting Help</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../api-reference/index.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/catalogues.html">Catalogues API</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/catalogues.html#list-catalogues">List Catalogues</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/catalogues.html#create-catalogue">Create Catalogue</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/catalogues.html#get-catalogue">Get Catalogue</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/catalogues.html#update-catalogue">Update Catalogue</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/catalogues.html#delete-catalogue">Delete Catalogue</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/events.html">Events API</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/events.html#get-catalogue-events">Get Catalogue Events</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/events.html#cursor-based-pagination-recommended-for-large-datasets">1. Cursor-Based Pagination (Recommended for Large Datasets)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/events.html#page-based-pagination">2. Page-Based Pagination</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/events.html#limit-offset-pagination">3. Limit/Offset Pagination</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/events.html#get-filtered-events">Get Filtered Events</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/import.html">Import API</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/import.html#import-from-geonet">Import from GeoNet</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/import.html#get-import-history">Get Import History</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/upload.html">Upload API</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/upload.html#upload-file">Upload File</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/merge.html">Merge API</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/merge.html#merge-catalogues">Merge Catalogues</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/export.html">Export API</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/export.html#export-catalogue">Export Catalogue</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/health.html">Health Check API</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/health.html#readiness-check">Readiness Check</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/errors.html">Error Responses</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/errors.html#error-response-format">Error Response Format</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/errors.html#http-status-codes">HTTP Status Codes</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/errors.html#common-error-codes">Common Error Codes</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/authentication.html">Authentication API Overview</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/authentication.html#authentication-and-authorization-system">Authentication and Authorization System</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#user-roles">User Roles</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#setup-and-installation">Setup and Installation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#api-protection">API Protection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#frontend-usage">Frontend Usage</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#backend-usage">Backend Usage</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#user-management">User Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#security-best-practices">Security Best Practices</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#api-reference">API Reference</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/index.html#security-features">Security Features</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/index.html#id1">Security Features</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/index.html#rate-limiting">Rate Limiting</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../api-reference/catalogues.html">Catalogues API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/catalogues.html#list-catalogues">List Catalogues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/catalogues.html#create-catalogue">Create Catalogue</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/catalogues.html#get-catalogue">Get Catalogue</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/catalogues.html#update-catalogue">Update Catalogue</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/catalogues.html#delete-catalogue">Delete Catalogue</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../api-reference/events.html">Events API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/events.html#get-catalogue-events">Get Catalogue Events</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/events.html#cursor-based-pagination-recommended-for-large-datasets">1. Cursor-Based Pagination (Recommended for Large Datasets)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/events.html#page-based-pagination">2. Page-Based Pagination</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/events.html#limit-offset-pagination">3. Limit/Offset Pagination</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/events.html#get-filtered-events">Get Filtered Events</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../api-reference/import.html">Import API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/import.html#import-from-geonet">Import from GeoNet</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/import.html#get-import-history">Get Import History</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../api-reference/upload.html">Upload API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/upload.html#upload-file">Upload File</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../api-reference/merge.html">Merge API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/merge.html#merge-catalogues">Merge Catalogues</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../api-reference/export.html">Export API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/export.html#export-catalogue">Export Catalogue</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../api-reference/authentication.html">Authentication API Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api-reference/authentication.html#authentication-and-authorization-system">Authentication and Authorization System</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/authentication.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/authentication.html#user-roles">User Roles</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#admin">1. Admin</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#editor">2. Editor</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#viewer">3. Viewer</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#guest">4. Guest</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/authentication.html#setup-and-installation">Setup and Installation</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#environment-variables">1. Environment Variables</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#run-database-migration">2. Run Database Migration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#change-default-admin-password">3. Change Default Admin Password</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/authentication.html#api-protection">API Protection</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#protected-endpoints">Protected Endpoints</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#public-endpoints">Public Endpoints</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/authentication.html#frontend-usage">Frontend Usage</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#authentication-hooks">Authentication Hooks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#permission-gate-component">Permission Gate Component</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#protected-routes">Protected Routes</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/authentication.html#backend-usage">Backend Usage</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#api-route-protection">API Route Protection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#available-middleware-functions">Available Middleware Functions</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/authentication.html#user-management">User Management</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#admin-user-management-page">Admin User Management Page</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#programmatic-user-management">Programmatic User Management</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/authentication.html#security-best-practices">Security Best Practices</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/authentication.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#authentication-required-error">“Authentication required” error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#insufficient-permissions-error">“Insufficient permissions” error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api-reference/authentication.html#migration-fails">Migration fails</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../api-reference/authentication.html#api-reference">API Reference</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Deployment &amp; Administration</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/index.html">Deployment &amp; Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/environment-setup.html">Environment Setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/environment-setup.html#required-variables">Required Variables</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/environment-setup.html#optional-variables">Optional Variables</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/environment-setup.html#database-initialization">Database Initialization</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/mongodb-atlas.html">MongoDB Atlas Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/docker.html">Docker Deployment</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#prerequisites">Prerequisites</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#quick-start">Quick Start</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#environment-configuration">Environment Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#required-variables">Required Variables</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#optional-variables">Optional Variables</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#service-architecture">Service Architecture</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#application-service-app">Application Service (app)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#database-service-mongodb">Database Service (mongodb)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#nginx-service-nginx">Nginx Service (nginx)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#deployment-options">Deployment Options</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#option-1-full-stack-with-mongodb">Option 1: Full Stack (with MongoDB)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#option-2-application-only-with-mongodb-atlas">Option 2: Application Only (with MongoDB Atlas)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#option-3-with-nginx-reverse-proxy">Option 3: With Nginx Reverse Proxy</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#health-checks">Health Checks</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#application-health">Application Health</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#container-health-status">Container Health Status</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#management-commands">Management Commands</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#view-logs">View Logs</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#stop-services">Stop Services</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#restart-services">Restart Services</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#update-application">Update Application</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#database-backup">Database Backup</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#backup-mongodb-data">Backup MongoDB Data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#restore-mongodb-data">Restore MongoDB Data</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#container-won-t-start">Container Won’t Start</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#database-connection-failed">Database Connection Failed</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#out-of-memory">Out of Memory</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/docker.html#permission-denied">Permission Denied</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#security-best-practices">Security Best Practices</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/vercel.html">Vercel Deployment</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/vercel.html#vercel-deployment-guide">Vercel Deployment Guide</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#prerequisites">Prerequisites</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#mongodb-atlas-setup">MongoDB Atlas Setup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#next-js-configuration">Next.js Configuration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#environment-variables">Environment Variables</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#database-initialization">Database Initialization</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#deployment-process">Deployment Process</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#post-deployment-verification">Post-Deployment Verification</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#production-checklist">Production Checklist</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#cost-considerations">Cost Considerations</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/ci-cd.html">CI/CD Setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/ci-cd.html#ci-cd-pipeline-setup">CI/CD Pipeline Setup</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/ci-cd.html#overview">Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/ci-cd.html#github-actions-workflows">GitHub Actions Workflows</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/ci-cd.html#pre-commit-hooks">Pre-commit Hooks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/ci-cd.html#test-coverage">Test Coverage</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/ci-cd.html#continuous-integration-best-practices">Continuous Integration Best Practices</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/ci-cd.html#deployment-pipeline">Deployment Pipeline</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/ci-cd.html#monitoring-alerts">Monitoring &amp; Alerts</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/ci-cd.html#local-development-workflow">Local Development Workflow</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/ci-cd.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/ci-cd.html#customization">Customization</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/ci-cd.html#security-considerations">Security Considerations</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/ci-cd.html#performance-optimization">Performance Optimization</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/ci-cd.html#metrics-analytics">Metrics &amp; Analytics</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/ci-cd.html#future-enhancements">Future Enhancements</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/ci-cd.html#resources">Resources</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/ci-cd.html#support">Support</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/geonet-baseline.html">GeoNet Baseline Setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/geonet-baseline.html#geonet-baseline-catalogue-setup-guide">GeoNet Baseline Catalogue Setup Guide</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/geonet-baseline.html#overview">📋 Overview</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/geonet-baseline.html#quick-start">🚀 Quick Start</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/geonet-baseline.html#import-configuration-options">📊 Import Configuration Options</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/geonet-baseline.html#updating-the-baseline-catalogue">🔄 Updating the Baseline Catalogue</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/geonet-baseline.html#data-structure">📁 Data Structure</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/geonet-baseline.html#testing-the-import">🧪 Testing the Import</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/geonet-baseline.html#api-documentation">📖 API Documentation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/geonet-baseline.html#use-cases">🎯 Use Cases</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/geonet-baseline.html#important-notes">⚠️ Important Notes</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/geonet-baseline.html#troubleshooting">🔧 Troubleshooting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/geonet-baseline.html#additional-resources">📚 Additional Resources</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/geonet-baseline.html#summary">🎉 Summary</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/environment-setup.html">Environment Setup</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/environment-setup.html#required-variables">Required Variables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/environment-setup.html#optional-variables">Optional Variables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/environment-setup.html#database-initialization">Database Initialization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/vercel.html">Vercel Deployment</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/vercel.html#vercel-deployment-guide">Vercel Deployment Guide</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/vercel.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/vercel.html#prerequisites">Prerequisites</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/vercel.html#mongodb-atlas-setup">MongoDB Atlas Setup</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#existing-configuration">Existing Configuration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#verify-network-access-for-vercel">Verify Network Access for Vercel</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#optional-create-new-cluster">(Optional) Create New Cluster</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#atlas-optimizations">Atlas Optimizations</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/vercel.html#next-js-configuration">Next.js Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#vercel-specific-changes-optional">Vercel-Specific Changes (Optional)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/vercel.html#environment-variables">Environment Variables</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#required-variables">Required Variables</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#setting-variables-in-vercel">Setting Variables in Vercel</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#generating-nextauth-secret">Generating NEXTAUTH_SECRET</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/vercel.html#database-initialization">Database Initialization</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#option-1-run-locally-recommended">Option 1: Run Locally (Recommended)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#option-2-via-mongodb-compass">Option 2: Via MongoDB Compass</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#option-3-via-atlas-ui">Option 3: Via Atlas UI</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/vercel.html#deployment-process">Deployment Process</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#step-1-connect-repository-to-vercel">Step 1: Connect Repository to Vercel</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#step-2-configure-build-settings">Step 2: Configure Build Settings</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#step-3-add-environment-variables">Step 3: Add Environment Variables</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#step-4-deploy">Step 4: Deploy</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#step-5-set-up-custom-domain-optional">Step 5: Set Up Custom Domain (Optional)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/vercel.html#post-deployment-verification">Post-Deployment Verification</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#check-health-endpoint">1. Check Health Endpoint</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#test-mongodb-connection">2. Test MongoDB Connection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#verify-key-features">3. Verify Key Features</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#check-vercel-logs">4. Check Vercel Logs</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/vercel.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#debug-mode">Debug Mode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#getting-help">Getting Help</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/vercel.html#production-checklist">Production Checklist</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/vercel.html#cost-considerations">Cost Considerations</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#vercel-pricing">Vercel Pricing</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../deployment/vercel.html#mongodb-atlas-pricing">MongoDB Atlas Pricing</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/docker.html">Docker Deployment</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/docker.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/docker.html#prerequisites">Prerequisites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/docker.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/docker.html#environment-configuration">Environment Configuration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#required-variables">Required Variables</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#optional-variables">Optional Variables</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/docker.html#service-architecture">Service Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#application-service-app">Application Service (app)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#database-service-mongodb">Database Service (mongodb)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#nginx-service-nginx">Nginx Service (nginx)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/docker.html#deployment-options">Deployment Options</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#option-1-full-stack-with-mongodb">Option 1: Full Stack (with MongoDB)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#option-2-application-only-with-mongodb-atlas">Option 2: Application Only (with MongoDB Atlas)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#option-3-with-nginx-reverse-proxy">Option 3: With Nginx Reverse Proxy</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/docker.html#health-checks">Health Checks</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#application-health">Application Health</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#container-health-status">Container Health Status</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/docker.html#management-commands">Management Commands</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#view-logs">View Logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#stop-services">Stop Services</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#restart-services">Restart Services</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#update-application">Update Application</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/docker.html#database-backup">Database Backup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#backup-mongodb-data">Backup MongoDB Data</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#restore-mongodb-data">Restore MongoDB Data</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/docker.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#container-won-t-start">Container Won’t Start</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#database-connection-failed">Database Connection Failed</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#out-of-memory">Out of Memory</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../deployment/docker.html#permission-denied">Permission Denied</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/docker.html#security-best-practices">Security Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../deployment/docker.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../deployment/mongodb-atlas.html">MongoDB Atlas Setup</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../administration/authentication.html">Authentication &amp; Roles</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../administration/authentication.html#getting-started-with-authentication">Getting Started with Authentication</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#quick-start">Quick Start</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#set-environment-variables">1. Set Environment Variables</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#run-the-migration">2. Run the Migration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#start-the-development-server">3. Start the Development Server</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#test-the-authentication">4. Test the Authentication</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#testing-api-protection">Testing API Protection</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#test-with-curl">Test with curl</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#test-with-frontend">Test with Frontend</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#user-roles-summary">User Roles Summary</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#common-tasks">Common Tasks</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#change-user-role">Change User Role</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#create-additional-admin-users">Create Additional Admin Users</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#reset-password-manual">Reset Password (Manual)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#next-steps">Next Steps</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#database-not-initialized-error">“Database not initialized” error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#can-t-login">Can’t login</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#insufficient-permissions-error">“Insufficient permissions” error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#migration-fails">Migration fails</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#security-checklist">Security Checklist</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#support">Support</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../administration/authentication.html#authentication-and-authorization-system">Authentication and Authorization System</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#user-roles">User Roles</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#admin">1. Admin</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#editor">2. Editor</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#viewer">3. Viewer</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#guest">4. Guest</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#setup-and-installation">Setup and Installation</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#environment-variables">1. Environment Variables</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#run-database-migration">2. Run Database Migration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#change-default-admin-password">3. Change Default Admin Password</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#api-protection">API Protection</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#protected-endpoints">Protected Endpoints</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#public-endpoints">Public Endpoints</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#frontend-usage">Frontend Usage</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#authentication-hooks">Authentication Hooks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#permission-gate-component">Permission Gate Component</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#protected-routes">Protected Routes</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#backend-usage">Backend Usage</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#api-route-protection">API Route Protection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#available-middleware-functions">Available Middleware Functions</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#user-management">User Management</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#admin-user-management-page">Admin User Management Page</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#programmatic-user-management">Programmatic User Management</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#security-best-practices">Security Best Practices</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#id9">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#authentication-required-error">“Authentication required” error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#id10">“Insufficient permissions” error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#id11">Migration fails</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#api-reference">API Reference</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../administration/authentication.html#authentication-system-fully-working">✅ Authentication System - FULLY WORKING!</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#success-confirmation">Success Confirmation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#what-you-should-see-on-the-profile-page">What You Should See on the Profile Page</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#your-current-user">Your Current User</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#complete-authentication-features-now-available">Complete Authentication Features Now Available</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#user-registration-register">1. User Registration (<cite>/register</cite>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#user-login-login">2. User Login (<cite>/login</cite>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#user-profile-profile">3. User Profile (<cite>/profile</cite>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#admin-user-management-admin-users">4. Admin User Management (<cite>/admin/users</cite>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#protected-api-routes">5. Protected API Routes</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#frontend-permission-controls">6. Frontend Permission Controls</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#testing-the-full-system">Testing the Full System</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#test-1-registration">Test 1: Registration ✅</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#test-2-login">Test 2: Login ✅</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#test-3-profile">Test 3: Profile ✅</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#test-4-role-based-access">Test 4: Role-Based Access</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#test-5-sign-out">Test 5: Sign Out</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#id18">Next Steps</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#create-an-admin-user">1. Create an Admin User</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#test-admin-features">2. Test Admin Features</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#test-api-protection">3. Test API Protection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#create-more-users">4. Create More Users</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#system-architecture">System Architecture</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#authentication-flow">Authentication Flow</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#role-hierarchy">Role Hierarchy</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#permission-system">Permission System</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#files-created-modified">Files Created/Modified</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#created-26-files">Created (26 files)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/authentication.html#modified-7-files">Modified (7 files)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#documentation">Documentation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#id19">Support</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/authentication.html#congratulations">Congratulations! 🎉</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../administration/user-management.html">User Management</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../administration/user-management.html#how-to-become-an-admin">How to Become an Admin</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#method-1-using-the-promotion-script-recommended">Method 1: Using the Promotion Script (Recommended)</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-1-find-your-email">Step 1: Find Your Email</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-2-run-the-promotion-script">Step 2: Run the Promotion Script</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-3-log-out-and-log-back-in">Step 3: Log Out and Log Back In</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#method-2-using-mongodb-shell">Method 2: Using MongoDB Shell</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-1-connect-to-mongodb">Step 1: Connect to MongoDB</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-2-update-the-user-role">Step 2: Update the User Role</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-3-verify-the-change">Step 3: Verify the Change</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-4-log-out-and-log-back-in">Step 4: Log Out and Log Back In</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#method-3-using-mongodb-compass-gui">Method 3: Using MongoDB Compass (GUI)</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#id1">Step 1: Connect to MongoDB</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-2-navigate-to-users-collection">Step 2: Navigate to Users Collection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-3-find-and-edit-your-user">Step 3: Find and Edit Your User</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#id2">Step 4: Log Out and Log Back In</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#method-4-admin-user-management-once-you-have-an-admin">Method 4: Admin User Management (Once You Have an Admin)</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-1-log-in-as-admin">Step 1: Log in as Admin</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-2-go-to-user-management">Step 2: Go to User Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-3-promote-a-user">Step 3: Promote a User</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#verifying-admin-access">Verifying Admin Access</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#in-the-user-menu-top-right-avatar">In the User Menu (Top Right Avatar)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#admin-features-you-can-access">Admin Features You Can Access</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#admin-permissions">Admin Permissions</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#user-not-found-error">“User not found” Error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#changes-not-taking-effect">Changes Not Taking Effect</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#can-t-connect-to-mongodb">Can’t Connect to MongoDB</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#script-errors">Script Errors</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#quick-reference">Quick Reference</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#promote-user-to-admin-quick-command">Promote User to Admin (Quick Command)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#list-all-users">List All Users</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#check-your-current-role">Check Your Current Role</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#security-notes">Security Notes</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#next-steps">Next Steps</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../administration/user-management.html#change-password-feature">Change Password Feature</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#id3">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#how-to-change-your-password">How to Change Your Password</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#method-1-from-the-user-menu-recommended">Method 1: From the User Menu (Recommended)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#method-2-from-your-profile-page">Method 2: From Your Profile Page</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#method-3-direct-url">Method 3: Direct URL</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#change-password-form">Change Password Form</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#current-password">1. Current Password</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#new-password">2. New Password</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#confirm-new-password">3. Confirm New Password</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#password-requirements">Password Requirements</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#step-by-step-instructions">Step-by-Step Instructions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-1-access-the-change-password-page">Step 1: Access the Change Password Page</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-2-enter-your-current-password">Step 2: Enter Your Current Password</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-3-enter-your-new-password">Step 3: Enter Your New Password</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-4-confirm-your-new-password">Step 4: Confirm Your New Password</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-5-submit-the-form">Step 5: Submit the Form</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#step-6-success">Step 6: Success!</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#common-errors-and-solutions">Common Errors and Solutions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#current-password-is-incorrect">“Current password is incorrect”</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#new-password-must-be-at-least-8-characters-long">“New password must be at least 8 characters long”</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#new-passwords-do-not-match">“New passwords do not match”</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#new-password-must-be-different-from-current-password">“New password must be different from current password”</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#security-best-practices">Security Best Practices</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#when-to-change-your-password">When to Change Your Password</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#creating-strong-passwords">Creating Strong Passwords</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#for-administrators">For Administrators</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#resetting-user-passwords">Resetting User Passwords</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#api-endpoint">API Endpoint</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#id4">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#can-t-access-the-change-password-page">Can’t Access the Change Password Page</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#form-not-submitting">Form Not Submitting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#password-changed-but-can-t-login">Password Changed But Can’t Login</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#related-documentation">Related Documentation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#id5">Quick Reference</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#access-change-password-page">Access Change Password Page</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#id6">Password Requirements</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#common-commands">Common Commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../administration/user-management.html#password-change-feature-implementation-complete">✅ Password Change Feature - Implementation Complete!</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#id7">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#what-was-implemented">🎯 What Was Implemented</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#change-password-page-change-password">1. <strong>Change Password Page</strong> (<cite>/change-password</cite>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#api-endpoint-api-auth-change-password">2. <strong>API Endpoint</strong> (<cite>/api/auth/change-password</cite>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#user-interface-integration">3. <strong>User Interface Integration</strong></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#files-created">📁 Files Created</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#files-modified">📝 Files Modified</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#how-to-use">🚀 How to Use</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#for-users">For Users</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#id8">Password Requirements</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#security-features">🔐 Security Features</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#user-experience">🎨 User Experience</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#visual-features">Visual Features</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#validation">Validation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#navigation">Navigation</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#testing-the-feature">🧪 Testing the Feature</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#test-steps">Test Steps</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#test-cases">Test Cases</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#api-details">📊 API Details</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#endpoint">Endpoint</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#request">Request</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#success-response-200">Success Response (200)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#error-responses">Error Responses</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#id9">🎯 Next Steps</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#for-you-user">For You (User)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../administration/user-management.html#for-future-enhancements-optional">For Future Enhancements (Optional)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#documentation">📚 Documentation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/user-management.html#summary">✅ Summary</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../administration/monitoring.html">Monitoring</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../administration/monitoring.html#debug-tools-for-registration">Debug Tools for Registration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../administration/monitoring.html#browser-console-debugger">Browser Console Debugger</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/monitoring.html#quick-test-function">Quick Test Function</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/monitoring.html#monitor-form-submission">Monitor Form Submission</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/monitoring.html#check-environment">Check Environment</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/monitoring.html#network-request-logger">Network Request Logger</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/monitoring.html#bookmarklet">Bookmarklet</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/monitoring.html#react-devtools">React DevTools</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/monitoring.html#mongodb-query-helper">MongoDB Query Helper</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/monitoring.html#server-side-debugging">Server-Side Debugging</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/monitoring.html#quick-commands">Quick Commands</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/monitoring.html#automated-test-script">Automated Test Script</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/monitoring.html#tips">Tips</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../administration/monitoring.html#common-console-commands">Common Console Commands</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Additional Resources</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../data-validation.html">Data Validation Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../data-validation.html#data-validation-quality-assurance-guide">Data Validation &amp; Quality Assurance Guide</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../data-validation.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../data-validation.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../data-validation.html#input-validation">Input Validation</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#required-fields">Required Fields</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#optional-fields-with-validation">Optional Fields with Validation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#validation-rules">Validation Rules</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../data-validation.html#data-quality-assessment">Data Quality Assessment</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#completeness-score-0-100">1. Completeness Score (0-100%)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#consistency-score-0-100">2. Consistency Score (0-100%)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#accuracy-score-0-100">3. Accuracy Score (0-100%)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#overall-quality-grade">Overall Quality Grade</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../data-validation.html#cross-field-validation">Cross-Field Validation</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#magnitude-depth-relationships">Magnitude-Depth Relationships</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#uncertainty-value-relationships">Uncertainty-Value Relationships</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#quality-metrics-consistency">Quality Metrics Consistency</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../data-validation.html#quality-metrics">Quality Metrics</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#location-quality">Location Quality</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#network-geometry">Network Geometry</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#solution-quality">Solution Quality</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#magnitude-quality">Magnitude Quality</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../data-validation.html#completeness-metrics">Completeness Metrics</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#required-fields-coverage">Required Fields Coverage</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#optional-fields-coverage">Optional Fields Coverage</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#missing-data-patterns">Missing Data Patterns</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../data-validation.html#anomaly-detection">Anomaly Detection</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#extreme-values">Extreme Values</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#temporal-clustering">Temporal Clustering</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#geographic-anomalies">Geographic Anomalies</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../data-validation.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#data-preparation">Data Preparation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#quality-improvement">Quality Improvement</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#data-validation-workflow">Data Validation Workflow</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#minimum-quality-standards">Minimum Quality Standards</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../data-validation.html#error-messages-reference">Error Messages Reference</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#common-errors">Common Errors</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#common-warnings">Common Warnings</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../data-validation.html#api-reference">API Reference</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../data-validation.html#validation-functions">Validation Functions</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../data-validation.html#support">Support</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../troubleshooting.html">Troubleshooting</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../troubleshooting.html#troubleshooting-user-registration">Troubleshooting User Registration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#quick-diagnostic-checklist">Quick Diagnostic Checklist</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#check-environment-variables">1. Check Environment Variables</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#run-database-migration">2. Run Database Migration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#check-mongodb-connection">3. Check MongoDB Connection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#browser-developer-tools-debugging">4. Browser Developer Tools Debugging</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#common-issues-and-solutions">Common Issues and Solutions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#issue-1-failed-to-fetch-or-network-error">Issue 1: “Failed to fetch” or Network Error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#issue-2-nextauth-secret-must-be-provided">Issue 2: “NEXTAUTH_SECRET must be provided”</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#issue-3-database-not-initialized-or-mongodb-connection-error">Issue 3: “Database not initialized” or MongoDB Connection Error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#issue-4-user-with-this-email-already-exists">Issue 4: “User with this email already exists”</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#issue-5-form-validation-not-working">Issue 5: Form Validation Not Working</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#issue-6-registration-succeeds-but-can-t-login">Issue 6: Registration Succeeds but Can’t Login</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#manual-testing-steps">Manual Testing Steps</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#test-1-successful-registration">Test 1: Successful Registration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#test-2-duplicate-email">Test 2: Duplicate Email</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#test-3-password-validation">Test 3: Password Validation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#test-4-password-mismatch">Test 4: Password Mismatch</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#debugging-with-curl">Debugging with curl</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#check-server-logs">Check Server Logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#database-verification">Database Verification</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#still-having-issues">Still Having Issues?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#getting-help">Getting Help</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#quick-fix-script">Quick Fix Script</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../troubleshooting.html#registration-debugging-guide">Registration Debugging Guide</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#quick-start-immediate-actions">Quick Start - Immediate Actions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#step-1-update-nextauth-url">Step 1: Update NEXTAUTH_URL</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#step-2-run-the-test-script">Step 2: Run the Test Script</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#step-3-use-the-test-page">Step 3: Use the Test Page</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#debugging-workflow">Debugging Workflow</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#check-browser-console-f12">1. Check Browser Console (F12)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#check-network-tab">2. Check Network Tab</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#id9">3. Check Server Logs</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#test-with-curl">4. Test with curl</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#id10">Common Issues and Solutions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#issue-1-button-does-nothing">Issue 1: Button Does Nothing</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#issue-2-failed-to-fetch-error">Issue 2: “Failed to fetch” Error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#issue-3-nextauth-secret-must-be-provided">Issue 3: “NEXTAUTH_SECRET must be provided”</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#issue-4-mongodb-connection-error">Issue 4: MongoDB Connection Error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#issue-5-user-already-exists">Issue 5: User Already Exists</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#testing-checklist">Testing Checklist</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#files-to-check">Files to Check</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#get-more-help">Get More Help</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#emergency-reset">Emergency Reset</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#success-criteria">Success Criteria</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../troubleshooting.html#registration-issue-fixed">Registration Issue - FIXED ✅</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#problem">Problem</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#root-cause">Root Cause</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#solution-applied">Solution Applied</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#added-missing-environment-variables">1. Added Missing Environment Variables</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#ran-database-migration">2. Ran Database Migration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#verified-api-is-working">3. Verified API is Working</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#how-to-use-registration-now">How to Use Registration Now</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#option-1-use-the-web-interface">Option 1: Use the Web Interface</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#option-2-use-the-test-page">Option 2: Use the Test Page</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#option-3-use-the-api-directly">Option 3: Use the API Directly</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#what-was-created">What Was Created</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../troubleshooting.html#test-user">Test User</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#next-steps">Next Steps</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#id15">Troubleshooting</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#files-modified">Files Modified</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#id16">Testing Checklist</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#support">Support</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../glossary.html#seismological-terms">Seismological Terms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../glossary.html#technical-terms">Technical Terms</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../glossary.html#quality-grades">Quality Grades</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../changelog.html">Changelog</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../changelog.html#version-1-0-0">Version 1.0.0</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../changelog.html#current">2026-01 (Current)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../changelog.html#id1">2025-12</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../changelog.html#id2">2025-11</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../changelog.html#id3">2025-10</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../changelog.html#id4">2025-09</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../changelog.html#roadmap">Roadmap</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../contributing.html">Contributing</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../contributing.html#contributing-to-earthquake-catalogue-platform">Contributing to Earthquake Catalogue Platform</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../contributing.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../contributing.html#code-of-conduct">Code of Conduct</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../contributing.html#getting-started">Getting Started</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#prerequisites">Prerequisites</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#development-setup">Development Setup</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../contributing.html#development-workflow">Development Workflow</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#branch-naming">Branch Naming</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#local-development">Local Development</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../contributing.html#coding-standards">Coding Standards</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#typescript">TypeScript</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#react-components">React Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#file-organization">File Organization</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#styling">Styling</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../contributing.html#testing-guidelines">Testing Guidelines</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#test-structure">Test Structure</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#test-coverage">Test Coverage</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#running-tests">Running Tests</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../contributing.html#commit-guidelines">Commit Guidelines</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#commit-message-format">Commit Message Format</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#pre-commit-checks">Pre-commit Checks</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../contributing.html#pull-request-process">Pull Request Process</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#before-submitting">Before Submitting</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#pr-description-template">PR Description Template</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#review-process">Review Process</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../contributing.html#issue-guidelines">Issue Guidelines</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#bug-reports">Bug Reports</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#feature-requests">Feature Requests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../contributing.html#questions">Questions</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../contributing.html#getting-help">Getting Help</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">Earthquake Catalogue Platform</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">User Guide</a></li>
+      <li class="breadcrumb-item active">Importing from GeoNet</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/user-guide/importing-geonet.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="importing-from-geonet">
+<h1>Importing from GeoNet<a class="headerlink" href="#importing-from-geonet" title="Link to this heading"></a></h1>
+<p>Learn how to automatically import earthquake data from GeoNet’s FDSN Event Web Service.</p>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>The platform provides seamless integration with GeoNet (New Zealand’s geological hazard information system) to automatically import earthquake data. This feature is ideal for:</p>
+<ul class="simple">
+<li><p>Maintaining up-to-date earthquake catalogues</p></li>
+<li><p>Importing historical data for specific regions</p></li>
+<li><p>Updating existing events with revised parameters</p></li>
+<li><p>Building baseline catalogues for research</p></li>
+</ul>
+</section>
+<section id="data-source">
+<h2>Data Source<a class="headerlink" href="#data-source" title="Link to this heading"></a></h2>
+<p><strong>Service:</strong> GeoNet FDSN Event Web Service</p>
+<p><strong>URL:</strong> <a class="reference external" href="https://service.geonet.org.nz/fdsnws/event/1/query">https://service.geonet.org.nz/fdsnws/event/1/query</a></p>
+<p><strong>Coverage:</strong> New Zealand and surrounding regions</p>
+<p><strong>License:</strong> Creative Commons Attribution 4.0 International License</p>
+<p><strong>Update Frequency:</strong> Real-time (events typically available within minutes)</p>
+</section>
+<section id="import-process">
+<h2>Import Process<a class="headerlink" href="#import-process" title="Link to this heading"></a></h2>
+<section id="step-1-navigate-to-import-page">
+<h3>Step 1: Navigate to Import Page<a class="headerlink" href="#step-1-navigate-to-import-page" title="Link to this heading"></a></h3>
+<p>Click <strong>Import</strong> in the navigation menu or go to <code class="docutils literal notranslate"><span class="pre">/import</span></code>.</p>
+</section>
+<section id="step-2-configure-time-range">
+<h3>Step 2: Configure Time Range<a class="headerlink" href="#step-2-configure-time-range" title="Link to this heading"></a></h3>
+<p>Choose how to specify the time range:</p>
+<p><strong>Recent Events (Quick Import):</strong></p>
+<p>Select from preset time ranges:</p>
+<ul class="simple">
+<li><p>Last 1 hour</p></li>
+<li><p>Last 6 hours</p></li>
+<li><p>Last 24 hours</p></li>
+<li><p>Last 7 days</p></li>
+<li><p>Last 30 days</p></li>
+</ul>
+<p><strong>Custom Date Range:</strong></p>
+<p>Specify exact start and end dates:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Start Date: 2024-01-01 00:00:00
+End Date: 2024-01-31 23:59:59
+</pre></div>
+</div>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>For large date ranges, consider importing in smaller batches to avoid timeouts.</p>
+</div>
+</section>
+<section id="step-3-set-magnitude-filters">
+<h3>Step 3: Set Magnitude Filters<a class="headerlink" href="#step-3-set-magnitude-filters" title="Link to this heading"></a></h3>
+<p>Filter events by magnitude:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Minimum Magnitude: 2.0
+Maximum Magnitude: 10.0
+</pre></div>
+</div>
+<p><strong>Common magnitude ranges:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">M</span> <span class="pre">≥</span> <span class="pre">4.0</span></code> - Significant earthquakes</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">M</span> <span class="pre">≥</span> <span class="pre">3.0</span></code> - Felt earthquakes</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">M</span> <span class="pre">≥</span> <span class="pre">2.0</span></code> - Recorded earthquakes</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">M</span> <span class="pre">≥</span> <span class="pre">0.0</span></code> - All events (including microseismicity)</p></li>
+</ul>
+</section>
+<section id="step-4-set-depth-filters-optional">
+<h3>Step 4: Set Depth Filters (Optional)<a class="headerlink" href="#step-4-set-depth-filters-optional" title="Link to this heading"></a></h3>
+<p>Filter by depth range:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Minimum Depth: 0 km
+Maximum Depth: 100 km
+</pre></div>
+</div>
+<p><strong>Depth categories:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">0-40</span> <span class="pre">km</span></code> - Shallow earthquakes (most common)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">40-70</span> <span class="pre">km</span></code> - Intermediate depth</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">70-300</span> <span class="pre">km</span></code> - Deep earthquakes</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">300+</span> <span class="pre">km</span></code> - Very deep (subduction zones)</p></li>
+</ul>
+</section>
+<section id="step-5-define-geographic-bounds-optional">
+<h3>Step 5: Define Geographic Bounds (Optional)<a class="headerlink" href="#step-5-define-geographic-bounds-optional" title="Link to this heading"></a></h3>
+<p>Limit imports to a specific region using a bounding box:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Minimum Latitude: -47.5
+Maximum Latitude: -34.0
+Minimum Longitude: 165.0
+Maximum Longitude: 179.0
+</pre></div>
+</div>
+<p><strong>Example regions:</strong></p>
+<ul class="simple">
+<li><p><strong>All New Zealand:</strong> Lat: -47.5 to -34.0, Lon: 165.0 to 179.0</p></li>
+<li><p><strong>North Island:</strong> Lat: -42.0 to -34.0, Lon: 172.0 to 179.0</p></li>
+<li><p><strong>South Island:</strong> Lat: -47.5 to -40.0, Lon: 165.0 to 175.0</p></li>
+<li><p><strong>Canterbury:</strong> Lat: -44.5 to -42.5, Lon: 171.0 to 173.5</p></li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Leave bounds empty to import all events within the time and magnitude range.</p>
+</div>
+</section>
+<section id="step-6-configure-duplicate-handling">
+<h3>Step 6: Configure Duplicate Handling<a class="headerlink" href="#step-6-configure-duplicate-handling" title="Link to this heading"></a></h3>
+<p>Choose how to handle duplicate events:</p>
+<p><strong>Skip Duplicates (Default):</strong></p>
+<p>Events already in the catalogue are skipped.</p>
+<p><strong>Update Existing Events:</strong></p>
+<p>Enable this option to update existing events with new data from GeoNet. Useful for:</p>
+<ul class="simple">
+<li><p>Getting revised locations and magnitudes</p></li>
+<li><p>Updating preliminary events with reviewed parameters</p></li>
+<li><p>Refreshing quality metrics</p></li>
+</ul>
+</section>
+<section id="step-7-name-your-catalogue">
+<h3>Step 7: Name Your Catalogue<a class="headerlink" href="#step-7-name-your-catalogue" title="Link to this heading"></a></h3>
+<p>If creating a new catalogue, provide a descriptive name:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Example: &quot;GeoNet - New Zealand 2024&quot;
+Example: &quot;Canterbury Earthquakes M4+&quot;
+</pre></div>
+</div>
+<p>Or select an existing catalogue to add events to.</p>
+</section>
+<section id="step-8-start-import">
+<h3>Step 8: Start Import<a class="headerlink" href="#step-8-start-import" title="Link to this heading"></a></h3>
+<p>Click <strong>Start Import</strong> to begin the import process.</p>
+<p>The platform will:</p>
+<ol class="arabic simple">
+<li><p>Query the GeoNet FDSN service</p></li>
+<li><p>Fetch matching events</p></li>
+<li><p>Parse QuakeML data</p></li>
+<li><p>Check for duplicates</p></li>
+<li><p>Validate and store events</p></li>
+<li><p>Update catalogue statistics</p></li>
+</ol>
+</section>
+</section>
+<section id="import-results">
+<h2>Import Results<a class="headerlink" href="#import-results" title="Link to this heading"></a></h2>
+<p>After import completes, you’ll see a summary:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Import Summary
+──────────────────────────────
+Total Fetched:     1,234 events
+New Events:        1,150 events
+Updated Events:    45 events
+Skipped (Duplicates): 39 events
+Errors:            0 events
+
+Duration: 12.5 seconds
+</pre></div>
+</div>
+</section>
+<section id="import-history">
+<h2>Import History<a class="headerlink" href="#import-history" title="Link to this heading"></a></h2>
+<p>View all past imports for a catalogue:</p>
+<ol class="arabic simple">
+<li><p>Navigate to the <strong>Catalogues</strong> page</p></li>
+<li><p>Select a catalogue</p></li>
+<li><p>Click <strong>Import History</strong></p></li>
+</ol>
+<p>Each import record shows:</p>
+<ul class="simple">
+<li><p>Import date and time</p></li>
+<li><p>Time range imported</p></li>
+<li><p>Filter parameters used</p></li>
+<li><p>Event counts (new, updated, skipped)</p></li>
+<li><p>Any errors encountered</p></li>
+</ul>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>Use import history to track data provenance and verify catalogue completeness.</p>
+</div>
+</section>
+<section id="duplicate-detection">
+<h2>Duplicate Detection<a class="headerlink" href="#duplicate-detection" title="Link to this heading"></a></h2>
+<p>The platform uses intelligent matching to detect duplicates:</p>
+<p><strong>Matching Criteria:</strong></p>
+<ul class="simple">
+<li><p>Time window: ±60 seconds</p></li>
+<li><p>Distance: ≤50 km</p></li>
+<li><p>Magnitude difference: ≤0.5</p></li>
+</ul>
+<p>Events matching all three criteria are considered duplicates.</p>
+<p><strong>Duplicate Handling:</strong></p>
+<ul class="simple">
+<li><p><strong>Skip:</strong> Leave existing event unchanged</p></li>
+<li><p><strong>Update:</strong> Replace with new data from GeoNet</p></li>
+<li><p><strong>Merge:</strong> Combine information (future feature)</p></li>
+</ul>
+</section>
+<section id="best-practices">
+<h2>Best Practices<a class="headerlink" href="#best-practices" title="Link to this heading"></a></h2>
+<section id="regular-updates">
+<h3>Regular Updates<a class="headerlink" href="#regular-updates" title="Link to this heading"></a></h3>
+<p>For ongoing monitoring:</p>
+<ol class="arabic simple">
+<li><p>Create a baseline catalogue with historical data</p></li>
+<li><p>Schedule regular imports (e.g., daily or weekly)</p></li>
+<li><p>Enable “Update Existing Events” to get revised parameters</p></li>
+</ol>
+</section>
+<section id="quality-filtering">
+<h3>Quality Filtering<a class="headerlink" href="#quality-filtering" title="Link to this heading"></a></h3>
+<p>Import high-quality events:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Minimum Magnitude: 3.0
+Minimum Used Station Count: 10
+Maximum Azimuthal Gap: 180°
+</pre></div>
+</div>
+</section>
+<section id="large-imports">
+<h3>Large Imports<a class="headerlink" href="#large-imports" title="Link to this heading"></a></h3>
+<p>For importing years of data:</p>
+<ol class="arabic simple">
+<li><p>Break into smaller time ranges (e.g., monthly)</p></li>
+<li><p>Import during off-peak hours</p></li>
+<li><p>Monitor import history for errors</p></li>
+<li><p>Verify event counts match expected values</p></li>
+</ol>
+</section>
+</section>
+<section id="troubleshooting">
+<h2>Troubleshooting<a class="headerlink" href="#troubleshooting" title="Link to this heading"></a></h2>
+<section id="no-events-found">
+<h3>No Events Found<a class="headerlink" href="#no-events-found" title="Link to this heading"></a></h3>
+<p>If import returns zero events:</p>
+<ul class="simple">
+<li><p>Verify time range is correct</p></li>
+<li><p>Check magnitude and depth filters aren’t too restrictive</p></li>
+<li><p>Ensure geographic bounds include seismically active areas</p></li>
+<li><p>Confirm GeoNet service is accessible</p></li>
+</ul>
+</section>
+<section id="timeout-errors">
+<h3>Timeout Errors<a class="headerlink" href="#timeout-errors" title="Link to this heading"></a></h3>
+<p>For large imports:</p>
+<ul class="simple">
+<li><p>Reduce time range</p></li>
+<li><p>Increase minimum magnitude</p></li>
+<li><p>Use geographic bounds to limit area</p></li>
+</ul>
+</section>
+<section id="duplicate-issues">
+<h3>Duplicate Issues<a class="headerlink" href="#duplicate-issues" title="Link to this heading"></a></h3>
+<p>If too many duplicates:</p>
+<ul class="simple">
+<li><p>Check if catalogue already contains this data</p></li>
+<li><p>Verify time range doesn’t overlap previous imports</p></li>
+<li><p>Review duplicate detection thresholds</p></li>
+</ul>
+</section>
+</section>
+<section id="next-steps">
+<h2>Next Steps<a class="headerlink" href="#next-steps" title="Link to this heading"></a></h2>
+<p>After importing:</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="visualization.html"><span class="doc">Visualization</span></a> - View imported events on the map</p></li>
+<li><p><a class="reference internal" href="quality-assessment.html"><span class="doc">Quality Assessment</span></a> - Review quality scores</p></li>
+<li><p><a class="reference internal" href="merging-catalogues.html"><span class="doc">Merging Catalogues</span></a> - Merge with other catalogues</p></li>
+<li><p><a class="reference internal" href="exporting-data.html"><span class="doc">Exporting Data</span></a> - Export in different formats</p></li>
+</ul>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="uploading-data.html" class="btn btn-neutral float-left" title="Uploading Data" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="merging-catalogues.html" class="btn btn-neutral float-right" title="Merging Catalogues" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Kenny Graham - GNS Science.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

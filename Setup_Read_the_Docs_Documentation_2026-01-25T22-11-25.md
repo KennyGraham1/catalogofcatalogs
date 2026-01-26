@@ -1,0 +1,11 @@
+[ ] NAME:Current Task List DESCRIPTION:Root task for conversation 948f528c-3c55-4a48-a3f8-75bdf43a17c2
+-[x] NAME:Set up Sphinx documentation structure DESCRIPTION:Create docs/source/ directory structure and basic Sphinx configuration files
+-[x] NAME:Create Sphinx configuration (conf.py) DESCRIPTION:Set up conf.py with sphinx_rtd_theme, extensions, and project metadata
+-[x] NAME:Create master index.rst DESCRIPTION:Create the main documentation homepage with toctree
+-[x] NAME:Convert and organize User Guide documentation DESCRIPTION:Convert user-facing documentation to RST format in user-guide/ directory
+-[/] NAME:Convert and organize Developer Guide documentation DESCRIPTION:Convert developer documentation to RST format in developer-guide/ directory
+-[ ] NAME:Convert and organize API Reference documentation DESCRIPTION:Convert API documentation to RST format in api-reference/ directory
+-[ ] NAME:Convert and organize Deployment documentation DESCRIPTION:Convert deployment guides to RST format in deployment/ directory
+-[ ] NAME:Create additional documentation sections DESCRIPTION:Create glossary, changelog, troubleshooting, and contribution guidelines
+-[ ] NAME:Set up Read the Docs configuration DESCRIPTION:Create .readthedocs.yaml and documentation requirements.txt
+-[ ] NAME:Test documentation build locally DESCRIPTION:Build and verify the documentation renders correctly
