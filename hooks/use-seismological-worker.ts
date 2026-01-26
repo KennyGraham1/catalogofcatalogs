@@ -9,7 +9,7 @@ interface EarthquakeEvent {
   longitude: number;
   depth: number;
   magnitude: number;
-  magnitude_type?: string;
+  magnitude_type?: string | null;
 }
 
 interface WorkerResult<T> {

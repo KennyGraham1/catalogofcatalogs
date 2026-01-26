@@ -9,6 +9,17 @@ import { EarthquakeEvent } from '@/types/earthquake';
 export type { EarthquakeEvent } from '@/types/earthquake';
 
 /**
+ * Minimal event interface for sampling functions
+ * Allows any event type with the required fields for sampling
+ */
+interface SampleableEvent {
+  time: string;
+  latitude: number;
+  longitude: number;
+  magnitude: number;
+}
+
+/**
  * Get color for earthquake markers based on depth (GeoNet style)
  * Implements a cyan-to-dark-teal gradient matching GeoNet NZ earthquake maps
  * Shallow events (< 15km) are bright cyan, deep events (>= 200km) are navy
@@ -555,7 +566,7 @@ export function validateEvent(event: Partial<EarthquakeEvent>): {
  * @param maxSamples - Maximum number of events to return (default: 1000)
  * @returns Object containing sampled events and metadata
  */
-export function sampleEarthquakeEvents<T extends EarthquakeEvent>(
+export function sampleEarthquakeEvents<T extends SampleableEvent>(
   events: T[],
   maxSamples: number = 1000
 ): {
@@ -625,7 +636,7 @@ export function sampleEarthquakeEvents<T extends EarthquakeEvent>(
 /**
  * Create magnitude bins for stratified sampling
  */
-function createMagnitudeBins<T extends EarthquakeEvent>(events: T[]): T[][] {
+function createMagnitudeBins<T extends SampleableEvent>(events: T[]): T[][] {
   const bins: T[][] = [[], [], [], [], []]; // 5 bins for magnitude ranges
 
   for (const event of events) {
@@ -643,7 +654,7 @@ function createMagnitudeBins<T extends EarthquakeEvent>(events: T[]): T[][] {
 /**
  * Sample events from a bin using geographic and temporal distribution
  */
-function stratifiedSampleBin<T extends EarthquakeEvent>(
+function stratifiedSampleBin<T extends SampleableEvent>(
   bin: T[],
   targetCount: number
 ): T[] {
@@ -711,7 +722,7 @@ export interface ViewportBounds {
  * @param viewport - Optional viewport bounds to prioritize visible events
  * @returns Object containing sampled events and metadata
  */
-export function sampleEarthquakeEventsWithViewport<T extends EarthquakeEvent>(
+export function sampleEarthquakeEventsWithViewport<T extends SampleableEvent>(
   events: T[],
   maxSamples: number = 1000,
   viewport?: ViewportBounds | null
@@ -801,7 +812,7 @@ export function sampleEarthquakeEventsWithViewport<T extends EarthquakeEvent>(
 /**
  * Efficiently check if an event is within bounds
  */
-export function isEventInBounds<T extends EarthquakeEvent>(
+export function isEventInBounds<T extends { latitude: number; longitude: number }>(
   event: T,
   bounds: ViewportBounds
 ): boolean {
@@ -817,7 +828,7 @@ export function isEventInBounds<T extends EarthquakeEvent>(
  * Pre-compute event positions for faster filtering
  * Returns a Map of event ID to grid cell for spatial indexing
  */
-export function createSpatialIndex<T extends EarthquakeEvent & { id: string | number }>(
+export function createSpatialIndex<T extends { latitude: number; longitude: number; id: string | number }>(
   events: T[],
   cellSize: number = 1 // degrees
 ): Map<string, T[]> {
@@ -840,7 +851,7 @@ export function createSpatialIndex<T extends EarthquakeEvent & { id: string | nu
 /**
  * Query events from spatial index within bounds
  */
-export function queryEventsInBounds<T extends EarthquakeEvent & { id: string | number }>(
+export function queryEventsInBounds<T extends { latitude: number; longitude: number; id: string | number }>(
   grid: Map<string, T[]>,
   bounds: ViewportBounds,
   cellSize: number = 1

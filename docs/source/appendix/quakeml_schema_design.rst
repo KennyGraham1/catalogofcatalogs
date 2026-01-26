@@ -73,7 +73,14 @@ Based on ObsPy implementation and QuakeML BED specification:
 Event (Top Level)
 ^^^^^^^^^^^^^^^^^
 
-- ``publicID`` (string) - Unique resource identifier
+.. note::
+   Fields marked with |required| are mandatory for event creation.
+
+.. |required| raw:: html
+
+   <span style="background-color: #dc2626; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.75em; font-weight: bold;">REQUIRED</span>
+
+- ``publicID`` (string) |required| - Unique resource identifier
 - ``type`` (string) - Event type (earthquake, explosion, etc.)
 - ``typeCertainty`` (string) - Certainty of event type
 - ``description`` (array) - Event descriptions (name, region, etc.)
@@ -84,14 +91,14 @@ Origin (Location Information)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - ``publicID`` (string)
-- ``time`` (object) - Origin time with uncertainty
-  - ``value`` (datetime)
+- ``time`` (object) |required| - Origin time with uncertainty
+  - ``value`` (datetime) |required|
   - ``uncertainty`` (float)
-- ``latitude`` (object) - Latitude with uncertainty
-  - ``value`` (float)
+- ``latitude`` (object) |required| - Latitude with uncertainty
+  - ``value`` (float) |required|
   - ``uncertainty`` (float)
-- ``longitude`` (object) - Longitude with uncertainty
-  - ``value`` (float)
+- ``longitude`` (object) |required| - Longitude with uncertainty
+  - ``value`` (float) |required|
   - ``uncertainty`` (float)
 - ``depth`` (object) - Depth with uncertainty
   - ``value`` (float in meters)
@@ -125,8 +132,8 @@ Magnitude
 ^^^^^^^^^
 
 - ``publicID`` (string)
-- ``mag`` (object) - Magnitude value with uncertainty
-  - ``value`` (float)
+- ``mag`` (object) |required| - Magnitude value with uncertainty
+  - ``value`` (float) |required|
   - ``uncertainty`` (float)
 - ``type`` (string) - ML, Mw, mb, Ms, etc.
 - ``originID`` (string) - Reference to origin
@@ -140,13 +147,13 @@ Magnitude
 Pick (Phase Arrival Time)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-- ``publicID`` (string)
-- ``time`` (object) - Pick time with uncertainty
-  - ``value`` (datetime)
+- ``publicID`` (string) |required|
+- ``time`` (object) |required| - Pick time with uncertainty
+  - ``value`` (datetime) |required|
   - ``uncertainty`` (float)
-- ``waveformID`` (object) - Station/channel info
-  - ``networkCode`` (string)
-  - ``stationCode`` (string)
+- ``waveformID`` (object) |required| - Station/channel info
+  - ``networkCode`` (string) |required|
+  - ``stationCode`` (string) |required|
   - ``locationCode`` (string)
   - ``channelCode`` (string)
 - ``filterID`` (string)
@@ -161,8 +168,8 @@ Arrival (Association of Pick with Origin)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - ``publicID`` (string)
-- ``pickID`` (string) - Reference to pick
-- ``phase`` (string) - Phase identification
+- ``pickID`` (string) |required| - Reference to pick
+- ``phase`` (string) |required| - Phase identification
 - ``timeCorrection`` (float)
 - ``azimuth`` (float) - Azimuth from source to station
 - ``distance`` (float) - Epicentral distance in degrees
@@ -181,13 +188,13 @@ Arrival (Association of Pick with Origin)
 FocalMechanism
 ^^^^^^^^^^^^^^
 
-- ``publicID`` (string)
+- ``publicID`` (string) |required|
 - ``triggeringOriginID`` (string)
 - ``nodalPlanes`` (object) - Two nodal planes
   - ``nodalPlane1`` (object)
-    - ``strike`` (object with value/uncertainty)
-    - ``dip`` (object with value/uncertainty)
-    - ``rake`` (object with value/uncertainty)
+    - ``strike`` (object with value/uncertainty) |required|
+    - ``dip`` (object with value/uncertainty) |required|
+    - ``rake`` (object with value/uncertainty) |required|
   - ``nodalPlane2`` (object)
     - ``strike`` (object with value/uncertainty)
     - ``dip`` (object with value/uncertainty)
@@ -215,9 +222,9 @@ FocalMechanism
 Amplitude
 ^^^^^^^^^
 
-- ``publicID`` (string)
-- ``genericAmplitude`` (object) - Amplitude value with uncertainty
-  - ``value`` (float)
+- ``publicID`` (string) |required|
+- ``genericAmplitude`` (object) |required| - Amplitude value with uncertainty
+  - ``value`` (float) |required|
   - ``uncertainty`` (float)
 - ``type`` (string) - A, AML, etc.
 - ``category`` (string) - point/mean/duration/period/integral/other
@@ -243,10 +250,10 @@ Amplitude
 StationMagnitude
 ^^^^^^^^^^^^^^^^
 
-- ``publicID`` (string)
-- ``originID`` (string)
-- ``mag`` (object) - Magnitude value with uncertainty
-  - ``value`` (float)
+- ``publicID`` (string) |required|
+- ``originID`` (string) |required|
+- ``mag`` (object) |required| - Magnitude value with uncertainty
+  - ``value`` (float) |required|
   - ``uncertainty`` (float)
 - ``type`` (string)
 - ``amplitudeID`` (string)
@@ -261,47 +268,87 @@ Proposed Database Schema
 Core Columns (Frequently Queried)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+The following table shows the database schema with required fields marked:
+
+.. list-table:: Required vs Optional Fields
+   :header-rows: 1
+   :widths: 30 15 55
+
+   * - Field
+     - Status
+     - Description
+   * - ``id``
+     - |required|
+     - Primary key identifier
+   * - ``catalogue_id``
+     - |required|
+     - Reference to parent catalogue
+   * - ``time``
+     - |required|
+     - Event origin time (ISO 8601)
+   * - ``latitude``
+     - |required|
+     - Epicenter latitude (-90 to 90)
+   * - ``longitude``
+     - |required|
+     - Epicenter longitude (-180 to 180)
+   * - ``magnitude``
+     - |required|
+     - Event magnitude value
+   * - ``source_events``
+     - |required|
+     - JSON array of source event references
+   * - ``depth``
+     - Optional
+     - Depth in kilometers
+   * - ``event_public_id``
+     - Optional
+     - QuakeML public identifier
+   * - ``event_type``
+     - Optional
+     - Event type (earthquake, explosion, etc.)
+
 .. code-block:: sql
 
    CREATE TABLE merged_events (
-     -- Existing basic fields
-     id TEXT PRIMARY KEY,
-     catalogue_id TEXT NOT NULL,
-     time DATETIME NOT NULL,
-     latitude REAL NOT NULL,
-     longitude REAL NOT NULL,
-     depth REAL,
-     magnitude REAL NOT NULL,
-     source_events TEXT NOT NULL,
+     -- Required fields (NOT NULL)
+     id TEXT PRIMARY KEY,                    -- REQUIRED
+     catalogue_id TEXT NOT NULL,             -- REQUIRED
+     time DATETIME NOT NULL,                 -- REQUIRED
+     latitude REAL NOT NULL,                 -- REQUIRED
+     longitude REAL NOT NULL,                -- REQUIRED
+     magnitude REAL NOT NULL,                -- REQUIRED
+     source_events TEXT NOT NULL,            -- REQUIRED
      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-     
-     -- Event metadata
+
+     -- Optional event metadata
      event_public_id TEXT,
      event_type TEXT,
      event_type_certainty TEXT,
-     
-     -- Origin uncertainties (most commonly used)
+     depth REAL,
+
+     -- Optional origin uncertainties
      time_uncertainty REAL,
      latitude_uncertainty REAL,
      longitude_uncertainty REAL,
      depth_uncertainty REAL,
-     
-     -- Magnitude details
+
+     -- Optional magnitude details
      magnitude_type TEXT,
      magnitude_uncertainty REAL,
      magnitude_station_count INTEGER,
-     
-     -- Origin quality metrics (commonly queried)
+
+     -- Optional origin quality metrics
      azimuthal_gap REAL,
      used_phase_count INTEGER,
      used_station_count INTEGER,
      standard_error REAL,
-     
-     -- Evaluation metadata
+
+     -- Optional evaluation metadata
      evaluation_mode TEXT,
      evaluation_status TEXT,
-     
-     -- Complex nested data as JSON
+
+     -- Optional complex nested data as JSON
      origin_quality JSON,           -- Full OriginQuality object
      origins JSON,                  -- Array of all origins
      magnitudes JSON,               -- Array of all magnitudes
@@ -313,7 +360,7 @@ Core Columns (Frequently Queried)
      event_descriptions JSON,       -- Array of event descriptions
      comments JSON,                 -- Array of comments
      creation_info JSON,            -- CreationInfo object
-     
+
      FOREIGN KEY (catalogue_id) REFERENCES merged_catalogues(id) ON DELETE CASCADE
    );
 
