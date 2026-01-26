@@ -52,12 +52,70 @@ A web application for managing, analyzing, and visualizing earthquake catalogue 
 *   **Backend**: Next.js API Routes, MongoDB, xml2js.
 *   **Testing**: Jest, React Testing Library.
 
+## 🏗️ Architecture
+
+```mermaid
+flowchart TD
+    subgraph Client["🖥️ Client Browser"]
+        UI["React UI Components"]
+        State["Redux / Context"]
+        Maps["Leaflet Visualizations"]
+    end
+    
+    subgraph App["Next.js Application"]
+        API["API Routes (Serverless)"]
+        Pages["App Router (SSR/CSR)"]
+        Lib["Core Libraries (Parsers, Logic)"]
+    end
+    
+    subgraph Data["Data Layer"]
+        DB[(MongoDB Atlas)]
+        GeoNet["GeoNet API"]
+    end
+    
+    Client <--> App
+    App <--> DB
+    App <-- Import --> GeoNet
+```
+
 ## 📚 Documentation
 
-*   **[Read the Docs](https://catalogofcatalogs.readthedocs.io/en/latest/)** (Recommended)
-*   **[API Reference](docs/API_REFERENCE.md)**
-*   **[Architecture Overview](docs/ARCHITECTURE.md)**
-*   **[QuakeML Schema Design](docs/QUAKEML_SCHEMA_DESIGN.md)**
+The complete documentation is hosted on **[Read the Docs](https://catalogofcatalogs.readthedocs.io/en/latest/)**.
+
+*   **[User Guide](https://catalogofcatalogs.readthedocs.io/en/latest/user-guide/index.html)** - Comprehensive guides for all features.
+*   **[API Reference](https://catalogofcatalogs.readthedocs.io/en/latest/api-reference/index.html)** - Endpoints for catalogues, events, and imports.
+*   **[Architecture](https://catalogofcatalogs.readthedocs.io/en/latest/developer-guide/architecture.html)** - System design and component diagrams.
+*   **[Database Schema](https://catalogofcatalogs.readthedocs.io/en/latest/developer-guide/database-schema.html)** - MongoDB collections and QuakeML mapping.
+
+## 🔄 Platform Workflow
+
+```mermaid
+flowchart LR
+    subgraph Ingestion
+        User[Upload CSV/QML]
+        Live[Import GeoNet]
+    end
+    
+    subgraph Core
+        Process[Parser & Validator]
+        Merge[Merge Engine]
+        Store[(MongoDB)]
+    end
+    
+    subgraph Output
+        View[Interactive Maps]
+        Analyze[Statistics & b-values]
+        Export[Download Data]
+    end
+    
+    User --> Process
+    Live --> Process
+    Process --> Merge
+    Merge --> Store
+    Store --> View
+    Store --> Analyze
+    Store --> Export
+```
 
 ## 📊 Project Status
 
