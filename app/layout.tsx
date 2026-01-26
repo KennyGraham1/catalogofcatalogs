@@ -13,6 +13,8 @@ export const metadata: Metadata = {
   description: 'Upload, validate, parse, and store earthquake catalogues',
 };
 
+import { Analytics } from "@vercel/analytics/next"
+
 export default function RootLayout({
   children,
 }: {
@@ -26,6 +28,7 @@ export default function RootLayout({
             <Layout>
               {children}
             </Layout>
+            <Analytics />
           </ErrorBoundary>
         </SessionProvider>
       </body>

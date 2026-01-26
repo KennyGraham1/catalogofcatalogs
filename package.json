@@ -58,6 +58,7 @@
     "@types/react-window": "^2.0.0",
     "@types/sax": "^1.2.7",
     "@types/uuid": "^10.0.0",
+    "@vercel/analytics": "^1.6.1",
     "autoprefixer": "10.4.15",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.0",
