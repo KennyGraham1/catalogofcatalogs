@@ -2,20 +2,66 @@
 Exporting Data
 ==============
 
-Learn how to export earthquake catalogues in various formats.
+Learn how to export earthquake catalogues in various formats for analysis,
+sharing, and archival.
 
 --------
 Overview
 --------
 
-The platform supports exporting catalogues in multiple standard formats:
+The platform supports exporting catalogues in multiple standard formats, each
+optimized for different use cases:
 
-* CSV (Comma-Separated Values)
-* QuakeML 1.2 (XML)
-* JSON
-* GeoJSON
+* **CSV** - Spreadsheets and statistical analysis
+* **QuakeML 1.2** - Seismological software and standards compliance
+* **JSON** - Web applications and programming
+* **GeoJSON** - GIS and mapping applications
 
-All exports preserve complete event metadata, quality metrics, and source information.
+All exports preserve complete event metadata, quality metrics, and source
+information.
+
+Format Comparison
+=================
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 20 20 20 25
+
+   * - Feature
+     - CSV
+     - QuakeML
+     - JSON
+     - GeoJSON
+   * - Human readable
+     - Yes
+     - Somewhat
+     - Yes
+     - Yes
+   * - Excel compatible
+     - Yes
+     - No
+     - No
+     - No
+   * - GIS compatible
+     - Limited
+     - No
+     - No
+     - Yes
+   * - Full metadata
+     - Partial
+     - Yes
+     - Yes
+     - Partial
+   * - File size
+     - Smallest
+     - Largest
+     - Medium
+     - Medium
+   * - Best for
+     - Analysis
+     - Exchange
+     - APIs
+     - Mapping
 
 --------------
 Export Formats

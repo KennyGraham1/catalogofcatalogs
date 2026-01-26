@@ -2,13 +2,38 @@
 Quality Assessment
 ==================
 
-Understand the quality scoring system and how to filter events by quality metrics.
+Understand the quality scoring system and how to filter events by quality metrics
+for reliable seismological analysis.
 
 --------
 Overview
 --------
 
-The platform implements a comprehensive quality assessment system that evaluates earthquake locations based on multiple factors. Events are graded from **A+** (excellent) to **F** (poor).
+The platform implements a comprehensive quality assessment system that evaluates
+earthquake locations based on multiple factors. Events are graded from **A+**
+(excellent) to **F** (poor), helping you identify the most reliable data for
+your analysis.
+
+Quick Reference
+===============
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 85
+
+   * - Grade
+     - Recommended Use
+   * - **A+/A**
+     - Precision studies, location-dependent analysis, publications
+   * - **B+/B**
+     - General research, statistical analysis, most applications
+   * - **C**
+     - Completeness studies, broad pattern analysis
+   * - **D/F**
+     - Avoid for location-dependent analysis; review for errors
+
+**Key Principle:** Higher grades mean more reliable locations and magnitudes.
+Always filter by quality appropriate to your research question.
 
 --------------
 Quality Grades

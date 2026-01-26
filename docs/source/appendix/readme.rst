@@ -634,7 +634,7 @@ Code Style
 ---------
 
 
-- Kenny Graham - GNS Science
+- Kenny Graham - Earth Sciences NZ
 
 🙏 Acknowledgments
 -----------------

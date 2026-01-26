@@ -58,3 +58,16 @@ Thumbs.db
 
 # NFS temporary files
 .nfs*
+
+# Sphinx/Read the Docs documentation build
+docs/_build/
+docs/build/
+_build/
+
+# Sphinx cache
+docs/source/.doctrees/
+.doctrees/
+
+# Generated documentation
+*.pyc
+__pycache__/

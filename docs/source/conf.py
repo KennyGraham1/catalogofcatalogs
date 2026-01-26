@@ -11,7 +11,7 @@ from datetime import datetime
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'Earthquake Catalogue Platform'
-copyright = f'{datetime.now().year}, Kenny Graham - GNS Science'
+copyright = f'{datetime.now().year}, Kenny Graham - Earth Sciences NZ'
 author = 'Kenny Graham'
 release = '1.0.0'
 version = '1.0'

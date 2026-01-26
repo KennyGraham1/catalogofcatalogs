@@ -76,7 +76,7 @@ If you prefer to use MongoDB directly:
 ### Step 1: Connect to MongoDB
 
 ```bash
-mongosh "mongodb+srv://kerry_graham:Lcj4yk2l5SD8nAtx@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue"
+mongosh "mongodb+srv://kerry_graham:<YOUR_PASSWORD>@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue"
 ```
 
 Or if using local MongoDB:
@@ -132,7 +132,7 @@ If you prefer a graphical interface:
 1. Open MongoDB Compass
 2. Connect using your connection string:
    ```
-   mongodb+srv://kerry_graham:Lcj4yk2l5SD8nAtx@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue
+   mongodb+srv://kerry_graham:<YOUR_PASSWORD>@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue
    ```
 
 ### Step 2: Navigate to Users Collection
@@ -230,7 +230,7 @@ Steps:
 
 Make sure your `.env` file has the correct MongoDB connection string:
 ```bash
-MONGODB_URI=mongodb+srv://kerry_graham:Lcj4yk2l5SD8nAtx@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue
+MONGODB_URI=mongodb+srv://kerry_graham:<YOUR_PASSWORD>@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue
 MONGODB_DATABASE=eq-catalogue
 ```
 

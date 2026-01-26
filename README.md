@@ -485,7 +485,7 @@ For detailed database management instructions, see [DATABASE_MANAGEMENT.md](DATA
 
 ## 👥 Authors
 
-- Kenny Graham - GNS Science
+- Kenny Graham - Earth Sciences NZ
 
 ## 🙏 Acknowledgments
 
