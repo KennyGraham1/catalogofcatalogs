@@ -35,15 +35,15 @@ Merge Process Overview
 
    flowchart TD
        subgraph Inputs ["Input Catalogues"]
-           A[Catalogue A]
-           B[Catalogue B]
-           C[Catalogue C]
+           A["Catalogue A"]
+           B["Catalogue B"]
+           C["Catalogue C"]
        end
        
-       Combine[COMBINE ALL EVENTS]
-       Detect[DETECT DUPLICATES<br/>(time + location + magnitude)]
-       Resolve[RESOLVE CONFLICTS<br/>(apply selected merge strategy)]
-       Result[MERGED CATALOGUE<br/>(unique events with provenance)]
+       Combine["COMBINE ALL EVENTS"]
+       Detect["DETECT DUPLICATES<br/>(time + location + magnitude)"]
+       Resolve["RESOLVE CONFLICTS<br/>(apply selected merge strategy)"]
+       Result["MERGED CATALOGUE<br/>(unique events with provenance)"]
        
        A & B & C --> Combine
        Combine --> Detect
@@ -117,14 +117,14 @@ Strategy Decision Guide
 .. mermaid::
 
    flowchart TD
-       Start{Do you have one<br/>authoritative source?} -- YES --> Priority[Use Priority-Based<br/>(keeps authoritative data)]
-       Start -- NO --> Recent{Is one catalogue<br/>more recent?}
+       Start{"Do you have one<br/>authoritative source?"} -- YES --> Priority["Use Priority-Based<br/>(keeps authoritative data)"]
+       Start -- NO --> Recent{"Is one catalogue<br/>more recent?"}
        
-       Recent -- YES --> Newest[Use Newest Data<br/>(keeps latest revisions)]
-       Recent -- NO --> Matter{Which matters more?}
+       Recent -- YES --> Newest["Use Newest Data<br/>(keeps latest revisions)"]
+       Recent -- NO --> Matter{"Which matters more?"}
        
-       Matter -- Metadata completeness --> Complete[Use Most Complete]
-       Matter -- Statistical accuracy --> Average[Use Average Values]
+       Matter -- "Metadata completeness" --> Complete["Use Most Complete"]
+       Matter -- "Statistical accuracy" --> Average["Use Average Values"]
 
 
 Priority-Based Strategy

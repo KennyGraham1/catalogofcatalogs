@@ -21,20 +21,20 @@ Upload Workflow
 .. mermaid::
 
    flowchart LR
-       Upload[UPLOAD] --> Parse[PARSE]
-       Parse --> Validate[VALIDATE]
-       Validate --> Map[MAP]
-       Map --> Meta[METADATA]
-       Meta --> Store[STORE]
-       Store --> Result[RESULT]
+       Upload["UPLOAD"] --> Parse["PARSE"]
+       Parse --> Validate["VALIDATE"]
+       Validate --> Map["MAP"]
+       Map --> Meta["METADATA"]
+       Meta --> Store["STORE"]
+       Store --> Result["RESULT"]
        
-       Upload -.-> File[File Selection]
-       Parse -.-> Format[Format Detection]
-       Validate -.-> Check[Data Constraint Check]
-       Map -.-> Field[Field Mapping]
-       Meta -.-> Name[Catalogue Name]
-       Store -.-> DB[Database Insert]
-       Result -.-> Report[Analysis Report]
+       Upload -.-> File["File Selection"]
+       Parse -.-> Format["Format Detection"]
+       Validate -.-> Check["Data Constraint Check"]
+       Map -.-> Field["Field Mapping"]
+       Meta -.-> Name["Catalogue Name"]
+       Store -.-> DB["Database Insert"]
+       Result -.-> Report["Analysis Report"]
 
 
 **Seven Stages:**

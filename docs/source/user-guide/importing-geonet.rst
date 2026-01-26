@@ -26,20 +26,20 @@ Import Process Overview
 .. mermaid::
 
    flowchart LR
-       Query[QUERY] --> Fetch[FETCH]
-       Fetch --> Parse[PARSE]
-       Parse --> Dedupe[DEDUPE]
-       Dedupe --> Score[SCORE]
-       Score --> Store[STORE]
-       Store --> Report[REPORT]
+       Query["QUERY"] --> Fetch["FETCH"]
+       Fetch --> Parse["PARSE"]
+       Parse --> Dedupe["DEDUPE"]
+       Dedupe --> Score["SCORE"]
+       Score --> Store["STORE"]
+       Store --> Report["REPORT"]
        
-       Query -.-> Source[GeoNet API]
-       Fetch -.-> Format[QuakeML]
-       Parse -.-> Event[Event Extraction]
-       Dedupe -.-> Compare[Duplicate Check]
-       Score -.-> Quality[Quality Grading]
-       Store -.-> DB[Database Insert]
-       Report -.-> Summary[Import Summary]
+       Query -.-> Source["GeoNet API"]
+       Fetch -.-> Format["QuakeML"]
+       Parse -.-> Event["Event Extraction"]
+       Dedupe -.-> Compare["Duplicate Check"]
+       Score -.-> Quality["Quality Grading"]
+       Store -.-> DB["Database Insert"]
+       Report -.-> Summary["Import Summary"]
 
 
 -----------

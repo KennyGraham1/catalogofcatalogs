@@ -210,6 +210,27 @@ GeoJSON Export
 Export Process
 --------------
 
+.. mermaid::
+
+   flowchart TD
+       Start([Start]) --> Select["Select Catalogue"]
+       Select --> Filter{"Apply Filters?"}
+       
+       Filter -- Yes --> Apply["Apply Filters<br/>(Time, Mag, Region)"]
+       Apply --> Format
+       Filter -- No --> Format
+       
+       Format{"Choose Format"}
+       
+       Format --> CSV["CSV<br/>(Analysis)"]
+       Format --> QML["QuakeML<br/>(Exchange)"]
+       Format --> JSON["JSON<br/>(Web/API)"]
+       Format --> Geo["GeoJSON<br/>(GIS/Map)"]
+       
+       CSV & QML & JSON & Geo --> Download[Download File]
+       Download --> Validate[Validate Data]
+       Validate --> End([Done])
+
 Via Web Interface
 =================
 

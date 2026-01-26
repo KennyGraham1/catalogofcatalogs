@@ -148,6 +148,24 @@ Implemented a comprehensive Quality Control (QC) visualization feature for earth
 🎯 **User Workflow**
 -------------------
 
+.. mermaid::
+
+   flowchart TD
+       Start([Start]) --> Select["1. Select Catalogues"]
+       Select --> Config["2. Configure Merge<br/>(Thresholds & Strategy)"]
+       
+       Config --> Preview["3. Generate QC Preview"]
+       Preview --> Review["4. Review Duplicate Groups<br/>(Check Map & Warnings)"]
+       
+       Review --> Good{"Satisfied?"}
+       
+       Good -- No --> Adjust["Adjust Configuration"]
+       Adjust --> Preview
+       
+       Good -- Yes --> Proceed["5. Proceed with Merge"]
+       Proceed --> Execute["6. Execute & Save"]
+       Execute --> End([Done])
+
 
 **Step 1: Select Catalogues**
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

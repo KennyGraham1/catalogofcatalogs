@@ -11,6 +11,34 @@ This document describes the Continuous Integration and Continuous Deployment (CI
 GitHub Actions Workflows
 ------------------------
 
+.. mermaid::
+
+   flowchart TD
+       subgraph Triggers ["Triggers"]
+           Push["Push / PR"]
+           Main["Push to Main"]
+       end
+
+       subgraph CI ["CI Pipeline (test.yml)"]
+           Test["🧪 Run Tests<br/>(Node 18 & 20)"]
+           Security["🔒 Security Audit<br/>(npm audit)"]
+           Build["🏗️ Build App"]
+           
+           Push --> Test
+           Push --> Security
+           Test --> Build
+       end
+
+       subgraph CD ["CD Pipeline (deploy.yml)"]
+           DeployCheck["✅ Pre-deploy Checks"]
+           Deploy["🚀 Deploy to Production"]
+           
+           Main --> DeployCheck
+           DeployCheck --> Deploy
+       end
+       
+       Build -.-> DeployCheck
+
 
 1. Test Suite Workflow (`.github/workflows/test.yml`)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

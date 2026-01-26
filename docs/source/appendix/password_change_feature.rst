@@ -13,6 +13,37 @@ I've successfully implemented a comprehensive password change feature for the Ea
 🎯 What Was Implemented
 ----------------------
 
+.. mermaid::
+
+   sequenceDiagram
+       actor User
+       participant UI as Frontend Page
+       participant API as /api/auth/change-password
+       participant Auth as Auth Handler
+       participant DB as Database
+
+       User->>UI: Enter Current & New Password
+       UI->>UI: Validate Length & Match
+       UI->>API: POST {current, new}
+       
+       API->>Auth: Verify Session
+       Auth-->>API: Session Valid
+       
+       API->>DB: Fetch User Hash
+       DB-->>API: User Record
+       
+       API->>API: bcrypt.compare(current, hash)
+       alt Invalid Password
+           API-->>UI: 401 Unauthorized
+           UI-->>User: Error: "Current password incorrect"
+       else Valid Password
+           API->>API: bcrypt.hash(new, 10)
+           API->>DB: Update Password Hash
+           DB-->>API: Success
+           API-->>UI: 200 OK
+           UI-->>User: Success & Redirect to Profile
+       end
+
 
 1. **Change Password Page** (`/change-password`)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
