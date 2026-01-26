@@ -31,14 +31,20 @@ export function toSafeUser(user: User): SafeUser {
 }
 
 /**
- * Get user by email
+ * Get user by email (case-insensitive)
  */
 export async function getUserByEmail(email: string): Promise<User | null> {
   const collection = await getCollection(COLLECTIONS.USERS);
-  const user = await collection.findOne({ email });
-  
+  const normalizedEmail = email.trim().toLowerCase();
+
+  // Use case-insensitive regex match to handle legacy data with mixed case
+  const escapedEmail = normalizedEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const user = await collection.findOne({
+    email: { $regex: new RegExp(`^${escapedEmail}$`, 'i') }
+  });
+
   if (!user) return null;
-  
+
   const { _id, ...userData } = user as unknown as User & { _id?: unknown };
   return userData;
 }
@@ -66,19 +72,20 @@ export async function createUser(
   role: UserRole = UserRole.VIEWER
 ): Promise<SafeUser> {
   const collection = await getCollection(COLLECTIONS.USERS);
-  
-  // Check if user already exists
-  const existing = await collection.findOne({ email });
+  const normalizedEmail = email.trim().toLowerCase();
+
+  // Check if user already exists (case-insensitive)
+  const existing = await getUserByEmail(normalizedEmail);
   if (existing) {
     throw new Error('User with this email already exists');
   }
-  
+
   const passwordHash = await hashPassword(password);
   const now = new Date().toISOString();
-  
+
   const user: User = {
     id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    email,
+    email: normalizedEmail,
     name,
     password_hash: passwordHash,
     role,

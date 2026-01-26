@@ -13,15 +13,21 @@
  */
 
 import { memoize } from './memoization';
+import { EarthquakeEvent as BaseEarthquakeEvent } from '@/types/earthquake';
 
-export interface EarthquakeEvent {
+/**
+ * Seismological analysis event type
+ *
+ * Extends the base EarthquakeEvent with required fields for analysis:
+ * - id: Required for cluster tracking and memoization keys
+ * - depth: Required for 3D distance calculations in clustering
+ *
+ * Events passed to seismological analysis functions should have these fields
+ * populated. Use `toSeismologicalEvent()` to convert from base events.
+ */
+export interface EarthquakeEvent extends Omit<BaseEarthquakeEvent, 'id' | 'depth'> {
   id: number | string;
-  time: string;
-  latitude: number;
-  longitude: number;
   depth: number;
-  magnitude: number;
-  magnitude_type?: string;
 }
 
 export interface GutenbergRichterResult {

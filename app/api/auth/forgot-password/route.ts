@@ -30,6 +30,12 @@ export async function POST(request: NextRequest) {
     }
 
     const user = await getUserByEmail(email);
+    logger.info('Password reset requested', {
+      requestedEmail: email,
+      userFound: !!user,
+      foundUserEmail: user?.email || null,
+    });
+
     if (!user || !user.is_active) {
       return NextResponse.json({
         message: 'If an account exists for that email, a reset link has been sent.'
@@ -56,6 +62,11 @@ export async function POST(request: NextRequest) {
 
     const baseUrl = process.env.NEXTAUTH_URL || request.nextUrl.origin;
     const resetLink = `${baseUrl}/reset-password?token=${token}`;
+
+    logger.info('Sending password reset email', {
+      toEmail: user.email,
+      userId: user.id,
+    });
 
     await sendEmailNotification({
       to: user.email,

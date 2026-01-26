@@ -2,13 +2,11 @@
  * Utility functions for earthquake data processing
  */
 
-export interface EarthquakeEvent {
-  latitude: number;
-  longitude: number;
-  magnitude: number;
-  depth?: number | null;
-  time: string;
-}
+// Import canonical EarthquakeEvent type from central types module
+import { EarthquakeEvent } from '@/types/earthquake';
+
+// Re-export for backwards compatibility with existing imports
+export type { EarthquakeEvent } from '@/types/earthquake';
 
 /**
  * Get color for earthquake markers based on depth (GeoNet style)
