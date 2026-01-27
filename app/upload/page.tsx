@@ -19,17 +19,24 @@ import { CatalogueMetadataForm, CatalogueMetadata } from '@/components/upload/Ca
 import { ProcessingProgressIndicator, ProcessingProgressInfo } from '@/components/upload/ProcessingProgressIndicator';
 import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import { toast } from '@/hooks/use-toast';
-import { performQualityCheck } from '@/lib/data-quality-checker';
+import { performQualityCheck, QualityCheckResult } from '@/lib/data-quality-checker';
 import { validateEventsCrossFields } from '@/lib/cross-field-validation';
 import { useAuth } from '@/lib/auth/hooks';
 import { UserRole } from '@/lib/auth/types';
 import { getApiError } from '@/lib/api';
+import type { FileValidationResult, ParsedEvent } from '@/types/upload';
+
+// Type for cross-field validation result (matches validateEventsCrossFields return type)
+type CrossFieldValidationBatchResult = ReturnType<typeof validateEventsCrossFields>;
+
+// Maximum number of files allowed per upload
+const MAX_FILES = 20;
 
 type UploadStatus = 'idle' | 'uploading' | 'validating' | 'mapping' | 'metadata' | 'processing' | 'complete' | 'error';
 
 export default function UploadPage() {
   const router = useRouter();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const canUpload = user?.role === UserRole.EDITOR || user?.role === UserRole.ADMIN;
   const isReadOnly = !canUpload;
   const uploadBlockedMessage = !user
@@ -40,15 +47,26 @@ export default function UploadPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [delimiter, setDelimiter] = useState<DelimiterOption>('auto');
   const [dateFormat, setDateFormat] = useState<DateFormatOption>('auto');
-  const [validationResults, setValidationResults] = useState<any | null>(null);
-  const [qualityCheckResult, setQualityCheckResult] = useState<any | null>(null);
-  const [crossFieldValidation, setCrossFieldValidation] = useState<any | null>(null);
-  const [parsedEvents, setParsedEvents] = useState<any[]>([]);
+  const [validationResults, setValidationResults] = useState<FileValidationResult[] | null>(null);
+  const [qualityCheckResult, setQualityCheckResult] = useState<QualityCheckResult | null>(null);
+  const [crossFieldValidation, setCrossFieldValidation] = useState<CrossFieldValidationBatchResult | null>(null);
+  const [parsedEvents, setParsedEvents] = useState<ParsedEvent[]>([]);
   const [fieldMappings, setFieldMappings] = useState<Record<string, string>>({});
   const [isSchemaReady, setIsSchemaReady] = useState(false);
   const [catalogueName, setCatalogueName] = useState('');
   const [metadata, setMetadata] = useState<CatalogueMetadata>({});
-  const [processingReport, setProcessingReport] = useState<any | null>(null);
+  // Processing report type - inline since structure is constructed locally
+  const [processingReport, setProcessingReport] = useState<{
+    catalogueId: string;
+    catalogueName: string;
+    processedAt: string;
+    filesProcessed: Array<{ name: string; size: number; format: string }>;
+    totalEvents: number;
+    qualityScore: number | null;
+    validationResults: FileValidationResult[] | null;
+    validationSummary: { totalEvents: number; validEvents: number; invalidEvents: number } | null;
+    metadata: CatalogueMetadata;
+  } | null>(null);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressInfo>({
     stage: 'idle',
     progress: 0,
@@ -61,6 +79,22 @@ export default function UploadPage() {
     stage: 'idle',
     progress: 0,
   });
+
+  // Show loading state while authentication is being checked
+  if (isLoading) {
+    return (
+      <div className="container mx-auto py-8 max-w-7xl">
+        <Card>
+          <CardContent className="py-12">
+            <div className="flex flex-col items-center justify-center space-y-4">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <p className="text-muted-foreground">Loading...</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (!canUpload) {
     return (
@@ -83,6 +117,20 @@ export default function UploadPage() {
   }
 
   const handleFilesAdded = (newFiles: File[]) => {
+    const totalFiles = files.length + newFiles.length;
+    if (totalFiles > MAX_FILES) {
+      toast({
+        title: 'Too many files',
+        description: `Maximum ${MAX_FILES} files allowed per upload. You have ${files.length} files and tried to add ${newFiles.length} more.`,
+        variant: 'destructive',
+      });
+      // Only add files up to the limit
+      const remainingSlots = MAX_FILES - files.length;
+      if (remainingSlots > 0) {
+        setFiles([...files, ...newFiles.slice(0, remainingSlots)]);
+      }
+      return;
+    }
     setFiles([...files, ...newFiles]);
   };
 
@@ -358,16 +406,23 @@ export default function UploadPage() {
       setUploadStatus('validating');
 
       // Process validation results
-      const results = uploadResults.map(result => ({
-        fileName: result.fileName,
-        isValid: result.isValid !== false && (!result.errors || result.errors.length === 0),
-        errors: result.errors || [],
-        warnings: result.warnings || [],
-        format: result.format || 'UNKNOWN',
-        eventCount: result.events?.length || 0,
-        fields: result.detectedFields || ['time', 'latitude', 'longitude', 'depth', 'magnitude'],
-        validationReport: result.validationReport
-      }));
+      // Issue #6 fix: isValid should consider validation report's invalidEvents count, not just parser errors
+      const results = uploadResults.map(result => {
+        const hasParserErrors = result.errors && result.errors.length > 0;
+        const hasValidationErrors = (result.validationReport?.summary?.invalidEvents || 0) > 0;
+        const explicitlyInvalid = result.isValid === false;
+
+        return {
+          fileName: result.fileName,
+          isValid: !explicitlyInvalid && !hasParserErrors && !hasValidationErrors,
+          errors: result.errors || [],
+          warnings: result.warnings || [],
+          format: result.format || 'UNKNOWN',
+          eventCount: result.events?.length || 0,
+          fields: result.detectedFields || ['time', 'latitude', 'longitude', 'depth', 'magnitude'],
+          validationReport: result.validationReport
+        };
+      });
 
       // Combine all events from all files
       const allEvents = uploadResults.flatMap(result => result.events || []);
@@ -406,6 +461,20 @@ export default function UploadPage() {
         toast({
           title: 'Partial import ready',
           description: `Skipped ${totalErrors} invalid event${totalErrors === 1 ? '' : 's'}. ${allEvents.length} valid event${allEvents.length === 1 ? '' : 's'} ready to map.`,
+        });
+      }
+
+      // Issue #15: Warn about cross-field validation errors (non-blocking but explicit)
+      if (crossFieldResult.summary.errors > 0) {
+        toast({
+          title: 'Cross-field validation issues',
+          description: `${crossFieldResult.summary.errors} event(s) have cross-field validation errors. Review the validation results before proceeding.`,
+          variant: 'destructive',
+        });
+      } else if (crossFieldResult.summary.warnings > 0) {
+        toast({
+          title: 'Cross-field validation warnings',
+          description: `${crossFieldResult.summary.warnings} event(s) have cross-field validation warnings.`,
         });
       }
 
@@ -558,7 +627,9 @@ export default function UploadPage() {
           format: f.name.split('.').pop()?.toUpperCase() || 'UNKNOWN'
         })),
         totalEvents: parsedEvents.length,
-        qualityScore: qualityCheckResult?.score || 0,
+        // Issue #9 fix: Use null instead of 0 when no quality check was performed
+        // This distinguishes "no check performed" from "score is 0"
+        qualityScore: qualityCheckResult?.score ?? null,
         validationResults,
         validationSummary,
         metadata
@@ -631,20 +702,25 @@ export default function UploadPage() {
     };
 
     // Create and download JSON report
+    // Issue #20 fix: Use try-finally to ensure URL cleanup even if download fails
     const blob = new Blob([JSON.stringify(reportContent, null, 2)], { type: 'application/json' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = `${processingReport.catalogueName.replace(/\s+/g, '_')}_report.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
+    try {
+      a.href = url;
+      a.download = `${processingReport.catalogueName.replace(/\s+/g, '_')}_report.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
 
-    toast({
-      title: "Report downloaded",
-      description: "Processing report has been downloaded.",
-    });
+      toast({
+        title: "Report downloaded",
+        description: "Processing report has been downloaded.",
+      });
+    } finally {
+      // Always revoke the URL to prevent memory leaks
+      window.URL.revokeObjectURL(url);
+    }
   };
 
   const statusLabels: Record<UploadStatus, string> = {

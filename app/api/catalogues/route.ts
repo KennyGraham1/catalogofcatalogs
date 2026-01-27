@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
 
     if (!dbQueries) {
       return NextResponse.json(
-        { error: 'Database not initialized' },
+        { error: 'Database not initialized', code: 'DB_NOT_INITIALIZED' },
         { status: 500 }
       );
     }
@@ -130,7 +130,15 @@ export async function POST(request: NextRequest) {
     // Validate required fields
     if (!name || typeof name !== 'string' || !name.trim()) {
       return NextResponse.json(
-        { error: 'Catalogue name is required' },
+        { error: 'Catalogue name is required', code: 'MISSING_NAME' },
+        { status: 400 }
+      );
+    }
+
+    const trimmedName = name.trim();
+    if (trimmedName.length > 255) {
+      return NextResponse.json(
+        { error: 'Catalogue name must be 255 characters or less', code: 'NAME_TOO_LONG' },
         { status: 400 }
       );
     }
@@ -142,21 +150,61 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Basic validation of events - check required fields on first 100 events
-    const eventsToValidate = events.slice(0, 100);
+    // Helper to safely parse numeric values
+    const safeParseNumber = (value: any): number | null => {
+      if (value === undefined || value === null || value === '') return null;
+      const num = typeof value === 'number' ? value : parseFloat(String(value));
+      return isNaN(num) ? null : num;
+    };
+
+    // Comprehensive validation of ALL events - check required fields and value ranges
     const invalidEvents: { index: number; reason: string }[] = [];
 
-    for (let i = 0; i < eventsToValidate.length; i++) {
-      const event = eventsToValidate[i];
-      const missingFields: string[] = [];
+    for (let i = 0; i < events.length; i++) {
+      const event = events[i];
+      const errors: string[] = [];
 
-      if (!event.time) missingFields.push('time');
-      if (event.latitude === undefined || event.latitude === null) missingFields.push('latitude');
-      if (event.longitude === undefined || event.longitude === null) missingFields.push('longitude');
-      if (event.magnitude === undefined || event.magnitude === null) missingFields.push('magnitude');
+      // Check required field presence
+      if (!event.time || (typeof event.time === 'string' && event.time.trim() === '')) {
+        errors.push('time is required');
+      } else {
+        // Validate timestamp format
+        const date = new Date(event.time);
+        if (isNaN(date.getTime())) {
+          errors.push('time is not a valid timestamp');
+        }
+      }
 
-      if (missingFields.length > 0) {
-        invalidEvents.push({ index: i, reason: `Missing required fields: ${missingFields.join(', ')}` });
+      const latitude = safeParseNumber(event.latitude);
+      const longitude = safeParseNumber(event.longitude);
+      const magnitude = safeParseNumber(event.magnitude);
+      const depth = safeParseNumber(event.depth);
+
+      if (latitude === null) {
+        errors.push('latitude is required and must be a number');
+      } else if (latitude < -90 || latitude > 90) {
+        errors.push(`latitude ${latitude} must be between -90 and 90`);
+      }
+
+      if (longitude === null) {
+        errors.push('longitude is required and must be a number');
+      } else if (longitude < -180 || longitude > 180) {
+        errors.push(`longitude ${longitude} must be between -180 and 180`);
+      }
+
+      if (magnitude === null) {
+        errors.push('magnitude is required and must be a number');
+      } else if (magnitude < -3 || magnitude > 10) {
+        errors.push(`magnitude ${magnitude} must be between -3 and 10`);
+      }
+
+      // Depth is optional but must be valid if present
+      if (depth !== null && (depth < 0 || depth > 1000)) {
+        errors.push(`depth ${depth} must be between 0 and 1000 km`);
+      }
+
+      if (errors.length > 0) {
+        invalidEvents.push({ index: i, reason: errors.join('; ') });
       }
     }
 
@@ -165,8 +213,9 @@ export async function POST(request: NextRequest) {
         {
           error: `${invalidEvents.length} event(s) failed validation`,
           code: 'INVALID_EVENTS',
-          details: invalidEvents.slice(0, 10), // Return first 10 errors
+          details: invalidEvents.slice(0, 20), // Return first 20 errors for better debugging
           totalInvalid: invalidEvents.length,
+          message: 'All events must have valid time, latitude (-90 to 90), longitude (-180 to 180), and magnitude (-3 to 10)',
         },
         { status: 400 }
       );
@@ -174,7 +223,7 @@ export async function POST(request: NextRequest) {
 
     if (!dbQueries) {
       return NextResponse.json(
-        { error: 'Database not initialized' },
+        { error: 'Database not initialized', code: 'DB_NOT_INITIALIZED' },
         { status: 500 }
       );
     }
@@ -202,103 +251,93 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Helper to safely parse numeric values
-    const safeParseNumber = (value: any): number | null => {
-      if (value === undefined || value === null || value === '') return null;
-      const num = typeof value === 'number' ? value : parseFloat(String(value));
-      return isNaN(num) ? null : num;
-    };
+    // Prepare events for insertion
+    const eventsToInsert = events.map(event => {
+      // Parse required numeric fields - already validated above, so these are guaranteed to be valid
+      const latitude = safeParseNumber(event.latitude)!;
+      const longitude = safeParseNumber(event.longitude)!;
+      const magnitude = safeParseNumber(event.magnitude)!;
 
-    // Insert catalogue first
-    await dbQueries.insertCatalogue(
-      catalogueId,
-      name.trim(),
-      JSON.stringify([{ source: 'upload', description: 'Uploaded catalogue' }]),
-      JSON.stringify({ uploadDate: new Date().toISOString() }),
-      events.length,
-      'complete',
-      {
-        ...metadata,
-        min_latitude: minLat,
-        max_latitude: maxLat,
-        min_longitude: minLon,
-        max_longitude: maxLon,
+      return {
+        // Always generate a unique UUID for the primary ID to avoid duplicate key errors
+        // Store original IDs in source_id for reference
+        id: uuidv4(),
+        catalogue_id: catalogueId,
+        source_id: event.source_id || event.eventId || event.id || undefined,
+        time: event.time, // Already validated to be a valid timestamp above
+        latitude,
+        longitude,
+        magnitude,
+        source_events: JSON.stringify([{ source: 'upload', eventId: event.id || event.eventId }]),
+
+        // Optional fields
+        depth: safeParseNumber(event.depth) ?? undefined,
+        region: event.region,
+        location_name: event.location_name,
+        event_public_id: event.event_public_id || event.publicID,
+        event_type: event.event_type || event.eventType,
+        event_type_certainty: event.event_type_certainty,
+
+        // Uncertainties (ensure numeric types)
+        time_uncertainty: safeParseNumber(event.time_uncertainty) ?? undefined,
+        latitude_uncertainty: safeParseNumber(event.latitude_uncertainty) ?? undefined,
+        longitude_uncertainty: safeParseNumber(event.longitude_uncertainty) ?? undefined,
+        depth_uncertainty: safeParseNumber(event.depth_uncertainty) ?? undefined,
+
+        // Magnitude details
+        magnitude_type: event.magnitude_type || event.magnitudeType,
+        magnitude_uncertainty: safeParseNumber(event.magnitude_uncertainty) ?? undefined,
+        magnitude_station_count: safeParseNumber(event.magnitude_station_count) ?? undefined,
+
+        // Quality metrics (ensure numeric types)
+        azimuthal_gap: safeParseNumber(event.azimuthal_gap || event.azimuthalGap) ?? undefined,
+        minimum_distance: safeParseNumber(event.minimum_distance) ?? undefined,
+        used_phase_count: safeParseNumber(event.used_phase_count || event.usedPhaseCount) ?? undefined,
+        used_station_count: safeParseNumber(event.used_station_count || event.usedStationCount) ?? undefined,
+        standard_error: safeParseNumber(event.standard_error) ?? undefined,
+
+        // Evaluation
+        evaluation_mode: event.evaluation_mode,
+        evaluation_status: event.evaluation_status,
+
+        // Agency info
+        author: event.author,
+        agency_id: event.agency_id,
+
+        // Additional info
+        comment: event.comment,
+        creation_info: event.creation_info ? JSON.stringify(event.creation_info) : undefined,
+      };
+    });
+
+    // Use transaction to ensure atomic insertion of catalogue and events
+    // If any operation fails, the entire transaction is rolled back
+    // Note: dbQueries is guaranteed non-null after check at line 223
+    const db = dbQueries!;
+    await db.transaction(async (session) => {
+      // Insert catalogue
+      await db.insertCatalogue(
+        catalogueId,
+        trimmedName,
+        JSON.stringify([{ source: 'upload', description: 'Uploaded catalogue' }]),
+        JSON.stringify({ uploadDate: new Date().toISOString() }),
+        events.length,
+        'complete',
+        {
+          ...metadata,
+          min_latitude: minLat,
+          max_latitude: maxLat,
+          min_longitude: minLon,
+          max_longitude: maxLon,
+        },
+        session
+      );
+
+      // Insert events in bulk
+      if (eventsToInsert.length > 0) {
+        await db.bulkInsertEvents(eventsToInsert, session);
       }
-    );
-
-    // Insert events in bulk with cleanup on failure
-    if (events.length > 0) {
-      const eventsToInsert = events.map(event => {
-        // Parse required numeric fields - use 0 as fallback for required fields
-        const latitude = safeParseNumber(event.latitude);
-        const longitude = safeParseNumber(event.longitude);
-        const magnitude = safeParseNumber(event.magnitude);
-
-        return {
-          // Always generate a unique UUID for the primary ID to avoid duplicate key errors
-          // Store original IDs in source_id for reference
-          id: uuidv4(),
-          catalogue_id: catalogueId,
-          source_id: event.source_id || event.eventId || event.id || undefined,
-          time: event.time || '',
-          latitude: latitude ?? 0,
-          longitude: longitude ?? 0,
-          magnitude: magnitude ?? 0,
-          source_events: JSON.stringify([{ source: 'upload', eventId: event.id || event.eventId }]),
-
-          // Optional fields
-          depth: safeParseNumber(event.depth) ?? undefined,
-          region: event.region,
-          location_name: event.location_name,
-          event_public_id: event.event_public_id || event.publicID,
-          event_type: event.event_type || event.eventType,
-          event_type_certainty: event.event_type_certainty,
-
-          // Uncertainties (ensure numeric types)
-          time_uncertainty: safeParseNumber(event.time_uncertainty) ?? undefined,
-          latitude_uncertainty: safeParseNumber(event.latitude_uncertainty) ?? undefined,
-          longitude_uncertainty: safeParseNumber(event.longitude_uncertainty) ?? undefined,
-          depth_uncertainty: safeParseNumber(event.depth_uncertainty) ?? undefined,
-
-          // Magnitude details
-          magnitude_type: event.magnitude_type || event.magnitudeType,
-          magnitude_uncertainty: safeParseNumber(event.magnitude_uncertainty) ?? undefined,
-          magnitude_station_count: safeParseNumber(event.magnitude_station_count) ?? undefined,
-
-          // Quality metrics (ensure numeric types)
-          azimuthal_gap: safeParseNumber(event.azimuthal_gap || event.azimuthalGap) ?? undefined,
-          minimum_distance: safeParseNumber(event.minimum_distance) ?? undefined,
-          used_phase_count: safeParseNumber(event.used_phase_count || event.usedPhaseCount) ?? undefined,
-          used_station_count: safeParseNumber(event.used_station_count || event.usedStationCount) ?? undefined,
-          standard_error: safeParseNumber(event.standard_error) ?? undefined,
-
-          // Evaluation
-          evaluation_mode: event.evaluation_mode,
-          evaluation_status: event.evaluation_status,
-
-          // Agency info
-          author: event.author,
-          agency_id: event.agency_id,
-
-          // Additional info
-          comment: event.comment,
-          creation_info: event.creation_info ? JSON.stringify(event.creation_info) : undefined,
-        };
-      });
-
-      try {
-        await dbQueries.bulkInsertEvents(eventsToInsert);
-      } catch (bulkInsertError) {
-        // Clean up the catalogue if bulk insert fails to prevent orphaned data
-        logger.error('Bulk insert failed, cleaning up catalogue', { catalogueId, error: bulkInsertError });
-        try {
-          await dbQueries.deleteCatalogue(catalogueId);
-        } catch (cleanupError) {
-          logger.error('Failed to clean up catalogue after bulk insert failure', { catalogueId, error: cleanupError });
-        }
-        throw bulkInsertError;
-      }
-    }
+    });
 
     // Invalidate cache
     invalidateCacheByPrefix('catalogues');

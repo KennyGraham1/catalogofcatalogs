@@ -77,18 +77,18 @@ export interface EarthquakeEvent extends BaseEarthquakeEvent {
   preferred_origin_id?: string | null;
   preferred_magnitude_id?: string | null;
 
-  // Complex nested data as JSON strings
-  origin_quality?: string | null;
-  origins?: string | null;
-  magnitudes?: string | null;
-  picks?: string | null;
-  arrivals?: string | null;
-  focal_mechanisms?: string | null;
-  amplitudes?: string | null;
-  station_magnitudes?: string | null;
-  event_descriptions?: string | null;
-  comments?: string | null;
-  creation_info?: string | null;
+  // Complex nested data as JSON strings or objects (objects during parsing, strings for storage)
+  origin_quality?: string | Record<string, unknown> | null;
+  origins?: string | Record<string, unknown> | null;
+  magnitudes?: string | Record<string, unknown> | null;
+  picks?: string | Record<string, unknown> | null;
+  arrivals?: string | Record<string, unknown> | null;
+  focal_mechanisms?: string | Record<string, unknown> | null;
+  amplitudes?: string | Record<string, unknown> | null;
+  station_magnitudes?: string | Record<string, unknown> | null;
+  event_descriptions?: string | Record<string, unknown> | null;
+  comments?: string | Record<string, unknown> | null;
+  creation_info?: string | Record<string, unknown> | null;
 
   // Internal tracking
   source_id?: string | null;

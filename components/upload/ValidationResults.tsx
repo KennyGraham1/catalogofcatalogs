@@ -5,11 +5,42 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import type { ValidationFailureDetail, ValidationFailureReport } from '@/lib/validation';
 
 interface ValidationError {
-  line: number;
+  line?: number;
   message: string;
+  field?: string;
+  value?: unknown;
+}
+
+// Flexible failure type - accepts different failure structures
+interface FlexibleValidationFailure {
+  eventIndex?: number;
+  eventId?: string | null;
+  field?: string;
+  message: string;
+  severity?: 'error' | 'warning' | 'info' | string;
+  category?: string;
+  value?: unknown;
+  expected?: string;
+  line?: number;
+}
+
+// Flexible validation report type - accepts both ValidationFailureReport and simpler ValidationReport
+interface FlexibleValidationReport {
+  generatedAt?: string;
+  summary: {
+    totalEvents?: number;
+    validEvents?: number;
+    invalidEvents?: number;
+    failureCount?: number;
+    errorCount?: number;
+    warningCount?: number;
+    infoCount?: number;
+    byCategory?: Record<string, number>;
+    byField?: Record<string, number>;
+  };
+  failures?: FlexibleValidationFailure[];
 }
 
 interface ValidationResult {
@@ -20,7 +51,7 @@ interface ValidationResult {
   format: string;
   eventCount: number;
   fields: string[];
-  validationReport?: ValidationFailureReport;
+  validationReport?: FlexibleValidationReport;
 }
 
 interface ValidationResultsProps {
@@ -48,7 +79,7 @@ export function ValidationResults({ results, catalogueName, onRemoveFile, onPrev
     XML: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300',
   };
 
-  const getFailureLocation = (failure: ValidationFailureDetail) => {
+  const getFailureLocation = (failure: FlexibleValidationFailure) => {
     if (failure.line !== undefined) {
       return `Line ${failure.line}`;
     }
@@ -121,7 +152,8 @@ export function ValidationResults({ results, catalogueName, onRemoveFile, onPrev
       return raw;
     };
 
-    const rows = result.validationReport.failures.map(failure => [
+    const failures = result.validationReport?.failures ?? [];
+    const rows = failures.map(failure => [
       catalogueName || '',
       result.fileName,
       result.validationReport?.generatedAt || '',
@@ -144,7 +176,7 @@ export function ValidationResults({ results, catalogueName, onRemoveFile, onPrev
     downloadBlob(csv, `${baseName}_validation_report.csv`, 'text/csv');
   };
 
-  const renderFailureList = (failures: ValidationFailureDetail[], severity: 'error' | 'warning' | 'info') => {
+  const renderFailureList = (failures: FlexibleValidationFailure[], severity: 'error' | 'warning' | 'info') => {
     const maxItems = 50;
     const displayed = failures.slice(0, maxItems);
     const remaining = failures.length - displayed.length;
@@ -174,7 +206,7 @@ export function ValidationResults({ results, catalogueName, onRemoveFile, onPrev
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <span className="font-medium text-foreground">{getFailureLocation(failure)}</span>
                 {failure.field && <Badge variant="secondary">{failure.field}</Badge>}
-                <Badge variant="outline">{failure.category.replace(/_/g, ' ')}</Badge>
+                {failure.category && <Badge variant="outline">{failure.category.replace(/_/g, ' ')}</Badge>}
               </div>
               <div className="font-medium">{failure.message}</div>
               <div className="text-xs text-muted-foreground">
@@ -295,15 +327,17 @@ export function ValidationResults({ results, catalogueName, onRemoveFile, onPrev
                           <p className="font-medium">{result.validationReport.summary.failureCount}</p>
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-2 mt-3">
-                        {Object.entries(result.validationReport.summary.byCategory)
-                          .filter(([, count]) => count > 0)
-                          .map(([category, count]) => (
-                            <Badge key={category} variant="outline">
-                              {category.replace(/_/g, ' ')}: {count}
-                            </Badge>
-                          ))}
-                      </div>
+                      {result.validationReport.summary.byCategory && (
+                        <div className="flex flex-wrap gap-2 mt-3">
+                          {Object.entries(result.validationReport.summary.byCategory)
+                            .filter(([, count]) => count > 0)
+                            .map(([category, count]) => (
+                              <Badge key={category} variant="outline">
+                                {category.replace(/_/g, ' ')}: {count}
+                              </Badge>
+                            ))}
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -356,9 +390,9 @@ export function ValidationResults({ results, catalogueName, onRemoveFile, onPrev
                     </div>
                   )}
 
-                  {result.validationReport && result.validationReport.failures.length > 0 && (
+                  {result.validationReport && result.validationReport.failures && result.validationReport.failures.length > 0 && (
                     <div className="space-y-4">
-                      {result.validationReport.summary.errorCount > 0 && (
+                      {(result.validationReport.summary.errorCount ?? 0) > 0 && (
                         <div>
                           <h4 className="font-medium mb-2 text-red-600 dark:text-red-400">Errors</h4>
                           {renderFailureList(
@@ -368,7 +402,7 @@ export function ValidationResults({ results, catalogueName, onRemoveFile, onPrev
                         </div>
                       )}
 
-                      {result.validationReport.summary.warningCount > 0 && (
+                      {(result.validationReport.summary.warningCount ?? 0) > 0 && (
                         <div>
                           <h4 className="font-medium mb-2 text-amber-600 dark:text-amber-400">Warnings</h4>
                           {renderFailureList(
@@ -378,7 +412,7 @@ export function ValidationResults({ results, catalogueName, onRemoveFile, onPrev
                         </div>
                       )}
 
-                      {result.validationReport.summary.infoCount > 0 && (
+                      {(result.validationReport.summary.infoCount ?? 0) > 0 && (
                         <div>
                           <h4 className="font-medium mb-2 text-blue-600 dark:text-blue-400">Info</h4>
                           {renderFailureList(

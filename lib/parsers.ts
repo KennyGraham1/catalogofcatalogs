@@ -272,15 +272,6 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
     })
   };
 }
-
-/**
- * Parse a single CSV line handling quoted values
- * @deprecated Use parseLine from delimiter-detector instead
- */
-function parseCSVLine(line: string): string[] {
-  return parseLine(line, ',');
-}
-
 /**
  * Parse JSON format earthquake catalogue
  * Automatically detects and handles GeoJSON format
@@ -331,7 +322,7 @@ export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult
       if (arrayProps.length === 1) {
         // If there's exactly one array property, use it
         eventArray = data[arrayProps[0]];
-        console.log(`[Parser] Auto-detected array property: ${arrayProps[0]}`);
+        debugLog(`[Parser] Auto-detected array property: ${arrayProps[0]}`);
       } else if (arrayProps.length > 1) {
         const message = `Multiple array properties found: ${arrayProps.join(', ')}. Please use one of: events, data, features, earthquakes, results`;
         appendParserFailure(validationAccumulator, { line: 0 }, message);
@@ -844,30 +835,30 @@ export function parseFile(content: string, filename: string, delimiter?: Delimit
     case 'csv':
     case 'txt':
     case 'dat':
-      console.log(`[Parser] Parsing ${filename} as delimited text based on extension`);
+      debugLog(`[Parser] Parsing ${filename} as delimited text based on extension`);
       return parseCSV(content, delimiter, dateFormat);
     case 'json':
-      console.log(`[Parser] Parsing ${filename} as JSON based on extension`);
+      debugLog(`[Parser] Parsing ${filename} as JSON based on extension`);
       return parseJSON(content, dateFormat);
     case 'geojson':
-      console.log(`[Parser] Parsing ${filename} as GeoJSON based on extension`);
+      debugLog(`[Parser] Parsing ${filename} as GeoJSON based on extension`);
       return parseGeoJSON(content);
     case 'xml':
     case 'qml':
-      console.log(`[Parser] Parsing ${filename} as QuakeML based on extension`);
+      debugLog(`[Parser] Parsing ${filename} as QuakeML based on extension`);
       return parseQuakeML(content);
     default:
       // Try to auto-detect based on content
-      console.log(`[Parser] Auto-detecting format for ${filename}`);
+      debugLog(`[Parser] Auto-detecting format for ${filename}`);
       const trimmed = content.trim();
       if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-        console.log(`[Parser] Auto-detected JSON format`);
+        debugLog(`[Parser] Auto-detected JSON format`);
         return parseJSON(content, dateFormat);
       } else if (trimmed.startsWith('<')) {
-        console.log(`[Parser] Auto-detected XML/QuakeML format`);
+        debugLog(`[Parser] Auto-detected XML/QuakeML format`);
         return parseQuakeML(content);
       } else {
-        console.log(`[Parser] Defaulting to delimited text format`);
+        debugLog(`[Parser] Defaulting to delimited text format`);
         return parseCSV(content, delimiter, dateFormat);
       }
   }

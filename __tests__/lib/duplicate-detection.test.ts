@@ -179,13 +179,15 @@ describe('Duplicate Detection', () => {
 
     it('should handle null input gracefully', () => {
       const config = getPresetConfig('strict');
-      expect(areDuplicates(null, baseEvent, config)).toBeNull();
-      expect(areDuplicates(baseEvent, null, config)).toBeNull();
-      expect(areDuplicates(null, null, config)).toBeNull();
+      // Use type assertions since the function handles null at runtime but types don't allow it
+      expect(areDuplicates(null as unknown as typeof baseEvent, baseEvent, config)).toBeNull();
+      expect(areDuplicates(baseEvent, null as unknown as typeof baseEvent, config)).toBeNull();
+      expect(areDuplicates(null as unknown as typeof baseEvent, null as unknown as typeof baseEvent, config)).toBeNull();
     });
 
     it('should handle events without time gracefully', () => {
-      const noTimeEvent = { ...baseEvent, time: undefined };
+      // Use type assertion since the function handles missing time at runtime
+      const noTimeEvent = { ...baseEvent, time: undefined as unknown as string };
       const config = getPresetConfig('strict');
       expect(areDuplicates(baseEvent, noTimeEvent, config)).toBeNull();
     });

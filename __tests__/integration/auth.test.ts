@@ -251,6 +251,14 @@ describe('Authentication Integration Tests', () => {
   });
 
   describe('Role-Based Access Control', () => {
+    const mockFindOne = jest.fn();
+
+    beforeEach(() => {
+      (getCollection as jest.Mock).mockResolvedValue({
+        findOne: mockFindOne,
+      });
+    });
+
     it('should allow admin to access admin routes', async () => {
       // Arrange
       (getServerSession as jest.Mock).mockResolvedValue({

@@ -33,8 +33,33 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
   const [newKeyword, setNewKeyword] = useState('');
   const [newReference, setNewReference] = useState('');
 
+  // Issue #17: Field length limits for metadata validation
+  const FIELD_MAX_LENGTHS: Partial<Record<keyof CatalogueMetadata, number>> = {
+    description: 5000,
+    data_source: 255,
+    provider: 255,
+    geographic_region: 255,
+    quality_notes: 2000,
+    contact_name: 255,
+    contact_email: 255,
+    contact_organization: 255,
+    license: 255,
+    usage_terms: 2000,
+    citation: 1000,
+    doi: 255,
+    version: 50,
+    notes: 2000,
+    validation_summary: 2000,
+    validation_report: 5000,
+  };
+
   const updateField = (field: keyof CatalogueMetadata, value: any) => {
     if (readOnly) return;
+    // Apply length limits for string fields
+    const maxLength = FIELD_MAX_LENGTHS[field];
+    if (maxLength && typeof value === 'string' && value.length > maxLength) {
+      value = value.slice(0, maxLength);
+    }
     onChange({ ...metadata, [field]: value });
   };
 

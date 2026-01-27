@@ -24,8 +24,8 @@ export const earthquakeEventSchema = z.object({
   depth: z.number().min(0, 'Depth must be >= 0 km').max(1000, 'Depth must be <= 1000 km').nullable().optional(),
   magnitude: z.number().min(-3, 'Magnitude must be >= -3').max(10, 'Magnitude must be <= 10'),
   magnitudeType: z.string().max(10).optional(),
-  region: z.string().max(255).optional(),
-  location_name: z.string().max(255).optional(),
+  region: z.string().max(255).nullable().optional(),
+  location_name: z.string().max(255).nullable().optional(),
   source: z.string().max(100).optional(),
   status: z.enum(['automatic', 'reviewed', 'manual']).optional(),
 
@@ -140,8 +140,8 @@ export const fileUploadSchema = z.object({
 
 export type FileUpload = z.infer<typeof fileUploadSchema>;
 
-// Catalogue metadata schema
-export const catalogueMetadataSchema = z.object({
+// Catalogue database record schema (distinct from form-level CatalogueMetadata in types/upload.ts)
+export const catalogueRecordSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1).max(255),
   created_at: z.string().datetime(),
@@ -151,7 +151,7 @@ export const catalogueMetadataSchema = z.object({
   status: z.enum(['processing', 'complete', 'error']),
 });
 
-export type CatalogueMetadata = z.infer<typeof catalogueMetadataSchema>;
+export type CatalogueRecord = z.infer<typeof catalogueRecordSchema>;
 
 // Field mapping schema - includes all QuakeML 1.2 fields and expanded schema fields
 export const fieldMappingSchema = z.object({
