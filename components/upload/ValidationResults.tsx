@@ -26,9 +26,11 @@ interface ValidationResult {
 interface ValidationResultsProps {
   results: ValidationResult[];
   catalogueName?: string;
+  onRemoveFile?: (fileName: string) => void;
+  onPreviewData?: (fileName: string) => void;
 }
 
-export function ValidationResults({ results, catalogueName }: ValidationResultsProps) {
+export function ValidationResults({ results, catalogueName, onRemoveFile, onPreviewData }: ValidationResultsProps) {
   const warningCount = results.reduce(
     (count, result) => count + (result.validationReport?.summary.warningCount ?? result.warnings.length),
     0
@@ -388,11 +390,24 @@ export function ValidationResults({ results, catalogueName }: ValidationResultsP
                     </div>
                   )}
                   
-                  <div className="flex justify-end">
-                    {!result.isValid ? (
-                      <Button variant="destructive" size="sm">Remove File</Button>
-                    ) : (
-                      <Button variant="outline" size="sm">Preview Data</Button>
+                  <div className="flex justify-end gap-2">
+                    {!result.isValid && onRemoveFile && (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => onRemoveFile(result.fileName)}
+                      >
+                        Remove File
+                      </Button>
+                    )}
+                    {result.isValid && onPreviewData && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onPreviewData(result.fileName)}
+                      >
+                        Preview Data
+                      </Button>
                     )}
                   </div>
                 </div>

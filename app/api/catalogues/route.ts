@@ -137,7 +137,37 @@ export async function POST(request: NextRequest) {
 
     if (!events || !Array.isArray(events)) {
       return NextResponse.json(
-        { error: 'Events array is required' },
+        { error: 'Events array is required', code: 'INVALID_EVENTS' },
+        { status: 400 }
+      );
+    }
+
+    // Basic validation of events - check required fields on first 100 events
+    const eventsToValidate = events.slice(0, 100);
+    const invalidEvents: { index: number; reason: string }[] = [];
+
+    for (let i = 0; i < eventsToValidate.length; i++) {
+      const event = eventsToValidate[i];
+      const missingFields: string[] = [];
+
+      if (!event.time) missingFields.push('time');
+      if (event.latitude === undefined || event.latitude === null) missingFields.push('latitude');
+      if (event.longitude === undefined || event.longitude === null) missingFields.push('longitude');
+      if (event.magnitude === undefined || event.magnitude === null) missingFields.push('magnitude');
+
+      if (missingFields.length > 0) {
+        invalidEvents.push({ index: i, reason: `Missing required fields: ${missingFields.join(', ')}` });
+      }
+    }
+
+    if (invalidEvents.length > 0) {
+      return NextResponse.json(
+        {
+          error: `${invalidEvents.length} event(s) failed validation`,
+          code: 'INVALID_EVENTS',
+          details: invalidEvents.slice(0, 10), // Return first 10 errors
+          totalInvalid: invalidEvents.length,
+        },
         { status: 400 }
       );
     }
@@ -152,27 +182,34 @@ export async function POST(request: NextRequest) {
     // Generate catalogue ID
     const catalogueId = uuidv4();
 
-    // Calculate geographic bounds
+    // Calculate geographic bounds in single pass (more efficient for large datasets)
     let minLat: number | undefined;
     let maxLat: number | undefined;
     let minLon: number | undefined;
     let maxLon: number | undefined;
 
-    if (events.length > 0) {
-      const lats = events.map(e => e.latitude).filter(lat => typeof lat === 'number');
-      const lons = events.map(e => e.longitude).filter(lon => typeof lon === 'number');
+    for (const event of events) {
+      const lat = typeof event.latitude === 'number' ? event.latitude : null;
+      const lon = typeof event.longitude === 'number' ? event.longitude : null;
 
-      if (lats.length > 0) {
-        minLat = Math.min(...lats);
-        maxLat = Math.max(...lats);
+      if (lat !== null) {
+        if (minLat === undefined || lat < minLat) minLat = lat;
+        if (maxLat === undefined || lat > maxLat) maxLat = lat;
       }
-      if (lons.length > 0) {
-        minLon = Math.min(...lons);
-        maxLon = Math.max(...lons);
+      if (lon !== null) {
+        if (minLon === undefined || lon < minLon) minLon = lon;
+        if (maxLon === undefined || lon > maxLon) maxLon = lon;
       }
     }
 
-    // Insert catalogue
+    // Helper to safely parse numeric values
+    const safeParseNumber = (value: any): number | null => {
+      if (value === undefined || value === null || value === '') return null;
+      const num = typeof value === 'number' ? value : parseFloat(String(value));
+      return isNaN(num) ? null : num;
+    };
+
+    // Insert catalogue first
     await dbQueries.insertCatalogue(
       catalogueId,
       name.trim(),
@@ -189,60 +226,78 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    // Insert events in bulk
+    // Insert events in bulk with cleanup on failure
     if (events.length > 0) {
-      const eventsToInsert = events.map(event => ({
-        // Always generate a unique UUID for the primary ID to avoid duplicate key errors
-        // Store original IDs in source_id for reference
-        id: uuidv4(),
-        catalogue_id: catalogueId,
-        source_id: event.source_id || event.eventId || event.id || null,
-        time: event.time,
-        latitude: event.latitude,
-        longitude: event.longitude,
-        depth: event.depth ?? null,
-        magnitude: event.magnitude,
-        source_events: JSON.stringify([{ source: 'upload', eventId: event.id || event.eventId }]),
+      const eventsToInsert = events.map(event => {
+        // Parse required numeric fields - use 0 as fallback for required fields
+        const latitude = safeParseNumber(event.latitude);
+        const longitude = safeParseNumber(event.longitude);
+        const magnitude = safeParseNumber(event.magnitude);
 
-        // Optional fields
-        region: event.region,
-        location_name: event.location_name,
-        event_public_id: event.event_public_id || event.publicID,
-        event_type: event.event_type || event.eventType,
-        event_type_certainty: event.event_type_certainty,
+        return {
+          // Always generate a unique UUID for the primary ID to avoid duplicate key errors
+          // Store original IDs in source_id for reference
+          id: uuidv4(),
+          catalogue_id: catalogueId,
+          source_id: event.source_id || event.eventId || event.id || undefined,
+          time: event.time || '',
+          latitude: latitude ?? 0,
+          longitude: longitude ?? 0,
+          magnitude: magnitude ?? 0,
+          source_events: JSON.stringify([{ source: 'upload', eventId: event.id || event.eventId }]),
 
-        // Uncertainties
-        time_uncertainty: event.time_uncertainty,
-        latitude_uncertainty: event.latitude_uncertainty,
-        longitude_uncertainty: event.longitude_uncertainty,
-        depth_uncertainty: event.depth_uncertainty,
+          // Optional fields
+          depth: safeParseNumber(event.depth) ?? undefined,
+          region: event.region,
+          location_name: event.location_name,
+          event_public_id: event.event_public_id || event.publicID,
+          event_type: event.event_type || event.eventType,
+          event_type_certainty: event.event_type_certainty,
 
-        // Magnitude details
-        magnitude_type: event.magnitude_type || event.magnitudeType,
-        magnitude_uncertainty: event.magnitude_uncertainty,
-        magnitude_station_count: event.magnitude_station_count,
+          // Uncertainties (ensure numeric types)
+          time_uncertainty: safeParseNumber(event.time_uncertainty) ?? undefined,
+          latitude_uncertainty: safeParseNumber(event.latitude_uncertainty) ?? undefined,
+          longitude_uncertainty: safeParseNumber(event.longitude_uncertainty) ?? undefined,
+          depth_uncertainty: safeParseNumber(event.depth_uncertainty) ?? undefined,
 
-        // Quality metrics
-        azimuthal_gap: event.azimuthal_gap || event.azimuthalGap,
-        minimum_distance: event.minimum_distance,
-        used_phase_count: event.used_phase_count || event.usedPhaseCount,
-        used_station_count: event.used_station_count || event.usedStationCount,
-        standard_error: event.standard_error,
+          // Magnitude details
+          magnitude_type: event.magnitude_type || event.magnitudeType,
+          magnitude_uncertainty: safeParseNumber(event.magnitude_uncertainty) ?? undefined,
+          magnitude_station_count: safeParseNumber(event.magnitude_station_count) ?? undefined,
 
-        // Evaluation
-        evaluation_mode: event.evaluation_mode,
-        evaluation_status: event.evaluation_status,
+          // Quality metrics (ensure numeric types)
+          azimuthal_gap: safeParseNumber(event.azimuthal_gap || event.azimuthalGap) ?? undefined,
+          minimum_distance: safeParseNumber(event.minimum_distance) ?? undefined,
+          used_phase_count: safeParseNumber(event.used_phase_count || event.usedPhaseCount) ?? undefined,
+          used_station_count: safeParseNumber(event.used_station_count || event.usedStationCount) ?? undefined,
+          standard_error: safeParseNumber(event.standard_error) ?? undefined,
 
-        // Agency info
-        author: event.author,
-        agency_id: event.agency_id,
+          // Evaluation
+          evaluation_mode: event.evaluation_mode,
+          evaluation_status: event.evaluation_status,
 
-        // Additional info
-        comment: event.comment,
-        creation_info: event.creation_info ? JSON.stringify(event.creation_info) : null,
-      }));
+          // Agency info
+          author: event.author,
+          agency_id: event.agency_id,
 
-      await dbQueries.bulkInsertEvents(eventsToInsert);
+          // Additional info
+          comment: event.comment,
+          creation_info: event.creation_info ? JSON.stringify(event.creation_info) : undefined,
+        };
+      });
+
+      try {
+        await dbQueries.bulkInsertEvents(eventsToInsert);
+      } catch (bulkInsertError) {
+        // Clean up the catalogue if bulk insert fails to prevent orphaned data
+        logger.error('Bulk insert failed, cleaning up catalogue', { catalogueId, error: bulkInsertError });
+        try {
+          await dbQueries.deleteCatalogue(catalogueId);
+        } catch (cleanupError) {
+          logger.error('Failed to clean up catalogue after bulk insert failure', { catalogueId, error: cleanupError });
+        }
+        throw bulkInsertError;
+      }
     }
 
     // Invalidate cache

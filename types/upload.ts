@@ -77,32 +77,10 @@ export interface FileValidationResult {
 
 /**
  * Quality check result from performQualityCheck
+ * NOTE: Use QualityCheckResult from '@/lib/data-quality-checker' instead
+ * This re-export is for convenience
  */
-export interface QualityCheckResult {
-  overallScore: number;
-  completeness: number;
-  accuracy: number;
-  consistency: number;
-  metrics: {
-    fieldCompleteness: Record<string, number>;
-    outlierCount: number;
-    duplicateCount: number;
-    temporalCoverage: number;
-    spatialCoverage: number;
-  };
-  issues: QualityIssue[];
-}
-
-/**
- * Individual quality issue
- */
-export interface QualityIssue {
-  field: string;
-  severity: 'low' | 'medium' | 'high';
-  message: string;
-  affectedEvents: number;
-  suggestion?: string;
-}
+export type { QualityCheckResult } from '@/lib/data-quality-checker';
 
 /**
  * Cross-field validation check result
@@ -140,6 +118,7 @@ export interface CrossFieldValidationResult {
 /**
  * Parsed earthquake event before mapping
  * Uses optional fields since parsing may not capture all data
+ * This is the single source of truth for ParsedEvent
  */
 export interface ParsedEvent {
   // Required fields
@@ -152,6 +131,7 @@ export interface ParsedEvent {
   depth?: number | null;
   region?: string | null;
   location_name?: string | null;
+  source?: string;
 
   // Event identification
   id?: string;
@@ -199,6 +179,9 @@ export interface ParsedEvent {
   comment?: string;
   creation_info?: Record<string, unknown>;
 
+  // QuakeML 1.2 extended data (when parsing QuakeML files)
+  quakeml?: import('@/lib/types/quakeml').QuakeMLEvent;
+
   // Index for reference purposes
   [key: string]: unknown;
 }
@@ -234,34 +217,60 @@ export interface ProcessingReport {
 
 /**
  * Catalogue metadata from the form
+ * This is the single source of truth for metadata structure
  */
 export interface CatalogueMetadata {
+  // Basic metadata
   description?: string;
   data_source?: string;
   provider?: string;
   geographic_region?: string;
+
+  // Time period
   time_period_start?: string;
   time_period_end?: string;
-  data_quality?: string;
+
+  // Quality - nested object for structured quality assessment
+  data_quality?: {
+    completeness?: string;
+    accuracy?: string;
+    reliability?: string;
+  };
   quality_notes?: string;
+
+  // Contact
   contact_name?: string;
   contact_email?: string;
   contact_organization?: string;
+
+  // License
   license?: string;
   usage_terms?: string;
   citation?: string;
+
+  // Additional
   doi?: string;
   version?: string;
-  keywords?: string;
-  reference_links?: string;
+  keywords?: string[];        // Array of keywords
+  reference_links?: string[]; // Array of reference URLs
   notes?: string;
+
+  // Validation data (added during processing)
+  validation_summary?: string;
+  validation_report?: string;
+  validation_timestamp?: string;
 }
+
+/**
+ * Upload stage type - stages during file upload and initial processing
+ */
+export type UploadStage = 'idle' | 'uploading' | 'parsing' | 'validating' | 'saving' | 'complete' | 'error';
 
 /**
  * Upload progress tracking
  */
 export interface UploadProgressInfo {
-  stage: 'idle' | 'uploading' | 'parsing' | 'validating' | 'complete' | 'error';
+  stage: UploadStage;
   progress: number;
   bytesUploaded: number;
   totalBytes: number;
@@ -273,10 +282,15 @@ export interface UploadProgressInfo {
 }
 
 /**
+ * Processing stage type - stages during catalogue processing
+ */
+export type ProcessingStage = 'idle' | 'mapping' | 'saving' | 'report' | 'complete' | 'error';
+
+/**
  * Processing progress tracking (post-upload)
  */
 export interface ProcessingProgressInfo {
-  stage: 'idle' | 'mapping' | 'saving' | 'report' | 'complete' | 'error';
+  stage: ProcessingStage;
   progress: number;
   message?: string;
   eventCount?: number;
@@ -284,11 +298,12 @@ export interface ProcessingProgressInfo {
 }
 
 /**
- * Upload status states
+ * Upload status states - overall workflow status
  */
 export type UploadStatus =
   | 'idle'
   | 'uploading'
+  | 'parsing'
   | 'validating'
   | 'mapping'
   | 'metadata'

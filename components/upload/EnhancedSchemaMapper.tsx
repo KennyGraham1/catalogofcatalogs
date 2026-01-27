@@ -220,27 +220,11 @@ export function EnhancedSchemaMapper({
       }
 
       setLoading(false);
-      checkRequiredFieldsInternal();
+      // Note: Required fields check is handled by the fieldMappings useEffect
     }, 500);
 
     return () => clearTimeout(timer);
   }, [validationResults, autoMapping, configLoaded, savedMappingConfig, fileFormat, getCustomMappingsFromConfig]);
-  
-  // Check if required fields are mapped (internal function)
-  const checkRequiredFieldsInternal = () => {
-    const { complete, missing } = checkRequiredFieldsMapped(fieldMappings);
-    if (complete) {
-      onSchemaReady(true);
-      return;
-    }
-
-    const sourceFields = getSourceFields();
-    const normalizedFields = new Set(sourceFields.map((field: string) => field.toLowerCase()));
-    const hasSplitTimestamp = normalizedFields.has('year') && normalizedFields.has('month') && normalizedFields.has('day');
-    const adjustedMissing = hasSplitTimestamp ? missing.filter((field: string) => field !== 'time') : missing;
-
-    onSchemaReady(adjustedMissing.length === 0);
-  };
 
   // Update field mapping
   const updateMapping = (sourceField: string, targetField: string) => {
@@ -253,14 +237,30 @@ export function EnhancedSchemaMapper({
       }
       return updated;
     });
-
-    setTimeout(() => {
-      checkRequiredFieldsInternal();
-      if (onMappingsChange) {
-        onMappingsChange(fieldMappings);
-      }
-    }, 0);
   };
+
+  // Effect to propagate mapping changes and check required fields after state settles
+  useEffect(() => {
+    // Skip during initial loading
+    if (loading) return;
+
+    // Check required fields with current (settled) state
+    const { complete, missing } = checkRequiredFieldsMapped(fieldMappings);
+    if (complete) {
+      onSchemaReady(true);
+    } else {
+      const sourceFields = getSourceFields();
+      const normalizedFields = new Set(sourceFields.map((field: string) => field.toLowerCase()));
+      const hasSplitTimestamp = normalizedFields.has('year') && normalizedFields.has('month') && normalizedFields.has('day');
+      const adjustedMissing = hasSplitTimestamp ? missing.filter((field: string) => field !== 'time') : missing;
+      onSchemaReady(adjustedMissing.length === 0);
+    }
+
+    // Notify parent of mapping changes
+    if (onMappingsChange) {
+      onMappingsChange(fieldMappings);
+    }
+  }, [fieldMappings, loading, onMappingsChange, onSchemaReady, validationResults]);
   
   // Get source fields from validation results
   const getSourceFields = () => {
@@ -364,7 +364,7 @@ export function EnhancedSchemaMapper({
       title: 'Template loaded',
       description: `Loaded mapping template "${template.name}"`
     });
-    setTimeout(checkRequiredFieldsInternal, 0);
+    // Note: Required fields check is handled by the fieldMappings useEffect
   };
   
   // Delete a template

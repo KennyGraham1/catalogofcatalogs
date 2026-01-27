@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { parseFile } from '@/lib/parsers';
 import { type Delimiter } from '@/lib/delimiter-detector';
 import { type DateFormat } from '@/lib/date-format-detector';
-import { apiCache } from '@/lib/cache';
 import { requireEditor } from '@/lib/auth/middleware';
+import { Logger } from '@/lib/errors';
 
+const logger = new Logger('UploadAPI');
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
 
 export async function POST(request: NextRequest) {
@@ -84,12 +85,12 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Upload error:', error);
+    logger.error('Upload error', error);
 
     const errorMessage = error instanceof Error ? error.message : 'Failed to process file';
 
     return NextResponse.json(
-      { error: errorMessage },
+      { error: errorMessage, code: 'UPLOAD_ERROR' },
       { status: 500 }
     );
   }

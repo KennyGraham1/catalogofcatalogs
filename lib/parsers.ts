@@ -5,33 +5,28 @@
  * processing of large files (100MB+) with constant memory usage.
  */
 
-import { validateEvent } from './earthquake-utils';
+import { validateEvent, normalizeTimestamp } from './earthquake-utils';
 import { summarizeValidationFailures, validateEventWithDetails, type FieldMappingTrace, type ValidationEventContext, type ValidationFailureDetail, type ValidationFailureReport } from './validation';
 import { validateEventCrossFields } from './cross-field-validation';
 import { parseQuakeMLEvent } from './quakeml-parser';
-import type { QuakeMLEvent } from './types/quakeml';
 import { createReadStream } from 'fs';
 import { createInterface } from 'readline';
 import { detectDelimiter, parseLine, parseWithDelimiter, type Delimiter } from './delimiter-detector';
 import { parseGeoJSON } from './geojson-parser';
 import { detectDateFormat, type DateFormat } from './date-format-detector';
 import { FIELD_ALIASES } from './field-definitions';
+import type { ParsedEvent } from '@/types/upload';
 
-export interface ParsedEvent {
-  time: string;
-  latitude: number;
-  longitude: number;
-  depth?: number | null;
-  magnitude: number;
-  magnitudeType?: string;
-  region?: string;
-  source?: string;
-  eventId?: string;
-  [key: string]: any;
+// Re-export ParsedEvent for consumers of this module
+export type { ParsedEvent } from '@/types/upload';
 
-  // QuakeML 1.2 extended data (when parsing QuakeML files)
-  quakeml?: QuakeMLEvent;
-}
+// Debug logger - only logs in development mode
+const debugLog = (message: string) => {
+  if (process.env.NODE_ENV === 'development') {
+    // eslint-disable-next-line no-console
+    console.log(message);
+  }
+};
 
 export interface ParseResult {
   success: boolean;
@@ -304,7 +299,7 @@ export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult
 
     // Check if this is GeoJSON format
     if (data.type === 'FeatureCollection' || data.type === 'Feature') {
-      console.log('[Parser] Detected GeoJSON format, using specialized parser');
+      debugLog('[Parser] Detected GeoJSON format, using specialized parser');
       return parseGeoJSON(content);
     }
 
@@ -322,7 +317,7 @@ export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult
       eventArray = data.data;
     } else if (data.features && Array.isArray(data.features)) {
       // GeoJSON-like format without type field - use GeoJSON parser
-      console.log('[Parser] Detected features array, attempting GeoJSON parsing');
+      debugLog('[Parser] Detected features array, attempting GeoJSON parsing');
       return parseGeoJSON(content);
     } else if (data.earthquakes && Array.isArray(data.earthquakes)) {
       // { earthquakes: [...] } structure
@@ -822,7 +817,6 @@ function mapCommonFields(event: any, dateFormat?: DateFormat, includeMappingRepo
 
   // Normalize timestamp to ISO 8601 format with date format hint
   if (mapped.time) {
-    const { normalizeTimestamp } = require('./earthquake-utils');
     const formatHint = dateFormat === 'US' ? 'US' : dateFormat === 'International' ? 'International' : undefined;
     const normalized = normalizeTimestamp(mapped.time, formatHint);
     if (normalized) {

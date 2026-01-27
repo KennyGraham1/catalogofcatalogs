@@ -17,43 +17,10 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Plus, X } from 'lucide-react';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
+import type { CatalogueMetadata } from '@/types/upload';
 
-export interface CatalogueMetadata {
-  // Basic metadata
-  description?: string;
-  data_source?: string;
-  provider?: string;
-  geographic_region?: string;
-  
-  // Time period
-  time_period_start?: string;
-  time_period_end?: string;
-  
-  // Quality
-  data_quality?: {
-    completeness?: string;
-    accuracy?: string;
-    reliability?: string;
-  };
-  quality_notes?: string;
-  
-  // Contact
-  contact_name?: string;
-  contact_email?: string;
-  contact_organization?: string;
-  
-  // License
-  license?: string;
-  usage_terms?: string;
-  citation?: string;
-  
-  // Additional
-  doi?: string;
-  version?: string;
-  keywords?: string[];
-  reference_links?: string[];
-  notes?: string;
-}
+// Re-export the type for convenience
+export type { CatalogueMetadata } from '@/types/upload';
 
 interface CatalogueMetadataFormProps {
   metadata: CatalogueMetadata;
@@ -84,9 +51,16 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
 
   const addKeyword = () => {
     if (readOnly) return;
-    if (newKeyword.trim()) {
+    const trimmedKeyword = newKeyword.trim().toLowerCase();
+    if (trimmedKeyword) {
       const keywords = metadata.keywords || [];
-      onChange({ ...metadata, keywords: [...keywords, newKeyword.trim()] });
+      // Deduplicate: check if keyword already exists (case-insensitive)
+      if (!keywords.some(k => k.toLowerCase() === trimmedKeyword)) {
+        // Limit to 20 keywords max
+        if (keywords.length < 20) {
+          onChange({ ...metadata, keywords: [...keywords, newKeyword.trim()] });
+        }
+      }
       setNewKeyword('');
     }
   };
@@ -97,11 +71,33 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
     onChange({ ...metadata, keywords: keywords.filter((_, i) => i !== index) });
   };
 
+  // Simple URL validation helper
+  const isValidUrl = (url: string): boolean => {
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  };
+
   const addReference = () => {
     if (readOnly) return;
-    if (newReference.trim()) {
+    const trimmedRef = newReference.trim();
+    if (trimmedRef) {
+      // Validate URL format
+      if (!isValidUrl(trimmedRef)) {
+        // Allow user to still add if it looks like a URL (starts with http)
+        if (!trimmedRef.startsWith('http://') && !trimmedRef.startsWith('https://')) {
+          setNewReference('');
+          return;
+        }
+      }
       const references = metadata.reference_links || [];
-      onChange({ ...metadata, reference_links: [...references, newReference.trim()] });
+      // Deduplicate
+      if (!references.includes(trimmedRef)) {
+        onChange({ ...metadata, reference_links: [...references, trimmedRef] });
+      }
       setNewReference('');
     }
   };

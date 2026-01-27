@@ -127,6 +127,23 @@ export default function UploadPage() {
       return events; // No custom mappings, return as-is
     }
 
+    // Fields that must be numeric
+    const numericFields = new Set([
+      'latitude', 'longitude', 'depth', 'magnitude',
+      'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty',
+      'depth_uncertainty', 'horizontal_uncertainty', 'magnitude_uncertainty',
+      'azimuthal_gap', 'used_phase_count', 'used_station_count', 'standard_error',
+      'minimum_distance', 'maximum_distance', 'associated_phase_count',
+      'associated_station_count', 'depth_phase_count', 'magnitude_station_count'
+    ]);
+
+    // Helper to safely parse numeric values
+    const safeParseNumber = (value: any): number | null => {
+      if (value === undefined || value === null || value === '') return null;
+      const num = typeof value === 'number' ? value : parseFloat(String(value));
+      return isNaN(num) ? null : num;
+    };
+
     return events.map(event => {
       const mappedEvent: any = { ...event };
 
@@ -137,8 +154,12 @@ export default function UploadPage() {
           continue;
         }
 
-        // Copy value from source to target field
-        mappedEvent[targetField] = event[sourceField];
+        // For numeric fields, ensure proper type conversion
+        if (numericFields.has(targetField)) {
+          mappedEvent[targetField] = safeParseNumber(event[sourceField]);
+        } else {
+          mappedEvent[targetField] = event[sourceField];
+        }
       }
 
       return mappedEvent;
@@ -383,12 +404,13 @@ export default function UploadPage() {
 
       if (hasErrors && hasValidEvents) {
         toast({
-          title: 'Validation issues detected',
-          description: `Skipped ${totalErrors} invalid event${totalErrors === 1 ? '' : 's'}; ${allEvents.length} valid event${allEvents.length === 1 ? '' : 's'} ready to map.`,
+          title: 'Partial import ready',
+          description: `Skipped ${totalErrors} invalid event${totalErrors === 1 ? '' : 's'}. ${allEvents.length} valid event${allEvents.length === 1 ? '' : 's'} ready to map.`,
         });
       }
 
-      if (!hasErrors && hasValidEvents) {
+      // Auto-navigate to schema tab when there are valid events (including partial imports)
+      if (hasValidEvents) {
         setTimeout(() => {
           setActiveTab('schema');
         }, 500);
@@ -536,7 +558,7 @@ export default function UploadPage() {
           format: f.name.split('.').pop()?.toUpperCase() || 'UNKNOWN'
         })),
         totalEvents: parsedEvents.length,
-        qualityScore: qualityCheckResult?.overallScore || 0,
+        qualityScore: qualityCheckResult?.score || 0,
         validationResults,
         validationSummary,
         metadata

@@ -4,20 +4,10 @@ import { useState, useRef, useEffect } from 'react';
 import { Upload, X, File, FileSpreadsheet, FileJson, FilePlus, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import type { UploadStage, UploadProgressInfo } from '@/types/upload';
 
-export type UploadStage = 'idle' | 'uploading' | 'parsing' | 'validating' | 'saving' | 'complete' | 'error';
-
-export interface UploadProgressInfo {
-  stage: UploadStage;
-  progress: number;
-  bytesUploaded: number;
-  totalBytes: number;
-  currentFile?: string;
-  filesCompleted: number;
-  totalFiles: number;
-  startTime?: number;
-  message?: string;
-}
+// Re-export for convenience
+export type { UploadStage, UploadProgressInfo } from '@/types/upload';
 
 interface FileUploaderProps {
   files: File[];
@@ -160,13 +150,16 @@ export function FileUploader({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
+        role="region"
+        aria-label="File upload drop zone"
+        aria-describedby="upload-instructions"
       >
         <div className="flex flex-col items-center justify-center space-y-4 text-center">
-          <div className="p-3 rounded-full bg-primary/10">
+          <div className="p-3 rounded-full bg-primary/10" aria-hidden="true">
             <Upload className="h-8 w-8 text-primary" />
           </div>
-          
-          <div>
+
+          <div id="upload-instructions">
             <h3 className="font-semibold text-lg mb-1">Upload Earthquake Catalogues</h3>
             <p className="text-muted-foreground max-w-md mx-auto">
               Drag and drop your catalogue files here, or click to browse.
@@ -180,8 +173,9 @@ export function FileUploader({
             disabled={uploading || disabled}
             variant="outline"
             className="relative"
+            aria-label="Select files to upload"
           >
-            <FilePlus className="mr-2 h-4 w-4" />
+            <FilePlus className="mr-2 h-4 w-4" aria-hidden="true" />
             Select Files
           </Button>
 
@@ -193,6 +187,7 @@ export function FileUploader({
             multiple
             accept=".csv,.txt,.qml,.json,.geojson,.xml"
             disabled={uploading || disabled}
+            aria-label="File input for catalogue upload"
           />
         </div>
       </div>

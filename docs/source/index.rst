@@ -149,7 +149,7 @@ Indices and tables
 License
 -------
 
-This project is developed by Kenny Graham at GNS Science.
+This project is developed by Kenny Graham at Earth Sciences NZ (AI Assisted).
 
 **Last Updated:** January 2026
 
