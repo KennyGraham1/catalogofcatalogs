@@ -158,7 +158,9 @@ export async function POST(request: NextRequest) {
     };
 
     // Comprehensive validation of ALL events - check required fields and value ranges
+    // Partition events into valid and invalid arrays for partial import support
     const invalidEvents: { index: number; reason: string }[] = [];
+    const validEvents: { event: typeof events[0]; index: number }[] = [];
 
     for (let i = 0; i < events.length; i++) {
       const event = events[i];
@@ -205,15 +207,19 @@ export async function POST(request: NextRequest) {
 
       if (errors.length > 0) {
         invalidEvents.push({ index: i, reason: errors.join('; ') });
+      } else {
+        // Event passed validation - add to valid events array
+        validEvents.push({ event, index: i });
       }
     }
 
-    if (invalidEvents.length > 0) {
+    // If ALL events are invalid, reject the entire request
+    if (validEvents.length === 0) {
       return NextResponse.json(
         {
-          error: `${invalidEvents.length} event(s) failed validation`,
-          code: 'INVALID_EVENTS',
-          details: invalidEvents.slice(0, 20), // Return first 20 errors for better debugging
+          error: `All ${invalidEvents.length} event(s) failed validation. No events could be imported.`,
+          code: 'ALL_EVENTS_INVALID',
+          details: invalidEvents.slice(0, 100), // Return first 100 errors for debugging
           totalInvalid: invalidEvents.length,
           message: 'All events must have valid time, latitude (-90 to 90), longitude (-180 to 180), and magnitude (-3 to 10)',
         },
@@ -231,15 +237,15 @@ export async function POST(request: NextRequest) {
     // Generate catalogue ID
     const catalogueId = uuidv4();
 
-    // Calculate geographic bounds in single pass (more efficient for large datasets)
+    // Calculate geographic bounds from VALID events only (more efficient for large datasets)
     let minLat: number | undefined;
     let maxLat: number | undefined;
     let minLon: number | undefined;
     let maxLon: number | undefined;
 
-    for (const event of events) {
-      const lat = typeof event.latitude === 'number' ? event.latitude : null;
-      const lon = typeof event.longitude === 'number' ? event.longitude : null;
+    for (const { event } of validEvents) {
+      const lat = safeParseNumber(event.latitude);
+      const lon = safeParseNumber(event.longitude);
 
       if (lat !== null) {
         if (minLat === undefined || lat < minLat) minLat = lat;
@@ -251,8 +257,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Prepare events for insertion
-    const eventsToInsert = events.map(event => {
+    // Prepare ONLY VALID events for insertion
+    const eventsToInsert = validEvents.map(({ event }) => {
       // Parse required numeric fields - already validated above, so these are guaranteed to be valid
       const latitude = safeParseNumber(event.latitude)!;
       const longitude = safeParseNumber(event.longitude)!;
@@ -310,18 +316,36 @@ export async function POST(request: NextRequest) {
       };
     });
 
+    // Calculate validation statistics for the response
+    const totalSubmitted = events.length;
+    const successfullyImported = validEvents.length;
+    const failedValidation = invalidEvents.length;
+    const successRate = totalSubmitted > 0
+      ? Math.round((successfullyImported / totalSubmitted) * 10000) / 100
+      : 0;
+    const isPartialImport = failedValidation > 0;
+
     // Use transaction to ensure atomic insertion of catalogue and events
     // If any operation fails, the entire transaction is rolled back
-    // Note: dbQueries is guaranteed non-null after check at line 223
+    // Note: dbQueries is guaranteed non-null after check at line 229
     const db = dbQueries!;
     await db.transaction(async (session) => {
-      // Insert catalogue
+      // Insert catalogue with ACTUAL imported event count (not total submitted)
       await db.insertCatalogue(
         catalogueId,
         trimmedName,
-        JSON.stringify([{ source: 'upload', description: 'Uploaded catalogue' }]),
-        JSON.stringify({ uploadDate: new Date().toISOString() }),
-        events.length,
+        JSON.stringify([{ source: 'upload', description: isPartialImport ? 'Uploaded catalogue (partial import)' : 'Uploaded catalogue' }]),
+        JSON.stringify({
+          uploadDate: new Date().toISOString(),
+          partialImport: isPartialImport,
+          validationSummary: {
+            totalSubmitted,
+            successfullyImported,
+            failedValidation,
+            successRate,
+          }
+        }),
+        successfullyImported, // Use count of VALID events, not total
         'complete',
         {
           ...metadata,
@@ -333,25 +357,55 @@ export async function POST(request: NextRequest) {
         session
       );
 
-      // Insert events in bulk
+      // Insert only valid events in bulk
       if (eventsToInsert.length > 0) {
         await db.bulkInsertEvents(eventsToInsert, session);
       }
     });
 
-    // Invalidate cache
+    // Invalidate cache only after successful insertion
     invalidateCacheByPrefix('catalogues');
 
+    // Log with both success and failure counts
     logger.info('Catalogue created successfully', {
       catalogueId,
       name,
-      eventCount: events.length
+      eventCount: successfullyImported,
+      totalSubmitted,
+      failedValidation,
+      isPartialImport,
     });
 
     // Fetch the created catalogue to return
     const catalogue = await dbQueries.getCatalogueById(catalogueId);
 
-    return NextResponse.json(catalogue, { status: 201 });
+    // Build comprehensive validation report
+    const validationReport = {
+      totalSubmitted,
+      successfullyImported,
+      failedValidation,
+      successRate,
+      // Limit invalid events details to first 100 for performance
+      invalidEvents: invalidEvents.slice(0, 100),
+      hasMoreInvalidEvents: invalidEvents.length > 100,
+    };
+
+    // Build response message
+    const importMessage = isPartialImport
+      ? `Imported ${successfullyImported.toLocaleString()} of ${totalSubmitted.toLocaleString()} events. ${failedValidation.toLocaleString()} event${failedValidation === 1 ? '' : 's'} failed validation.`
+      : `Successfully imported all ${successfullyImported.toLocaleString()} events.`;
+
+    // Return response with catalogue properties spread at top level for backward compatibility
+    // Also include validationReport and partialImport metadata for clients that support it
+    return NextResponse.json(
+      {
+        ...catalogue,
+        validationReport,
+        importMessage,
+        partialImport: isPartialImport,
+      },
+      { status: 201 }
+    );
 
   } catch (error) {
     logger.error('Failed to create catalogue', error);
