@@ -236,7 +236,11 @@ export function validateTimeLocationConsistency(event: any): DataQualityCheck[] 
   if (event.time) {
     const eventTime = new Date(event.time);
     const now = new Date();
-    
+    // Absolute minimum date for historical seismology (year 1000 CE)
+    const absoluteMinDate = new Date('1000-01-01');
+    // Instrumental era threshold (for informational notes)
+    const instrumentalEraDate = new Date('1900-01-01');
+
     if (eventTime > now) {
       checks.push({
         passed: false,
@@ -247,15 +251,24 @@ export function validateTimeLocationConsistency(event: any): DataQualityCheck[] 
       });
     }
 
-    // Check if time is unreasonably old
-    const minDate = new Date('1900-01-01');
-    if (eventTime < minDate) {
+    // Check if time is unreasonably old (before 1000 CE)
+    if (eventTime < absoluteMinDate) {
       checks.push({
         passed: false,
-        severity: 'warning',
-        message: `Event time (${eventTime.toISOString()}) is before 1900`,
+        severity: 'error',
+        message: `Event time (${eventTime.toISOString()}) is before year 1000 CE`,
         field: 'time',
-        suggestion: 'Verify the timestamp - instrumental seismology began around 1900'
+        suggestion: 'Events before 1000 CE are not supported - check timestamp format'
+      });
+    }
+    // Informational note for pre-instrumental era (before 1900)
+    else if (eventTime < instrumentalEraDate) {
+      checks.push({
+        passed: true, // This is informational, not a validation failure
+        severity: 'info',
+        message: `Historical event from pre-instrumental era (${eventTime.toISOString()})`,
+        field: 'time',
+        suggestion: 'Pre-1900 historical events are supported - uncertainties may be higher due to lack of instrumental data'
       });
     }
   }

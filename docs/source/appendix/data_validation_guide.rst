@@ -42,8 +42,8 @@ All earthquake events must include the following required fields:
      - Description
    * - ``time``
      - DateTime
-     - 1900-01-01 to present
-     - Event origin time
+     - 1000-01-01 to present
+     - Event origin time (supports historical events back to year 1000 CE)
    * - ``latitude``
      - Number
      - -90 to 90
@@ -137,8 +137,15 @@ Time Validation
 
 - Must be a valid ISO 8601 datetime or parseable date string
 - Cannot be in the future
-- Should be after 1900-01-01 (instrumental seismology era)
-- Warning if before 1900 (pre-instrumental era)
+- Must be after year 1000 CE (minimum supported date for historical seismology)
+- Informational note for pre-1900 events (pre-instrumental era)
+
+**Historical Events Support**: The system supports historical earthquake catalogues dating
+back to year 1000 CE. Events before 1900 are flagged with an informational note (not an
+error or warning) to indicate they are from the pre-instrumental era and may have higher
+location/magnitude uncertainties. This enables importing historical seismology catalogues
+that document earthquakes from written records, archaeological evidence, and other
+historical sources.
 
 Location Validation
 ~~~~~~~~~~~~~~~~~~~

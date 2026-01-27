@@ -7,6 +7,7 @@ import { validateDepth, validateMagnitude, validateTimestamp } from './earthquak
  */
 
 // Enhanced earthquake event schema with comprehensive validation
+// Note: Historical seismology extends back to ~1000 CE for documented earthquakes
 export const earthquakeEventSchema = z.object({
   id: z.string().optional(),
   time: z.string().datetime().or(z.string().refine((val) => !isNaN(Date.parse(val)), {
@@ -14,10 +15,11 @@ export const earthquakeEventSchema = z.object({
   })).refine((val) => {
     const date = new Date(val);
     const now = new Date();
-    const minDate = new Date('1900-01-01');
+    // Allow historical events back to year 1000 CE for historical seismology catalogues
+    const minDate = new Date('1000-01-01');
     return date >= minDate && date <= now;
   }, {
-    message: 'Event time must be between 1900 and present'
+    message: 'Event time must be between year 1000 CE and present'
   }),
   latitude: z.number().min(-90, 'Latitude must be >= -90').max(90, 'Latitude must be <= 90'),
   longitude: z.number().min(-180, 'Longitude must be >= -180').max(180, 'Longitude must be <= 180'),

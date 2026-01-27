@@ -275,13 +275,16 @@ export function detectAnomalies(event: {
   }
 
   // === TEMPORAL ANOMALIES ===
-  
+
   if (event.time) {
     const eventDate = new Date(event.time);
     const now = new Date();
-    const minDate = new Date('1900-01-01');
+    // Absolute minimum date for historical seismology (year 1000 CE)
+    const absoluteMinDate = new Date('1000-01-01');
+    // Instrumental era threshold (for informational warnings)
+    const instrumentalEraDate = new Date('1900-01-01');
 
-    // Future event
+    // Future event - this is always an error
     if (eventDate > now) {
       flags.push({
         type: 'error',
@@ -292,14 +295,24 @@ export function detectAnomalies(event: {
       });
     }
 
-    // Very old event (before 1900)
-    if (eventDate < minDate) {
+    // Very old event (before 1000 CE) - likely invalid
+    if (eventDate < absoluteMinDate) {
       flags.push({
-        type: 'warning',
+        type: 'error',
         category: 'temporal',
         field: 'time',
-        message: `Event time is before 1900: ${event.time}`,
-        suggestion: 'Historical events before 1900 should be carefully verified.'
+        message: `Event time is before year 1000 CE: ${event.time}`,
+        suggestion: 'Events before 1000 CE are not supported. Check the timestamp format.'
+      });
+    }
+    // Pre-instrumental era event (before 1900) - informational only
+    else if (eventDate < instrumentalEraDate) {
+      flags.push({
+        type: 'info',
+        category: 'temporal',
+        field: 'time',
+        message: `Historical event from pre-instrumental era: ${event.time}`,
+        suggestion: 'Pre-1900 historical events are supported but may have higher uncertainty due to lack of instrumental data.'
       });
     }
   }

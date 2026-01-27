@@ -192,6 +192,19 @@ export interface OriginUncertainty {
 }
 
 // ============================================================================
+// CompositeTime (for historical events with uncertain times)
+// ============================================================================
+
+export interface CompositeTime {
+  year?: IntegerQuantity;
+  month?: IntegerQuantity;
+  day?: IntegerQuantity;
+  hour?: IntegerQuantity;
+  minute?: IntegerQuantity;
+  second?: RealQuantity;
+}
+
+// ============================================================================
 // Origin
 // ============================================================================
 
@@ -217,6 +230,18 @@ export interface Origin {
   comment?: Comment[];
   // Arrivals are child elements of Origin in QuakeML
   arrivals?: Arrival[];
+  // Supplementary information on time of rupture start for complex historic events
+  compositeTime?: CompositeTime[];
+}
+
+// ============================================================================
+// Station Magnitude Contribution
+// ============================================================================
+
+export interface StationMagnitudeContribution {
+  stationMagnitudeID: string;
+  residual?: number;
+  weight?: number;
 }
 
 // ============================================================================
@@ -235,6 +260,8 @@ export interface Magnitude {
   evaluationStatus?: EvaluationStatus;
   creationInfo?: CreationInfo;
   comment?: Comment[];
+  // Station magnitude contributions used to compute this network magnitude
+  stationMagnitudeContributions?: StationMagnitudeContribution[];
 }
 
 // ============================================================================
@@ -250,6 +277,8 @@ export interface StationMagnitude {
   methodID?: string;
   waveformID?: WaveformStreamID;
   creationInfo?: CreationInfo;
+  // Comments for this station magnitude
+  comment?: Comment[];
 }
 
 // ============================================================================
@@ -372,6 +401,20 @@ export interface SourceTimeFunction {
   decayTime?: number;
 }
 
+// ============================================================================
+// DataUsed (for MomentTensor inversion details)
+// ============================================================================
+
+export type DataUsedWaveType = 'P waves' | 'body waves' | 'surface waves' | 'mantle waves' | 'combined';
+
+export interface DataUsed {
+  waveType: DataUsedWaveType;
+  stationCount?: number;
+  componentCount?: number;
+  shortestPeriod?: number;
+  longestPeriod?: number;
+}
+
 export interface MomentTensor {
   publicID?: string;
   derivedOriginID: string;
@@ -390,6 +433,8 @@ export interface MomentTensor {
   category?: string;
   inversionType?: string;
   creationInfo?: CreationInfo;
+  // Information about data used in moment tensor inversion
+  dataUsed?: DataUsed[];
 }
 
 export interface FocalMechanism {
@@ -407,6 +452,8 @@ export interface FocalMechanism {
   evaluationStatus?: EvaluationStatus;
   creationInfo?: CreationInfo;
   comment?: Comment[];
+  // Waveforms used in focal mechanism determination
+  waveformID?: WaveformStreamID[];
 }
 
 // ============================================================================
