@@ -58,7 +58,7 @@ A web application for managing, analyzing, and visualizing earthquake catalogue 
 flowchart TD
     subgraph Client["🖥️ Client Browser"]
         UI["React UI Components"]
-        State["Redux / Context"]
+        State["React Context"]
         Maps["Leaflet Visualizations"]
     end
     

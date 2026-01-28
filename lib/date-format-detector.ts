@@ -19,7 +19,7 @@ export interface DateFormatDetectionResult {
  */
 export function detectDateFormat(dateStrings: string[], maxSamples: number = 50): DateFormatDetectionResult {
   const samples = dateStrings.slice(0, maxSamples);
-  
+
   if (samples.length === 0) {
     return {
       format: 'Unknown',
@@ -43,7 +43,7 @@ export function detectDateFormat(dateStrings: string[], maxSamples: number = 50)
 
   for (const dateStr of samples) {
     const trimmed = dateStr.trim();
-    
+
     // Check for ISO format (YYYY-MM-DD or YYYY/MM/DD)
     const isoMatch = trimmed.match(isoPattern);
     if (isoMatch) {
@@ -57,9 +57,9 @@ export function detectDateFormat(dateStrings: string[], maxSamples: number = 50)
     if (slashMatch) {
       const first = parseInt(slashMatch[1]);
       const second = parseInt(slashMatch[2]);
-      
+
       analyzedCount++;
-      
+
       // Unambiguous cases
       if (first > 12 && second <= 12) {
         // First value > 12, must be day (International format: DD/MM/YYYY)
@@ -82,9 +82,9 @@ export function detectDateFormat(dateStrings: string[], maxSamples: number = 50)
     if (dashMatch) {
       const first = parseInt(dashMatch[1]);
       const second = parseInt(dashMatch[2]);
-      
+
       analyzedCount++;
-      
+
       // Unambiguous cases
       if (first > 12 && second <= 12) {
         // First value > 12, must be day (International format: DD-MM-YYYY)
@@ -119,7 +119,7 @@ export function detectDateFormat(dateStrings: string[], maxSamples: number = 50)
     format = 'US';
     confidence = unambiguousCount > 0 ? usFormatCount / unambiguousCount : 0;
     reasoning = `${usFormatCount} dates clearly in US format (MM/DD/YYYY) vs ${internationalFormatCount} in International format (DD/MM/YYYY)`;
-    
+
     if (ambiguousCount > usFormatCount) {
       confidence *= 0.7; // Reduce confidence if many ambiguous dates
       reasoning += `. ${ambiguousCount} ambiguous dates reduce confidence.`;
@@ -129,7 +129,7 @@ export function detectDateFormat(dateStrings: string[], maxSamples: number = 50)
     format = 'International';
     confidence = unambiguousCount > 0 ? internationalFormatCount / unambiguousCount : 0;
     reasoning = `${internationalFormatCount} dates clearly in International format (DD/MM/YYYY) vs ${usFormatCount} in US format (MM/DD/YYYY)`;
-    
+
     if (ambiguousCount > internationalFormatCount) {
       confidence *= 0.7; // Reduce confidence if many ambiguous dates
       reasoning += `. ${ambiguousCount} ambiguous dates reduce confidence.`;
@@ -159,7 +159,7 @@ export function detectDateFormat(dateStrings: string[], maxSamples: number = 50)
  */
 export function parseDateWithFormat(dateStr: string, format: DateFormat): Date | null {
   const trimmed = dateStr.trim();
-  
+
   // Try ISO format first (unambiguous)
   const isoPattern = /^(\d{4})-(\d{1,2})-(\d{1,2})/;
   const isoMatch = trimmed.match(isoPattern);
@@ -173,14 +173,14 @@ export function parseDateWithFormat(dateStr: string, format: DateFormat): Date |
   // Handle slash or dash separated dates
   const slashPattern = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(.+))?$/;
   const dashPattern = /^(\d{1,2})-(\d{1,2})-(\d{4})(?:\s+(.+))?$/;
-  
-  let match = trimmed.match(slashPattern) || trimmed.match(dashPattern);
-  
+
+  const match = trimmed.match(slashPattern) || trimmed.match(dashPattern);
+
   if (match) {
     const [, first, second, year, timePart] = match;
     let month: string;
     let day: string;
-    
+
     if (format === 'US') {
       month = first;
       day = second;
@@ -189,17 +189,17 @@ export function parseDateWithFormat(dateStr: string, format: DateFormat): Date |
       day = first;
       month = second;
     }
-    
+
     // Build ISO string
     const timeStr = timePart || '00:00:00';
     const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${timeStr}`;
-    
+
     const date = new Date(isoString);
     if (!isNaN(date.getTime())) {
       return date;
     }
   }
-  
+
   // Fallback to standard Date parsing
   const date = new Date(trimmed);
   return !isNaN(date.getTime()) ? date : null;

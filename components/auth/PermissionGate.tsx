@@ -29,10 +29,17 @@ export function PermissionGate({
   anyRole,
   fallback = null,
 }: PermissionGateProps) {
-  const hasPermission = permission ? usePermission(permission) : true;
-  const hasAnyPermission = anyPermission ? useAnyPermission(anyPermission) : true;
-  const hasRole = role ? useRole(role) : true;
-  const hasAnyRole = anyRole ? useAnyRole(anyRole) : true;
+  // Always call hooks unconditionally (React rules of hooks)
+  const permissionResult = usePermission(permission ?? Permission.CATALOGUE_READ);
+  const anyPermissionResult = useAnyPermission(anyPermission ?? []);
+  const roleResult = useRole(role ?? UserRole.VIEWER);
+  const anyRoleResult = useAnyRole(anyRole ?? []);
+
+  // Apply conditional logic after hooks are called
+  const hasPermission = permission ? permissionResult : true;
+  const hasAnyPermission = anyPermission && anyPermission.length > 0 ? anyPermissionResult : true;
+  const hasRole = role ? roleResult : true;
+  const hasAnyRole = anyRole && anyRole.length > 0 ? anyRoleResult : true;
 
   const isAuthorized = hasPermission && hasAnyPermission && hasRole && hasAnyRole;
 
@@ -42,4 +49,5 @@ export function PermissionGate({
 
   return <>{children}</>;
 }
+
 

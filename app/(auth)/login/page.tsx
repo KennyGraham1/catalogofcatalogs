@@ -63,7 +63,7 @@ export default function LoginPage() {
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
-            
+
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -76,7 +76,7 @@ export default function LoginPage() {
                 disabled={loading}
               />
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <Input
@@ -94,7 +94,7 @@ export default function LoginPage() {
               </div>
             </div>
           </CardContent>
-          
+
           <CardFooter className="flex flex-col space-y-4">
             <Button
               type="submit"
@@ -103,9 +103,9 @@ export default function LoginPage() {
             >
               {loading ? 'Signing in...' : 'Sign in'}
             </Button>
-            
+
             <p className="text-center text-sm text-gray-600">
-              Don't have an account?{' '}
+              Don&apos;t have an account?{' '}
               <Link href="/register" className="font-medium text-blue-600 hover:text-blue-500">
                 Register
               </Link>

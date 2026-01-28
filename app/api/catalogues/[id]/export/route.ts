@@ -190,7 +190,6 @@ export async function GET(
 /**
  * Generate CSV content from events
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function generateCSV(events: any[], catalogue: any): string {
   const metadataLines: string[] = [];
 

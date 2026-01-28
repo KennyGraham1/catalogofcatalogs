@@ -4,6 +4,9 @@
  * Provides database operations for the earthquake catalogue application.
  */
 
+// Check Node.js version on server startup
+import './check-node-version';
+
 import { getDb, getCollection, COLLECTIONS, withTransaction, ClientSession } from './mongodb';
 import { Db, WithId, Document } from 'mongodb';
 import { invalidateCatalogueCache } from './cache';
@@ -629,7 +632,7 @@ if (typeof window === 'undefined') {
       const collection = await getCollection(COLLECTIONS.EVENTS);
       const sortDir = direction === 'desc' ? -1 : 1;
 
-      let query: any = { catalogue_id: catalogueId };
+      const query: Record<string, unknown> = { catalogue_id: catalogueId };
 
       if (cursor) {
         const [cursorTime, cursorId] = cursor.split(':');

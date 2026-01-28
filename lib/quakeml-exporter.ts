@@ -660,7 +660,7 @@ function escapeXml(str: string): string {
  */
 export function eventToQuakeML(event: MergedEvent): string {
   // Parse QuakeML data if available
-  let quakeml: QuakeMLEvent | null = null;
+  const quakeml: QuakeMLEvent | null = null;
 
   // Try to reconstruct QuakeML from stored data
   const publicID = event.event_public_id || `smi:local/event/${event.id}`;

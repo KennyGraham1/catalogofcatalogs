@@ -32,11 +32,11 @@ interface GlobalSearchProps {
   className?: string;
 }
 
-export function GlobalSearch({ 
-  placeholder = 'Search events (e.g., id:us1234 mag:>=4 region:wellington)', 
+export function GlobalSearch({
+  placeholder = 'Search events (e.g., id:us1234 mag:>=4 region:wellington)',
   catalogueId,
   onResultSelect,
-  className 
+  className
 }: GlobalSearchProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -106,7 +106,7 @@ export function GlobalSearch({
 
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedIndex(prev => 
+        setSelectedIndex(prev =>
           prev < results.length - 1 ? prev + 1 : prev
         );
       } else if (e.key === 'ArrowUp') {
@@ -225,7 +225,7 @@ export function GlobalSearch({
       {showResults && !loading && query.trim().length >= 2 && results.length === 0 && (
         <div className="absolute z-50 w-full mt-2 bg-popover border rounded-md shadow-lg p-4">
           <div className="text-center text-sm text-muted-foreground">
-            No events found for "{query}"
+            No events found for &quot;{query}&quot;
           </div>
         </div>
       )}

@@ -1,0 +1,16 @@
+{
+  "extends": ["next/core-web-vitals"],
+  "rules": {
+    "no-console": ["warn", { "allow": ["warn", "error"] }],
+    "prefer-const": "error",
+    "no-var": "error"
+  },
+  "overrides": [
+    {
+      "files": ["**/__tests__/**/*", "**/*.test.ts", "**/*.test.tsx"],
+      "rules": {
+        "no-console": "off"
+      }
+    }
+  ]
+}

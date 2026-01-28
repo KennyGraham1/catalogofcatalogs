@@ -199,7 +199,7 @@ describe('Cross-Field Validation', () => {
       expect(checks.some(c => c.severity === 'error' && c.field === 'time')).toBe(true);
     });
 
-    it('should warn for very old timestamps', () => {
+    it('should provide info for pre-instrumental era timestamps', () => {
       const event = {
         time: '1850-01-15T10:30:00Z',
         latitude: -41.5,
@@ -207,7 +207,8 @@ describe('Cross-Field Validation', () => {
       };
 
       const checks = validateTimeLocationConsistency(event);
-      expect(checks.some(c => c.severity === 'warning' && c.field === 'time')).toBe(true);
+      // Pre-1900 dates return 'info' severity (not 'warning') as historical events are valid
+      expect(checks.some(c => c.severity === 'info' && c.field === 'time')).toBe(true);
     });
 
     it('should warn for Null Island location', () => {

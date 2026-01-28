@@ -1157,20 +1157,20 @@ export default function MergePage() {
             <Tabs defaultValue="select" value={activeTab} onValueChange={setActiveTab}>
               <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="select">Select Catalogues</TabsTrigger>
-                <TabsTrigger 
-                  value="configure" 
+                <TabsTrigger
+                  value="configure"
                   disabled={selectedCatalogues.length < 2}
                 >
                   Configure Merge
                 </TabsTrigger>
-                <TabsTrigger 
-                  value="preview" 
+                <TabsTrigger
+                  value="preview"
                   disabled={selectedCatalogues.length < 2 || activeTab === 'select'}
                 >
                   Preview & Merge
                 </TabsTrigger>
               </TabsList>
-              
+
               <TabsContent value="select" className="pt-6">
                 <div className="flex items-center gap-2 bg-muted p-3 rounded-md">
                   <AlertTriangle className="h-5 w-5 text-amber-500" />
@@ -1235,7 +1235,7 @@ export default function MergePage() {
                         content={
                           <div className="space-y-1 text-xs">
                             <p>Field tokens: name:, id:, status:, source:, type:, events:, date:.</p>
-                            <p>Example: <span className="font-medium">status:complete events:&gt;10000 "New Zealand"</span></p>
+                            <p>Example: <span className="font-medium">status:complete events:&gt;10000 &quot;New Zealand&quot;</span></p>
                           </div>
                         }
                       >
@@ -1354,7 +1354,7 @@ export default function MergePage() {
                     />
                   )}
                 </div>
-                
+
                 {selectedCatalogues.length > 0 && (
                   <div className="bg-muted/30 p-4 rounded-md mt-4">
                     <h3 className="font-medium mb-2">Selection Summary</h3>
@@ -1375,7 +1375,7 @@ export default function MergePage() {
                   </div>
                 )}
               </TabsContent>
-              
+
               <TabsContent value="configure" className="pt-6">
                 <div className="space-y-6">
                   <div>
@@ -1395,9 +1395,9 @@ export default function MergePage() {
                       />
                     </div>
                   </div>
-                  
+
                   <Separator className="my-6" />
-                  
+
                   <div>
                     <h3 className="text-base font-medium mb-1">Event Matching Criteria</h3>
                     <p className="text-sm text-muted-foreground mb-4">
@@ -1467,16 +1467,16 @@ export default function MergePage() {
                       </div>
                     </div>
                   </div>
-                  
+
                   <Separator className="my-6" />
-                  
+
                   <div className="space-y-4">
                     <div>
                       <h3 className="text-base font-medium mb-1">Conflict Resolution</h3>
                       <p className="text-sm text-muted-foreground mb-4">
                         Choose how to handle conflicting data for the same event
                       </p>
-                      
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <div className="flex items-center gap-1.5">
@@ -1600,7 +1600,7 @@ export default function MergePage() {
                               htmlFor="export-only"
                               className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
                             >
-                              Export only (don't save to database)
+                              Export only (don&apos;t save to database)
                             </Label>
                             <p className="text-sm text-muted-foreground">
                               Perform the merge in memory and prepare for export without saving to the database.
@@ -1705,7 +1705,7 @@ export default function MergePage() {
                 {mergeStatus === 'complete' && (
                   <MergeActions
                     events={mergedEvents}
-                    onDownload={() => {}}
+                    onDownload={() => { }}
                     catalogueMetadata={{
                       name: mergedName,
                       ...mergeMetadata
@@ -1726,8 +1726,8 @@ export default function MergePage() {
             </Tabs>
           </CardContent>
           <CardFooter className="flex justify-between border-t bg-muted/20 px-6 py-4">
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               onClick={handlePreviousStep}
               disabled={activeTab === 'select' || mergeStatus === 'merging'}
             >
@@ -1735,7 +1735,7 @@ export default function MergePage() {
             </Button>
             <div className="flex gap-2">
               {activeTab === 'select' && (
-                <Button 
+                <Button
                   onClick={handleNextStep}
                   disabled={selectedCatalogues.length < 2}
                 >
@@ -1744,7 +1744,7 @@ export default function MergePage() {
                 </Button>
               )}
               {activeTab === 'configure' && (
-                <Button 
+                <Button
                   onClick={handleNextStep}
                 >
                   Preview Merge

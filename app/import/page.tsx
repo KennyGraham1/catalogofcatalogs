@@ -29,7 +29,7 @@ export default function ImportPage() {
   const [catalogues, setCatalogues] = useState<Catalogue[]>([]);
   const [selectedCatalogueId, setSelectedCatalogueId] = useState<string>('');
   const [isLoadingCatalogues, setIsLoadingCatalogues] = useState(true);
-  
+
   useEffect(() => {
     const fetchCatalogues = async () => {
       try {
@@ -40,9 +40,9 @@ export default function ImportPage() {
         }
         const data = await response.json();
         setCatalogues(data);
-        
+
         // Auto-select GeoNet catalogue if it exists
-        const geonetCatalogue = data.find((c: Catalogue) => 
+        const geonetCatalogue = data.find((c: Catalogue) =>
           c.name.includes('GeoNet') || c.name.includes('Automated Import')
         );
         if (geonetCatalogue) {
@@ -60,10 +60,10 @@ export default function ImportPage() {
         setIsLoadingCatalogues(false);
       }
     };
-    
+
     fetchCatalogues();
   }, []);
-  
+
   return (
     <div className="container py-6 max-w-7xl mx-auto">
       <div className="mb-6 space-y-1">
@@ -72,7 +72,7 @@ export default function ImportPage() {
           Automatically import earthquake events from the GeoNet FDSN Event Web Service
         </p>
       </div>
-      
+
       <Tabs defaultValue="import" className="space-y-6">
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="import" className="flex items-center gap-2">
@@ -88,7 +88,7 @@ export default function ImportPage() {
             Information
           </TabsTrigger>
         </TabsList>
-        
+
         <TabsContent value="import" className="space-y-6">
           {canImport ? (
             <ImportForm readOnly={isReadOnly} />
@@ -110,7 +110,7 @@ export default function ImportPage() {
             />
           )}
         </TabsContent>
-        
+
         <TabsContent value="history" className="space-y-4">
           {canImport ? (
             <>
@@ -175,19 +175,19 @@ export default function ImportPage() {
               <div>
                 <h3 className="font-semibold mb-2">Data Source</h3>
                 <p className="text-sm text-muted-foreground">
-                  This feature imports earthquake data from the GeoNet FDSN Event Web Service, 
-                  which provides comprehensive seismic event information for New Zealand and 
+                  This feature imports earthquake data from the GeoNet FDSN Event Web Service,
+                  which provides comprehensive seismic event information for New Zealand and
                   surrounding regions.
                 </p>
               </div>
-              
+
               <div>
                 <h3 className="font-semibold mb-2">API Endpoint</h3>
                 <p className="text-sm text-muted-foreground font-mono bg-muted p-2 rounded">
                   https://service.geonet.org.nz/fdsnws/event/1/query
                 </p>
               </div>
-              
+
               <div>
                 <h3 className="font-semibold mb-2">Supported Features</h3>
                 <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
@@ -200,7 +200,7 @@ export default function ImportPage() {
                   <li>Track import history and statistics</li>
                 </ul>
               </div>
-              
+
               <div>
                 <h3 className="font-semibold mb-2">Imported Fields</h3>
                 <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
@@ -211,30 +211,30 @@ export default function ImportPage() {
                   <li>Event type (earthquake, quarry blast, etc.)</li>
                 </ul>
               </div>
-              
+
               <div>
                 <h3 className="font-semibold mb-2">Best Practices</h3>
                 <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                   <li>Start with a small time range (e.g., last 24 hours) to test the import</li>
                   <li>Use magnitude filters to reduce the number of events imported</li>
-                  <li>Enable "Update existing events" to keep data synchronized with GeoNet</li>
+                  <li>Enable &quot;Update existing events&quot; to keep data synchronized with GeoNet</li>
                   <li>Check the import history to monitor for errors or issues</li>
                   <li>Consider setting up scheduled imports for regular data updates</li>
                 </ul>
               </div>
-              
+
               <div>
                 <h3 className="font-semibold mb-2">Rate Limits</h3>
                 <p className="text-sm text-muted-foreground">
-                  The GeoNet API does not require authentication and has no explicit rate limits. 
+                  The GeoNet API does not require authentication and has no explicit rate limits.
                   However, please be respectful of the service and avoid making excessive requests.
                 </p>
               </div>
-              
+
               <div>
                 <h3 className="font-semibold mb-2">Data License</h3>
                 <p className="text-sm text-muted-foreground">
-                  GeoNet data is provided under the Creative Commons Attribution 4.0 International 
+                  GeoNet data is provided under the Creative Commons Attribution 4.0 International
                   License. Please ensure you comply with the license terms when using this data.
                 </p>
               </div>

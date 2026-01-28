@@ -8,16 +8,23 @@
  * - Update catalogue (PATCH /api/catalogues/[id])
  * - Delete catalogue (DELETE /api/catalogues/[id])
  * - Export catalogue (GET /api/catalogues/[id]/export)
+ *
+ * NOTE: These tests require Node.js 18+ for native Web API support (Request/Response).
+ * They will be skipped on older Node versions.
  */
 
-import { NextRequest } from 'next/server';
+// Ensure this file is treated as a module (prevents global scope pollution)
+export {};
 
-// Mock NextAuth
+// Check for Web API support BEFORE any imports that might depend on them
+const hasWebAPIs = typeof globalThis.Request !== 'undefined';
+const describeIfWebAPIs = hasWebAPIs ? describe : describe.skip;
+
+// Mock definitions - these are hoisted by Jest and run before any imports
 jest.mock('next-auth', () => ({
   getServerSession: jest.fn(),
 }));
 
-// Mock MongoDB
 jest.mock('@/lib/mongodb', () => ({
   getDb: jest.fn(),
   getCollection: jest.fn(),
@@ -28,7 +35,6 @@ jest.mock('@/lib/mongodb', () => ({
   },
 }));
 
-// Mock cache
 jest.mock('@/lib/cache', () => ({
   apiCache: { get: jest.fn(), set: jest.fn(), delete: jest.fn(), clear: jest.fn() },
   catalogueCache: { get: jest.fn(), set: jest.fn(), delete: jest.fn() },
@@ -36,18 +42,27 @@ jest.mock('@/lib/cache', () => ({
   invalidateCacheByPrefix: jest.fn(),
 }));
 
-// Mock rate limiter
 jest.mock('@/lib/rate-limiter', () => ({
   applyRateLimit: jest.fn(() => ({ success: true, headers: {} })),
   readRateLimiter: {},
   apiRateLimiter: {},
 }));
 
-import { getServerSession } from 'next-auth';
-import { getCollection } from '@/lib/mongodb';
-import { catalogueCache } from '@/lib/cache';
+// Conditionally import modules to avoid loading next/server on Node < 18
+// Using require() inside conditional ensures the import doesn't happen at module parse time
+let NextRequest: typeof import('next/server').NextRequest;
+let getServerSession: typeof import('next-auth').getServerSession;
+let getCollection: typeof import('@/lib/mongodb').getCollection;
+let catalogueCache: typeof import('@/lib/cache').catalogueCache;
 
-describe('Catalogue API Integration Tests', () => {
+if (hasWebAPIs) {
+  NextRequest = require('next/server').NextRequest;
+  getServerSession = require('next-auth').getServerSession;
+  getCollection = require('@/lib/mongodb').getCollection;
+  catalogueCache = require('@/lib/cache').catalogueCache;
+}
+
+describeIfWebAPIs('Catalogue API Integration Tests', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -427,7 +442,7 @@ describe('Catalogue API Integration Tests', () => {
   });
 });
 
-describe('Catalogue Events API', () => {
+describeIfWebAPIs('Catalogue Events API', () => {
   const mockFind = jest.fn();
   const mockToArray = jest.fn();
   const mockSort = jest.fn();
@@ -478,7 +493,7 @@ describe('Catalogue Events API', () => {
   });
 });
 
-describe('Catalogue Export API', () => {
+describeIfWebAPIs('Catalogue Export API', () => {
   const mockFindOne = jest.fn();
   const mockFind = jest.fn();
   const mockToArray = jest.fn();

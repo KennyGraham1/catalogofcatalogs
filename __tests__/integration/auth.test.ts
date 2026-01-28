@@ -7,9 +7,26 @@
  * - Password change
  * - Password reset flow
  * - Role-based access control
+ *
+ * NOTE: These tests require Node.js 18+ for native Web API support (Request/Response).
+ * They will be skipped on older Node versions.
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+// Ensure this file is treated as a module (prevents global scope pollution)
+export {};
+
+// Skip entire test suite if Request is not available (Node < 18)
+const hasWebAPIs = typeof globalThis.Request !== 'undefined';
+const describeIfWebAPIs = hasWebAPIs ? describe : describe.skip;
+
+// Only import NextRequest/NextResponse if Web APIs are available
+let NextRequest: any;
+let NextResponse: any;
+if (hasWebAPIs) {
+  const nextServer = require('next/server');
+  NextRequest = nextServer.NextRequest;
+  NextResponse = nextServer.NextResponse;
+}
 
 // Mock NextAuth
 jest.mock('next-auth', () => ({
@@ -33,12 +50,25 @@ jest.mock('bcryptjs', () => ({
   compare: jest.fn(),
 }));
 
-import bcrypt from 'bcryptjs';
-import { getServerSession } from 'next-auth';
-import { getCollection } from '@/lib/mongodb';
-import { getSession, requireAdmin, requireEditor } from '@/lib/auth/middleware';
+// Conditionally import modules that depend on Web APIs
+let bcrypt: any;
+let getServerSession: any;
+let getCollection: any;
+let getSession: any;
+let requireAdmin: any;
+let requireEditor: any;
 
-describe('Authentication Integration Tests', () => {
+if (hasWebAPIs) {
+  bcrypt = require('bcryptjs');
+  getServerSession = require('next-auth').getServerSession;
+  getCollection = require('@/lib/mongodb').getCollection;
+  const authMiddleware = require('@/lib/auth/middleware');
+  getSession = authMiddleware.getSession;
+  requireAdmin = authMiddleware.requireAdmin;
+  requireEditor = authMiddleware.requireEditor;
+}
+
+describeIfWebAPIs('Authentication Integration Tests', () => {
   // Reset mocks before each test
   beforeEach(() => {
     jest.clearAllMocks();
@@ -366,7 +396,7 @@ describe('Authentication Integration Tests', () => {
   });
 });
 
-describe('Password Reset Flow', () => {
+describeIfWebAPIs('Password Reset Flow', () => {
   const mockFindOne = jest.fn();
   const mockInsertOne = jest.fn();
   const mockUpdateOne = jest.fn();

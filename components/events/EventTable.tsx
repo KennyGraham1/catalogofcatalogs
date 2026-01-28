@@ -67,26 +67,15 @@ export function EventTable({
   defaultSortDirection = 'desc',
   virtualizationThreshold = 100
 }: EventTableProps) {
-  // Use virtualized table for large datasets
-  if (events.length > virtualizationThreshold) {
-    return (
-      <VirtualizedEventTable
-        events={events}
-        onEventClick={onEventClick}
-        className={className}
-        defaultSortField={defaultSortField}
-        defaultSortDirection={defaultSortDirection}
-      />
-    );
-  }
+  // Hooks must be called unconditionally (React rules of hooks)
   const [sortField, setSortField] = useState<SortField>(defaultSortField);
   const [sortDirection, setSortDirection] = useState<SortDirection>(defaultSortDirection);
 
   // Sort events
   const sortedEvents = useMemo(() => {
     const sorted = [...events].sort((a, b) => {
-      let aValue: any;
-      let bValue: any;
+      let aValue: number;
+      let bValue: number;
 
       switch (sortField) {
         case 'time':
@@ -126,6 +115,19 @@ export function EventTable({
 
     return sorted;
   }, [events, sortField, sortDirection]);
+
+  // Use virtualized table for large datasets (after hooks are called)
+  if (events.length > virtualizationThreshold) {
+    return (
+      <VirtualizedEventTable
+        events={events}
+        onEventClick={onEventClick}
+        className={className}
+        defaultSortField={defaultSortField}
+        defaultSortDirection={defaultSortDirection}
+      />
+    );
+  }
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -170,7 +172,7 @@ export function EventTable({
 
   const getQualityBadge = (score?: number | null) => {
     if (!score) return null;
-    
+
     let variant: 'default' | 'secondary' | 'destructive' | 'outline' = 'secondary';
     if (score >= 80) variant = 'default';
     else if (score >= 60) variant = 'secondary';

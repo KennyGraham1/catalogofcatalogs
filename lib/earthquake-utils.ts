@@ -132,14 +132,14 @@ export function calculateDistance(
   const R = 6371; // Earth's radius in kilometers
   const dLat = toRadians(lat2 - lat1);
   const dLon = toRadians(lon2 - lon1);
-  
+
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(toRadians(lat1)) *
-      Math.cos(toRadians(lat2)) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  
+    Math.cos(toRadians(lat2)) *
+    Math.sin(dLon / 2) *
+    Math.sin(dLon / 2);
+
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
@@ -506,7 +506,7 @@ export function eventsMatch(
     event2.latitude,
     event2.longitude
   );
-  
+
   return timeDiff <= timeThresholdSeconds && distance <= distanceThresholdKm;
 }
 
@@ -747,8 +747,8 @@ export function sampleEarthquakeEventsWithViewport<T extends SampleableEvent>(
   }
 
   // Separate events into viewport and outside viewport
-  let inViewportEvents: T[] = [];
-  let outsideViewportEvents: T[] = [];
+  const inViewportEvents: T[] = [];
+  const outsideViewportEvents: T[] = [];
 
   if (viewport) {
     for (const event of events) {
@@ -765,7 +765,7 @@ export function sampleEarthquakeEventsWithViewport<T extends SampleableEvent>(
     }
   } else {
     // No viewport, treat all as in-viewport
-    inViewportEvents = events;
+    inViewportEvents.push(...events);
   }
 
   const sampledEvents: T[] = [];
