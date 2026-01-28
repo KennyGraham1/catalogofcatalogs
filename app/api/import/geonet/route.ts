@@ -219,6 +219,17 @@ export async function POST(request: NextRequest) {
       errorMessage = error.message;
       errorType = error.name;
 
+      // Sanitize error message to prevent leaking internal details
+      // Remove file paths and stack traces
+      errorMessage = errorMessage
+        .replace(/at\s+.*\(.*\)/g, '')
+        .replace(/\/[^\s]+\.(ts|js)/g, '<path>')
+        .trim();
+      // Truncate very long messages
+      if (errorMessage.length > 200) {
+        errorMessage = errorMessage.substring(0, 200) + '...';
+      }
+
       // Check for specific error types and provide helpful messages
       if (error.message.includes('Circuit breaker is OPEN')) {
         errorMessage = 'The GeoNet API appears to be experiencing issues. Please try again later.';

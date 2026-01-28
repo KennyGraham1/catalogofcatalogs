@@ -21,29 +21,38 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const catalogueId = searchParams.get('catalogueId');
     const limitParam = searchParams.get('limit');
-    
+
     if (!catalogueId) {
       return NextResponse.json(
         { error: 'Missing catalogueId parameter' },
         { status: 400 }
       );
     }
-    
+
+    // Validate catalogueId format (UUID)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(catalogueId)) {
+      return NextResponse.json(
+        { error: 'Invalid catalogueId format' },
+        { status: 400 }
+      );
+    }
+
     const limit = limitParam ? parseInt(limitParam, 10) : 10;
-    
+
     if (isNaN(limit) || limit <= 0) {
       return NextResponse.json(
         { error: 'Limit must be a positive number' },
         { status: 400 }
       );
     }
-    
+
     const history = await geonetImportService.getImportHistory(catalogueId, limit);
-    
+
     return NextResponse.json(history);
   } catch (error) {
     console.error('[API] Error fetching import history:', error);
-    
+
     return NextResponse.json(
       {
         error: 'Failed to fetch import history',

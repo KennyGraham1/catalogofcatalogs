@@ -273,6 +273,8 @@ export interface DbQueries {
 
   // GeoNet import methods
   getEventBySourceId: (catalogueId: string, sourceId: string) => Promise<MergedEvent | undefined>;
+  // Performance Optimization: Bulk query for efficient duplicate detection
+  getEventsBySourceIds: (catalogueId: string, sourceIds: string[]) => Promise<Map<string, string>>;
   updateEvent: (id: string, updates: Partial<MergedEvent>) => Promise<void>;
   insertImportHistory: (
     id: string,
@@ -779,17 +781,17 @@ if (typeof window === 'undefined') {
           { min_latitude: { $lte: maxLat } },
           crossesDateline
             ? {
-                $or: [
-                  { max_longitude: { $gte: minLon } },
-                  { min_longitude: { $lte: maxLon } }
-                ]
-              }
+              $or: [
+                { max_longitude: { $gte: minLon } },
+                { min_longitude: { $lte: maxLon } }
+              ]
+            }
             : {
-                $and: [
-                  { max_longitude: { $gte: minLon } },
-                  { min_longitude: { $lte: maxLon } }
-                ]
-              }
+              $and: [
+                { max_longitude: { $gte: minLon } },
+                { min_longitude: { $lte: maxLon } }
+              ]
+            }
         ]
       }).sort({ created_at: -1 }).toArray();
 
@@ -964,6 +966,31 @@ if (typeof window === 'undefined') {
       const collection = await getCollection(COLLECTIONS.EVENTS);
       const doc = await collection.findOne({ catalogue_id: catalogueId, source_id: sourceId });
       return toPlainObject<MergedEvent>(doc);
+    },
+
+    // Performance Optimization: Bulk query for efficient duplicate detection
+    getEventsBySourceIds: async (catalogueId: string, sourceIds: string[]): Promise<Map<string, string>> => {
+      if (!catalogueId) {
+        throw new Error('Missing catalogue ID');
+      }
+      if (!sourceIds || sourceIds.length === 0) {
+        return new Map();
+      }
+
+      const collection = await getCollection(COLLECTIONS.EVENTS);
+      const docs = await collection.find({
+        catalogue_id: catalogueId,
+        source_id: { $in: sourceIds }
+      }).project({ source_id: 1, id: 1 }).toArray();
+
+      // Return map of source_id -> database id
+      const result = new Map<string, string>();
+      for (const doc of docs) {
+        if (doc.source_id && doc.id) {
+          result.set(doc.source_id, doc.id);
+        }
+      }
+      return result;
     },
 
     updateEvent: async (id: string, updates: Partial<MergedEvent>): Promise<void> => {

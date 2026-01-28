@@ -13,6 +13,7 @@ import { dbQueries, MergedEvent } from './db';
 import { v4 as uuidv4 } from 'uuid';
 import { extractBoundsFromMergedEvents } from './geo-bounds-utils';
 import pLimit from 'p-limit';
+import { Builder } from 'xml2js';
 
 /**
  * Helper to ensure dbQueries is available
@@ -91,7 +92,7 @@ export interface ImportHistory {
 function extractFocalMechanismFromXML(xml: string): any | null {
   try {
     // Look for focalMechanism elements
-    const focalMechRegex = /<focalMechanism[^>]*>(.*?)<\/focalMechanism>/gs;
+    const focalMechRegex = /<focalMechanism[^>]*>([\s\S]*?)<\/focalMechanism>/g;
     const focalMechMatches = Array.from(xml.matchAll(focalMechRegex));
 
     for (let i = 0; i < focalMechMatches.length; i++) {
@@ -99,24 +100,24 @@ function extractFocalMechanismFromXML(xml: string): any | null {
       const fmXML = match[1];
 
       // Extract nodalPlanes
-      const nodalPlanesRegex = /<nodalPlanes>(.*?)<\/nodalPlanes>/s;
+      const nodalPlanesRegex = /<nodalPlanes>([\s\S]*?)<\/nodalPlanes>/;
       const nodalPlanesMatch = fmXML.match(nodalPlanesRegex);
 
       if (nodalPlanesMatch) {
         const nodalPlanesXML = nodalPlanesMatch[1];
 
         // Extract nodalPlane1
-        const np1Regex = /<nodalPlane1>(.*?)<\/nodalPlane1>/s;
+        const np1Regex = /<nodalPlane1>([\s\S]*?)<\/nodalPlane1>/;
         const np1Match = nodalPlanesXML.match(np1Regex);
 
         // Extract nodalPlane2
-        const np2Regex = /<nodalPlane2>(.*?)<\/nodalPlane2>/s;
+        const np2Regex = /<nodalPlane2>([\s\S]*?)<\/nodalPlane2>/;
         const np2Match = nodalPlanesXML.match(np2Regex);
 
         const extractPlane = (planeXML: string) => {
-          const strikeMatch = planeXML.match(/<strike>.*?<value>([^<]+)<\/value>.*?<\/strike>/s);
-          const dipMatch = planeXML.match(/<dip>.*?<value>([^<]+)<\/value>.*?<\/dip>/s);
-          const rakeMatch = planeXML.match(/<rake>.*?<value>([^<]+)<\/value>.*?<\/rake>/s);
+          const strikeMatch = planeXML.match(/<strike>[\s\S]*?<value>([^<]+)<\/value>[\s\S]*?<\/strike>/);
+          const dipMatch = planeXML.match(/<dip>[\s\S]*?<value>([^<]+)<\/value>[\s\S]*?<\/dip>/);
+          const rakeMatch = planeXML.match(/<rake>[\s\S]*?<value>([^<]+)<\/value>[\s\S]*?<\/rake>/);
 
           if (strikeMatch && dipMatch && rakeMatch) {
             return {
@@ -157,21 +158,21 @@ export class GeoNetImportService {
   private static readonly FOCAL_MECHANISM_MIN_MAGNITUDE = 5.0; // Only fetch focal mechanisms for M5.0+
   private static readonly FOCAL_MECHANISM_CONCURRENCY = 5; // Max concurrent focal mechanism requests
   private static readonly BULK_INSERT_BATCH_SIZE = 100; // Process events in batches for bulk insert
-  
+
   /**
    * Import events from GeoNet
    */
   async importEvents(options: ImportOptions = {}): Promise<ImportResult> {
     const startTime = new Date();
     const errors: string[] = [];
-    
+
     console.log('[GeoNetImportService] Starting import with options:', options);
-    
+
     try {
       // 1. Fetch events from GeoNet API
       const events = await this.fetchEvents(options);
       console.log(`[GeoNetImportService] Fetched ${events.length} events from GeoNet`);
-      
+
       if (events.length === 0) {
         return {
           success: true,
@@ -187,7 +188,7 @@ export class GeoNetImportService {
           duration: Date.now() - startTime.getTime(),
         };
       }
-      
+
       // 2. Get or create catalogue
       const catalogueId = await this.getOrCreateCatalogue(
         options.catalogueId,
@@ -195,7 +196,7 @@ export class GeoNetImportService {
         options.userId
       );
       console.log(`[GeoNetImportService] Using catalogue: ${catalogueId}`);
-      
+
       // 3. Process events with bulk insert optimization
       let newEvents = 0;
       let updatedEvents = 0;
@@ -207,7 +208,7 @@ export class GeoNetImportService {
       updatedEvents = result.updatedEvents;
       skippedEvents = result.skippedEvents;
       errors.push(...result.errors);
-      
+
       const endTime = new Date();
       const duration = endTime.getTime() - startTime.getTime();
 
@@ -252,7 +253,7 @@ export class GeoNetImportService {
       });
 
       console.log(`[GeoNetImportService] Import complete: ${newEvents} new, ${updatedEvents} updated, ${skippedEvents} skipped, ${errors.length} errors`);
-      
+
       return {
         success: errors.length === 0,
         catalogueId,
@@ -270,7 +271,7 @@ export class GeoNetImportService {
       const errorMsg = `Import failed: ${error instanceof Error ? error.message : String(error)}`;
       console.error(`[GeoNetImportService] ${errorMsg}`);
       errors.push(errorMsg);
-      
+
       return {
         success: false,
         catalogueId: options.catalogueId || '',
@@ -286,7 +287,7 @@ export class GeoNetImportService {
       };
     }
   }
-  
+
   /**
    * Fetch events from GeoNet API
    */
@@ -294,7 +295,7 @@ export class GeoNetImportService {
     // Determine time range
     let startDate: Date;
     let endDate: Date;
-    
+
     if (options.hours) {
       endDate = new Date();
       startDate = new Date(endDate.getTime() - options.hours * 60 * 60 * 1000);
@@ -306,7 +307,7 @@ export class GeoNetImportService {
       endDate = new Date();
       startDate = new Date(endDate.getTime() - 24 * 60 * 60 * 1000);
     }
-    
+
     // Fetch events
     const events = await geonetClient.fetchEventsText({
       starttime: startDate.toISOString(),
@@ -321,10 +322,10 @@ export class GeoNetImportService {
       maxlongitude: options.maxLongitude,
       orderby: 'time',
     });
-    
+
     return events;
   }
-  
+
   /**
    * Get existing catalogue or create new one
    */
@@ -354,7 +355,7 @@ export class GeoNetImportService {
     console.log(`[GeoNetImportService] Created new catalogue: ${name} (${newId})`);
     return newId;
   }
-  
+
   /**
    * Process a single event (insert or update)
    * Returns: 'new', 'updated', or 'skipped'
@@ -406,21 +407,12 @@ export class GeoNetImportService {
   }> {
     const errors: string[] = [];
 
-    // Step 1: Check which events already exist (single query)
+    // Step 1: Check which events already exist (single bulk query - fixes N+1 problem)
     console.log(`[GeoNetImportService] Checking for existing events...`);
     const eventIds = events.map(e => e.EventID);
-    const existingEventsMap = new Map<string, string>(); // source_id -> db_id
 
-    for (const eventId of eventIds) {
-      try {
-        const existing = await getDbQueries().getEventBySourceId(catalogueId, eventId);
-        if (existing) {
-          existingEventsMap.set(eventId, existing.id);
-        }
-      } catch (error) {
-        console.error(`[GeoNetImportService] Error checking event ${eventId}:`, error);
-      }
-    }
+    // Use bulk query instead of sequential queries for much better performance
+    const existingEventsMap = await getDbQueries().getEventsBySourceIds(catalogueId, eventIds);
 
     // Step 2: Separate new events from existing ones
     const newEventsList: GeoNetEventText[] = [];
@@ -457,8 +449,7 @@ export class GeoNetImportService {
           try {
             const quakeML = await geonetClient.fetchEventById(event.EventID);
             if (quakeML) {
-              const xml2js = await import('xml2js');
-              const builder = new xml2js.Builder();
+              const builder = new Builder();
               const xmlString = builder.buildObject(quakeML);
               const focalMechanism = extractFocalMechanismFromXML(xmlString);
               if (focalMechanism) {
@@ -629,8 +620,7 @@ export class GeoNetImportService {
 
         if (quakeML) {
           // Convert QuakeML object back to XML string for parsing
-          const xml2js = await import('xml2js');
-          const builder = new xml2js.Builder();
+          const builder = new Builder();
           const xmlString = builder.buildObject(quakeML);
 
           const focalMechanism = extractFocalMechanismFromXML(xmlString);
@@ -663,7 +653,7 @@ export class GeoNetImportService {
       focal_mechanisms: focalMechanisms,
     });
   }
-  
+
   /**
    * Update existing event
    *
@@ -686,8 +676,7 @@ export class GeoNetImportService {
 
         if (quakeML) {
           // Convert QuakeML object back to XML string for parsing
-          const xml2js = await import('xml2js');
-          const builder = new xml2js.Builder();
+          const builder = new Builder();
           const xmlString = builder.buildObject(quakeML);
 
           const focalMechanism = extractFocalMechanismFromXML(xmlString);
@@ -713,7 +702,7 @@ export class GeoNetImportService {
       focal_mechanisms: focalMechanisms,
     });
   }
-  
+
   /**
    * Save import history
    */
@@ -728,7 +717,7 @@ export class GeoNetImportService {
     errors: string[];
   }): Promise<void> {
     const historyId = uuidv4();
-    
+
     await getDbQueries().insertImportHistory(
       historyId,
       data.catalogueId,
@@ -741,14 +730,14 @@ export class GeoNetImportService {
       data.errors.length > 0 ? JSON.stringify(data.errors) : null
     );
   }
-  
+
   /**
    * Get import history for a catalogue
    */
   async getImportHistory(catalogueId: string, limit: number = 10): Promise<ImportHistory[]> {
     return await getDbQueries().getImportHistory(catalogueId, limit);
   }
-  
+
   /**
    * Get last import time for a catalogue
    */

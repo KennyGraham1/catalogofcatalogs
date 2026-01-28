@@ -29,22 +29,22 @@ export function ImportHistory({ catalogueId, limit = 10 }: ImportHistoryProps) {
   const [history, setHistory] = useState<ImportHistoryRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
   useEffect(() => {
     if (!catalogueId) return;
-    
+
     const fetchHistory = async () => {
       setIsLoading(true);
       setError(null);
-      
+
       try {
         const response = await fetch(`/api/import/history?catalogueId=${catalogueId}&limit=${limit}`);
-        
+
         if (!response.ok) {
           const data = await response.json();
           throw new Error(data.message || data.error || 'Failed to fetch history');
         }
-        
+
         const data = await response.json();
         setHistory(data);
       } catch (err) {
@@ -53,10 +53,10 @@ export function ImportHistory({ catalogueId, limit = 10 }: ImportHistoryProps) {
         setIsLoading(false);
       }
     };
-    
+
     fetchHistory();
   }, [catalogueId, limit]);
-  
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleString('en-GB', {
@@ -68,14 +68,14 @@ export function ImportHistory({ catalogueId, limit = 10 }: ImportHistoryProps) {
       second: '2-digit',
     });
   };
-  
+
   const formatDuration = (startTime: string, endTime: string) => {
     const start = new Date(startTime);
     const end = new Date(endTime);
     const duration = end.getTime() - start.getTime();
     return `${(duration / 1000).toFixed(2)}s`;
   };
-  
+
   if (!catalogueId) {
     return (
       <Card>
@@ -88,7 +88,7 @@ export function ImportHistory({ catalogueId, limit = 10 }: ImportHistoryProps) {
       </Card>
     );
   }
-  
+
   return (
     <Card>
       <CardHeader>
@@ -128,9 +128,15 @@ export function ImportHistory({ catalogueId, limit = 10 }: ImportHistoryProps) {
               </TableHeader>
               <TableBody>
                 {history.map((record) => {
-                  const errors = record.errors ? JSON.parse(record.errors) : [];
+                  let errors: string[] = [];
+                  try {
+                    errors = record.errors ? JSON.parse(record.errors) : [];
+                  } catch {
+                    // Handle malformed JSON gracefully
+                    errors = record.errors ? [record.errors] : [];
+                  }
                   const hasErrors = errors.length > 0;
-                  
+
                   return (
                     <TableRow key={record.id}>
                       <TableCell className="font-medium">
