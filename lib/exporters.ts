@@ -20,6 +20,24 @@ export interface ExportMetadata {
   citation?: string;
   eventCount?: number;
   generatedAt?: string;
+  // Contact information
+  contactName?: string;
+  contactEmail?: string;
+  contactOrganization?: string;
+  // Data quality
+  dataQuality?: {
+    completeness?: string;
+    accuracy?: string;
+    reliability?: string;
+  };
+  qualityNotes?: string;
+  // Additional metadata
+  doi?: string;
+  version?: string;
+  keywords?: string[];
+  referenceLinks?: string[];
+  usageTerms?: string;
+  notes?: string;
 }
 
 /**
@@ -47,6 +65,22 @@ export function eventsToGeoJSON(
       } : undefined,
       license: metadata?.license,
       citation: metadata?.citation,
+      // Contact information
+      contact: (metadata?.contactName || metadata?.contactEmail || metadata?.contactOrganization) ? {
+        name: metadata?.contactName,
+        email: metadata?.contactEmail,
+        organization: metadata?.contactOrganization,
+      } : undefined,
+      // Data quality
+      dataQuality: metadata?.dataQuality,
+      qualityNotes: metadata?.qualityNotes,
+      // Additional metadata
+      doi: metadata?.doi,
+      version: metadata?.version,
+      keywords: metadata?.keywords,
+      referenceLinks: metadata?.referenceLinks,
+      usageTerms: metadata?.usageTerms,
+      notes: metadata?.notes,
     },
     features: events.map(event => ({
       type: 'Feature',
@@ -67,32 +101,32 @@ export function eventsToGeoJSON(
         magnitude: event.magnitude,
         magnitudeType: event.magnitude_type,
         depth: event.depth,
-        
+
         // Identifiers
         publicId: event.event_public_id,
         sourceId: event.source_id,
-        
+
         // Event classification
         eventType: event.event_type,
         eventTypeCertainty: event.event_type_certainty,
-        
+
         // Uncertainties
         timeUncertainty: event.time_uncertainty,
-        locationUncertainty: event.latitude_uncertainty && event.longitude_uncertainty ? 
+        locationUncertainty: event.latitude_uncertainty && event.longitude_uncertainty ?
           Math.sqrt(
-            Math.pow(event.latitude_uncertainty, 2) + 
+            Math.pow(event.latitude_uncertainty, 2) +
             Math.pow(event.longitude_uncertainty, 2)
           ) : undefined,
         depthUncertainty: event.depth_uncertainty,
         magnitudeUncertainty: event.magnitude_uncertainty,
-        
+
         // Quality metrics
         azimuthalGap: event.azimuthal_gap,
         usedPhaseCount: event.used_phase_count,
         usedStationCount: event.used_station_count,
         magnitudeStationCount: event.magnitude_station_count,
         standardError: event.standard_error,
-        
+
         // Evaluation
         evaluationMode: event.evaluation_mode,
         evaluationStatus: event.evaluation_status,
@@ -141,9 +175,48 @@ export function eventsToKML(
   kml += '<kml xmlns="http://www.opengis.net/kml/2.2">\n';
   kml += '  <Document>\n';
   kml += `    <name>${escapeXml(metadata?.catalogueName || 'Earthquake Catalogue')}</name>\n`;
-  
-  if (metadata?.description) {
-    kml += `    <description>${escapeXml(metadata.description)}</description>\n`;
+
+  // Build comprehensive description with all metadata
+  const descriptionParts: string[] = [];
+  if (metadata?.description) descriptionParts.push(metadata.description);
+  if (metadata?.source) descriptionParts.push(`Source: ${metadata.source}`);
+  if (metadata?.provider) descriptionParts.push(`Provider: ${metadata.provider}`);
+  if (metadata?.region) descriptionParts.push(`Region: ${metadata.region}`);
+  if (metadata?.timePeriodStart && metadata?.timePeriodEnd) {
+    descriptionParts.push(`Time Period: ${metadata.timePeriodStart} to ${metadata.timePeriodEnd}`);
+  }
+  if (metadata?.eventCount) descriptionParts.push(`Event Count: ${metadata.eventCount}`);
+  if (metadata?.license) descriptionParts.push(`License: ${metadata.license}`);
+  if (metadata?.citation) descriptionParts.push(`Citation: ${metadata.citation}`);
+  if (metadata?.doi) descriptionParts.push(`DOI: ${metadata.doi}`);
+  if (metadata?.version) descriptionParts.push(`Version: ${metadata.version}`);
+  if (metadata?.contactName || metadata?.contactEmail || metadata?.contactOrganization) {
+    const contactParts = [];
+    if (metadata?.contactName) contactParts.push(metadata.contactName);
+    if (metadata?.contactOrganization) contactParts.push(metadata.contactOrganization);
+    if (metadata?.contactEmail) contactParts.push(metadata.contactEmail);
+    descriptionParts.push(`Contact: ${contactParts.join(', ')}`);
+  }
+  if (metadata?.keywords && metadata.keywords.length > 0) {
+    descriptionParts.push(`Keywords: ${metadata.keywords.join(', ')}`);
+  }
+  if (metadata?.usageTerms) descriptionParts.push(`Usage Terms: ${metadata.usageTerms}`);
+  if (metadata?.qualityNotes) descriptionParts.push(`Quality Notes: ${metadata.qualityNotes}`);
+  if (metadata?.dataQuality) {
+    const qualityParts = [];
+    if (metadata.dataQuality.completeness) qualityParts.push(`Completeness: ${metadata.dataQuality.completeness}`);
+    if (metadata.dataQuality.accuracy) qualityParts.push(`Accuracy: ${metadata.dataQuality.accuracy}`);
+    if (metadata.dataQuality.reliability) qualityParts.push(`Reliability: ${metadata.dataQuality.reliability}`);
+    if (qualityParts.length > 0) descriptionParts.push(`Data Quality: ${qualityParts.join('; ')}`);
+  }
+  if (metadata?.referenceLinks && metadata.referenceLinks.length > 0) {
+    descriptionParts.push(`References: ${metadata.referenceLinks.join(', ')}`);
+  }
+  if (metadata?.notes) descriptionParts.push(`Notes: ${metadata.notes}`);
+  descriptionParts.push(`Generated: ${metadata?.generatedAt || new Date().toISOString()}`);
+
+  if (descriptionParts.length > 0) {
+    kml += `    <description><![CDATA[${descriptionParts.join('\n')}]]></description>\n`;
   }
 
   // Define styles for different magnitude ranges
@@ -180,7 +253,7 @@ export function eventsToKML(
   // Create folders for each magnitude range
   magnitudeRanges.forEach(range => {
     const rangeEvents = events.filter(e => e.magnitude >= range.min && e.magnitude < range.max);
-    
+
     if (rangeEvents.length > 0) {
       kml += `    <Folder>\n`;
       kml += `      <name>${range.label} (${rangeEvents.length} events)</name>\n`;
@@ -189,7 +262,7 @@ export function eventsToKML(
       rangeEvents.forEach(event => {
         const eventDate = new Date(event.time);
         const formattedDate = eventDate.toISOString();
-        
+
         kml += '      <Placemark>\n';
         kml += `        <name>M ${event.magnitude.toFixed(1)}</name>\n`;
         kml += `        <description><![CDATA[\n`;
@@ -198,7 +271,7 @@ export function eventsToKML(
         kml += `            <tr><td><b>Magnitude:</b></td><td>${event.magnitude.toFixed(2)} ${escapeXml(event.magnitude_type || '')}</td></tr>\n`;
         kml += `            <tr><td><b>Depth:</b></td><td>${event.depth !== null ? event.depth.toFixed(1) + ' km' : 'Unknown'}</td></tr>\n`;
         kml += `            <tr><td><b>Location:</b></td><td>${event.latitude.toFixed(4)}°, ${event.longitude.toFixed(4)}°</td></tr>\n`;
-        
+
         if (event.azimuthal_gap != null) {
           kml += `            <tr><td><b>Azimuthal Gap:</b></td><td>${event.azimuthal_gap.toFixed(0)}°</td></tr>\n`;
         }
@@ -217,7 +290,7 @@ export function eventsToKML(
         if (event.evaluation_status) {
           kml += `            <tr><td><b>Status:</b></td><td>${escapeXml(event.evaluation_status)}</td></tr>\n`;
         }
-        
+
         kml += `          </table>\n`;
         kml += `        ]]></description>\n`;
         kml += `        <styleUrl>#${range.name}</styleUrl>\n`;
@@ -263,6 +336,22 @@ export function eventsToJSON(
       citation: metadata?.citation,
       generated: metadata?.generatedAt || new Date().toISOString(),
       eventCount: events.length,
+      // Contact information
+      contact: (metadata?.contactName || metadata?.contactEmail || metadata?.contactOrganization) ? {
+        name: metadata?.contactName,
+        email: metadata?.contactEmail,
+        organization: metadata?.contactOrganization,
+      } : undefined,
+      // Data quality
+      dataQuality: metadata?.dataQuality,
+      qualityNotes: metadata?.qualityNotes,
+      // Additional metadata
+      doi: metadata?.doi,
+      version: metadata?.version,
+      keywords: metadata?.keywords,
+      referenceLinks: metadata?.referenceLinks,
+      usageTerms: metadata?.usageTerms,
+      notes: metadata?.notes,
     },
     events: events.map(event => ({
       id: event.id,

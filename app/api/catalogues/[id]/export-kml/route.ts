@@ -51,8 +51,14 @@ export async function GET(
     const times = events.map((e) => new Date(e.time).getTime());
     const minTime = new Date(Math.min(...times)).toISOString();
     const maxTime = new Date(Math.max(...times)).toISOString();
-    
-    // Convert to KML
+
+    // Parse data quality, keywords, and reference links if stored as JSON strings
+    let dataQuality, keywords, referenceLinks;
+    try { dataQuality = catalogue.data_quality && (typeof catalogue.data_quality === 'string' ? JSON.parse(catalogue.data_quality) : catalogue.data_quality); } catch { }
+    try { keywords = catalogue.keywords && (typeof catalogue.keywords === 'string' ? JSON.parse(catalogue.keywords) : catalogue.keywords); } catch { }
+    try { referenceLinks = catalogue.reference_links && (typeof catalogue.reference_links === 'string' ? JSON.parse(catalogue.reference_links) : catalogue.reference_links); } catch { }
+
+    // Convert to KML with comprehensive metadata
     const kmlContent = eventsToKML(events, {
       catalogueName: catalogue.name,
       description: catalogue.description || undefined,
@@ -64,6 +70,17 @@ export async function GET(
       license: catalogue.license || undefined,
       citation: catalogue.citation || undefined,
       eventCount: events.length,
+      contactName: catalogue.contact_name || undefined,
+      contactEmail: catalogue.contact_email || undefined,
+      contactOrganization: catalogue.contact_organization || undefined,
+      dataQuality,
+      qualityNotes: catalogue.quality_notes || undefined,
+      doi: catalogue.doi || undefined,
+      version: catalogue.version || undefined,
+      keywords,
+      referenceLinks,
+      usageTerms: catalogue.usage_terms || undefined,
+      notes: catalogue.notes || undefined,
     });
 
     // Generate descriptive filename with timestamp

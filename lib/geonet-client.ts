@@ -174,32 +174,105 @@ export class GeoNetClient {
         return [];
       }
 
+      // Validate Content-Type header to ensure we're getting the expected format
+      const contentType = response.headers.get('content-type') || '';
+      const isTextFormat = contentType.includes('text/plain') ||
+                           contentType.includes('text/csv') ||
+                           contentType.includes('application/csv');
+
       const text = await response.text();
+
+      // Check for error responses that may come with 200 status
+      // GeoNet API may return error messages as plain text even with 200 OK
+      const trimmedText = text.trim().toLowerCase();
+      if (trimmedText.startsWith('an error') ||
+          trimmedText.startsWith('error:') ||
+          trimmedText.startsWith('<!doctype') ||
+          trimmedText.startsWith('<html') ||
+          (trimmedText.startsWith('<?xml') && trimmedText.includes('<error'))) {
+        const errorPreview = text.substring(0, 200).replace(/\s+/g, ' ');
+        console.error('[GeoNetClient] GeoNet returned an error response:', errorPreview);
+        throw new Error(`GeoNet API returned an error: ${errorPreview}`);
+      }
+
+      // Log warning if Content-Type doesn't match expected format but continue
+      if (!isTextFormat && contentType) {
+        console.warn(`[GeoNetClient] Unexpected Content-Type: ${contentType}. Expected text/plain or text/csv.`);
+      }
+
       const lines = text.trim().split('\n');
 
       if (lines.length === 0) {
         return [];
       }
 
-      // First line is header
-      const header = lines[0].replace('#', '').split('|').map(h => h.trim());
+      // First line is header - validate it has the expected pipe-delimited format
+      const headerLine = lines[0];
+      if (!headerLine.includes('|')) {
+        // Response doesn't have expected pipe-delimited format
+        const errorPreview = text.substring(0, 200).replace(/\s+/g, ' ');
+        console.error('[GeoNetClient] Response is not in expected pipe-delimited format:', errorPreview);
+        throw new Error(`GeoNet API returned unexpected format. Expected pipe-delimited text, got: ${errorPreview}`);
+      }
+
+      const header = headerLine.replace('#', '').split('|').map(h => h.trim());
+
+      // Validate that we have the required fields in the header
+      const requiredFields = ['EventID', 'Time', 'Latitude', 'Longitude', 'Magnitude'];
+      const missingFields = requiredFields.filter(field => !header.includes(field));
+      if (missingFields.length > 0) {
+        console.warn(`[GeoNetClient] Response header missing expected fields: ${missingFields.join(', ')}. Header: ${header.join(', ')}`);
+      }
 
       // Parse data lines
       const events: GeoNetEventText[] = [];
       for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split('|').map(v => v.trim());
+        const line = lines[i].trim();
+        if (!line) continue; // Skip empty lines
+
+        const values = line.split('|').map(v => v.trim());
+
+        // Skip malformed lines that don't have enough values
+        if (values.length < header.length / 2) {
+          console.warn(`[GeoNetClient] Skipping malformed line ${i}: ${line.substring(0, 100)}`);
+          continue;
+        }
+
         const event: any = {};
+        let hasValidRequiredFields = true;
 
         header.forEach((key, index) => {
           const value = values[index];
 
-          // Convert numeric fields
+          // Convert numeric fields with NaN handling
           if (key === 'Latitude' || key === 'Longitude' || key === 'Depth/km' || key === 'Magnitude') {
-            event[key] = parseFloat(value);
+            const numValue = parseFloat(value);
+            if (isNaN(numValue)) {
+              // Critical fields must be valid
+              if (key === 'Latitude' || key === 'Longitude' || key === 'Magnitude') {
+                console.warn(`[GeoNetClient] Invalid ${key} value "${value}" on line ${i}`);
+                hasValidRequiredFields = false;
+              }
+              event[key] = key === 'Depth/km' ? 0 : numValue; // Default depth to 0 if invalid
+            } else {
+              event[key] = numValue;
+            }
           } else {
             event[key] = value;
           }
         });
+
+        // Skip events with invalid required numeric fields
+        if (!hasValidRequiredFields) {
+          console.warn(`[GeoNetClient] Skipping event on line ${i} due to invalid required fields`);
+          continue;
+        }
+
+        // Validate EventID and Time are present
+        if (!event.EventID || !event.Time) {
+          console.warn(`[GeoNetClient] Skipping event on line ${i} due to missing EventID or Time`);
+          continue;
+        }
 
         events.push(event as GeoNetEventText);
       }
@@ -237,15 +310,31 @@ export class GeoNetClient {
 
       const xml = await response.text();
 
-      // Parse XML to JSON
-      const result = await parseStringPromise(xml, {
-        explicitArray: false,
-        mergeAttrs: true,
-        tagNameProcessors: [(name) => name.replace(/^q:/, '')],
-      });
+      // Check for error responses that may come with 200 status
+      const trimmedXml = xml.trim().toLowerCase();
+      if (trimmedXml.startsWith('an error') ||
+          trimmedXml.startsWith('error:') ||
+          (trimmedXml.startsWith('<!doctype') && !trimmedXml.includes('quakeml'))) {
+        const errorPreview = xml.substring(0, 200).replace(/\s+/g, ' ');
+        console.error('[GeoNetClient] GeoNet returned an error response:', errorPreview);
+        throw new Error(`GeoNet API returned an error: ${errorPreview}`);
+      }
 
-      console.log('[GeoNetClient] Fetched QuakeML data');
-      return result;
+      // Parse XML to JSON
+      try {
+        const result = await parseStringPromise(xml, {
+          explicitArray: false,
+          mergeAttrs: true,
+          tagNameProcessors: [(name) => name.replace(/^q:/, '')],
+        });
+
+        console.log('[GeoNetClient] Fetched QuakeML data');
+        return result;
+      } catch (parseError) {
+        const errorPreview = xml.substring(0, 200).replace(/\s+/g, ' ');
+        console.error('[GeoNetClient] Failed to parse XML response:', errorPreview);
+        throw new Error(`Failed to parse GeoNet XML response: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+      }
     });
   }
   

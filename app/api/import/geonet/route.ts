@@ -7,11 +7,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { geonetImportService } from '@/lib/geonet-import-service';
-import { Logger } from '@/lib/errors';
 import { apiCache } from '@/lib/cache';
 import { requireEditor } from '@/lib/auth/middleware';
-
-const logger = new Logger('GeoNetImport');
 
 export async function POST(request: NextRequest) {
   try {
@@ -95,6 +92,80 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate depth range
+    if (minDepth !== undefined && (typeof minDepth !== 'number' || minDepth < 0)) {
+      return NextResponse.json(
+        { error: 'Minimum depth must be a non-negative number' },
+        { status: 400 }
+      );
+    }
+
+    if (maxDepth !== undefined && (typeof maxDepth !== 'number' || maxDepth < 0)) {
+      return NextResponse.json(
+        { error: 'Maximum depth must be a non-negative number' },
+        { status: 400 }
+      );
+    }
+
+    if (minDepth !== undefined && maxDepth !== undefined && minDepth > maxDepth) {
+      return NextResponse.json(
+        { error: 'Minimum depth cannot be greater than maximum depth' },
+        { status: 400 }
+      );
+    }
+
+    // Validate latitude range (-90 to 90)
+    if (minLatitude !== undefined && (typeof minLatitude !== 'number' || minLatitude < -90 || minLatitude > 90)) {
+      return NextResponse.json(
+        { error: 'Minimum latitude must be between -90 and 90' },
+        { status: 400 }
+      );
+    }
+
+    if (maxLatitude !== undefined && (typeof maxLatitude !== 'number' || maxLatitude < -90 || maxLatitude > 90)) {
+      return NextResponse.json(
+        { error: 'Maximum latitude must be between -90 and 90' },
+        { status: 400 }
+      );
+    }
+
+    if (minLatitude !== undefined && maxLatitude !== undefined && minLatitude > maxLatitude) {
+      return NextResponse.json(
+        { error: 'Minimum latitude cannot be greater than maximum latitude' },
+        { status: 400 }
+      );
+    }
+
+    // Validate longitude range (-180 to 180)
+    if (minLongitude !== undefined && (typeof minLongitude !== 'number' || minLongitude < -180 || minLongitude > 180)) {
+      return NextResponse.json(
+        { error: 'Minimum longitude must be between -180 and 180' },
+        { status: 400 }
+      );
+    }
+
+    if (maxLongitude !== undefined && (typeof maxLongitude !== 'number' || maxLongitude < -180 || maxLongitude > 180)) {
+      return NextResponse.json(
+        { error: 'Maximum longitude must be between -180 and 180' },
+        { status: 400 }
+      );
+    }
+
+    if (minLongitude !== undefined && maxLongitude !== undefined && minLongitude > maxLongitude) {
+      return NextResponse.json(
+        { error: 'Minimum longitude cannot be greater than maximum longitude' },
+        { status: 400 }
+      );
+    }
+
+    // Validate date order
+    if (parsedStartDate && parsedEndDate && parsedStartDate > parsedEndDate) {
+      return NextResponse.json(
+        { error: 'Start date must be before end date' },
+        { status: 400 }
+      );
+    }
+
     // Trigger import
     console.log('[API] Starting GeoNet import with options:', {
       startDate: parsedStartDate?.toISOString(),
@@ -139,12 +210,46 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('[API] Import error:', error);
 
+    // Extract detailed error information
+    let errorMessage = 'Unknown error occurred';
+    let errorType = 'UnknownError';
+    let statusCode = 500;
+
+    if (error instanceof Error) {
+      errorMessage = error.message;
+      errorType = error.name;
+
+      // Check for specific error types and provide helpful messages
+      if (error.message.includes('Circuit breaker is OPEN')) {
+        errorMessage = 'The GeoNet API appears to be experiencing issues. Please try again later.';
+        errorType = 'CircuitBreakerOpen';
+        statusCode = 503;
+      } else if (error.message.includes('GeoNet API returned an error')) {
+        errorType = 'GeoNetApiError';
+        statusCode = 502;
+      } else if (error.message.includes('timeout') || error.message.includes('Timeout')) {
+        errorMessage = 'Request to GeoNet API timed out. Please try again with a smaller time range.';
+        errorType = 'TimeoutError';
+        statusCode = 504;
+      } else if (error.message.includes('fetch') || error.message.includes('network')) {
+        errorMessage = 'Network error connecting to GeoNet API. Please check your connection and try again.';
+        errorType = 'NetworkError';
+        statusCode = 503;
+      } else if (error.message.includes('Database not available')) {
+        errorMessage = 'Database is temporarily unavailable. Please try again later.';
+        errorType = 'DatabaseError';
+        statusCode = 503;
+      }
+    }
+
     return NextResponse.json(
       {
         error: 'Import failed',
-        message: error instanceof Error ? error.message : String(error),
+        message: errorMessage,
+        errorType,
+        timestamp: new Date().toISOString(),
       },
-      { status: 500 }
+      { status: statusCode }
     );
   }
 }

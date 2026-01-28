@@ -52,6 +52,13 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
   const [updateExisting, setUpdateExisting] = useState(false);
   const [catalogueName, setCatalogueName] = useState('GeoNet - Automated Import');
 
+  // Helper to parse float safely, returning undefined for empty/invalid values
+  const parseFloatSafe = (value: string): number | undefined => {
+    if (!value || value.trim() === '') return undefined;
+    const num = parseFloat(value);
+    return isNaN(num) ? undefined : num;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (readOnly) {
@@ -62,6 +69,61 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
       });
       return;
     }
+
+    // Client-side validation
+    if (timeRange === 'custom') {
+      if (!startDate || !endDate) {
+        setError('Please enter both start and end dates.');
+        return;
+      }
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      if (start > end) {
+        setError('Start date must be before end date.');
+        return;
+      }
+    }
+
+    // Parse and validate magnitude range
+    const minMag = parseFloatSafe(minMagnitude);
+    const maxMag = parseFloatSafe(maxMagnitude);
+    if (minMag !== undefined && maxMag !== undefined && minMag > maxMag) {
+      setError('Minimum magnitude cannot be greater than maximum magnitude.');
+      return;
+    }
+
+    // Parse and validate latitude range
+    const minLat = parseFloatSafe(minLatitude);
+    const maxLat = parseFloatSafe(maxLatitude);
+    if (minLat !== undefined && (minLat < -90 || minLat > 90)) {
+      setError('Minimum latitude must be between -90 and 90.');
+      return;
+    }
+    if (maxLat !== undefined && (maxLat < -90 || maxLat > 90)) {
+      setError('Maximum latitude must be between -90 and 90.');
+      return;
+    }
+    if (minLat !== undefined && maxLat !== undefined && minLat > maxLat) {
+      setError('Minimum latitude cannot be greater than maximum latitude.');
+      return;
+    }
+
+    // Parse and validate longitude range
+    const minLon = parseFloatSafe(minLongitude);
+    const maxLon = parseFloatSafe(maxLongitude);
+    if (minLon !== undefined && (minLon < -180 || minLon > 180)) {
+      setError('Minimum longitude must be between -180 and 180.');
+      return;
+    }
+    if (maxLon !== undefined && (maxLon < -180 || maxLon > 180)) {
+      setError('Maximum longitude must be between -180 and 180.');
+      return;
+    }
+    if (minLon !== undefined && maxLon !== undefined && minLon > maxLon) {
+      setError('Minimum longitude cannot be greater than maximum longitude.');
+      return;
+    }
+
     setIsImporting(true);
     setResult(null);
     setError(null);
@@ -81,26 +143,26 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
         body.endDate = endDate;
       }
 
-      // Add magnitude filters
-      if (minMagnitude) {
-        body.minMagnitude = parseFloat(minMagnitude);
+      // Add magnitude filters (using pre-validated values)
+      if (minMag !== undefined) {
+        body.minMagnitude = minMag;
       }
-      if (maxMagnitude) {
-        body.maxMagnitude = parseFloat(maxMagnitude);
+      if (maxMag !== undefined) {
+        body.maxMagnitude = maxMag;
       }
 
-      // Add geographic filters
-      if (minLatitude) {
-        body.minLatitude = parseFloat(minLatitude);
+      // Add geographic filters (using pre-validated values)
+      if (minLat !== undefined) {
+        body.minLatitude = minLat;
       }
-      if (maxLatitude) {
-        body.maxLatitude = parseFloat(maxLatitude);
+      if (maxLat !== undefined) {
+        body.maxLatitude = maxLat;
       }
-      if (minLongitude) {
-        body.minLongitude = parseFloat(minLongitude);
+      if (minLon !== undefined) {
+        body.minLongitude = minLon;
       }
-      if (maxLongitude) {
-        body.maxLongitude = parseFloat(maxLongitude);
+      if (maxLon !== undefined) {
+        body.maxLongitude = maxLon;
       }
 
       const response = await fetch('/api/import/geonet', {
@@ -111,7 +173,50 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
         body: JSON.stringify(body),
       });
 
-      const data = await response.json();
+      // Check Content-Type before parsing as JSON
+      const contentType = response.headers.get('content-type') || '';
+      let data: any;
+
+      if (contentType.includes('application/json')) {
+        try {
+          data = await response.json();
+        } catch (parseError) {
+          // JSON parsing failed even though Content-Type was JSON
+          const textBody = await response.clone().text().catch(() => 'Unable to read response');
+          console.error('[ImportForm] Failed to parse JSON response:', textBody.substring(0, 500));
+          throw new Error(
+            `Server returned invalid JSON. Status: ${response.status}. ` +
+            `Response preview: ${textBody.substring(0, 100)}...`
+          );
+        }
+      } else {
+        // Response is not JSON - try to extract error message from text
+        const textBody = await response.text();
+        console.error('[ImportForm] Received non-JSON response:', {
+          status: response.status,
+          contentType,
+          body: textBody.substring(0, 500)
+        });
+
+        // Check if it looks like an HTML error page
+        if (textBody.includes('<!DOCTYPE') || textBody.includes('<html')) {
+          throw new Error(
+            `Server returned an HTML error page (status ${response.status}). ` +
+            'The GeoNet API may be temporarily unavailable. Please try again later.'
+          );
+        }
+
+        // Check for common error message formats
+        if (textBody.toLowerCase().startsWith('an error') ||
+            textBody.toLowerCase().startsWith('error:')) {
+          throw new Error(`GeoNet API error: ${textBody.substring(0, 200)}`);
+        }
+
+        throw new Error(
+          `Server returned non-JSON response (${contentType || 'unknown type'}). ` +
+          `Status: ${response.status}. Response: ${textBody.substring(0, 100)}...`
+        );
+      }
 
       if (!response.ok) {
         throw new Error(data.message || data.error || 'Import failed');

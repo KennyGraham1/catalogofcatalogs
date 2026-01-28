@@ -28,7 +28,7 @@ import type {
  */
 function formatRealQuantity(value: number | null, uncertainty?: number | null): string {
   if (value === null) return '';
-  
+
   let xml = `<value>${value}</value>`;
   if (uncertainty !== null && uncertainty !== undefined) {
     xml += `\n      <uncertainty>${uncertainty}</uncertainty>`;
@@ -52,14 +52,14 @@ function formatTimeQuantity(time: string, uncertainty?: number | null): string {
  */
 function formatCreationInfo(info: CreationInfo, indent: string = '    '): string {
   const parts: string[] = [];
-  
+
   if (info.agencyID) parts.push(`${indent}<agencyID>${escapeXml(info.agencyID)}</agencyID>`);
   if (info.author) parts.push(`${indent}<author>${escapeXml(info.author)}</author>`);
   if (info.creationTime) parts.push(`${indent}<creationTime>${info.creationTime}</creationTime>`);
   if (info.version) parts.push(`${indent}<version>${escapeXml(info.version)}</version>`);
-  
+
   if (parts.length === 0) return '';
-  
+
   return `${indent.slice(2)}<creationInfo>\n${parts.join('\n')}\n${indent.slice(2)}</creationInfo>`;
 }
 
@@ -69,12 +69,12 @@ function formatCreationInfo(info: CreationInfo, indent: string = '    '): string
 function formatComment(comment: Comment, indent: string = '    '): string {
   let xml = `${indent}<comment>\n`;
   xml += `${indent}  <text>${escapeXml(comment.text)}</text>\n`;
-  
+
   if (comment.id) xml += `${indent}  <id>${escapeXml(comment.id)}</id>\n`;
   if (comment.creationInfo) {
     xml += formatCreationInfo(comment.creationInfo, indent + '  ') + '\n';
   }
-  
+
   xml += `${indent}</comment>`;
   return xml;
 }
@@ -95,35 +95,35 @@ function formatEventDescription(desc: EventDescription, indent: string = '    ')
  */
 function formatOrigin(origin: Origin, indent: string = '    '): string {
   let xml = `${indent}<origin publicID="${escapeXml(origin.publicID)}">\n`;
-  
+
   // Time
   if (origin.time) {
     xml += `${indent}  <time>\n`;
     xml += `${indent}    ${formatTimeQuantity(origin.time.value, origin.time.uncertainty)}\n`;
     xml += `${indent}  </time>\n`;
   }
-  
+
   // Latitude
   if (origin.latitude) {
     xml += `${indent}  <latitude>\n`;
     xml += `${indent}    ${formatRealQuantity(origin.latitude.value, origin.latitude.uncertainty)}\n`;
     xml += `${indent}  </latitude>\n`;
   }
-  
+
   // Longitude
   if (origin.longitude) {
     xml += `${indent}  <longitude>\n`;
     xml += `${indent}    ${formatRealQuantity(origin.longitude.value, origin.longitude.uncertainty)}\n`;
     xml += `${indent}  </longitude>\n`;
   }
-  
+
   // Depth
   if (origin.depth) {
     xml += `${indent}  <depth>\n`;
     xml += `${indent}    ${formatRealQuantity(origin.depth.value, origin.depth.uncertainty)}\n`;
     xml += `${indent}  </depth>\n`;
   }
-  
+
   // Quality
   if (origin.quality) {
     xml += `${indent}  <quality>\n`;
@@ -150,7 +150,7 @@ function formatOrigin(origin: Origin, indent: string = '    '): string {
     }
     xml += `${indent}  </quality>\n`;
   }
-  
+
   // Evaluation mode and status
   if (origin.evaluationMode) {
     xml += `${indent}  <evaluationMode>${escapeXml(origin.evaluationMode)}</evaluationMode>\n`;
@@ -180,29 +180,29 @@ function formatOrigin(origin: Origin, indent: string = '    '): string {
  */
 function formatMagnitude(magnitude: Magnitude, indent: string = '    '): string {
   let xml = `${indent}<magnitude publicID="${escapeXml(magnitude.publicID)}">\n`;
-  
+
   // Magnitude value
   if (magnitude.mag) {
     xml += `${indent}  <mag>\n`;
     xml += `${indent}    ${formatRealQuantity(magnitude.mag.value, magnitude.mag.uncertainty)}\n`;
     xml += `${indent}  </mag>\n`;
   }
-  
+
   // Type
   if (magnitude.type) {
     xml += `${indent}  <type>${escapeXml(magnitude.type)}</type>\n`;
   }
-  
+
   // Station count
   if (magnitude.stationCount !== undefined) {
     xml += `${indent}  <stationCount>${magnitude.stationCount}</stationCount>\n`;
   }
-  
+
   // Origin ID
   if (magnitude.originID) {
     xml += `${indent}  <originID>${escapeXml(magnitude.originID)}</originID>\n`;
   }
-  
+
   // Evaluation mode and status
   if (magnitude.evaluationMode) {
     xml += `${indent}  <evaluationMode>${escapeXml(magnitude.evaluationMode)}</evaluationMode>\n`;
@@ -210,12 +210,12 @@ function formatMagnitude(magnitude: Magnitude, indent: string = '    '): string 
   if (magnitude.evaluationStatus) {
     xml += `${indent}  <evaluationStatus>${escapeXml(magnitude.evaluationStatus)}</evaluationStatus>\n`;
   }
-  
+
   // Creation info
   if (magnitude.creationInfo) {
     xml += formatCreationInfo(magnitude.creationInfo, indent + '  ') + '\n';
   }
-  
+
   xml += `${indent}</magnitude>`;
   return xml;
 }
@@ -661,22 +661,22 @@ function escapeXml(str: string): string {
 export function eventToQuakeML(event: MergedEvent): string {
   // Parse QuakeML data if available
   let quakeml: QuakeMLEvent | null = null;
-  
+
   // Try to reconstruct QuakeML from stored data
   const publicID = event.event_public_id || `smi:local/event/${event.id}`;
-  
+
   let xml = `  <event publicID="${escapeXml(publicID)}">\n`;
-  
+
   // Event type
   if (event.event_type) {
     xml += `    <type>${escapeXml(event.event_type)}</type>\n`;
   }
-  
+
   // Event type certainty
   if (event.event_type_certainty) {
     xml += `    <typeCertainty>${escapeXml(event.event_type_certainty)}</typeCertainty>\n`;
   }
-  
+
   // Descriptions
   if (event.event_descriptions) {
     try {
@@ -688,7 +688,7 @@ export function eventToQuakeML(event: MergedEvent): string {
       // Ignore parse errors
     }
   }
-  
+
   // Comments
   if (event.comments) {
     try {
@@ -700,17 +700,17 @@ export function eventToQuakeML(event: MergedEvent): string {
       // Ignore parse errors
     }
   }
-  
+
   // Preferred origin ID
   if (event.preferred_origin_id) {
     xml += `    <preferredOriginID>${escapeXml(event.preferred_origin_id)}</preferredOriginID>\n`;
   }
-  
+
   // Preferred magnitude ID
   if (event.preferred_magnitude_id) {
     xml += `    <preferredMagnitudeID>${escapeXml(event.preferred_magnitude_id)}</preferredMagnitudeID>\n`;
   }
-  
+
   // Origins
   if (event.origins) {
     try {
@@ -744,7 +744,7 @@ export function eventToQuakeML(event: MergedEvent): string {
         }
         xml += `      </depth>\n`;
       }
-      
+
       // Add quality metrics if available
       if (event.azimuthal_gap || event.used_phase_count || event.used_station_count || event.standard_error) {
         xml += `      <quality>\n`;
@@ -754,7 +754,7 @@ export function eventToQuakeML(event: MergedEvent): string {
         if (event.standard_error) xml += `        <standardError>${event.standard_error}</standardError>\n`;
         xml += `      </quality>\n`;
       }
-      
+
       if (event.evaluation_mode) {
         xml += `      <evaluationMode>${escapeXml(event.evaluation_mode)}</evaluationMode>\n`;
       }
@@ -875,7 +875,32 @@ export function eventToQuakeML(event: MergedEvent): string {
 /**
  * Convert multiple events to a complete QuakeML document
  */
-export function eventsToQuakeMLDocument(events: MergedEvent[], catalogueName?: string): string {
+export function eventsToQuakeMLDocument(
+  events: MergedEvent[],
+  catalogueName?: string,
+  metadata?: {
+    description?: string;
+    source?: string;
+    provider?: string;
+    region?: string;
+    timePeriodStart?: string;
+    timePeriodEnd?: string;
+    license?: string;
+    citation?: string;
+    eventCount?: number;
+    contactName?: string;
+    contactEmail?: string;
+    contactOrganization?: string;
+    dataQuality?: { completeness?: string; accuracy?: string; reliability?: string };
+    qualityNotes?: string;
+    doi?: string;
+    version?: string;
+    keywords?: string[];
+    referenceLinks?: string[];
+    usageTerms?: string;
+    notes?: string;
+  }
+): string {
   const timestamp = new Date().toISOString();
   const publicID = `smi:local/eventParameters/${Date.now()}`;
 
@@ -883,16 +908,61 @@ export function eventsToQuakeMLDocument(events: MergedEvent[], catalogueName?: s
   xml += '<q:quakeml xmlns="http://quakeml.org/xmlns/bed/1.2" xmlns:q="http://quakeml.org/xmlns/quakeml/1.2">\n';
   xml += `  <eventParameters publicID="${escapeXml(publicID)}">\n`;
 
-  if (catalogueName) {
+  // Build comprehensive description
+  const descParts: string[] = [];
+  if (catalogueName) descParts.push(`Catalogue: ${catalogueName}`);
+  if (metadata?.description) descParts.push(metadata.description);
+  if (metadata?.source) descParts.push(`Source: ${metadata.source}`);
+  if (metadata?.provider) descParts.push(`Provider: ${metadata.provider}`);
+  if (metadata?.region) descParts.push(`Region: ${metadata.region}`);
+  if (metadata?.timePeriodStart && metadata?.timePeriodEnd) {
+    descParts.push(`Time Period: ${metadata.timePeriodStart} to ${metadata.timePeriodEnd}`);
+  }
+  if (metadata?.eventCount) descParts.push(`Event Count: ${metadata.eventCount}`);
+
+  if (descParts.length > 0) {
     xml += `    <description>\n`;
-    xml += `      <text>Merged earthquake catalogue: ${escapeXml(catalogueName)}</text>\n`;
+    xml += `      <text>${escapeXml(descParts.join('; '))}</text>\n`;
     xml += `    </description>\n`;
   }
 
+  // Add comments for additional metadata
+  const addComment = (text: string) => {
+    xml += `    <comment>\n      <text>${escapeXml(text)}</text>\n    </comment>\n`;
+  };
+
+  if (metadata?.license) addComment(`License: ${metadata.license}`);
+  if (metadata?.citation) addComment(`Citation: ${metadata.citation}`);
+  if (metadata?.doi) addComment(`DOI: ${metadata.doi}`);
+  if (metadata?.usageTerms) addComment(`Usage Terms: ${metadata.usageTerms}`);
+  if (metadata?.contactName || metadata?.contactEmail || metadata?.contactOrganization) {
+    const contactParts = [];
+    if (metadata.contactName) contactParts.push(metadata.contactName);
+    if (metadata.contactOrganization) contactParts.push(metadata.contactOrganization);
+    if (metadata.contactEmail) contactParts.push(metadata.contactEmail);
+    addComment(`Contact: ${contactParts.join(', ')}`);
+  }
+  if (metadata?.keywords && metadata.keywords.length > 0) {
+    addComment(`Keywords: ${metadata.keywords.join(', ')}`);
+  }
+  if (metadata?.referenceLinks && metadata.referenceLinks.length > 0) {
+    addComment(`References: ${metadata.referenceLinks.join(', ')}`);
+  }
+  if (metadata?.dataQuality) {
+    const qParts = [];
+    if (metadata.dataQuality.completeness) qParts.push(`Completeness: ${metadata.dataQuality.completeness}`);
+    if (metadata.dataQuality.accuracy) qParts.push(`Accuracy: ${metadata.dataQuality.accuracy}`);
+    if (metadata.dataQuality.reliability) qParts.push(`Reliability: ${metadata.dataQuality.reliability}`);
+    if (qParts.length > 0) addComment(`Data Quality: ${qParts.join('; ')}`);
+  }
+  if (metadata?.qualityNotes) addComment(`Quality Notes: ${metadata.qualityNotes}`);
+  if (metadata?.notes) addComment(`Notes: ${metadata.notes}`);
+
+  // Creation info with version
   xml += `    <creationInfo>\n`;
   xml += `      <creationTime>${timestamp}</creationTime>\n`;
   xml += `      <agencyID>CatalogueOfCatalogues</agencyID>\n`;
-  xml += `      <version>1.0</version>\n`;
+  xml += `      <version>${metadata?.version || '1.0'}</version>\n`;
   xml += `    </creationInfo>\n`;
 
   // Add all events

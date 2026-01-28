@@ -12,7 +12,6 @@ import { geonetClient, GeoNetEventText } from './geonet-client';
 import { dbQueries, MergedEvent } from './db';
 import { v4 as uuidv4 } from 'uuid';
 import { extractBoundsFromMergedEvents } from './geo-bounds-utils';
-import { parseStringPromise } from 'xml2js';
 import pLimit from 'p-limit';
 
 /**
@@ -482,10 +481,23 @@ export class GeoNetImportService {
     let newEventsCount = 0;
     if (newEventsList.length > 0) {
       try {
-        const eventsToInsert = newEventsList.map(event => this.convertToMergedEvent(event, catalogueId, focalMechanismsMap));
-        await getDbQueries().bulkInsertEvents(eventsToInsert);
-        newEventsCount = newEventsList.length;
-        console.log(`[GeoNetImportService] Bulk inserted ${newEventsCount} new events`);
+        // Validate events before insertion
+        const validEvents: GeoNetEventText[] = [];
+        for (const event of newEventsList) {
+          if (!this.validateEvent(event)) {
+            console.warn(`[GeoNetImportService] Skipping invalid event ${event.EventID}: missing or invalid required fields`);
+            errors.push(`Skipped event ${event.EventID}: invalid data`);
+            continue;
+          }
+          validEvents.push(event);
+        }
+
+        if (validEvents.length > 0) {
+          const eventsToInsert = validEvents.map(event => this.convertToMergedEvent(event, catalogueId, focalMechanismsMap));
+          await getDbQueries().bulkInsertEvents(eventsToInsert);
+          newEventsCount = validEvents.length;
+          console.log(`[GeoNetImportService] Bulk inserted ${newEventsCount} new events`);
+        }
       } catch (error) {
         const errorMsg = `Bulk insert failed: ${error instanceof Error ? error.message : String(error)}`;
         console.error(`[GeoNetImportService] ${errorMsg}`);
@@ -497,6 +509,12 @@ export class GeoNetImportService {
     let updatedEventsCount = 0;
     for (const { dbId, event } of updateEventsList) {
       try {
+        // Validate event before update
+        if (!this.validateEvent(event)) {
+          console.warn(`[GeoNetImportService] Skipping invalid event update ${event.EventID}: missing or invalid required fields`);
+          errors.push(`Skipped event update ${event.EventID}: invalid data`);
+          continue;
+        }
         await this.updateEvent(dbId, event, focalMechanismsMap.get(event.EventID) || null);
         updatedEventsCount++;
       } catch (error) {
@@ -515,6 +533,49 @@ export class GeoNetImportService {
   }
 
   /**
+   * Validate that an event has all required fields with valid values
+   */
+  private validateEvent(event: GeoNetEventText): boolean {
+    // Check required string fields
+    if (!event.EventID || typeof event.EventID !== 'string' || event.EventID.trim() === '') {
+      return false;
+    }
+    if (!event.Time || typeof event.Time !== 'string' || event.Time.trim() === '') {
+      return false;
+    }
+
+    // Validate time is parseable
+    const parsedTime = new Date(event.Time);
+    if (isNaN(parsedTime.getTime())) {
+      console.warn(`[GeoNetImportService] Invalid time for event ${event.EventID}: ${event.Time}`);
+      return false;
+    }
+
+    // Check required numeric fields are valid numbers
+    if (typeof event.Latitude !== 'number' || isNaN(event.Latitude)) {
+      return false;
+    }
+    if (typeof event.Longitude !== 'number' || isNaN(event.Longitude)) {
+      return false;
+    }
+    if (typeof event.Magnitude !== 'number' || isNaN(event.Magnitude)) {
+      return false;
+    }
+
+    // Validate coordinate ranges
+    if (event.Latitude < -90 || event.Latitude > 90) {
+      console.warn(`[GeoNetImportService] Invalid latitude for event ${event.EventID}: ${event.Latitude}`);
+      return false;
+    }
+    if (event.Longitude < -180 || event.Longitude > 180) {
+      console.warn(`[GeoNetImportService] Invalid longitude for event ${event.EventID}: ${event.Longitude}`);
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
    * Convert GeoNet event to MergedEvent format for bulk insert
    */
   private convertToMergedEvent(
@@ -529,6 +590,7 @@ export class GeoNetImportService {
     longitude: number;
     magnitude: number;
     source_events: string;
+    source_id: string;
   } {
     const eventId = uuidv4();
     const focalMechanisms = focalMechanismsMap.get(event.EventID) || null;
@@ -536,12 +598,14 @@ export class GeoNetImportService {
     return {
       id: eventId,
       catalogue_id: catalogueId,
+      source_id: event.EventID, // Critical: Include source_id for duplicate detection
       time: event.Time,
       latitude: event.Latitude,
       longitude: event.Longitude,
       depth: event['Depth/km'],
       magnitude: event.Magnitude,
       source_events: JSON.stringify([{
+        source: 'GeoNet', // Match format used in insertEvent()
         eventId: event.EventID
       }]),
       magnitude_type: event.MagType || null,
