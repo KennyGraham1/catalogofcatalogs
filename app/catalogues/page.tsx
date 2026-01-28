@@ -232,6 +232,8 @@ export default function CataloguesPage() {
     setGeoSearchBounds(null);
     setGeoSearchRequestId(null);
     fetchCatalogues();
+    // fetchCatalogues is a wrapper around refreshCatalogues from context
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const normalizeSearchValue = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -565,7 +567,7 @@ export default function CataloguesPage() {
     });
   }, [catalogues]);
 
-  const matchesSearchQuery = (catalogueMeta: CatalogueMeta, tokens: SearchToken[]): boolean => {
+  const matchesSearchQuery = useCallback((catalogueMeta: CatalogueMeta, tokens: SearchToken[]): boolean => {
     if (tokens.length === 0) return true;
 
     const { searchFields, haystack, createdTimestamp, eventCount } = catalogueMeta;
@@ -621,7 +623,7 @@ export default function CataloguesPage() {
 
       return normalizeSearchValue(searchFields[fieldKey]).includes(value);
     });
-  };
+  }, []);
 
   const searchTokens = useMemo(
     () => parseSearchTokens(debouncedSearchQuery),
@@ -636,7 +638,7 @@ export default function CataloguesPage() {
 
       return matchesSearch && matchesStatus;
     });
-  }, [cataloguesWithMeta, searchTokens, statusFilter]);
+  }, [cataloguesWithMeta, matchesSearchQuery, searchTokens, statusFilter]);
 
   // Memoized sorted catalogues
   const sortedCatalogues = useMemo(() => {

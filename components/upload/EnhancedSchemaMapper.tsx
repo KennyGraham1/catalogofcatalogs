@@ -244,12 +244,18 @@ export function EnhancedSchemaMapper({
     // Skip during initial loading
     if (loading) return;
 
+    // Helper to get source fields from validation results
+    const getSourceFieldsLocal = () => {
+      if (!validationResults || validationResults.length === 0) return [];
+      return validationResults[0].fields || [];
+    };
+
     // Check required fields with current (settled) state
     const { complete, missing } = checkRequiredFieldsMapped(fieldMappings);
     if (complete) {
       onSchemaReady(true);
     } else {
-      const sourceFields = getSourceFields();
+      const sourceFields = getSourceFieldsLocal();
       const normalizedFields = new Set(sourceFields.map((field: string) => field.toLowerCase()));
       const hasSplitTimestamp = normalizedFields.has('year') && normalizedFields.has('month') && normalizedFields.has('day');
       const adjustedMissing = hasSplitTimestamp ? missing.filter((field: string) => field !== 'time') : missing;

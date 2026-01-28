@@ -38,7 +38,7 @@ import {
   Loader2,
   Info,
   Download,
-  Image,
+  Image as ImageIcon,
   FileJson,
   ChevronsUpDown,
   Check
@@ -191,11 +191,11 @@ const ChartExportButton = memo(function ChartExportButton({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={handleExportPNG}>
-          <Image className="h-4 w-4 mr-2" />
+          <ImageIcon className="h-4 w-4 mr-2" />
           Export as PNG
         </DropdownMenuItem>
         <DropdownMenuItem onClick={handleExportSVG}>
-          <Image className="h-4 w-4 mr-2" />
+          <ImageIcon className="h-4 w-4 mr-2" />
           Export as SVG
         </DropdownMenuItem>
         {data && (

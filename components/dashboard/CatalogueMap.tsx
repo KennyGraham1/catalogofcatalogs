@@ -73,6 +73,8 @@ export const CatalogueMap = memo(function CatalogueMap() {
     }
 
     fetchCatalogues();
+    // Only run on mount; selectedCatalogue check is for initial auto-select only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Memoized fetch function for better performance

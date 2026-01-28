@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Loader2, MapPin, Calendar, Activity } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -99,6 +99,18 @@ export function GlobalSearch({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Handle result click - memoized to be used in keyboard navigation effect
+  const handleResultClick = useCallback((result: SearchResult) => {
+    if (onResultSelect) {
+      onResultSelect(result);
+    } else {
+      // Default behavior: navigate to catalogue with event highlighted
+      router.push(`/catalogues/${result.catalogueId}?eventId=${result.id}`);
+    }
+    setShowResults(false);
+    setQuery('');
+  }, [onResultSelect, router]);
+
   // Handle keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -126,18 +138,7 @@ export function GlobalSearch({
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
     }
-  }, [showResults, results, selectedIndex]);
-
-  const handleResultClick = (result: SearchResult) => {
-    if (onResultSelect) {
-      onResultSelect(result);
-    } else {
-      // Default behavior: navigate to catalogue with event highlighted
-      router.push(`/catalogues/${result.catalogueId}?eventId=${result.id}`);
-    }
-    setShowResults(false);
-    setQuery('');
-  };
+  }, [handleResultClick, showResults, results, selectedIndex]);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);

@@ -64,6 +64,8 @@ export default function AdminRoleRequestsPage() {
     if (user?.role === UserRole.ADMIN) {
       fetchRequests();
     }
+    // fetchRequests uses statusFilter which is already in deps; function is stable
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role, statusFilter]);
 
   const handleDecision = async (requestId: string, decision: 'approved' | 'rejected') => {

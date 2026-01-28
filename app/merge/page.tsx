@@ -838,10 +838,10 @@ export default function MergePage() {
     }
   };
 
-  const getSourceNamesForSort = (catalogue: CatalogueItem): string => {
+  const getSourceNamesForSort = useCallback((catalogue: CatalogueItem): string => {
     const sourceNames = getSourceNamesForSearch(catalogue);
     return sourceNames.length > 0 ? sourceNames.join(', ') : 'Unknown';
-  };
+  }, []);
 
   const getSourceTypeBadge = (catalogue: CatalogueItem) => {
     const sourceType = getSourceType(catalogue);
@@ -931,7 +931,7 @@ export default function MergePage() {
     date: 'created',
   };
 
-  const matchesSearchQuery = (catalogue: CatalogueItem, tokens: SearchToken[]): boolean => {
+  const matchesSearchQuery = useCallback((catalogue: CatalogueItem, tokens: SearchToken[]): boolean => {
     if (tokens.length === 0) return true;
 
     const fields = buildSearchFields(catalogue);
@@ -991,7 +991,7 @@ export default function MergePage() {
 
       return normalizeSearchValue(fields[fieldKey]).includes(value);
     });
-  };
+  }, []);
 
   const baseCatalogues = filteredCatalogues;
 
@@ -1002,7 +1002,7 @@ export default function MergePage() {
 
   const searchedCatalogues = useMemo(() => {
     return baseCatalogues.filter((catalogue) => matchesSearchQuery(catalogue, searchTokens));
-  }, [baseCatalogues, searchTokens]);
+  }, [baseCatalogues, matchesSearchQuery, searchTokens]);
 
   const sortedCatalogues = useMemo(() => {
     return [...searchedCatalogues].sort((a, b) => {
@@ -1022,7 +1022,7 @@ export default function MergePage() {
 
       return sortDirection === 'asc' ? comparison : -comparison;
     });
-  }, [searchedCatalogues, sortField, sortDirection]);
+  }, [getSourceNamesForSort, searchedCatalogues, sortField, sortDirection]);
 
   const {
     currentPage,

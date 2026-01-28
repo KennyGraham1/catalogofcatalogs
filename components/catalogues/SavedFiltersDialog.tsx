@@ -59,6 +59,8 @@ export function SavedFiltersDialog({ currentFilters, onLoadFilter, readOnly = fa
     if (open) {
       fetchSavedFilters();
     }
+    // fetchSavedFilters is a fetch function that doesn't depend on any reactive values
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const fetchSavedFilters = async () => {

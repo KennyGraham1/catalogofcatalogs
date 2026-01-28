@@ -43,20 +43,33 @@ export function SchemaMapper({ validationResults, isProcessing, onSchemaReady }:
   const [selectFields, setSelectFields] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   
+  // Check if required fields are mapped correctly
+  const checkRequiredFields = (mappings: Record<string, string>) => {
+    const isMappingComplete = standardFields
+      .filter(field => field.required)
+      .every(field => {
+        return Object.values(mappings).includes(field.id);
+      });
+
+    onSchemaReady(isMappingComplete);
+  };
+
   // Simulate loading field data
   useEffect(() => {
     const timer = setTimeout(() => {
+      let newMappings: Record<string, string> = {};
+
       if (validationResults && validationResults.length > 0) {
         // Auto-detect common field names
         const detectedMappings: Record<string, string> = {};
-        
+
         // Get all fields from the first validation result
         const sampleFields = validationResults[0].fields || [];
-        
+
         // Perform simple auto-mapping based on common field names
         sampleFields.forEach((field: string) => {
           const lowerField = field.toLowerCase();
-          
+
           // Simple mapping logic
           if (lowerField.includes('id') || lowerField === 'eventid') detectedMappings[field] = 'eventId';
           else if (lowerField.includes('time') || lowerField === 'date') detectedMappings[field] = 'time';
@@ -69,32 +82,24 @@ export function SchemaMapper({ validationResults, isProcessing, onSchemaReady }:
           else if (lowerField.includes('region') || lowerField.includes('location')) detectedMappings[field] = 'region';
           else if (lowerField.includes('status')) detectedMappings[field] = 'status';
         });
-        
+
+        newMappings = detectedMappings;
         setFieldMappings(detectedMappings);
-        
+
         // Set all fields as selected initially
         setSelectFields(standardFields.map(f => f.id));
       }
-      
+
       setLoading(false);
-      
-      // Check if required fields are mapped
-      checkRequiredFields();
+
+      // Check if required fields are mapped using the new mappings
+      checkRequiredFields(newMappings);
     }, 1000);
-    
+
     return () => clearTimeout(timer);
+    // checkRequiredFields and onSchemaReady are stable; validationResults is the trigger
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [validationResults]);
-  
-  // Check if required fields are mapped correctly
-  const checkRequiredFields = () => {
-    const isMappingComplete = standardFields
-      .filter(field => field.required)
-      .every(field => {
-        return Object.values(fieldMappings).includes(field.id);
-      });
-    
-    onSchemaReady(isMappingComplete);
-  };
   
   // Update field mapping
   const updateMapping = (sourceField: string, targetField: string) => {

@@ -72,6 +72,8 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
       return;
     }
     fetchCatalogue();
+    // fetchCatalogue uses params.id which is already in deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id, canEdit]);
 
   const fetchCatalogue = async () => {

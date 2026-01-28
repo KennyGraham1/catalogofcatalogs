@@ -75,6 +75,8 @@ export default function ProfilePage() {
     } else {
       setRequestedRole(UserRole.EDITOR);
     }
+    // Only re-run when user.role changes; user object reference may change on each render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role]);
 
   const handleRoleRequestSubmit = async (event: FormEvent<HTMLFormElement>) => {

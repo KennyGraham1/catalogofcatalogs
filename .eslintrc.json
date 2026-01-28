@@ -11,6 +11,17 @@
       "rules": {
         "no-console": "off"
       }
+    },
+    {
+      "files": [
+        "lib/**/*.ts",
+        "lib/**/*.tsx",
+        "app/api/**/*.ts",
+        "app/api/**/*.tsx"
+      ],
+      "rules": {
+        "no-console": "off"
+      }
     }
   ]
 }
