@@ -166,6 +166,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate catalogue name if provided
+    if (catalogueName !== undefined && (typeof catalogueName !== 'string' || catalogueName.trim() === '')) {
+      return NextResponse.json(
+        { error: 'Catalogue name cannot be empty' },
+        { status: 400 }
+      );
+    }
+
     // Trigger import
     console.log('[API] Starting GeoNet import with options:', {
       startDate: parsedStartDate?.toISOString(),

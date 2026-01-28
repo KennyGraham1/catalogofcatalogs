@@ -515,8 +515,8 @@ if (typeof window === 'undefined') {
         if (event.magnitude < -3 || event.magnitude > 10) {
           throw new Error(`Invalid magnitude: ${event.magnitude}. Must be between -3 and 10`);
         }
-        if (event.depth !== null && event.depth !== undefined && (event.depth < 0 || event.depth > 1000)) {
-          throw new Error(`Invalid depth: ${event.depth}. Must be between 0 and 1000 km`);
+        if (event.depth !== null && event.depth !== undefined && (event.depth < -5 || event.depth > 1000)) {
+          throw new Error(`Invalid depth: ${event.depth}. Must be between -5 and 1000 km (negative = above sea level)`);
         }
         const date = new Date(event.time);
         if (isNaN(date.getTime())) {

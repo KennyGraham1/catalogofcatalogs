@@ -213,27 +213,39 @@ export class GeoNetImportService {
       const duration = endTime.getTime() - startTime.getTime();
 
       // 4. Update geographic bounds and event count for the catalogue
+      // Performance fix: Calculate bounds from imported events only, merge with existing
       if (newEvents > 0 || updatedEvents > 0) {
         try {
-          const catalogueEvents = await getDbQueries().getEventsByCatalogueId(catalogueId);
-          const eventsArray = Array.isArray(catalogueEvents) ? catalogueEvents : catalogueEvents.data;
+          // Get current catalogue to retrieve existing bounds
+          const catalogue = await getDbQueries().getCatalogueById(catalogueId);
 
-          // Update event count to reflect actual number of events in the catalogue
-          const totalEventCount = eventsArray.length;
-          await getDbQueries().updateCatalogueEventCount(catalogueId, totalEventCount);
-          console.log(`[GeoNetImportService] Updated event count for catalogue ${catalogueId}: ${totalEventCount}`);
+          // Calculate bounds from imported events only (memory efficient)
+          const importedEventsBounds = this.calculateBoundsFromGeoNetEvents(events);
 
-          const bounds = extractBoundsFromMergedEvents(eventsArray);
-          if (bounds) {
+          if (importedEventsBounds && catalogue) {
+            // Merge imported bounds with existing catalogue bounds
+            const mergedBounds = {
+              minLatitude: Math.min(importedEventsBounds.minLatitude, catalogue.min_latitude ?? 90),
+              maxLatitude: Math.max(importedEventsBounds.maxLatitude, catalogue.max_latitude ?? -90),
+              minLongitude: Math.min(importedEventsBounds.minLongitude, catalogue.min_longitude ?? 180),
+              maxLongitude: Math.max(importedEventsBounds.maxLongitude, catalogue.max_longitude ?? -180),
+            };
+
             await getDbQueries().updateCatalogueGeoBounds(
               catalogueId,
-              bounds.minLatitude,
-              bounds.maxLatitude,
-              bounds.minLongitude,
-              bounds.maxLongitude
+              mergedBounds.minLatitude,
+              mergedBounds.maxLatitude,
+              mergedBounds.minLongitude,
+              mergedBounds.maxLongitude
             );
             console.log(`[GeoNetImportService] Updated geographic bounds for catalogue ${catalogueId}`);
           }
+
+          // Update event count using incremental calculation
+          const currentCount = catalogue?.event_count ?? 0;
+          const newTotalCount = currentCount + newEvents;
+          await getDbQueries().updateCatalogueEventCount(catalogueId, newTotalCount);
+          console.log(`[GeoNetImportService] Updated event count for catalogue ${catalogueId}: ${newTotalCount}`);
         } catch (error) {
           console.error(`[GeoNetImportService] Failed to update catalogue metadata:`, error);
           // Don't fail the import if metadata update fails
@@ -327,6 +339,40 @@ export class GeoNetImportService {
   }
 
   /**
+   * Calculate geographic bounds from GeoNet events (memory efficient)
+   * This avoids loading all events from database just to calculate bounds
+   */
+  private calculateBoundsFromGeoNetEvents(events: GeoNetEventText[]): {
+    minLatitude: number;
+    maxLatitude: number;
+    minLongitude: number;
+    maxLongitude: number;
+  } | null {
+    if (events.length === 0) {
+      return null;
+    }
+
+    let minLat = 90;
+    let maxLat = -90;
+    let minLon = 180;
+    let maxLon = -180;
+
+    for (const event of events) {
+      if (event.Latitude < minLat) minLat = event.Latitude;
+      if (event.Latitude > maxLat) maxLat = event.Latitude;
+      if (event.Longitude < minLon) minLon = event.Longitude;
+      if (event.Longitude > maxLon) maxLon = event.Longitude;
+    }
+
+    return {
+      minLatitude: minLat,
+      maxLatitude: maxLat,
+      minLongitude: minLon,
+      maxLongitude: maxLon,
+    };
+  }
+
+  /**
    * Get existing catalogue or create new one
    */
   private async getOrCreateCatalogue(catalogueId?: string, catalogueName?: string, userId?: string): Promise<string> {
@@ -360,7 +406,7 @@ export class GeoNetImportService {
    * Process a single event (insert or update)
    * Returns: 'new', 'updated', or 'skipped'
    *
-   * NOTE: This method is kept for backward compatibility but is not used in the optimized flow.
+   * @deprecated This method is kept for backward compatibility but is not used in the optimized flow.
    * Use processEventsBulk() for better performance.
    */
   private async processEvent(

@@ -22,42 +22,42 @@ export interface GeoNetQueryParams {
   // Time range
   starttime?: string;  // ISO 8601 format: 2024-10-24T00:00:00
   endtime?: string;    // ISO 8601 format: 2024-10-24T23:59:59
-  
+
   // Geographic bounds (rectangular)
   minlatitude?: number;  // Southern boundary (-90 to 90)
   maxlatitude?: number;  // Northern boundary (-90 to 90)
   minlongitude?: number; // Western boundary (-180 to 180)
   maxlongitude?: number; // Eastern boundary (-180 to 180)
-  
+
   // Geographic bounds (circular)
   latitude?: number;   // Center latitude
   longitude?: number;  // Center longitude
   minradius?: number;  // Minimum distance (degrees)
   maxradius?: number;  // Maximum distance (degrees)
-  
+
   // Depth constraints
   mindepth?: number;   // Minimum depth (km)
   maxdepth?: number;   // Maximum depth (km)
-  
+
   // Magnitude constraints
   minmagnitude?: number;  // Minimum magnitude
   maxmagnitude?: number;  // Maximum magnitude
-  
+
   // Sorting
   orderby?: 'time' | 'time-asc' | 'magnitude' | 'magnitude-asc';
-  
+
   // Event ID
   eventid?: string;  // Specific event ID (e.g., 2024p804906)
-  
+
   // Event type
   eventtype?: string;  // earthquake, explosion, etc. (comma-separated list)
-  
+
   // Update filter
   updateafter?: string;  // ISO 8601 format - events updated after this time
-  
+
   // Response format
   format?: 'xml' | 'text';  // Default: xml (QuakeML)
-  
+
   // Error handling
   nodata?: '204' | '404';  // HTTP status code when no data found
 }
@@ -132,22 +132,22 @@ export class GeoNetClient {
   resetCircuitBreaker() {
     this.circuitBreaker.forceReset();
   }
-  
+
   /**
    * Build query URL with parameters
    */
   private buildQueryUrl(params: GeoNetQueryParams): string {
     const url = new URL(this.baseUrl);
-    
+
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined && value !== null) {
         url.searchParams.append(key, value.toString());
       }
     });
-    
+
     return url.toString();
   }
-  
+
   /**
    * Fetch events in text format (simplified, faster)
    * Includes circuit breaker protection and automatic retry with exponential backoff
@@ -159,7 +159,11 @@ export class GeoNetClient {
 
       console.log('[GeoNetClient] Fetching events (text format):', url);
 
-      const response = await retryFetch(url, undefined, {
+      const response = await retryFetch(url, {
+        headers: {
+          'User-Agent': 'CatalogOfCatalogs/1.0 (https://github.com/KennyGraham1/catalogofcatalogs)',
+        },
+      }, {
         maxAttempts: 3,
         initialDelay: 1000,
         maxDelay: 10000,
@@ -177,8 +181,8 @@ export class GeoNetClient {
       // Validate Content-Type header to ensure we're getting the expected format
       const contentType = response.headers.get('content-type') || '';
       const isTextFormat = contentType.includes('text/plain') ||
-                           contentType.includes('text/csv') ||
-                           contentType.includes('application/csv');
+        contentType.includes('text/csv') ||
+        contentType.includes('application/csv');
 
       const text = await response.text();
 
@@ -186,10 +190,10 @@ export class GeoNetClient {
       // GeoNet API may return error messages as plain text even with 200 OK
       const trimmedText = text.trim().toLowerCase();
       if (trimmedText.startsWith('an error') ||
-          trimmedText.startsWith('error:') ||
-          trimmedText.startsWith('<!doctype') ||
-          trimmedText.startsWith('<html') ||
-          (trimmedText.startsWith('<?xml') && trimmedText.includes('<error'))) {
+        trimmedText.startsWith('error:') ||
+        trimmedText.startsWith('<!doctype') ||
+        trimmedText.startsWith('<html') ||
+        (trimmedText.startsWith('<?xml') && trimmedText.includes('<error'))) {
         const errorPreview = text.substring(0, 200).replace(/\s+/g, ' ');
         console.error('[GeoNetClient] GeoNet returned an error response:', errorPreview);
         throw new Error(`GeoNet API returned an error: ${errorPreview}`);
@@ -281,7 +285,7 @@ export class GeoNetClient {
       return events;
     });
   }
-  
+
   /**
    * Fetch events in QuakeML format (complete metadata)
    * Includes circuit breaker protection and automatic retry with exponential backoff
@@ -293,7 +297,11 @@ export class GeoNetClient {
 
       console.log('[GeoNetClient] Fetching events (QuakeML format):', url);
 
-      const response = await retryFetch(url, undefined, {
+      const response = await retryFetch(url, {
+        headers: {
+          'User-Agent': 'CatalogOfCatalogs/1.0 (https://github.com/KennyGraham1/catalogofcatalogs)',
+        },
+      }, {
         maxAttempts: 3,
         initialDelay: 1000,
         maxDelay: 10000,
@@ -313,8 +321,8 @@ export class GeoNetClient {
       // Check for error responses that may come with 200 status
       const trimmedXml = xml.trim().toLowerCase();
       if (trimmedXml.startsWith('an error') ||
-          trimmedXml.startsWith('error:') ||
-          (trimmedXml.startsWith('<!doctype') && !trimmedXml.includes('quakeml'))) {
+        trimmedXml.startsWith('error:') ||
+        (trimmedXml.startsWith('<!doctype') && !trimmedXml.includes('quakeml'))) {
         const errorPreview = xml.substring(0, 200).replace(/\s+/g, ' ');
         console.error('[GeoNetClient] GeoNet returned an error response:', errorPreview);
         throw new Error(`GeoNet API returned an error: ${errorPreview}`);
@@ -337,21 +345,21 @@ export class GeoNetClient {
       }
     });
   }
-  
+
   /**
    * Fetch a single event by ID in QuakeML format
    */
   async fetchEventById(eventId: string): Promise<any> {
     return this.fetchEventsQuakeML({ eventid: eventId });
   }
-  
+
   /**
    * Fetch recent events (last N hours)
    */
   async fetchRecentEvents(hours: number = 24, minMagnitude?: number): Promise<GeoNetEventText[]> {
     const endtime = new Date();
     const starttime = new Date(endtime.getTime() - hours * 60 * 60 * 1000);
-    
+
     return this.fetchEventsText({
       starttime: starttime.toISOString(),
       endtime: endtime.toISOString(),
@@ -359,7 +367,7 @@ export class GeoNetClient {
       orderby: 'time',
     });
   }
-  
+
   /**
    * Fetch events updated since a specific time
    */
@@ -370,7 +378,7 @@ export class GeoNetClient {
       orderby: 'time',
     });
   }
-  
+
   /**
    * Fetch events in a date range
    */
@@ -386,7 +394,7 @@ export class GeoNetClient {
       orderby: 'time',
     });
   }
-  
+
   /**
    * Fetch events in New Zealand region
    * Approximate bounds: -47.5 to -34.0 lat, 165.0 to 179.0 lon
