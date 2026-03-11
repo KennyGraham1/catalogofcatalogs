@@ -1,0 +1,385 @@
+\documentclass[12pt]{article}
+\usepackage[a4paper,inner=2cm,top=2.5cm,bottom=2.5cm,outer=4cm,marginparwidth=3cm]{geometry}
+
+\usepackage[dvipsnames]{xcolor}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{amssymb}
+\usepackage{array}
+\usepackage{booktabs} % For professional tables
+\usepackage{longtable}
+\usepackage{tabulary}
+\usepackage{pdflscape}% For landscape pages
+\usepackage{microtype}
+\usepackage{csquotes}
+\usepackage{fancyhdr}
+\usepackage[scaled]{helvet}
+\renewcommand*\familydefault{\sfdefault}
+\usepackage[left]{lineno}
+\renewcommand{\linenumberfont}{\normalfont\tiny\color{gray}}
+\usepackage[ddmmyyyy,hhmmss]{datetime}
+\definecolor{tealgreen}{RGB}{0, 102, 102}
+\definecolor{midnightgreen}{RGB}{0, 64, 77}
+\usepackage{titlesec}
+\titleformat{\section}
+{\color{midnightgreen}\normalfont\Large\bfseries}
+{\color{midnightgreen}\thesection}{1em}{}
+\titleformat{\subsection}
+{\color{tealgreen}\normalfont\normalsize\bfseries}
+{\color{tealgreen}\thesubsection}{1em}{}
+\usepackage{vhistory}
+\usepackage[round]{natbib}
+\usepackage[hidelinks,bookmarksnumbered]{hyperref}
+\usepackage[nameinlink,noabbrev]{cleveref}
+\hypersetup{
+pdftitle={Towards a FAIR Framework for Earthquake Catalogs in Aotearoa New Zealand},
+pdfauthor={Kenny Graham and co-authors},
+colorlinks=false
+}
+
+% Consistent terminology (NZ English spelling with preferred "catalog")
+\newcommand{\catalog}{catalog}
+\newcommand{\catalogs}{catalogs}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{1em plus 0.1em minus 0.2em}
+
+\pagestyle{fancy}
+\fancyhead{}
+\fancyfoot{}
+\fancyhead[RO,LE]{Framework for Earthquake Cataloging}
+\fancyfoot[RO,LE]{Page \thepage}
+\fancyfoot[C]{\textbf{Draft for review}}
+\fancyfoot[RE, LO]{Created: \today\ at \currenttime}
+\setlength{\headheight}{14.5pt}
+
+\newcounter{note}
+\stepcounter{note}
+\renewcommand{\abstractname}{Executive Summary}
+\newcommand{\Note}[1]{%
+\marginpar{%
+\tiny{\color{tealgreen}{\thenote\ \ #1}}%
+}%
+\stepcounter{note}%
+}
+\newcommand{\MNote}[1]{%
+\marginpar{%
+\tiny{\color{tealgreen}{#1}}%
+}%
+}
+
+\begin{document}
+
+ \title{Towards a FAIR Framework for Earthquake \catalogs\ in Aotearoa New Zealand \vhCurrentVersion}
+
+ \author{
+Kenny Graham$^{1}$,
+Jonathan Hanson$^{1}$,
+Calum Chamberlain$^{2}$, \\
+Eleanor Mestel$^{2}$,
+Chris Rollins$^{1}$, 
+Sandra Bourguignon$^{1}$, \\
+Florent Aden$^{1}$, 
+Codee-Leigh Williams$^{2}$ \\
+Brendon Bradley$^{3}$ \\ \\ \\
+$^{1}$ Earth Sciences New Zealand \\
+$^{2}$ Victoria University of Wellington \\
+$^{3}$ University of Canterbury
+}
+
+
+\date{\today}
+\maketitle
+
+\newpage
+\begin{abstract}
+Earthquake catalogs are essential for seismology, underpinning research, monitoring, and risk management. In Aotearoa New Zealand, catalogs are developed for diverse purposes, but suffer from uneven access, inconsistent standards, and limited interoperability. Two national workshops in 2023 and 2024 brought together researchers, agencies, and industry to co-design a practical framework guided by the FAIR principles: Findability, Accessibility, Interoperability, and Reusability. This white paper outlines the current catalog landscape, community-identified challenges, and a proposed framework with implementation recommendations. Our aim is to establish a national capability that improves transparency, comparability, and reusability of earthquake data, enabling reproducible science, accelerating research, and strengthening hazard and risk decision-making.
+\end{abstract}
+
+% \vspace{6cm}
+\begin{versionhistory}
+\vhEntry{v0.1}{21/05/2025}{Kenny Draft}{First draft}
+\end{versionhistory}
+\clearpage
+
+\linenumbers
+\modulolinenumbers[5]
+
+\tableofcontents
+\pagebreak
+
+\section{Introduction}
+Earthquake catalogs are the cornerstone of seismology, supporting fundamental research, operational monitoring, and risk management. In Aotearoa New Zealand, many catalogs exist, but they are fragmented, inconsistently documented, and not always interoperable. These limitations hinder both research and policy. Ensuring that earthquake catalog data are \emph{Findable, Accessible, Interoperable, and Reusable} is critical to maximise their value in science and practice. Our goal is a nationally coordinated framework and portal that makes catalog data transparent, comparable, and citable.
+
+New Zealand's national operational catalog curated by GeoNet provides broad coverage and public access, including web and programmatic services \citep{GeoNetEqCatalogue, GeoNetFDSN, GeoNetAPI}. Internationally, initiatives such as EPOS Seismology demonstrate the benefits of standardised FAIR data services and coordinated infrastructure \citep{EPOSSeisTCS, EPOSSeisDataServices}. This paper synthesises outcomes from two national workshops and intersession working group activity to propose a FAIR framework tailored to the New Zealand context.
+
+\section{Current Catalog Landscape}
+New Zealand's earthquake data ecosystem comprises a set of catalogs that serve different purposes. Understanding their strengths and gaps is a prerequisite to a FAIR framework.
+
+\subsection{National Operational Catalog}
+GeoNet maintains the national operational catalog and associated services, exposing event information to the public and researchers through search tools and standard interfaces \citep{GeoNetEqCatalogue, GeoNetFDSN}. Strengths include consistent coverage and accessibility throughout the country. Gaps include evolving metadata conventions across time, mixed-magnitude types, and limited exposure of some detailed processing fields to end users.
+
+\subsection{Regional and Volcano-specific Catalogs}
+Research catalogs for specific regions or processes add high-resolution detail. For example, a consistent and high-precision catalog for the Taup{\={o}} Volcanic Zone demonstrates enhanced detection and relocation accuracy in a volcanically active area \citep{TVZCatalogue2025}. These catalogs often use dense local networks or specialised methods. Their findability and interoperability can be limited if formats, identifiers, or metadata differ from national standards.
+
+\subsection{Temporary Deployments and Experiment Catalogs}
+Following significant earthquakes or for targeted studies, temporary arrays and ocean bottom deployments generate short-term catalogs with lower magnitude thresholds. These datasets are valuable, but are not routinely discoverable or merged with the national catalog without additional curation and metadata alignment.
+
+\subsection{Historical and Derived Catalogs}
+Historical catalogs compiled from written and oral records and derived catalogs for hazard modelling or research snapshots complement the instrument era. Without formal versioning, identifiers, and processing documentation, these sets can diverge from operational catalogs and be difficult to reuse or compare \citep{NSHM2022BSSA}.
+
+\subsection*{Summary of Strengths and Gaps}
+\begin{itemize}
+\item \textbf{Strengths}: depth precision and completeness in local studies; consistency and access in national datasets.
+\item \textbf{Gaps}: variable completeness through time and space; inconsistent processing; uncertain magnitude and depth scales; missing metadata; opaque methods; uneven access to legacy and temporary data.
+\end{itemize}
+
+\section{Earthquake Catalogs: New Zealand and International Practices}
+Earthquake catalogs record key details such as time, location, depth, and magnitude, and are essential for seismic hazard analysis, research, and engineering design. New Zealand's catalog, maintained by GNS Science through GeoNet, has evolved since the 1930s, combining instrumental data and historical records \citep{GeoNetEqCatalogue, GeoNetAPI, gns_neid}. Similar catalogs exist globally (e.g., USGS, Swiss Seismological Service, EMSC). This section compares New Zealand's catalog with international counterparts, identifies core attributes of robust catalogs, and outlines steps toward a harmonised global framework for earthquake science and engineering.
+
+\subsection{New Zealand (GeoNet)}
+GeoNet maintains New Zealand's earthquake catalog as part of the National Earthquake Information Database, serving as the central repository for NZ seismic events\cite{gns_neid}. The catalog contains origin time, location, magnitude, and seismic phase data\cite{GeoNetEqCatalogue}, with each event assigned a unique Public ID\cite{GeoNetEqCatalogue}. Coverage spans instrumentally recorded earthquakes (1930s--present) and historical events from oral/written records\cite{gns_neid}.
+
+Data access includes Quake Search (CSV, GeoJSON, KML, GML)\cite{GeoNetEqCatalogue} and FDSN/WFS services delivering QuakeML with uncertainties, phase arrivals, velocity models, and multiple magnitude determinations\cite{GeoNetFDSN,GeoNetLocationInfo}. The catalog covers NZ and offshore regions with $M_L$ 1--2 completeness in monitored areas, featuring automatic and reviewed solutions\cite{GeoNetLocationInfo} and event type classification\cite{GeoNetFDSN}. A 2022 update standardised magnitude scales nationwide\cite{gns_neid}.
+
+\subsection{United States (USGS ComCat)}
+USGS operates the federated ANSS ComCat, covering global earthquakes ($M$4.5+ complete globally; $M$1--2.5 in US)\cite{usgs_comcat}. Accessed via FDSN Event API\cite{USGSFDSN} with QuakeML default output\cite{USGSFDSN} and optional CSV/GeoJSON/KML\cite{USGSFDSN}, plus real-time GeoJSON feeds\cite{USGSFDSN}. Catalog entries include standard parameters plus quality metrics (stations used, azimuthal gap, RMS residuals)\cite{usgs_comcat} and magnitude uncertainty\cite{usgs_comcat}.
+
+ComCat integrates 100+ networks (California, Alaska, Hawaii, ISC-GEM, others)\cite{usgs_comcat}, storing multiple solutions per event with one flagged as preferred\cite{usgs_comcat}. Additional products include ShakeMap and crowdsourced intensity data\cite{usgs_comcat}.
+
+\subsection{Switzerland (SED)}
+The Swiss Seismological Service maintains a high-quality catalog dating to 1879\cite{sed_report}, with historical events to 250 AD. Dense network achieves $M_c$ 1.0--1.5 completeness\cite{sed_report}. SED introduced updated magnitude scales ($M_{Lhc}$, 2020)\cite{sed_report}, employs 3D velocity models and relative relocation\cite{sed_report}, and provides formal uncertainties via QuakeML since 2013\cite{sed_report}.
+
+Data accessible through FDSN webservices\cite{sed_report}. Notable cross-border collaboration integrates 60+ stations from France, Germany, Italy, Austria for improved border coverage\cite{sed_report}. The ECOS project unified historical records into a homogenized database.
+
+\subsection{European/International}
+\textbf{EMSC} operates the European Seismic Portal, aggregating data from multiple networks via FDSN-compliant services\cite{emsc_home,emsc_webservices}, providing multiple solutions and phase data\cite{emsc_webservices}.
+
+\textbf{ISC} archives global bulletin data from 130+ agencies\cite{isc_data_collection}, accepting multiple formats (Nordic, GSE, ISF, QuakeML)\cite{isc_data_collection} with output in ISF or QuakeML\cite{isc_bulletin}.
+
+Other agencies (JMA, Geoscience Australia, EIDA) have adopted FDSN services, enabling uniform access. Major catalogs (USGS, GeoNet, SED, EMSC, ISC) now share common standards for open, interoperable data access\cite{EPOSSeisTCS,QuakeML}.
+
+
+
+
+\subsection{Gap Analysis: New Zealand vs International Best Practice}
+
+Table~\ref{tab:catalog_comparison} provides a comprehensive comparison of New Zealand's earthquake catalog capabilities against international benchmarks, specifically the USGS ComCat (United States) and Swiss SED/EPOS systems. The comparison evaluates ten critical dimensions: core event parameters, metadata and provenance documentation, versioning and review processes, data access mechanisms, historical data integration, uncertainty quantification, multi-catalog federation, special-purpose products, standards compliance, and governance structures. While New Zealand's GeoNet catalog demonstrates strong technical capabilities, particularly in API provision and QuakeML support, several gaps emerge relative to international leaders. Key priorities include: (1) universal uncertainty reporting across all catalog entries, (2) formalized version control with DOIs and changelogs, (3) development of an Event ID mapping service to link disparate catalogs, (4) stronger integration of historical and pre-instrumental data, and (5) establishment of formal governance structures with dedicated funding. Addressing these gaps will position New Zealand as a global leader in FAIR earthquake catalog practices.
+
+International earthquake catalogs demonstrate varying scales and capabilities. GeoNet (NZ) provides regional coverage ($M_L$ 1--2 completeness, 1930s+) with unique Public IDs and QuakeML support. USGS ComCat operates globally (M4.5+ complete worldwide, M1--2.5 in US, 1900+), federating 100+ networks with ShakeMap products. The Swiss SED achieves exceptional resolution ($M_c$ 1.0--1.5, 1879+ with historical to 250 AD) through 3D models and cross-border collaboration. EMSC rapidly aggregates European data with EventID mapping, while ISC archives global data from 130+ agencies as a long-term reference (1900+).
+
+
+\begin{landscape}
+\begin{longtable}{@{}p{3cm}p{4cm}p{3.5cm}p{3.5cm}p{3.5cm}@{}}
+\caption{Comparison of NZ and International Earthquake Catalog Capabilities} 
+\label{tab:catalog_comparison} \\
+\toprule
+\textbf{Feature} & \textbf{New Zealand} & \textbf{USGS ComCat} & \textbf{Swiss SED / EPOS} & \textbf{Gaps \& Priorities} \\
+\midrule
+\endfirsthead
+
+\multicolumn{5}{c}{\tablename\ \thetable{} -- \textit{continued}} \\
+\toprule
+\textbf{Feature} & \textbf{New Zealand} & \textbf{USGS ComCat} & \textbf{Swiss SED / EPOS} & \textbf{Gaps \& Priorities} \\
+\midrule
+\endhead
+
+\midrule
+\multicolumn{5}{r}{\textit{Continued on next page}} \\
+\endfoot
+
+\bottomrule
+\endlastfoot
+
+\textbf{Core parameters} & 
+Origin time, location, depth, magnitude, phase picks, station counts & 
+Hypocenter, magnitudes, phase data, moment tensors, macroseismic data \citep{usgs_comcat} & 
+Historical + instrumental events, uniform $M_w$, uncertainties, intensities \citep{sed_report} & 
+Lacks full uncertainty propagation for all events \\
+\addlinespace
+
+\textbf{Metadata \& provenance} & 
+Some document processing pipelines; incomplete or inconsistent across catalogs & 
+Maintains standards, data dictionaries, method documentation \citep{usgs_comcat} & 
+Adheres to FDSN, StationXML, QuakeML standards \citep{sed_report} & 
+Need consistent, centralized metadata policies \\
+\addlinespace
+
+\textbf{Versioning \& review} & 
+Rapid + review workflows; some reprocessing & 
+Versioned updates, multiple origins per event, revisions over time & 
+Unified access to evolving datasets, harmonization & 
+Formalize version control (DOIs, changelogs) \\
+\addlinespace
+
+\textbf{Access \& APIs} & 
+Quake Search, FDSN, QuakeML, CSV/GeoJSON export & 
+FDSN API, GeoJSON/CSV feeds, search interfaces \citep{USGSFDSN} & 
+Integrated access to waveforms, parametric data via standards \citep{EPOSSeisTCS} & 
+Enhance federated discovery, cross-catalog queries \\
+\addlinespace
+
+\textbf{Historical data} & 
+Some pre-instrumental events with greater uncertainty & 
+Includes large historic events, variable completeness & 
+Centuries of data, macroseismic fields, uncertainties \citep{sed_report} & 
+Strengthen integration, metadata, uncertainty modeling \\
+\addlinespace
+
+\textbf{Uncertainty \& quality} & 
+Many provide estimates (location/magnitude error); not universal & 
+Quality metrics: RMS, station count, azimuthal gap \citep{usgs_comcat} & 
+Emphasizes uncertainty, solution quality, EPOS standards \citep{sed_report} & 
+Universal uncertainty reporting needed \\
+\addlinespace
+
+\textbf{Multi-catalog linking} & 
+Mostly separate; limited cross-catalog mapping & 
+Aggregates many networks, links multiple origins per event & 
+Harmonized catalogs across Europe; cross-border exchange \citep{EPOSSeisTCS} & 
+Build Event ID mapping service, federated portal \\
+\addlinespace
+
+\textbf{Special products} & 
+Focal mechanisms, moment tensors, slow slip as standalone datasets & 
+Hosts moment tensors, additional products tied to events & 
+Integrates fault, slip, seismological products & 
+Better integrate special-purpose catalogs \\
+\addlinespace
+
+\textbf{Standards compliance} & 
+Supports FDSN/QuakeML; not all catalogs fully adhere & 
+FDSN and QuakeML in APIs and exports & 
+Full QuakeML, StationXML, FDSN compliance \citep{sed_report} & 
+Ensure full compliance across all catalogs \\
+\addlinespace
+
+\textbf{Governance \& sustainability} & 
+GNS/GeoNet or individual researchers; less formal structure & 
+Formal governance, funding, institutional roles (USGS/ANSS/NEIC) & 
+Robust institutional backing, cross-national coordination & 
+Establish formal governance, roles, funding \\
+
+\end{longtable}
+\end{landscape}
+
+
+
+
+\section{Workshop Process and Stakeholder Engagement}
+The development of the framework was community-driven. A 2023 workshop framed needs and objectives, and a 2024 workshop reviewed progress and refined priorities \citep{GSNZWorkshop2023, GSNZWorkshop2024}. Between workshops, a working group met regularly to draft standards, test integration pathways, and design a prototype portal.
+
+Between workshops, the working group designed a prototype portal to capture versioned catalogs with documented methods, uncertainties, processing history, and persistent identifiers, all accessible via open APIs. The prototype was presented at the second workshop, received broad support, and was refined with community feedback.
+
+\section{Proposed FAIR Framework}
+The framework addresses the end-to-end lifecycle of catalog data. The components are outlined below.
+
+\subsection{Metadata Standards for Catalogs}
+A core metadata profile aligned with QuakeML and FDSN conventions captures identifiers, origin parameters with uncertainties, magnitude types with errors, detection and quality metrics, methodology descriptors, event classification, and catalog-level metadata \citep{QuakeML, GeoNetFDSN, USGSFDSN}. Required versus recommended fields are distinguished to balance utility and effort.
+
+\subsection{Shared Parameter Lexicon}
+A controlled vocabulary standardizes magnitude types, event classifications, phase names and quality codes, parameter units and formats, and dataset naming. Using QuakeML event type semantics and community practices improves interpretability and filtering across catalogs \citep{QuakeML, EventTypeNotes}.
+
+\subsection{Programmatic Access and Data Formats}
+Unified APIs provide machine-readable access across catalogs, returning CSV, GeoJSON, and QuakeML as appropriate. Bulk downloads of versioned datasets support reproducible research. Services are built on existing GeoNet interfaces and standards \citep{GeoNetAPI, GeoNetFDSN, QuakeML}.
+
+\subsection{Portal and Infrastructure for Data Discovery}
+A central portal offers unified search and mapping, rich metadata views, download and API endpoints, and documentation. The architecture federates operational feeds and curated research datasets. Integration with international systems enhances global interoperability \citep{EPOSSeisTCS, EPOSSeisDataServices}.
+
+\subsection{Licensing and Access Conditions}
+To support FAIR reusability, each dataset and metadata record should carry an explicit, machine-readable license and any access constraints \citep{FAIRPrinciples2016, GOFAIR}. For government-funded baseline products, a default open license aligned with New Zealand Government Open Access and Licensing guidance is recommended, with clearly documented exceptions for embargoed, sensitive, or culturally restricted data \citep{NZGOAL2022}. License metadata should be exposed through portal views and APIs to avoid ambiguity for downstream reuse.
+
+\subsection{FAIR Compliance Matrix and Indicators}
+A practical FAIR compliance matrix should map framework requirements to FAIR sub-principles (F1--F4, A1--A2, I1--I3, R1.1--R1.3) \citep{FAIRPrinciples2016, GOFAIR}. Indicators should include measurable checks such as persistent identifier coverage, metadata completeness, API uptime, use of controlled vocabularies, provenance completeness, and percentage of releases with citable version records. Reporting these indicators annually would provide transparent evidence of progress and guide prioritisation.
+
+\subsection{Versioning and Persistent Identifiers}
+Each catalog release carries a version and timestamp, with change logs. Significant data sets receive DOIs to enable citation. Event identity is preserved through stable identifiers and cross-references, with aliasing where needed. All versions remain accessible for reproducibility.
+
+A formal versioning policy should distinguish minor revisions (metadata corrections or non-substantive edits) from major revisions that alter event parameters or processing methods and therefore require a new DOI \citep{DataCiteVersioning}. Version links should be recorded in metadata (for example, relations equivalent to ``IsNewVersionOf'' and ``IsPreviousVersionOf'') to maintain a clear lineage of record.
+
+\subsection{Documentation of Processing, Provenance, and Uncertainty}
+Processing steps are documented, including detection, picking, location algorithms, velocity models, and magnitude calibration. Uncertainties for time, location, and magnitude are quantified or qualitatively flagged. The provenance, evaluation status, and links to raw waveforms and related products are included.
+
+To strengthen reproducibility, provenance fields should follow a consistent model describing entities (input data and outputs), activities (processing steps), and agents (people, institutions, and software), with software version and execution date captured as minimum requirements \citep{PROVO}. This structure supports transparent audit trails across operational and research catalogs.
+
+\subsection{Aotearoa New Zealand Data Governance Context}
+In Aotearoa New Zealand, the framework should be implemented in a way that is consistent with both FAIR and CARE principles, so that data stewardship recognises Indigenous rights, authority, and benefit alongside openness \citep{CAREPrinciples2020}. For catalogs incorporating mātauranga-informed interpretations, iwi-relevant records, or sensitive contextual information, governance processes should document appropriate access conditions, attribution, and engagement pathways.
+
+\section{Implementation Recommendations}
+\subsection{Governance, Roles, and Responsibilities}
+Establish a Steering Committee with representation from GNS Science, universities, agencies, and international advisors. A GNS-led Data Stewardship Team manages ingestion, quality control, APIs, and the portal. Contributor guidance and user feedback mechanisms ensure community ownership and utility.
+
+\subsection{Timeline for Development and Adoption}
+\textbf{Phase 1: Planning and mobilization (0--6 months)}. Formalize governance and resources. Finalize the metadata schema and technical architecture.\\
+\textbf{Phase 2: Prototyping and initial integration (6--18 months)}. Build core portal and APIs. Integrate pilot catalogs and refine standards.\\
+\textbf{Phase 3: Full-scale implementation (18--36 months)}. Ingest major regional and temporary datasets. Harden and launch the public portal.\\
+\textbf{Phase 4: Maintenance and improvement (36+ months)}. Operate as a national core service with annual review and enhancements.
+
+\subsection{Funding and Support Considerations}
+Secure multi-year funding through research infrastructure programmes and operational budgets. Budget for data curation and development roles, storage and delivery costs, and user support. Measure success with adoption metrics, integrated catalog counts, and demonstrable impact on science and hazard modelling.
+
+\section{Benefits}
+\textbf{Reproducibility}. Versioned datasets with persistent identifiers and clear processing history enable verification and reuse.\\
+\textbf{Science and innovation}. Integrated and standardised data reduce barriers and accelerate discovery, aligned with international best practice \citep{EPOSSeisTCS}.\\
+\textbf{Risk and hazard}. Trusted, timely, and comparable inputs improve hazard and risk assessments and operational products \citep{NSHM2022BSSA}.\\
+\textbf{Collaboration and efficiency}. Shared rules, tools, and data reduce duplication and strengthen national capabilities.
+
+
+
+\section*{Acknowledgements}
+We thank participants in the 2023 and 2024 workshops for their contributions, and colleagues across GNS Science and universities for their ongoing input to this framework.
+
+
+\appendix
+\section*{Appendix A: Summary of Workshop Tables 1–8}
+\addcontentsline{toc}{section}{Appendix A: Summary of Workshop Tables 1–8}
+
+This appendix summarises the full set of workshop discussions captured across eight interactive tables. The content reflects community perspectives on minimum catalog attributes, metadata requirements, processing concerns, governance needs, and priorities for a national FAIR-aligned framework for earthquake catalogs in Aotearoa New Zealand.
+\begin{table}[H]
+\centering
+\small
+\caption{Summary of Key Themes from Workshop Tables 1–8}
+\setlength{\tabcolsep}{6pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{p{3.2cm} p{11cm}}
+\hline
+\textbf{Theme} & \textbf{Key Points} \\
+\hline
+
+\textbf{Minimum Catalog Attributes} &
+Phase picks; station metadata; velocity models (1D/3D); depths and magnitudes with uncertainties; completeness estimates; region of interest; unique IDs; focal mechanisms; processing history; detection and processing methods. \\[0.2cm]
+
+\textbf{Metadata \& Documentation Needs} &
+Clear methodology (location algorithm, velocity model, filters); solution provenance; waveform availability; descriptive summaries; parameter definitions; assumptions (point-source vs 2D/3D); embargo details; QC information; required README and DOI; multiple contacts. \\[0.2cm]
+
+\textbf{Access \& Versioning} &
+Raw data accessibility; open formats (CSV, QuakeML, FDSN); programmatic access (API); search by region, time, magnitude; support for multiple versions; backward/forward compatible formats; tracking of method changes; long-term storage of legacy releases. \\[0.2cm]
+
+\textbf{Governance Needs} &
+Defined roles (contributor, reviewer, maintainer); central catalog portal; consistent naming conventions; periodic updates; upload validation; framework transparency; responsibility for long-term stewardship. \\[0.2cm]
+
+\textbf{Community Priorities} &
+National catalog portal; common parameter lexicon; national 3D community velocity model; honest uncertainties; digitisation \& reprocessing of legacy data; cross-catalog interoperability; clear documentation for older datasets. \\[0.2cm]
+
+\textbf{Concerns Raised} &
+Inconsistent completeness; variable processing; missing metadata; uncertain magnitude/depth scales; ``black-box'' ML outputs; compatibility issues across regional/temporary catalogs; handling of unpublished datasets; need for quality flags and user warnings. \\[0.2cm]
+
+\textbf{Desired Portal Features} &
+Merge multiple catalogs; support subcatalogs; synthetic catalogs; geographic reference tools; method-based filtering; visualisation; minimum-requirements upload form; linkage among event, waveform, and station data. \\[0.2cm]
+
+\textbf{What Users Liked} &
+Simple form; unified access; clear uncertainty fields; reproducibility focus; increased awareness of catalog availability; prioritisation of essential fields. \\[0.2cm]
+
+\textbf{Requested Improvements} &
+More metadata fields and filters; better uncertainty representation; link with 2D/3D models; clarify naming/versioning; transparent ML integration; improved handling of old locations; inclusion of focal mechanisms and strong-motion connections. \\
+\hline
+\end{tabular}
+\end{table}
+
+
+
+\bibliographystyle{apalike}
+\bibliography{02_eq_catalogue_framework}
+
+\end{document}
