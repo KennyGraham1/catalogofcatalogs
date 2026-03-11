@@ -78,9 +78,9 @@ Kenny Graham$^{1}$,
 Jonathan Hanson$^{1}$,
 Calum Chamberlain$^{2}$, \\
 Eleanor Mestel$^{2}$,
-Chris Rollins$^{1}$, 
+Chris Rollins$^{1}$,
 Sandra Bourguignon$^{1}$, \\
-Florent Aden$^{1}$, 
+Florent Aden$^{1}$,
 Codee-Leigh Williams$^{2}$ \\
 Brendon Bradley$^{3}$ \\ \\ \\
 $^{1}$ Earth Sciences New Zealand \\
@@ -94,7 +94,7 @@ $^{3}$ University of Canterbury
 
 \newpage
 \begin{abstract}
-Earthquake catalogs are essential for seismology, underpinning research, monitoring, and risk management. In Aotearoa New Zealand, catalogs are developed for diverse purposes, but suffer from uneven access, inconsistent standards, and limited interoperability. Two national workshops in 2023 and 2024 brought together researchers, agencies, and industry to co-design a practical framework guided by the FAIR principles: Findability, Accessibility, Interoperability, and Reusability. This white paper outlines the current catalog landscape, community-identified challenges, and a proposed framework with implementation recommendations. Our aim is to establish a national capability that improves transparency, comparability, and reusability of earthquake data, enabling reproducible science, accelerating research, and strengthening hazard and risk decision-making.
+Earthquake catalogs are essential for seismology, underpinning research, monitoring, and risk management. In Aotearoa New Zealand, catalogs are developed for diverse purposes, but suffer from uneven access, inconsistent standards, and limited interoperability. Two national workshops in 2023 and 2024 brought together researchers, agencies, and industry to co-design a practical framework guided by the FAIR principles: Findability, Accessibility, Interoperability, and Reusability. This white paper outlines the current catalog landscape, community-identified challenges, and a proposed framework with implementation recommendations. A prototype portal has been developed to validate the framework specifications, demonstrating end-to-end workflows for catalog ingestion, quality assessment, merge and conflation, analytics, and programmatic access. Our aim is to establish a national capability that improves transparency, comparability, and reusability of earthquake data, enabling reproducible science, accelerating research, and strengthening hazard and risk decision-making.
 \end{abstract}
 
 % \vspace{6cm}
@@ -172,7 +172,7 @@ International earthquake catalogs demonstrate varying scales and capabilities. G
 
 \begin{landscape}
 \begin{longtable}{@{}p{3cm}p{4cm}p{3.5cm}p{3.5cm}p{3.5cm}@{}}
-\caption{Comparison of NZ and International Earthquake Catalog Capabilities} 
+\caption{Comparison of NZ and International Earthquake Catalog Capabilities}
 \label{tab:catalog_comparison} \\
 \toprule
 \textbf{Feature} & \textbf{New Zealand} & \textbf{USGS ComCat} & \textbf{Swiss SED / EPOS} & \textbf{Gaps \& Priorities} \\
@@ -192,73 +192,73 @@ International earthquake catalogs demonstrate varying scales and capabilities. G
 \bottomrule
 \endlastfoot
 
-\textbf{Core parameters} & 
-Origin time, location, depth, magnitude, phase picks, station counts & 
-Hypocenter, magnitudes, phase data, moment tensors, macroseismic data \citep{usgs_comcat} & 
-Historical + instrumental events, uniform $M_w$, uncertainties, intensities \citep{sed_report} & 
+\textbf{Core parameters} &
+Origin time, location, depth, magnitude, phase picks, station counts &
+Hypocenter, magnitudes, phase data, moment tensors, macroseismic data \citep{usgs_comcat} &
+Historical + instrumental events, uniform $M_w$, uncertainties, intensities \citep{sed_report} &
 Lacks full uncertainty propagation for all events \\
 \addlinespace
 
-\textbf{Metadata \& provenance} & 
-Some document processing pipelines; incomplete or inconsistent across catalogs & 
-Maintains standards, data dictionaries, method documentation \citep{usgs_comcat} & 
-Adheres to FDSN, StationXML, QuakeML standards \citep{sed_report} & 
+\textbf{Metadata \& provenance} &
+Some document processing pipelines; incomplete or inconsistent across catalogs &
+Maintains standards, data dictionaries, method documentation \citep{usgs_comcat} &
+Adheres to FDSN, StationXML, QuakeML standards \citep{sed_report} &
 Need consistent, centralized metadata policies \\
 \addlinespace
 
-\textbf{Versioning \& review} & 
-Rapid + review workflows; some reprocessing & 
-Versioned updates, multiple origins per event, revisions over time & 
-Unified access to evolving datasets, harmonization & 
+\textbf{Versioning \& review} &
+Rapid + review workflows; some reprocessing &
+Versioned updates, multiple origins per event, revisions over time &
+Unified access to evolving datasets, harmonization &
 Formalize version control (DOIs, changelogs) \\
 \addlinespace
 
-\textbf{Access \& APIs} & 
-Quake Search, FDSN, QuakeML, CSV/GeoJSON export & 
-FDSN API, GeoJSON/CSV feeds, search interfaces \citep{USGSFDSN} & 
-Integrated access to waveforms, parametric data via standards \citep{EPOSSeisTCS} & 
+\textbf{Access \& APIs} &
+Quake Search, FDSN, QuakeML, CSV/GeoJSON export &
+FDSN API, GeoJSON/CSV feeds, search interfaces \citep{USGSFDSN} &
+Integrated access to waveforms, parametric data via standards \citep{EPOSSeisTCS} &
 Enhance federated discovery, cross-catalog queries \\
 \addlinespace
 
-\textbf{Historical data} & 
-Some pre-instrumental events with greater uncertainty & 
-Includes large historic events, variable completeness & 
-Centuries of data, macroseismic fields, uncertainties \citep{sed_report} & 
+\textbf{Historical data} &
+Some pre-instrumental events with greater uncertainty &
+Includes large historic events, variable completeness &
+Centuries of data, macroseismic fields, uncertainties \citep{sed_report} &
 Strengthen integration, metadata, uncertainty modeling \\
 \addlinespace
 
-\textbf{Uncertainty \& quality} & 
-Many provide estimates (location/magnitude error); not universal & 
-Quality metrics: RMS, station count, azimuthal gap \citep{usgs_comcat} & 
-Emphasizes uncertainty, solution quality, EPOS standards \citep{sed_report} & 
+\textbf{Uncertainty \& quality} &
+Many provide estimates (location/magnitude error); not universal &
+Quality metrics: RMS, station count, azimuthal gap \citep{usgs_comcat} &
+Emphasizes uncertainty, solution quality, EPOS standards \citep{sed_report} &
 Universal uncertainty reporting needed \\
 \addlinespace
 
-\textbf{Multi-catalog linking} & 
-Mostly separate; limited cross-catalog mapping & 
-Aggregates many networks, links multiple origins per event & 
-Harmonized catalogs across Europe; cross-border exchange \citep{EPOSSeisTCS} & 
+\textbf{Multi-catalog linking} &
+Mostly separate; limited cross-catalog mapping &
+Aggregates many networks, links multiple origins per event &
+Harmonized catalogs across Europe; cross-border exchange \citep{EPOSSeisTCS} &
 Build Event ID mapping service, federated portal \\
 \addlinespace
 
-\textbf{Special products} & 
-Focal mechanisms, moment tensors, slow slip as standalone datasets & 
-Hosts moment tensors, additional products tied to events & 
-Integrates fault, slip, seismological products & 
+\textbf{Special products} &
+Focal mechanisms, moment tensors, slow slip as standalone datasets &
+Hosts moment tensors, additional products tied to events &
+Integrates fault, slip, seismological products &
 Better integrate special-purpose catalogs \\
 \addlinespace
 
-\textbf{Standards compliance} & 
-Supports FDSN/QuakeML; not all catalogs fully adhere & 
-FDSN and QuakeML in APIs and exports & 
-Full QuakeML, StationXML, FDSN compliance \citep{sed_report} & 
+\textbf{Standards compliance} &
+Supports FDSN/QuakeML; not all catalogs fully adhere &
+FDSN and QuakeML in APIs and exports &
+Full QuakeML, StationXML, FDSN compliance \citep{sed_report} &
 Ensure full compliance across all catalogs \\
 \addlinespace
 
-\textbf{Governance \& sustainability} & 
-GNS/GeoNet or individual researchers; less formal structure & 
-Formal governance, funding, institutional roles (USGS/ANSS/NEIC) & 
-Robust institutional backing, cross-national coordination & 
+\textbf{Governance \& sustainability} &
+GNS/GeoNet or individual researchers; less formal structure &
+Formal governance, funding, institutional roles (USGS/ANSS/NEIC) &
+Robust institutional backing, cross-national coordination &
 Establish formal governance, roles, funding \\
 
 \end{longtable}
@@ -268,9 +268,30 @@ Establish formal governance, roles, funding \\
 
 
 \section{Workshop Process and Stakeholder Engagement}
+
+\subsection{Community Workshops}
 The development of the framework was community-driven. A 2023 workshop framed needs and objectives, and a 2024 workshop reviewed progress and refined priorities \citep{GSNZWorkshop2023, GSNZWorkshop2024}. Between workshops, a working group met regularly to draft standards, test integration pathways, and design a prototype portal.
 
-Between workshops, the working group designed a prototype portal to capture versioned catalogs with documented methods, uncertainties, processing history, and persistent identifiers, all accessible via open APIs. The prototype was presented at the second workshop, received broad support, and was refined with community feedback.
+\subsection{Prototype Portal: Capabilities and Validation}
+
+To ground community feedback in a working system, the working group developed a functional prototype portal implementing the core workflows proposed in this framework. The prototype provides a reference implementation against which framework specifications have been validated, and was used at the 2024 workshop to demonstrate ingestion, merge, export, and analytics workflows with representative New Zealand datasets.
+
+\textbf{Data ingestion and format support.}
+The prototype accepts earthquake catalog data in multiple standard formats: CSV and tab-delimited text files with automatic delimiter and date-format detection, JSON and GeoJSON in several common structural variants, and QuakeML 1.2. A field-mapping interface allows contributors to align source column names to the canonical schema, with alias-based auto-detection to reduce manual effort. Streaming parsers handle large files without excessive memory consumption. Direct integration with GeoNet's FDSN Event Web Service supports incremental import with automatic duplicate detection.
+
+\textbf{Search, filtering, and visualisation.}
+Users can search, filter, and visualise catalogs through an interactive portal. Spatial queries using bounding boxes, drawn polygons, and radius circles are supported alongside time-range, magnitude-range, and depth filtering. An interactive map provides event clustering, uncertainty-ellipse overlays, focal mechanism visualisation (beach ball diagrams), and station coverage display. Tabular views support pagination and virtual rendering for large event sets.
+
+\textbf{Catalog merge and conflation.}
+A catalog merge engine allows users to combine multiple catalogs with configurable strategies: priority-weighted (nominated agency preference), uncertainty-weighted average, quality-based (retaining the higher-quality solution), or complete-event selection (retaining the solution with the most populated fields). The engine detects conflicts based on spatial separation, time offset, magnitude difference, depth range, and network inconsistency. Conflict logs are generated for quality control review and the resulting merged event retains lineage links to its source events. A preview mode allows users to inspect merge results before committing, including a summary of conflicts and quality-control flags.
+
+\textbf{Analytical tools.}
+Implemented capabilities include Gutenberg-Richter $b$-value estimation, completeness magnitude ($M_c$) detection, energy release analysis, cluster detection, and focal mechanism visualisation. Multi-catalog comparison tools support magnitude-frequency distribution ($b$-value comparison) and uncertainty visualisation across catalogs.
+
+\textbf{Multi-format export.}
+Catalogs and event subsets are exportable as CSV, GeoJSON, KML, and QuakeML 1.2 from both the portal and the API. Version-specific exports ensure that a cited dataset version can be retrieved exactly as it was at time of citation.
+
+Community feedback from the 2024 workshop informed refinements to the metadata schema, merge configuration options, and quality grading approach described in the remainder of this paper.
 
 \section{Proposed FAIR Framework}
 The framework addresses the end-to-end lifecycle of catalog data. The components are outlined below.
@@ -278,43 +299,303 @@ The framework addresses the end-to-end lifecycle of catalog data. The components
 \subsection{Metadata Standards for Catalogs}
 A core metadata profile aligned with QuakeML and FDSN conventions captures identifiers, origin parameters with uncertainties, magnitude types with errors, detection and quality metrics, methodology descriptors, event classification, and catalog-level metadata \citep{QuakeML, GeoNetFDSN, USGSFDSN}. Required versus recommended fields are distinguished to balance utility and effort.
 
+At the catalog level, required metadata include: a unique persistent identifier, catalog name and short description, contributing institution(s), temporal coverage, geographic coverage, magnitude range, event count, processing methodology summary, license, and contact information. Recommended metadata add: velocity model reference, location algorithm, phase picking method, magnitude scale definitions, quality flag descriptions, and links to associated publications.
+
+At the event level, required fields are origin time, latitude, longitude, depth, and at least one magnitude value with its scale type. Recommended fields include origin time uncertainty, horizontal and vertical location uncertainties, magnitude uncertainty, station count, azimuthal gap, phase count, RMS residual, evaluation status (automatic or reviewed), and event type. Table~\ref{tab:metadata_fields} summarises the field hierarchy.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Metadata Field Hierarchy for FAIR Catalog Records}
+\label{tab:metadata_fields}
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{p{3.2cm} p{2cm} p{8cm}}
+\toprule
+\textbf{Field} & \textbf{Status} & \textbf{Description} \\
+\midrule
+\multicolumn{3}{l}{\textit{Catalog-level}} \\
+\midrule
+Persistent identifier & Required & DOI or equivalent resolvable identifier \\
+Name, description & Required & Human-readable title and summary \\
+Institution, contact & Required & Responsible party and contact details \\
+Temporal coverage & Required & Start and end date of events \\
+Geographic coverage & Required & Bounding box or region descriptor \\
+Magnitude range & Required & Minimum and maximum magnitude \\
+Event count & Required & Total number of events \\
+License & Required & Machine-readable license identifier (e.g.\ CC-BY 4.0) \\
+Processing summary & Required & High-level description of methods \\
+Velocity model & Recommended & Reference to velocity model used \\
+Location algorithm & Recommended & Software and version (e.g.\ NonLinLoc 7.0) \\
+Magnitude calibration & Recommended & Scale definitions and calibration reference \\
+Publication links & Recommended & DOIs of associated papers \\
+\midrule
+\multicolumn{3}{l}{\textit{Event-level}} \\
+\midrule
+Origin time & Required & UTC time (ISO 8601) \\
+Latitude, longitude & Required & WGS84 decimal degrees \\
+Depth & Required & Kilometres below sea level \\
+Magnitude value \& type & Required & Value and scale code (e.g.\ $M_w$, $M_L$) \\
+Origin time uncertainty & Recommended & Seconds (1$\sigma$) \\
+Horizontal uncertainty & Recommended & Kilometres (1$\sigma$) \\
+Vertical uncertainty & Recommended & Kilometres (1$\sigma$) \\
+Magnitude uncertainty & Recommended & Standard deviation \\
+Station count & Recommended & Number of stations used \\
+Azimuthal gap & Recommended & Degrees \\
+Phase count & Recommended & Number of phase picks used \\
+RMS residual & Recommended & Seconds \\
+Evaluation status & Recommended & ``automatic'' or ``reviewed'' \\
+Event type & Recommended & QuakeML event type vocabulary \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \subsection{Shared Parameter Lexicon}
 A controlled vocabulary standardizes magnitude types, event classifications, phase names and quality codes, parameter units and formats, and dataset naming. Using QuakeML event type semantics and community practices improves interpretability and filtering across catalogs \citep{QuakeML, EventTypeNotes}.
 
 \subsection{Programmatic Access and Data Formats}
+
+\subsubsection{API Design}
 Unified APIs provide machine-readable access across catalogs, returning CSV, GeoJSON, and QuakeML as appropriate. Bulk downloads of versioned datasets support reproducible research. Services are built on existing GeoNet interfaces and standards \citep{GeoNetAPI, GeoNetFDSN, QuakeML}.
 
+The API follows REST conventions. Authentication uses token-based credentials for write operations; read operations on public catalogs are unauthenticated. Rate limiting applies to protect service availability. Standard HTTP error codes and a consistent JSON error envelope enable reliable programmatic error handling. Table~\ref{tab:api_endpoints} summarises the principal endpoint categories.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Principal API Endpoint Categories}
+\label{tab:api_endpoints}
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{p{3cm} p{4.5cm} p{5.5cm}}
+\toprule
+\textbf{Category} & \textbf{Operations} & \textbf{Notes} \\
+\midrule
+Catalogs & List, retrieve, create, update, delete & Metadata including bounds, event count, license \\
+Events & List, spatial query, time-range, magnitude/depth filter & Pagination; supports GeoJSON, CSV, QuakeML output \\
+Search & Cross-catalog full-text and parameter search & Returns ranked results across all accessible catalogs \\
+Import & Upload file, sync from FDSN source, view history & Supports CSV, JSON, GeoJSON, QuakeML 1.2 \\
+Merge & Preview, execute, retrieve conflict log & Dry-run mode returns statistics without committing \\
+Export & Per-catalog or per-query download & CSV, GeoJSON, KML, QuakeML; version-specific \\
+Versions & List versions, retrieve specific version & Version-specific event snapshots remain available indefinitely \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Output format is negotiated via the \texttt{Accept} header or a \texttt{format} query parameter, defaulting to GeoJSON for spatial queries and CSV for tabular exports. QuakeML output is generated from the canonical internal event model, preserving uncertainty fields, evaluation status, and magnitude type.
+
+\subsubsection{Cross-Catalog Event ID Mapping}
+
+A known challenge in multi-agency seismology is that the same earthquake carries different public identifiers across agencies. For example, a New Zealand earthquake may appear as a GeoNet Public ID, a USGS event code, and an ISC event number. Without a mapping service, researchers aggregating data from multiple sources must resolve duplicates manually.
+
+The framework includes an event identity mapping service that maintains a table of cross-agency equivalences. Events are matched using configurable spatial, temporal, and magnitude thresholds (e.g., separation $<$\,20\,km, time offset $<$\,30\,s, magnitude difference $<$\,0.5). Ambiguous matches are flagged for expert review. The API exposes equivalence queries, allowing downstream tools to retrieve all known agency identifiers for a given event, deduplicate federated results, and trace the origin of merged solutions to their contributing source records.
+
+Event ID mapping records include the matching agency, the matched identifier, a confidence score, and the thresholds applied. This service aligns with the approach used by EMSC and extends it to the New Zealand context, facilitating interoperability with USGS, ISC, and regional networks.
+
 \subsection{Portal and Infrastructure for Data Discovery}
+
+\subsubsection{Discovery and Search}
 A central portal offers unified search and mapping, rich metadata views, download and API endpoints, and documentation. The architecture federates operational feeds and curated research datasets. Integration with international systems enhances global interoperability \citep{EPOSSeisTCS, EPOSSeisDataServices}.
 
+The portal search interface supports free-text search, spatial filtering (bounding box, polygon, radius), time-range and magnitude-range filtering, depth filtering, and event-type filtering. Saved filter configurations allow users to reproduce a specific query for monitoring or repeated analysis. Cross-catalog search returns a merged, deduplicated result list ranked by relevance.
+
+\subsubsection{Catalog Merge and Conflation}
+
+Catalog conflation — combining events from multiple independent catalogs into a unified view — is a central operation in multi-agency seismology. The framework specifies the following merge strategies, which users select based on their scientific objective:
+
+\begin{itemize}
+  \item \textbf{Priority-weighted}: a nominated agency's solution is preferred; solutions from other agencies are recorded as alternatives.
+  \item \textbf{Uncertainty-weighted average}: location, time, and magnitude are computed as an inverse-variance-weighted mean across contributing solutions.
+  \item \textbf{Quality-based}: the solution with the highest quality score (see Section~\ref{sec:quality}) is retained.
+  \item \textbf{Complete-event}: the solution with the greatest number of populated recommended fields is retained.
+\end{itemize}
+
+Conflicts are detected and logged when contributing solutions disagree beyond configurable thresholds: spatial separation, temporal offset, magnitude difference, depth range, and network mismatch. Each merged event retains explicit lineage to its contributing source events and the merge configuration used, enabling full audit and reproducibility. A dry-run preview mode returns conflict statistics and quality flags without committing a new catalog version.
+
+\subsubsection{Analytics}
+The portal provides in-browser analytical tools to support quality assessment and comparative analysis. Implemented capabilities include: Gutenberg-Richter $b$-value estimation with confidence intervals, completeness magnitude ($M_c$) detection, energy release summaries, spatial cluster detection, focal mechanism visualisation, and magnitude-frequency distribution comparison across multiple catalogs. These tools enable researchers to identify potential biases or artefacts before downloading data for further analysis.
+
 \subsection{Licensing and Access Conditions}
+
+\subsubsection{License Requirements}
 To support FAIR reusability, each dataset and metadata record should carry an explicit, machine-readable license and any access constraints \citep{FAIRPrinciples2016, GOFAIR}. For government-funded baseline products, a default open license aligned with New Zealand Government Open Access and Licensing guidance is recommended, with clearly documented exceptions for embargoed, sensitive, or culturally restricted data \citep{NZGOAL2022}. License metadata should be exposed through portal views and APIs to avoid ambiguity for downstream reuse.
+
+\subsubsection{Role-Based Access Control}
+
+Access to catalog data and portal operations is governed by a role-based model. Four roles are defined:
+
+\begin{itemize}
+  \item \textbf{Administrator}: full access including user management, system configuration, and deletion of catalog records.
+  \item \textbf{Editor}: can create and modify catalogs, import data, and initiate merge operations, but cannot manage users or alter system configuration.
+  \item \textbf{Viewer}: can search, view, filter, and export catalogs to which they have been granted access, but cannot modify data.
+  \item \textbf{Guest} (unauthenticated): can discover and download public catalogs; embargoed or restricted catalogs are not visible.
+\end{itemize}
+
+Role assignments are managed by Administrators and are recorded in an audit log. A role-upgrade request workflow allows registered users to request elevated access from an Administrator, with notifications and approval tracking.
+
+\subsubsection{Data-Level Access Control}
+Access control applies at the catalog level. Each catalog carries one of three access designations: \textbf{public} (accessible to all without authentication), \textbf{registered} (accessible to authenticated Viewers and above), or \textbf{restricted} (accessible only to named individuals or groups, as set by the Administrator). This mechanism supports time-limited embargoes, for example allowing a research group to work with a catalog privately until a companion paper is published.
+
+Field-level masking may be applied where a catalog contains sensitive location information, such as event locations near culturally significant sites. In such cases, location coordinates may be spatially generalised or withheld for Guest and Viewer access while full precision is retained for authorised users, consistent with the CARE framework described in Section~\ref{sec:care}.
+
+\subsubsection{Audit and Compliance}
+All write operations (catalog creation, import, merge, deletion) are recorded with the authenticated user identity, timestamp, and operation details. Read access to restricted catalogs is similarly logged. These records support institutional accountability and can be provided to data owners on request. Where usage agreements are attached to a catalog (for example, a requirement to cite a companion publication), the agreement is presented at download time and acceptance is recorded.
 
 \subsection{FAIR Compliance Matrix and Indicators}
 A practical FAIR compliance matrix should map framework requirements to FAIR sub-principles (F1--F4, A1--A2, I1--I3, R1.1--R1.3) \citep{FAIRPrinciples2016, GOFAIR}. Indicators should include measurable checks such as persistent identifier coverage, metadata completeness, API uptime, use of controlled vocabularies, provenance completeness, and percentage of releases with citable version records. Reporting these indicators annually would provide transparent evidence of progress and guide prioritisation.
 
 \subsection{Versioning and Persistent Identifiers}
+
+\subsubsection{Versioning Policy}
 Each catalog release carries a version and timestamp, with change logs. Significant data sets receive DOIs to enable citation. Event identity is preserved through stable identifiers and cross-references, with aliasing where needed. All versions remain accessible for reproducibility.
 
-A formal versioning policy should distinguish minor revisions (metadata corrections or non-substantive edits) from major revisions that alter event parameters or processing methods and therefore require a new DOI \citep{DataCiteVersioning}. Version links should be recorded in metadata (for example, relations equivalent to ``IsNewVersionOf'' and ``IsPreviousVersionOf'') to maintain a clear lineage of record.
+A formal versioning policy distinguishes minor revisions (metadata corrections or non-substantive edits) from major revisions that alter event parameters or processing methods and therefore require a new DOI \citep{DataCiteVersioning}. Version links should be recorded in metadata (for example, relations equivalent to ``IsNewVersionOf'' and ``IsPreviousVersionOf'') to maintain a clear lineage of record.
+
+The framework adopts a three-level versioning scheme: \textsc{major.minor.patch}. Major version increments indicate changes that alter event parameters for existing events (e.g., full reprocessing with a new velocity model or magnitude calibration). Minor version increments indicate additions of new events or new optional fields without changing existing event solutions. Patch increments indicate metadata corrections, documentation updates, or bug fixes that do not affect event parameters. Table~\ref{tab:versioning} gives illustrative examples.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Versioning Scheme: Examples of Version Increment Triggers}
+\label{tab:versioning}
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{p{2cm} p{4cm} p{7cm}}
+\toprule
+\textbf{Version} & \textbf{Trigger} & \textbf{Example change} \\
+\midrule
+\textsc{major} & Event parameters changed & Reprocessing with new 3D velocity model; recalibration of magnitude scale; adoption of new location algorithm affecting systematic offsets \\
+\textsc{minor} & New events or fields added & Ingestion of 500 additional aftershock events; addition of focal mechanism fields to existing events \\
+\textsc{patch} & Metadata or documentation & Contact email updated; description clarified; deprecated field removed from catalog-level record \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{DOI Assignment and Changelog}
+Each major and minor release receives a unique DOI minted through a recognised registration agency. DOI metadata includes catalog name, version, release date, geographic and temporal coverage, responsible institution, license, and relations to predecessor and successor versions.
+
+A machine-readable changelog accompanies each release, recording the type of change (added, updated, fixed), a description, and summary statistics (total event count, new events, modified events). Changelogs are published alongside the catalog record and retrievable via API. Together, versioned DOIs and changelogs allow a researcher to cite the exact data state used in a study and allow reviewers to understand what changed between referenced versions.
 
 \subsection{Documentation of Processing, Provenance, and Uncertainty}
 Processing steps are documented, including detection, picking, location algorithms, velocity models, and magnitude calibration. Uncertainties for time, location, and magnitude are quantified or qualitatively flagged. The provenance, evaluation status, and links to raw waveforms and related products are included.
 
 To strengthen reproducibility, provenance fields should follow a consistent model describing entities (input data and outputs), activities (processing steps), and agents (people, institutions, and software), with software version and execution date captured as minimum requirements \citep{PROVO}. This structure supports transparent audit trails across operational and research catalogs.
 
+\subsubsection{Uncertainty Representation}
+
+Uncertainty quantification is essential for scientific reusability. The framework specifies a standard representation to ensure consistency across catalogs and comparability in merged products.
+
+\textbf{Origin location and time uncertainties} are reported as standard deviations: \texttt{time\_uncertainty} (seconds), \texttt{horizontal\_uncertainty} (kilometres), and \texttt{depth\_uncertainty} (kilometres). Where horizontal uncertainty is anisotropic, the semi-major and semi-minor axes of the 68\% confidence ellipse and its azimuth are reported. These map directly to QuakeML \texttt{OriginUncertainty} elements.
+
+\textbf{Magnitude uncertainties} are reported as the standard deviation of the magnitude estimate on the stated scale. Because uncertainty is scale-dependent (local magnitude estimates carry different error profiles from moment magnitude estimates), the magnitude type code must always accompany the uncertainty value.
+
+\textbf{Events without quantified uncertainties} are flagged with a boolean \texttt{uncertainty\_available} field set to false. For historical or pre-instrumental events where formal uncertainty estimation is not possible, a qualitative confidence class may be substituted (e.g.\ ``well-constrained'', ``poorly-constrained'', ``felt-only''). The data quality scoring described in Section~\ref{sec:quality} penalises records where uncertainty information is absent.
+
+\textbf{Propagation through merges.} When events from multiple catalogs are merged, the combined uncertainty depends on the merge strategy. For uncertainty-weighted averaging, the combined standard deviation is computed from inverse-variance weighting. For priority or quality-based strategies, the selected solution's uncertainty is retained and the alternatives recorded. The merge log documents which strategy was applied and the resulting uncertainty for each merged event.
+
+\subsection{Data Quality Assessment Framework}
+\label{sec:quality}
+
+\subsubsection{Quality Scoring Methodology}
+A standardised quality scoring system enables consistent evaluation of catalog completeness and reliability, supporting informed reuse decisions. Quality is assessed across five dimensions:
+
+\begin{enumerate}
+  \item \textbf{Completeness}: fraction of required and recommended fields populated (weighted: required fields carry higher weight than recommended fields).
+  \item \textbf{Accuracy}: internal consistency checks, including depth--magnitude plausibility, non-negative uncertainty values, and coordinates within the catalog's declared geographic bounds.
+  \item \textbf{Reliability}: proportion of events with reviewed (versus automatic) solutions, station count and azimuthal gap relative to thresholds, and phase count adequacy.
+  \item \textbf{Consistency}: temporal ordering, absence of duplicate events (by time and location), and cross-field agreement (e.g.\ magnitude type codes matching declared scale definitions).
+  \item \textbf{Traceability}: availability of processing documentation, at least one contact record, and a link to the catalog version record or companion publication.
+\end{enumerate}
+
+An overall quality score (0--100) is computed as a weighted sum across dimensions (illustrative weights: 40\% completeness, 20\% accuracy, 15\% reliability, 15\% consistency, 10\% traceability). The score maps to a letter grade as shown in Table~\ref{tab:quality_grades}.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Quality Grade Thresholds and Recommended Use}
+\label{tab:quality_grades}
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{p{1.5cm} p{2cm} p{8.5cm}}
+\toprule
+\textbf{Grade} & \textbf{Score} & \textbf{Interpretation and recommended use} \\
+\midrule
+A+ & 95--100 & Excellent. Publication-ready; suitable for hazard modelling and all quantitative analysis. \\
+A  & 85--94  & Good. Suitable for most research and engineering applications. \\
+B+ & 75--84  & Acceptable. Minor gaps; document limitations in methods sections. \\
+B  & 65--74  & Fair. Notable gaps; consider supplementing with additional metadata. \\
+C+ & 55--64  & Poor. Significant gaps; expert review recommended before quantitative use. \\
+C  & 45--54  & Very poor. Limited utility for quantitative analysis. \\
+D  & 35--44  & Minimal utility. Use only for discovery or illustrative purposes. \\
+F  & $<$35   & Not recommended for quantitative analysis. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Quality grades are computed and displayed per catalog in the portal, and per event where event-level quality flags are populated. A quality report exportable as JSON or CSV provides a full breakdown of scores, flag descriptions, and actionable recommendations for catalog contributors.
+
+\subsubsection{Specific Quality Checks}
+Representative automated checks include: events ordered chronologically; no future-dated events; depth within the range 0--1000\,km; magnitude within a plausible range for the declared region; uncertainty values non-negative and not exceeding twice the parameter value; no coordinate pair repeated for distinct events at an identical time (duplicate detection); station count $\geq$\,5 for the event to be considered well-constrained; and azimuthal gap $<$\,180° for reliable depth estimates. Results are summarised as passed, warning, or failed for each check category.
+
+\subsubsection{Anomaly Detection}
+Statistical outlier detection flags events whose parameters fall outside expected distributions for the catalog as a whole. Events with unusually high magnitudes relative to surrounding events in time and space, or with depths inconsistent with the regional tectonic setting, are flagged for expert review. Flagged events are not removed automatically; the system annotates them so that users can apply appropriate caution.
+
+\subsection{Special Catalog Types and Integration}
+
+Different catalog types require adapted handling to preserve scientific value while meeting FAIR standards.
+
+\subsubsection{Regional Research Catalogs}
+Regional catalogs produced with specialised methods (e.g.\ 3D velocity models, relative relocation, custom magnitude calibrations) are ingested as distinct catalogs with their own version records and DOIs. Processing methods are documented in the catalog-level metadata, including references to the velocity model and location algorithm used. Regional catalogs are not automatically merged into the national operational catalog because different processing assumptions may introduce systematic biases; instead, the portal provides cross-reference links between co-temporal events in regional and national catalogs, with the spatial and magnitude offset reported so that researchers can assess consistency.
+
+\subsubsection{Temporary Deployment Catalogs}
+Catalogs from aftershock deployments or targeted experiments are ingested with an explicit time window and a designation of ``research'' or ``monitoring'' type. Station geometry metadata (array bounds or individual station codes) is stored as catalog-level attributes. Where waveform data are archived, links to the relevant FDSN waveform service are included. Temporary deployment catalogs are searchable and downloadable alongside permanent catalogs but are labelled to indicate their limited geographic and temporal scope.
+
+\subsubsection{Historical and Pre-Instrumental Catalogs}
+Historical catalogs present distinct challenges: location precision may be tens of kilometres, magnitude estimates are converted from macroseismic intensity or historical accounts, and formal uncertainty estimation is often not possible. The framework accommodates these catalogs through:
+
+\begin{itemize}
+  \item Qualitative location confidence classes (e.g.\ ``well-constrained'', ``approximate'', ``felt-only'') in place of or alongside numeric uncertainties.
+  \item Support for macroseismic intensity fields (Modified Mercalli or EMS-98) alongside or in place of instrumental magnitude.
+  \item Narrative description fields for source attribution (e.g.\ newspaper records, missionary accounts, oral tradition references).
+  \item Separate quality thresholds for historical records, reflecting their inherently lower parameter precision.
+\end{itemize}
+
+Historical catalogs are not merged with instrumental catalogs by default; they are presented as a separate collection with explicit data type labelling. Cross-reference links to instrumentally recorded aftershocks or re-analyses may be added where they exist.
+
+\subsubsection{Derived and Synthetic Catalogs}
+Derived catalogs (filtered subsets, hazard snapshots, or synthetic seismicity forecasts) are ingested with mandatory provenance metadata identifying the source catalog(s), derivation method, parameters, and software. Derived catalog records carry explicit ``derivedFrom'' relations to their source catalog versions, enabling users to trace a derived product back to the underlying data. Synthetic catalogs used in probabilistic seismic hazard analysis are labelled as ``synthetic'' to distinguish them from observational records.
+
 \subsection{Aotearoa New Zealand Data Governance Context}
+\label{sec:care}
 In Aotearoa New Zealand, the framework should be implemented in a way that is consistent with both FAIR and CARE principles, so that data stewardship recognises Indigenous rights, authority, and benefit alongside openness \citep{CAREPrinciples2020}. For catalogs incorporating mātauranga-informed interpretations, iwi-relevant records, or sensitive contextual information, governance processes should document appropriate access conditions, attribution, and engagement pathways.
 
+Where event records relate to locations of cultural significance or incorporate traditional ecological knowledge, the framework's data-level access control (Section 5.5.3) provides the technical mechanism to restrict or mask sensitive fields. Iwi and hapū should be engaged as partners in determining appropriate access conditions for such records, not only as data subjects. The Steering Committee's membership (Section 6.1) should include representation from relevant Māori communities and data sovereignty advocates to ensure that CARE principles are operationalised rather than aspirational.
+
 \section{Implementation Recommendations}
+
 \subsection{Governance, Roles, and Responsibilities}
-Establish a Steering Committee with representation from GNS Science, universities, agencies, and international advisors. A GNS-led Data Stewardship Team manages ingestion, quality control, APIs, and the portal. Contributor guidance and user feedback mechanisms ensure community ownership and utility.
+
+\subsubsection{Steering Committee}
+A Steering Committee provides strategic oversight and ensures community ownership of the framework. Membership should include representatives from GNS Science, at least two universities with active seismology programmes, a government user (e.g.\ National Emergency Management Agency), an engineering or insurance sector representative, an Indigenous data sovereignty advocate, and an international advisor from a peer organisation (e.g.\ ISC, EMSC, or GFZ). The Committee meets at minimum quarterly, with defined decision-making processes and staggered three-year terms to ensure continuity.
+
+The Committee is responsible for approving new data sources and catalogs for ingestion, ratifying versioning decisions that affect the national record, overseeing international partnerships and alignment with EPOS or similar consortia, and commissioning annual reporting against FAIR compliance indicators.
+
+\subsubsection{Data Stewardship Team}
+A GNS Science--led Data Stewardship Team handles day-to-day operations. Indicative resourcing for a mature service includes: a Data Stewardship Lead (oversight, Steering Committee liaison), Data Managers (catalog ingestion, metadata curation, quality review), a Software Engineer (API maintenance, infrastructure, security), and a User Support Analyst (community queries, documentation, training). Budget should cover staffing, infrastructure (compute, storage, backup), and biennial framework reviews.
+
+\subsubsection{Catalog Contribution Process}
+External researchers and institutions may submit catalogs for inclusion. Submissions require: catalog name and description, responsible institution and contact, time period and geographic coverage, event count and magnitude range, format and metadata documentation, and a declared license. A two-stage review process applies: technical QC (format validity, completeness score, duplicate check) followed by scientific peer review (methods assessment, comparison with existing catalogs). The expected review timeline is four to eight weeks, with written feedback provided regardless of outcome. Approved catalogs are assigned a DOI and version record.
+
+\subsubsection{Success Metrics and Annual Reporting}
+Progress should be measured and reported annually against indicators including: number of catalogs ingested; total event count and geographic coverage; proportion of catalogs with quality grade A or above; API uptime (target: 99.5\%); registered user count; number of data downloads and API queries; and number of peer-reviewed publications citing the platform or a versioned catalog DOI. Reporting against FAIR sub-principle indicators (Section~5.6) should also be included. Annual reports should be published openly to maintain transparency and accountability.
+
+Illustrative two-year targets: 20 or more catalogs integrated; 50,000 or more events accessible; 1,000 or more registered users; 100 or more research citations; API uptime exceeding 99\%.
 
 \subsection{Timeline for Development and Adoption}
-\textbf{Phase 1: Planning and mobilization (0--6 months)}. Formalize governance and resources. Finalize the metadata schema and technical architecture.\\
-\textbf{Phase 2: Prototyping and initial integration (6--18 months)}. Build core portal and APIs. Integrate pilot catalogs and refine standards.\\
-\textbf{Phase 3: Full-scale implementation (18--36 months)}. Ingest major regional and temporary datasets. Harden and launch the public portal.\\
-\textbf{Phase 4: Maintenance and improvement (36+ months)}. Operate as a national core service with annual review and enhancements.
+\textbf{Phase 1: Planning and mobilization (0--6 months)}. Formalize governance and resources. Finalize the metadata schema and technical architecture. Establish the Steering Committee and Data Stewardship Team.\\
+\textbf{Phase 2: Prototyping and initial integration (6--18 months)}. Build core portal and APIs. Integrate pilot catalogs (GeoNet national catalog plus 5--10 regional and temporary datasets). Refine standards based on contributor feedback. Deliver community training workshops.\\
+\textbf{Phase 3: Full-scale implementation (18--36 months)}. Ingest major regional and temporary datasets. Harden and launch the public portal. Activate event ID mapping service. Establish DOI minting workflow.\\
+\textbf{Phase 4: Maintenance and improvement (36+ months)}. Operate as a national core service with annual review, FAIR compliance reporting, and planned capability enhancements informed by community feedback.
 
 \subsection{Funding and Support Considerations}
 Secure multi-year funding through research infrastructure programmes and operational budgets. Budget for data curation and development roles, storage and delivery costs, and user support. Measure success with adoption metrics, integrated catalog counts, and demonstrable impact on science and hazard modelling.
@@ -332,14 +613,14 @@ We thank participants in the 2023 and 2024 workshops for their contributions, an
 
 
 \appendix
-\section*{Appendix A: Summary of Workshop Tables 1–8}
-\addcontentsline{toc}{section}{Appendix A: Summary of Workshop Tables 1–8}
+\section*{Appendix A: Summary of Workshop Tables 1--8}
+\addcontentsline{toc}{section}{Appendix A: Summary of Workshop Tables 1--8}
 
 This appendix summarises the full set of workshop discussions captured across eight interactive tables. The content reflects community perspectives on minimum catalog attributes, metadata requirements, processing concerns, governance needs, and priorities for a national FAIR-aligned framework for earthquake catalogs in Aotearoa New Zealand.
 \begin{table}[H]
 \centering
 \small
-\caption{Summary of Key Themes from Workshop Tables 1–8}
+\caption{Summary of Key Themes from Workshop Tables 1--8}
 \setlength{\tabcolsep}{6pt}
 \renewcommand{\arraystretch}{1.15}
 \begin{tabular}{p{3.2cm} p{11cm}}
@@ -380,6 +661,6 @@ More metadata fields and filters; better uncertainty representation; link with 2
 
 
 \bibliographystyle{apalike}
-\bibliography{02_eq_catalogue_framework}
+\bibliography{catalogBib}
 
 \end{document}
