@@ -3,10 +3,7 @@
  * Supports GeoJSON, KML, CSV, JSON, and QuakeML formats
  */
 
-import type { MergedEvent, MergedCatalogue } from './db';
-
-// Alias for backward compatibility
-type Catalogue = MergedCatalogue;
+import type { MergedEvent } from './db';
 
 export interface ExportMetadata {
   catalogueName?: string;
@@ -20,6 +17,13 @@ export interface ExportMetadata {
   citation?: string;
   eventCount?: number;
   generatedAt?: string;
+  // Geographic bounds
+  boundingBox?: {
+    minLatitude?: number | null;
+    maxLatitude?: number | null;
+    minLongitude?: number | null;
+    maxLongitude?: number | null;
+  };
   // Contact information
   contactName?: string;
   contactEmail?: string;
@@ -38,6 +42,16 @@ export interface ExportMetadata {
   referenceLinks?: string[];
   usageTerms?: string;
   notes?: string;
+  // Merge-specific metadata
+  mergeDescription?: string;
+  mergeUseCase?: string;
+  mergeMethodology?: string;
+  mergeQualityAssessment?: string;
+  // Provenance
+  createdBy?: string;
+  modifiedAt?: string;
+  // Source catalogues (parsed from JSON string in database)
+  sourceCatalogues?: unknown;
 }
 
 /**
@@ -61,8 +75,9 @@ export function eventsToGeoJSON(
       region: metadata?.region,
       timePeriod: metadata?.timePeriodStart && metadata?.timePeriodEnd ? {
         start: metadata.timePeriodStart,
-        end: metadata.timePeriodEnd
+        end: metadata.timePeriodEnd,
       } : undefined,
+      boundingBox: metadata?.boundingBox,
       license: metadata?.license,
       citation: metadata?.citation,
       // Contact information
@@ -81,56 +96,118 @@ export function eventsToGeoJSON(
       referenceLinks: metadata?.referenceLinks,
       usageTerms: metadata?.usageTerms,
       notes: metadata?.notes,
+      // Merge-specific metadata
+      merge: (metadata?.mergeDescription || metadata?.mergeUseCase ||
+              metadata?.mergeMethodology || metadata?.mergeQualityAssessment) ? {
+        description: metadata?.mergeDescription,
+        useCase: metadata?.mergeUseCase,
+        methodology: metadata?.mergeMethodology,
+        qualityAssessment: metadata?.mergeQualityAssessment,
+      } : undefined,
+      // Provenance
+      provenance: (metadata?.createdBy || metadata?.modifiedAt || metadata?.sourceCatalogues) ? {
+        createdBy: metadata?.createdBy,
+        modifiedAt: metadata?.modifiedAt,
+        sourceCatalogues: metadata?.sourceCatalogues,
+      } : undefined,
     },
     features: events.map(event => ({
       type: 'Feature',
       id: event.id,
       geometry: {
         type: 'Point',
-        // GeoJSON coordinates are [longitude, latitude, elevation]
-        // For earthquakes, we use negative depth as elevation
+        // GeoJSON coordinates are [longitude, latitude, elevation].
+        // For earthquakes, depth (km below surface) becomes negative elevation.
         coordinates: [
           event.longitude,
           event.latitude,
-          event.depth !== null ? -event.depth : 0
-        ]
+          event.depth !== null ? -event.depth : 0,
+        ],
       },
       properties: {
-        // Core properties
-        time: event.time,
-        magnitude: event.magnitude,
-        magnitudeType: event.magnitude_type,
-        depth: event.depth,
-
         // Identifiers
         publicId: event.event_public_id,
         sourceId: event.source_id,
+        catalogueId: event.catalogue_id,
+        createdAt: event.created_at,
+
+        // Timing
+        time: event.time,
+
+        // Location
+        depth: event.depth,               // km
+        depthType: event.depth_type,
+        region: event.region,
+        locationName: event.location_name,
 
         // Event classification
         eventType: event.event_type,
         eventTypeCertainty: event.event_type_certainty,
 
-        // Uncertainties
-        timeUncertainty: event.time_uncertainty,
-        locationUncertainty: event.latitude_uncertainty && event.longitude_uncertainty ?
-          Math.sqrt(
-            Math.pow(event.latitude_uncertainty, 2) +
-            Math.pow(event.longitude_uncertainty, 2)
-          ) : undefined,
-        depthUncertainty: event.depth_uncertainty,
+        // Magnitude
+        magnitude: event.magnitude,
+        magnitudeType: event.magnitude_type,
         magnitudeUncertainty: event.magnitude_uncertainty,
+        magnitudeStationCount: event.magnitude_station_count,
+        magnitudeMethodId: event.magnitude_method_id,
+        magnitudeEvaluationMode: event.magnitude_evaluation_mode,
+        magnitudeEvaluationStatus: event.magnitude_evaluation_status,
+
+        // Location uncertainties (individual components + precomputed horizontal)
+        timeUncertainty: event.time_uncertainty,
+        latitudeUncertainty: event.latitude_uncertainty,
+        longitudeUncertainty: event.longitude_uncertainty,
+        depthUncertainty: event.depth_uncertainty,
+        horizontalUncertainty: event.horizontal_uncertainty,     // km
+        // Combined location uncertainty (Euclidean of lat/lon components), kept for
+        // backward compatibility; prefer horizontalUncertainty when available.
+        locationUncertainty: event.latitude_uncertainty != null && event.longitude_uncertainty != null
+          ? Math.sqrt(
+              Math.pow(event.latitude_uncertainty, 2) +
+              Math.pow(event.longitude_uncertainty, 2)
+            )
+          : undefined,
+
+        // Origin provenance
+        earthModelId: event.earth_model_id,
+        methodId: event.method_id,
+        agencyId: event.agency_id,
+        author: event.author,
 
         // Quality metrics
         azimuthalGap: event.azimuthal_gap,
         usedPhaseCount: event.used_phase_count,
         usedStationCount: event.used_station_count,
-        magnitudeStationCount: event.magnitude_station_count,
         standardError: event.standard_error,
+        minimumDistance: event.minimum_distance,        // degrees
+        maximumDistance: event.maximum_distance,        // degrees
+        associatedPhaseCount: event.associated_phase_count,
+        associatedStationCount: event.associated_station_count,
+        depthPhaseCount: event.depth_phase_count,
 
         // Evaluation
         evaluationMode: event.evaluation_mode,
         evaluationStatus: event.evaluation_status,
-      }
+
+        // Preferred IDs (for cross-referencing nested elements)
+        preferredOriginId: event.preferred_origin_id,
+        preferredMagnitudeId: event.preferred_magnitude_id,
+
+        // Complex nested data — parsed from JSON strings stored in the database.
+        // GeoJSON properties may contain any valid JSON value (RFC 7946 §3.2).
+        sourceEvents: safeParseJsonField(event.source_events),
+        origins: safeParseJsonField(event.origins),
+        magnitudes: safeParseJsonField(event.magnitudes),
+        picks: safeParseJsonField(event.picks),
+        arrivals: safeParseJsonField(event.arrivals),
+        focalMechanisms: safeParseJsonField(event.focal_mechanisms),
+        amplitudes: safeParseJsonField(event.amplitudes),
+        stationMagnitudes: safeParseJsonField(event.station_magnitudes),
+        eventDescriptions: safeParseJsonField(event.event_descriptions),
+        comments: safeParseJsonField(event.comments),
+        creationInfo: safeParseJsonField(event.creation_info),
+        originQuality: safeParseJsonField(event.origin_quality),
+      },
     }))
   };
 
@@ -215,6 +292,19 @@ export function eventsToKML(
   if (metadata?.notes) descriptionParts.push(`Notes: ${metadata.notes}`);
   descriptionParts.push(`Generated: ${metadata?.generatedAt || new Date().toISOString()}`);
 
+  if (metadata?.boundingBox) {
+    const bb = metadata.boundingBox;
+    const parts: string[] = [];
+    if (bb.minLatitude != null) parts.push(`S: ${bb.minLatitude}`);
+    if (bb.maxLatitude != null) parts.push(`N: ${bb.maxLatitude}`);
+    if (bb.minLongitude != null) parts.push(`W: ${bb.minLongitude}`);
+    if (bb.maxLongitude != null) parts.push(`E: ${bb.maxLongitude}`);
+    if (parts.length > 0) descriptionParts.push(`Bounding Box: ${parts.join(', ')}`);
+  }
+  if (metadata?.mergeDescription) descriptionParts.push(`Merge Description: ${metadata.mergeDescription}`);
+  if (metadata?.mergeMethodology) descriptionParts.push(`Merge Methodology: ${metadata.mergeMethodology}`);
+  if (metadata?.createdBy) descriptionParts.push(`Created By: ${metadata.createdBy}`);
+
   if (descriptionParts.length > 0) {
     kml += `    <description><![CDATA[${descriptionParts.join('\n')}]]></description>\n`;
   }
@@ -269,27 +359,71 @@ export function eventsToKML(
         kml += `          <table>\n`;
         kml += `            <tr><td><b>Time:</b></td><td>${escapeXml(formattedDate)}</td></tr>\n`;
         kml += `            <tr><td><b>Magnitude:</b></td><td>${event.magnitude.toFixed(2)} ${escapeXml(event.magnitude_type || '')}</td></tr>\n`;
+        if (event.magnitude_uncertainty != null) {
+          kml += `            <tr><td><b>Magnitude Uncertainty:</b></td><td>±${event.magnitude_uncertainty}</td></tr>\n`;
+        }
+        if (event.magnitude_station_count != null) {
+          kml += `            <tr><td><b>Magnitude Stations:</b></td><td>${event.magnitude_station_count}</td></tr>\n`;
+        }
         kml += `            <tr><td><b>Depth:</b></td><td>${event.depth !== null ? event.depth.toFixed(1) + ' km' : 'Unknown'}</td></tr>\n`;
+        if (event.depth_type) {
+          kml += `            <tr><td><b>Depth Type:</b></td><td>${escapeXml(event.depth_type)}</td></tr>\n`;
+        }
         kml += `            <tr><td><b>Location:</b></td><td>${event.latitude.toFixed(4)}°, ${event.longitude.toFixed(4)}°</td></tr>\n`;
-
+        if (event.horizontal_uncertainty != null) {
+          kml += `            <tr><td><b>Horizontal Uncertainty:</b></td><td>${event.horizontal_uncertainty} km</td></tr>\n`;
+        }
+        if (event.region || event.location_name) {
+          kml += `            <tr><td><b>Region:</b></td><td>${escapeXml(event.region || event.location_name || '')}</td></tr>\n`;
+        }
+        if (event.event_type) {
+          kml += `            <tr><td><b>Event Type:</b></td><td>${escapeXml(event.event_type)}</td></tr>\n`;
+        }
+        if (event.event_type_certainty) {
+          kml += `            <tr><td><b>Type Certainty:</b></td><td>${escapeXml(event.event_type_certainty)}</td></tr>\n`;
+        }
+        if (event.event_public_id) {
+          kml += `            <tr><td><b>Public ID:</b></td><td>${escapeXml(event.event_public_id)}</td></tr>\n`;
+        }
+        if (event.agency_id) {
+          kml += `            <tr><td><b>Agency:</b></td><td>${escapeXml(event.agency_id)}</td></tr>\n`;
+        }
+        if (event.author) {
+          kml += `            <tr><td><b>Author:</b></td><td>${escapeXml(event.author)}</td></tr>\n`;
+        }
+        if (event.earth_model_id) {
+          kml += `            <tr><td><b>Earth Model:</b></td><td>${escapeXml(event.earth_model_id)}</td></tr>\n`;
+        }
+        if (event.method_id) {
+          kml += `            <tr><td><b>Location Method:</b></td><td>${escapeXml(event.method_id)}</td></tr>\n`;
+        }
         if (event.azimuthal_gap != null) {
           kml += `            <tr><td><b>Azimuthal Gap:</b></td><td>${event.azimuthal_gap.toFixed(0)}°</td></tr>\n`;
         }
         if (event.used_station_count != null) {
-          kml += `            <tr><td><b>Stations:</b></td><td>${event.used_station_count}</td></tr>\n`;
+          kml += `            <tr><td><b>Stations Used:</b></td><td>${event.used_station_count}</td></tr>\n`;
         }
         if (event.used_phase_count != null) {
-          kml += `            <tr><td><b>Phases:</b></td><td>${event.used_phase_count}</td></tr>\n`;
+          kml += `            <tr><td><b>Phases Used:</b></td><td>${event.used_phase_count}</td></tr>\n`;
         }
         if (event.standard_error != null) {
           kml += `            <tr><td><b>RMS Error:</b></td><td>${event.standard_error.toFixed(3)} s</td></tr>\n`;
         }
+        if (event.minimum_distance != null) {
+          kml += `            <tr><td><b>Min Distance:</b></td><td>${event.minimum_distance}°</td></tr>\n`;
+        }
+        if (event.associated_phase_count != null) {
+          kml += `            <tr><td><b>Associated Phases:</b></td><td>${event.associated_phase_count}</td></tr>\n`;
+        }
         if (event.evaluation_mode) {
-          kml += `            <tr><td><b>Mode:</b></td><td>${escapeXml(event.evaluation_mode)}</td></tr>\n`;
+          kml += `            <tr><td><b>Eval Mode:</b></td><td>${escapeXml(event.evaluation_mode)}</td></tr>\n`;
         }
         if (event.evaluation_status) {
-          kml += `            <tr><td><b>Status:</b></td><td>${escapeXml(event.evaluation_status)}</td></tr>\n`;
+          kml += `            <tr><td><b>Eval Status:</b></td><td>${escapeXml(event.evaluation_status)}</td></tr>\n`;
         }
+        // Note: complex nested fields (origins, magnitudes, picks, arrivals, focal_mechanisms,
+        // amplitudes, station_magnitudes, etc.) cannot be meaningfully represented in KML
+        // balloon HTML tables. Use JSON or QuakeML export for full fidelity.
 
         kml += `          </table>\n`;
         kml += `        ]]></description>\n`;
@@ -315,7 +449,19 @@ export function eventsToKML(
 }
 
 /**
- * Convert events to enhanced JSON format
+ * Safely parse a JSON string stored in a database field.
+ * Returns the parsed value, or undefined if the input is falsy or invalid JSON.
+ */
+function safeParseJsonField(value: string | null | undefined): unknown | undefined {
+  if (!value) return undefined;
+  try { return JSON.parse(value); } catch { return undefined; }
+}
+
+/**
+ * Convert events to enhanced JSON format.
+ * Includes all scalar event fields and all parsed nested JSON blob fields
+ * (origins, magnitudes, picks, arrivals, focal_mechanisms, amplitudes,
+ * station_magnitudes, event_descriptions, comments, creation_info, source_events).
  */
 export function eventsToJSON(
   events: MergedEvent[],
@@ -332,6 +478,7 @@ export function eventsToJSON(
         start: metadata.timePeriodStart,
         end: metadata.timePeriodEnd
       } : undefined,
+      boundingBox: metadata?.boundingBox,
       license: metadata?.license,
       citation: metadata?.citation,
       generated: metadata?.generatedAt || new Date().toISOString(),
@@ -352,42 +499,114 @@ export function eventsToJSON(
       referenceLinks: metadata?.referenceLinks,
       usageTerms: metadata?.usageTerms,
       notes: metadata?.notes,
+      // Merge-specific metadata (present when catalogue was created by merging source catalogues)
+      merge: (metadata?.mergeDescription || metadata?.mergeUseCase ||
+              metadata?.mergeMethodology || metadata?.mergeQualityAssessment) ? {
+        description: metadata?.mergeDescription,
+        useCase: metadata?.mergeUseCase,
+        methodology: metadata?.mergeMethodology,
+        qualityAssessment: metadata?.mergeQualityAssessment,
+      } : undefined,
+      // Provenance
+      provenance: (metadata?.createdBy || metadata?.modifiedAt || metadata?.sourceCatalogues) ? {
+        createdBy: metadata?.createdBy,
+        modifiedAt: metadata?.modifiedAt,
+        sourceCatalogues: metadata?.sourceCatalogues,
+      } : undefined,
     },
     events: events.map(event => ({
+      // Identifiers
       id: event.id,
       publicId: event.event_public_id,
       sourceId: event.source_id,
+      catalogueId: event.catalogue_id,
+
+      // Timing
       time: event.time,
+      createdAt: event.created_at,
+
+      // Location
       location: {
         latitude: event.latitude,
         longitude: event.longitude,
-        depth: event.depth,
+        depth: event.depth,             // km
+        depthType: event.depth_type,
       },
+
+      // Event classification
+      eventType: event.event_type,
+      eventTypeCertainty: event.event_type_certainty,
+
+      // Region / location description
+      region: event.region,
+      locationName: event.location_name,
+
+      // Magnitude
       magnitude: {
         value: event.magnitude,
         type: event.magnitude_type,
         uncertainty: event.magnitude_uncertainty,
         stationCount: event.magnitude_station_count,
+        methodId: event.magnitude_method_id,
+        evaluationMode: event.magnitude_evaluation_mode,
+        evaluationStatus: event.magnitude_evaluation_status,
       },
+
+      // All location uncertainties (individual + combined horizontal)
       uncertainties: {
         time: event.time_uncertainty,
         latitude: event.latitude_uncertainty,
         longitude: event.longitude_uncertainty,
         depth: event.depth_uncertainty,
+        horizontal: event.horizontal_uncertainty,  // km
       },
+
+      // Origin provenance
+      origin: {
+        earthModelId: event.earth_model_id,
+        methodId: event.method_id,
+        agencyId: event.agency_id,
+        author: event.author,
+      },
+
+      // Origin quality metrics
       quality: {
         azimuthalGap: event.azimuthal_gap,
         usedPhaseCount: event.used_phase_count,
         usedStationCount: event.used_station_count,
         standardError: event.standard_error,
+        minimumDistance: event.minimum_distance,     // degrees
+        maximumDistance: event.maximum_distance,     // degrees
+        associatedPhaseCount: event.associated_phase_count,
+        associatedStationCount: event.associated_station_count,
+        depthPhaseCount: event.depth_phase_count,
       },
+
+      // Evaluation
       evaluation: {
         mode: event.evaluation_mode,
         status: event.evaluation_status,
       },
-      eventType: event.event_type,
-      eventTypeCertainty: event.event_type_certainty,
-    }))
+
+      // Preferred IDs (for QuakeML cross-referencing within this event)
+      preferredOriginId: event.preferred_origin_id,
+      preferredMagnitudeId: event.preferred_magnitude_id,
+
+      // Complex nested data — parsed from JSON strings stored in the database.
+      // These are omitted (undefined) when absent, so JSON.stringify drops them.
+      sourceEvents: safeParseJsonField(event.source_events),
+      origins: safeParseJsonField(event.origins),
+      magnitudes: safeParseJsonField(event.magnitudes),
+      picks: safeParseJsonField(event.picks),
+      arrivals: safeParseJsonField(event.arrivals),
+      focalMechanisms: safeParseJsonField(event.focal_mechanisms),
+      amplitudes: safeParseJsonField(event.amplitudes),
+      stationMagnitudes: safeParseJsonField(event.station_magnitudes),
+      eventDescriptions: safeParseJsonField(event.event_descriptions),
+      comments: safeParseJsonField(event.comments),
+      creationInfo: safeParseJsonField(event.creation_info),
+      originQuality: safeParseJsonField(event.origin_quality),
+    })),
   };
 
   return JSON.stringify(jsonData, null, 2);

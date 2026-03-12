@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries, MergedEvent } from '@/lib/db';
 import { Logger, NotFoundError, formatErrorResponse, safeJSONParse } from '@/lib/errors';
-import { generateExportFilename, createDownloadHeaders } from '@/lib/export-utils';
+import { generateExportFilename, createDownloadHeaders, csvField } from '@/lib/export-utils';
 import { requireViewer } from '@/lib/auth/middleware';
 
 const logger = new Logger('DownloadAPI');
@@ -84,12 +84,12 @@ export async function GET(
         const source = sourceEvents[0]?.source || 'unknown';
 
         return [
-          event.time,
-          event.latitude,
-          event.longitude,
-          event.magnitude,
-          event.depth || '',
-          source
+          csvField(event.time),
+          csvField(event.latitude),
+          csvField(event.longitude),
+          csvField(event.magnitude),
+          csvField(event.depth !== null ? event.depth : ''), // depth=0 is valid
+          csvField(source),
         ].join(',');
       })
     ].join('\n');

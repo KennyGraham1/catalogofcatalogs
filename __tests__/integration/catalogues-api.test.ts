@@ -534,10 +534,29 @@ describeIfWebAPIs('Catalogue Export API', () => {
         'http://localhost:3000/api/catalogues/cat-123/export?format=csv'
       );
       const response = await GET(request, { params: { id: 'cat-123' } });
+      const text = await response.text();
+      const headerLine = text.split('\n').find(l => l.startsWith('Time,'));
 
       // Assert
       expect(response.status).toBe(200);
       expect(response.headers.get('Content-Type')).toContain('csv');
+
+      // Verify all expected column headers are present
+      const expectedColumns = [
+        'Time', 'Latitude', 'Longitude', 'Depth', 'Magnitude', 'MagnitudeType',
+        'EventType', 'EventTypeCertainty', 'Region', 'LocationName',
+        'Source', 'SourceID', 'PublicID',
+        'TimeUncertainty', 'LatitudeUncertainty', 'LongitudeUncertainty',
+        'DepthUncertainty', 'HorizontalUncertainty', 'MagnitudeUncertainty',
+        'DepthType', 'EarthModelID', 'MethodID', 'AgencyID', 'Author',
+        'MagnitudeStationCount', 'MagnitudeMethodID', 'MagnitudeEvaluationMode', 'MagnitudeEvaluationStatus',
+        'AzimuthalGap', 'UsedStationCount', 'UsedPhaseCount', 'StandardError',
+        'MinimumDistance', 'MaximumDistance', 'AssociatedPhaseCount', 'AssociatedStationCount', 'DepthPhaseCount',
+        'EvaluationMode', 'EvaluationStatus',
+      ];
+      for (const col of expectedColumns) {
+        expect(headerLine).toContain(col);
+      }
     });
 
     it('should export catalogue as JSON', async () => {
@@ -565,6 +584,215 @@ describeIfWebAPIs('Catalogue Export API', () => {
       // Assert
       expect(response.status).toBe(200);
       expect(response.headers.get('Content-Type')).toContain('json');
+    });
+
+    it('should export catalogue as GeoJSON', async () => {
+      (getServerSession as jest.Mock).mockResolvedValue({
+        user: { id: 'viewer-123', email: 'viewer@example.com', role: 'viewer' },
+      });
+      mockFindOne.mockResolvedValue({ id: 'cat-123', name: 'Export Test', event_count: 1 });
+      mockToArray.mockResolvedValue([
+        { id: 'evt-1', time: '2024-01-15T10:00:00Z', latitude: -41.5, longitude: 174.0, magnitude: 5.0, depth: 10 },
+      ]);
+
+      const { GET } = await import('@/app/api/catalogues/[id]/export/route');
+      const request = new NextRequest(
+        'http://localhost:3000/api/catalogues/cat-123/export?format=geojson'
+      );
+      const response = await GET(request, { params: { id: 'cat-123' } });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Content-Type')).toContain('geo+json');
+
+      const body = await response.json();
+      expect(body.type).toBe('FeatureCollection');
+      expect(body.features).toHaveLength(1);
+      expect(body.features[0].geometry.type).toBe('Point');
+    });
+
+    it('should export catalogue as KML', async () => {
+      (getServerSession as jest.Mock).mockResolvedValue({
+        user: { id: 'viewer-123', email: 'viewer@example.com', role: 'viewer' },
+      });
+      mockFindOne.mockResolvedValue({ id: 'cat-123', name: 'Export Test', event_count: 1 });
+      mockToArray.mockResolvedValue([
+        { id: 'evt-1', time: '2024-01-15T10:00:00Z', latitude: -41.5, longitude: 174.0, magnitude: 5.0, depth: 10 },
+      ]);
+
+      const { GET } = await import('@/app/api/catalogues/[id]/export/route');
+      const request = new NextRequest(
+        'http://localhost:3000/api/catalogues/cat-123/export?format=kml'
+      );
+      const response = await GET(request, { params: { id: 'cat-123' } });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Content-Type')).toContain('kml');
+
+      const text = await response.text();
+      expect(text).toContain('<?xml');
+      expect(text).toContain('<kml');
+    });
+
+    it('should export catalogue as QuakeML', async () => {
+      (getServerSession as jest.Mock).mockResolvedValue({
+        user: { id: 'viewer-123', email: 'viewer@example.com', role: 'viewer' },
+      });
+      mockFindOne.mockResolvedValue({ id: 'cat-123', name: 'Export Test', event_count: 1 });
+      mockToArray.mockResolvedValue([
+        { id: 'evt-1', time: '2024-01-15T10:00:00Z', latitude: -41.5, longitude: 174.0, magnitude: 5.0, depth: 10 },
+      ]);
+
+      const { GET } = await import('@/app/api/catalogues/[id]/export/route');
+      const request = new NextRequest(
+        'http://localhost:3000/api/catalogues/cat-123/export?format=quakeml'
+      );
+      const response = await GET(request, { params: { id: 'cat-123' } });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Content-Type')).toContain('xml');
+
+      const text = await response.text();
+      expect(text).toContain('<q:quakeml');
+    });
+
+    it('should return 400 for unsupported format', async () => {
+      (getServerSession as jest.Mock).mockResolvedValue({
+        user: { id: 'viewer-123', email: 'viewer@example.com', role: 'viewer' },
+      });
+
+      const { GET } = await import('@/app/api/catalogues/[id]/export/route');
+      const request = new NextRequest(
+        'http://localhost:3000/api/catalogues/cat-123/export?format=xlsx'
+      );
+      const response = await GET(request, { params: { id: 'cat-123' } });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should return 404 when catalogue not found', async () => {
+      (getServerSession as jest.Mock).mockResolvedValue({
+        user: { id: 'viewer-123', email: 'viewer@example.com', role: 'viewer' },
+      });
+      mockFindOne.mockResolvedValue(null);
+
+      const { GET } = await import('@/app/api/catalogues/[id]/export/route');
+      const request = new NextRequest(
+        'http://localhost:3000/api/catalogues/nonexistent/export?format=csv'
+      );
+      const response = await GET(request, { params: { id: 'nonexistent' } });
+
+      expect(response.status).toBe(404);
+    });
+
+    it('should return 200 with empty CSV body for a catalogue with no events', async () => {
+      (getServerSession as jest.Mock).mockResolvedValue({
+        user: { id: 'viewer-123', email: 'viewer@example.com', role: 'viewer' },
+      });
+      mockFindOne.mockResolvedValue({ id: 'cat-123', name: 'Empty Cat', event_count: 0 });
+      mockToArray.mockResolvedValue([]);
+
+      const { GET } = await import('@/app/api/catalogues/[id]/export/route');
+      const request = new NextRequest(
+        'http://localhost:3000/api/catalogues/cat-123/export?format=csv'
+      );
+      const response = await GET(request, { params: { id: 'cat-123' } });
+
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      // Should contain the header row but no data rows
+      expect(text).toContain('Time,Latitude,Longitude');
+    });
+
+    it('should quote CSV fields containing commas', async () => {
+      (getServerSession as jest.Mock).mockResolvedValue({
+        user: { id: 'viewer-123', email: 'viewer@example.com', role: 'viewer' },
+      });
+      mockFindOne.mockResolvedValue({ id: 'cat-123', name: 'Export Test', event_count: 1 });
+      mockToArray.mockResolvedValue([
+        {
+          id: 'evt-1',
+          time: '2024-01-15T10:00:00Z',
+          latitude: -41.5,
+          longitude: 174.0,
+          magnitude: 5.0,
+          depth: 10,
+          region: 'Wellington, New Zealand', // contains comma
+          source_events: '[]',
+        },
+      ]);
+
+      const { GET } = await import('@/app/api/catalogues/[id]/export/route');
+      const request = new NextRequest(
+        'http://localhost:3000/api/catalogues/cat-123/export?format=csv'
+      );
+      const response = await GET(request, { params: { id: 'cat-123' } });
+
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(text).toContain('"Wellington, New Zealand"');
+    });
+
+    it('should include depth=0 as 0 not empty in CSV', async () => {
+      (getServerSession as jest.Mock).mockResolvedValue({
+        user: { id: 'viewer-123', email: 'viewer@example.com', role: 'viewer' },
+      });
+      mockFindOne.mockResolvedValue({ id: 'cat-123', name: 'Export Test', event_count: 1 });
+      mockToArray.mockResolvedValue([
+        {
+          id: 'evt-1',
+          time: '2024-01-15T10:00:00Z',
+          latitude: -41.5,
+          longitude: 174.0,
+          magnitude: 3.5,
+          depth: 0, // surface event
+          source_events: '[]',
+        },
+      ]);
+
+      const { GET } = await import('@/app/api/catalogues/[id]/export/route');
+      const request = new NextRequest(
+        'http://localhost:3000/api/catalogues/cat-123/export?format=csv'
+      );
+      const response = await GET(request, { params: { id: 'cat-123' } });
+
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      const dataLine = text.split('\n').find(l => l.startsWith('2024-01-15'));
+      expect(dataLine).toBeDefined();
+      const fields = dataLine!.split(',');
+      expect(fields[3]).toBe('0'); // depth column (index 3)
+    });
+
+    it('should set Content-Disposition header with filename', async () => {
+      (getServerSession as jest.Mock).mockResolvedValue({
+        user: { id: 'viewer-123', email: 'viewer@example.com', role: 'viewer' },
+      });
+      mockFindOne.mockResolvedValue({ id: 'cat-123', name: 'Export Test', event_count: 1 });
+      mockToArray.mockResolvedValue([
+        { id: 'evt-1', time: '2024-01-15T10:00:00Z', latitude: -41.5, longitude: 174.0, magnitude: 5.0 },
+      ]);
+
+      const { GET } = await import('@/app/api/catalogues/[id]/export/route');
+      const request = new NextRequest(
+        'http://localhost:3000/api/catalogues/cat-123/export?format=csv'
+      );
+      const response = await GET(request, { params: { id: 'cat-123' } });
+
+      const disposition = response.headers.get('Content-Disposition');
+      expect(disposition).toContain('attachment');
+      expect(disposition).toContain('.csv');
+    });
+
+    it('should return 401 when unauthenticated', async () => {
+      (getServerSession as jest.Mock).mockResolvedValue(null);
+
+      const { GET } = await import('@/app/api/catalogues/[id]/export/route');
+      const request = new NextRequest(
+        'http://localhost:3000/api/catalogues/cat-123/export?format=csv'
+      );
+      const response = await GET(request, { params: { id: 'cat-123' } });
+
+      expect(response.status).toBe(401);
     });
   });
 });

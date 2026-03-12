@@ -17,17 +17,31 @@ export function sanitizeFilename(name: string): string {
 
 /**
  * Format a date for use in filenames
- * Returns format: YYYYMMDD_HHMMSS
+ * Returns format: YYYYMMDD_HHMMSS (always UTC to ensure consistency across server timezones)
  */
 export function formatDateForFilename(date: Date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const seconds = String(date.getSeconds()).padStart(2, '0');
-  
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const hours = String(date.getUTCHours()).padStart(2, '0');
+  const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+  const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+
   return `${year}${month}${day}_${hours}${minutes}${seconds}`;
+}
+
+/**
+ * Escape a value for inclusion in a CSV field.
+ * Wraps the value in double-quotes if it contains a comma, double-quote, or newline.
+ * Internal double-quotes are escaped by doubling them (RFC 4180).
+ */
+export function csvField(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return '';
+  const str = String(value);
+  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
 }
 
 /**

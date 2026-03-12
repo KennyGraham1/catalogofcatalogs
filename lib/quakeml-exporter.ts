@@ -4,8 +4,8 @@
  */
 
 import type { MergedEvent } from './db';
+import type { ExportMetadata } from './exporters';
 import type {
-  QuakeMLEvent,
   Origin,
   Magnitude,
   CreationInfo,
@@ -659,10 +659,7 @@ function escapeXml(str: string): string {
  * Convert a MergedEvent to QuakeML Event element
  */
 export function eventToQuakeML(event: MergedEvent): string {
-  // Parse QuakeML data if available
-  const quakeml: QuakeMLEvent | null = null;
-
-  // Try to reconstruct QuakeML from stored data
+  // Build QuakeML from stored data
   const publicID = event.event_public_id || `smi:local/event/${event.id}`;
 
   let xml = `  <event publicID="${escapeXml(publicID)}">\n`;
@@ -677,7 +674,7 @@ export function eventToQuakeML(event: MergedEvent): string {
     xml += `    <typeCertainty>${escapeXml(event.event_type_certainty)}</typeCertainty>\n`;
   }
 
-  // Descriptions
+  // Descriptions — use stored JSON if available, otherwise synthesise from scalar fields.
   if (event.event_descriptions) {
     try {
       const descriptions: EventDescription[] = JSON.parse(event.event_descriptions);
@@ -685,8 +682,14 @@ export function eventToQuakeML(event: MergedEvent): string {
         xml += formatEventDescription(desc) + '\n';
       });
     } catch (e) {
-      // Ignore parse errors
+      // Ignore parse errors; fall through to scalar fallback below
     }
+  }
+  // When no structured descriptions exist, emit region / location_name as a
+  // "region name" description (QuakeML EventDescriptionType = "region name").
+  if (!event.event_descriptions && (event.region || event.location_name)) {
+    const regionText = event.region || event.location_name || '';
+    xml += formatEventDescription({ text: regionText, type: 'region name' }) + '\n';
   }
 
   // Comments
@@ -711,47 +714,93 @@ export function eventToQuakeML(event: MergedEvent): string {
     xml += `    <preferredMagnitudeID>${escapeXml(event.preferred_magnitude_id)}</preferredMagnitudeID>\n`;
   }
 
-  // Origins
+  // Origins — use stored JSON when available, otherwise reconstruct from scalar fields.
+  let parsedOrigins: Origin[] | null = null;
   if (event.origins) {
     try {
-      const origins: Origin[] = JSON.parse(event.origins);
-      origins.forEach(origin => {
-        xml += formatOrigin(origin) + '\n';
-      });
-    } catch (e) {
-      // Fallback: create origin from basic fields
+      parsedOrigins = JSON.parse(event.origins);
+    } catch {
+      // unparseable JSON; fall through to scalar fallback
+    }
+  }
+  if (parsedOrigins && parsedOrigins.length > 0) {
+    parsedOrigins.forEach(origin => {
+      xml += formatOrigin(origin) + '\n';
+    });
+  } else {
+    // Fallback: reconstruct Origin from scalar database fields.
+    {
       const originID = event.preferred_origin_id || `smi:local/origin/${event.id}`;
       xml += `    <origin publicID="${escapeXml(originID)}">\n`;
+
+      // Time
       xml += `      <time>\n        <value>${event.time}</value>\n`;
-      if (event.time_uncertainty) {
+      if (event.time_uncertainty != null) {
         xml += `        <uncertainty>${event.time_uncertainty}</uncertainty>\n`;
       }
       xml += `      </time>\n`;
+
+      // Latitude
       xml += `      <latitude>\n        <value>${event.latitude}</value>\n`;
-      if (event.latitude_uncertainty) {
+      if (event.latitude_uncertainty != null) {
         xml += `        <uncertainty>${event.latitude_uncertainty}</uncertainty>\n`;
       }
       xml += `      </latitude>\n`;
+
+      // Longitude
       xml += `      <longitude>\n        <value>${event.longitude}</value>\n`;
-      if (event.longitude_uncertainty) {
+      if (event.longitude_uncertainty != null) {
         xml += `        <uncertainty>${event.longitude_uncertainty}</uncertainty>\n`;
       }
       xml += `      </longitude>\n`;
+
+      // Depth (QuakeML spec: depth value in meters)
       if (event.depth !== null) {
-        xml += `      <depth>\n        <value>${event.depth * 1000}</value>\n`; // Convert km to meters
-        if (event.depth_uncertainty) {
-          xml += `        <uncertainty>${event.depth_uncertainty}</uncertainty>\n`;
+        xml += `      <depth>\n        <value>${event.depth * 1000}</value>\n`;
+        if (event.depth_uncertainty != null) {
+          xml += `        <uncertainty>${event.depth_uncertainty * 1000}</uncertainty>\n`;
         }
         xml += `      </depth>\n`;
       }
 
-      // Add quality metrics if available
-      if (event.azimuthal_gap || event.used_phase_count || event.used_station_count || event.standard_error) {
+      // Depth type (how depth was constrained)
+      if (event.depth_type) {
+        xml += `      <depthType>${escapeXml(event.depth_type)}</depthType>\n`;
+      }
+
+      // Velocity model and location method
+      if (event.earth_model_id) {
+        xml += `      <earthModelID>${escapeXml(event.earth_model_id)}</earthModelID>\n`;
+      }
+      if (event.method_id) {
+        xml += `      <methodID>${escapeXml(event.method_id)}</methodID>\n`;
+      }
+
+      // Origin uncertainty — horizontal (QuakeML OriginUncertainty element)
+      if (event.horizontal_uncertainty != null) {
+        xml += `      <originUncertainty>\n`;
+        // horizontalUncertainty in QuakeML is in meters
+        xml += `        <horizontalUncertainty>${event.horizontal_uncertainty * 1000}</horizontalUncertainty>\n`;
+        xml += `      </originUncertainty>\n`;
+      }
+
+      // Quality metrics — all available fields
+      const hasQuality = event.azimuthal_gap != null || event.used_phase_count != null ||
+        event.used_station_count != null || event.standard_error != null ||
+        event.minimum_distance != null || event.maximum_distance != null ||
+        event.associated_phase_count != null || event.associated_station_count != null ||
+        event.depth_phase_count != null;
+      if (hasQuality) {
         xml += `      <quality>\n`;
-        if (event.used_phase_count) xml += `        <usedPhaseCount>${event.used_phase_count}</usedPhaseCount>\n`;
-        if (event.used_station_count) xml += `        <usedStationCount>${event.used_station_count}</usedStationCount>\n`;
-        if (event.azimuthal_gap) xml += `        <azimuthalGap>${event.azimuthal_gap}</azimuthalGap>\n`;
-        if (event.standard_error) xml += `        <standardError>${event.standard_error}</standardError>\n`;
+        if (event.associated_phase_count != null) xml += `        <associatedPhaseCount>${event.associated_phase_count}</associatedPhaseCount>\n`;
+        if (event.used_phase_count != null) xml += `        <usedPhaseCount>${event.used_phase_count}</usedPhaseCount>\n`;
+        if (event.associated_station_count != null) xml += `        <associatedStationCount>${event.associated_station_count}</associatedStationCount>\n`;
+        if (event.used_station_count != null) xml += `        <usedStationCount>${event.used_station_count}</usedStationCount>\n`;
+        if (event.depth_phase_count != null) xml += `        <depthPhaseCount>${event.depth_phase_count}</depthPhaseCount>\n`;
+        if (event.azimuthal_gap != null) xml += `        <azimuthalGap>${event.azimuthal_gap}</azimuthalGap>\n`;
+        if (event.minimum_distance != null) xml += `        <minimumDistance>${event.minimum_distance}</minimumDistance>\n`;
+        if (event.maximum_distance != null) xml += `        <maximumDistance>${event.maximum_distance}</maximumDistance>\n`;
+        if (event.standard_error != null) xml += `        <standardError>${event.standard_error}</standardError>\n`;
         xml += `      </quality>\n`;
       }
 
@@ -762,14 +811,22 @@ export function eventToQuakeML(event: MergedEvent): string {
         xml += `      <evaluationStatus>${escapeXml(event.evaluation_status)}</evaluationStatus>\n`;
       }
 
-      // Include arrivals in the fallback origin if available
+      // Fallback creationInfo from scalar agency/author fields
+      if (event.agency_id || event.author) {
+        xml += `      <creationInfo>\n`;
+        if (event.agency_id) xml += `        <agencyID>${escapeXml(event.agency_id)}</agencyID>\n`;
+        if (event.author) xml += `        <author>${escapeXml(event.author)}</author>\n`;
+        xml += `      </creationInfo>\n`;
+      }
+
+      // Arrivals (child elements of Origin in QuakeML)
       if (event.arrivals) {
         try {
           const arrivals: Arrival[] = JSON.parse(event.arrivals);
           arrivals.forEach(arrival => {
             xml += formatArrival(arrival) + '\n';
           });
-        } catch (arrivalError) {
+        } catch {
           // Ignore parse errors
         }
       }
@@ -778,33 +835,58 @@ export function eventToQuakeML(event: MergedEvent): string {
     }
   }
 
-  // Magnitudes
+  // Magnitudes — use stored JSON when available, otherwise reconstruct from scalar fields.
+  let parsedMagnitudes: Magnitude[] | null = null;
   if (event.magnitudes) {
     try {
-      const magnitudes: Magnitude[] = JSON.parse(event.magnitudes);
-      magnitudes.forEach(magnitude => {
-        xml += formatMagnitude(magnitude) + '\n';
-      });
-    } catch (e) {
-      // Fallback: create magnitude from basic fields
+      parsedMagnitudes = JSON.parse(event.magnitudes);
+    } catch {
+      // unparseable JSON; fall through to scalar fallback
+    }
+  }
+  if (parsedMagnitudes && parsedMagnitudes.length > 0) {
+    parsedMagnitudes.forEach(magnitude => {
+      xml += formatMagnitude(magnitude) + '\n';
+    });
+  } else {
+    // Fallback: reconstruct Magnitude from scalar database fields.
+    {
       const magnitudeID = event.preferred_magnitude_id || `smi:local/magnitude/${event.id}`;
       xml += `    <magnitude publicID="${escapeXml(magnitudeID)}">\n`;
+
       xml += `      <mag>\n        <value>${event.magnitude}</value>\n`;
-      if (event.magnitude_uncertainty) {
+      if (event.magnitude_uncertainty != null) {
         xml += `        <uncertainty>${event.magnitude_uncertainty}</uncertainty>\n`;
       }
       xml += `      </mag>\n`;
+
       if (event.magnitude_type) {
         xml += `      <type>${escapeXml(event.magnitude_type)}</type>\n`;
       }
-      if (event.magnitude_station_count) {
+      if (event.magnitude_station_count != null) {
         xml += `      <stationCount>${event.magnitude_station_count}</stationCount>\n`;
       }
-      if (event.evaluation_mode) {
-        xml += `      <evaluationMode>${escapeXml(event.evaluation_mode)}</evaluationMode>\n`;
+      if (event.preferred_origin_id) {
+        xml += `      <originID>${escapeXml(event.preferred_origin_id)}</originID>\n`;
       }
-      if (event.evaluation_status) {
-        xml += `      <evaluationStatus>${escapeXml(event.evaluation_status)}</evaluationStatus>\n`;
+      if (event.magnitude_method_id) {
+        xml += `      <methodID>${escapeXml(event.magnitude_method_id)}</methodID>\n`;
+      }
+      // Prefer magnitude-specific evaluation fields; fall back to origin-level fields.
+      const magEvalMode = event.magnitude_evaluation_mode || event.evaluation_mode;
+      const magEvalStatus = event.magnitude_evaluation_status || event.evaluation_status;
+      if (magEvalMode) {
+        xml += `      <evaluationMode>${escapeXml(magEvalMode)}</evaluationMode>\n`;
+      }
+      if (magEvalStatus) {
+        xml += `      <evaluationStatus>${escapeXml(magEvalStatus)}</evaluationStatus>\n`;
+      }
+      // Fallback creationInfo from scalar agency/author fields
+      if (event.agency_id || event.author) {
+        xml += `      <creationInfo>\n`;
+        if (event.agency_id) xml += `        <agencyID>${escapeXml(event.agency_id)}</agencyID>\n`;
+        if (event.author) xml += `        <author>${escapeXml(event.author)}</author>\n`;
+        xml += `      </creationInfo>\n`;
       }
       xml += `    </magnitude>\n`;
     }
@@ -878,28 +960,7 @@ export function eventToQuakeML(event: MergedEvent): string {
 export function eventsToQuakeMLDocument(
   events: MergedEvent[],
   catalogueName?: string,
-  metadata?: {
-    description?: string;
-    source?: string;
-    provider?: string;
-    region?: string;
-    timePeriodStart?: string;
-    timePeriodEnd?: string;
-    license?: string;
-    citation?: string;
-    eventCount?: number;
-    contactName?: string;
-    contactEmail?: string;
-    contactOrganization?: string;
-    dataQuality?: { completeness?: string; accuracy?: string; reliability?: string };
-    qualityNotes?: string;
-    doi?: string;
-    version?: string;
-    keywords?: string[];
-    referenceLinks?: string[];
-    usageTerms?: string;
-    notes?: string;
-  }
+  metadata?: ExportMetadata
 ): string {
   const timestamp = new Date().toISOString();
   const publicID = `smi:local/eventParameters/${Date.now()}`;
@@ -957,6 +1018,13 @@ export function eventsToQuakeMLDocument(
   }
   if (metadata?.qualityNotes) addComment(`Quality Notes: ${metadata.qualityNotes}`);
   if (metadata?.notes) addComment(`Notes: ${metadata.notes}`);
+  // Merge provenance
+  if (metadata?.mergeDescription) addComment(`Merge Description: ${metadata.mergeDescription}`);
+  if (metadata?.mergeUseCase) addComment(`Merge Use Case: ${metadata.mergeUseCase}`);
+  if (metadata?.mergeMethodology) addComment(`Merge Methodology: ${metadata.mergeMethodology}`);
+  if (metadata?.mergeQualityAssessment) addComment(`Merge Quality Assessment: ${metadata.mergeQualityAssessment}`);
+  if (metadata?.createdBy) addComment(`Created By: ${metadata.createdBy}`);
+  if (metadata?.modifiedAt) addComment(`Modified At: ${metadata.modifiedAt}`);
 
   // Creation info with version
   xml += `    <creationInfo>\n`;

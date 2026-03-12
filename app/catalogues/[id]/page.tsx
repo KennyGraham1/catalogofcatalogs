@@ -122,7 +122,14 @@ export default function CatalogueDetailPage() {
       }
 
       const response = await fetch(`/api/catalogues/${catalogueId}/export?format=${format}`);
-      if (!response.ok) throw new Error('Export failed');
+      if (!response.ok) {
+        let message = 'Export failed';
+        try {
+          const body = await response.json();
+          if (body?.error) message = body.error;
+        } catch { /* response was not JSON */ }
+        throw new Error(message);
+      }
 
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
@@ -161,7 +168,7 @@ export default function CatalogueDetailPage() {
     } catch (error) {
       toast({
         title: 'Export failed',
-        description: 'Failed to export catalogue',
+        description: error instanceof Error ? error.message : 'Failed to export catalogue',
         variant: 'destructive',
       });
     }
