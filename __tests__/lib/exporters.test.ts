@@ -426,6 +426,32 @@ describe('eventsToGeoJSON', () => {
     });
   });
 
+  it('emits RFC 7946 bbox member at FeatureCollection root when all bounds are available', () => {
+    // bbox order: [west, south, east, north]
+    expect(Array.isArray(parsed.bbox)).toBe(true);
+    expect(parsed.bbox).toEqual([166, -47, 178, -34]);
+  });
+
+  it('omits bbox when bounding box is not provided', () => {
+    const noBboxDoc = JSON.parse(eventsToGeoJSON([richEvent]));
+    expect(noBboxDoc.bbox).toBeUndefined();
+  });
+
+  it('emits 3D coordinates [lon, lat, -depth] when depth is known', () => {
+    const geom = parsed.features[0].geometry;
+    expect(geom.coordinates).toHaveLength(3);
+    expect(geom.coordinates[2]).toBe(-12.5);
+  });
+
+  it('emits 2D coordinates [lon, lat] when depth is null', () => {
+    const nullDepthEvent: MergedEvent = { ...richEvent, depth: null };
+    const doc = JSON.parse(eventsToGeoJSON([nullDepthEvent]));
+    const coords = doc.features[0].geometry.coordinates;
+    expect(coords).toHaveLength(2);
+    expect(coords[0]).toBe(174.7762);
+    expect(coords[1]).toBe(-41.2865);
+  });
+
   it('includes merge metadata when provided', () => {
     expect(parsed.metadata.merge.description).toBe('Merged from two sources');
   });
@@ -546,5 +572,34 @@ describe('eventsToKML', () => {
   it('places events in the correct magnitude folder', () => {
     // M 5.2 should be in the 5-6 folder
     expect(kml).toContain('M 5-6');
+  });
+
+  it('uses HTTPS for the earthquake icon URL', () => {
+    expect(kml).toContain('https://maps.google.com/mapfiles/kml/shapes/earthquake.png');
+    expect(kml).not.toContain('http://maps.google.com');
+  });
+
+  it('applies varied icon scales across magnitude ranges', () => {
+    // M7+ style should have a larger scale than M0-3 style
+    // Extract scale values from each Style block
+    const styleBlocks = kml.match(/<Style id="[^"]*">[\s\S]*?<\/Style>/g) || [];
+    const scales = styleBlocks.map(block => {
+      const match = block.match(/<scale>([\d.]+)<\/scale>/);
+      return match ? parseFloat(match[1]) : null;
+    }).filter(s => s !== null) as number[];
+    // Should have 6 styles, each with a scale value
+    expect(scales).toHaveLength(6);
+    // Scales should be monotonically increasing (larger magnitudes → larger icons)
+    for (let i = 1; i < scales.length; i++) {
+      expect(scales[i]).toBeGreaterThan(scales[i - 1]);
+    }
+  });
+
+  it('includes all M7+ events regardless of magnitude (open-ended last range)', () => {
+    // An M9.5 event should appear in the M7+ folder
+    const bigEvent: MergedEvent = { ...richEvent, magnitude: 9.5 };
+    const bigKml = eventsToKML([bigEvent], richMetadata);
+    expect(bigKml).toContain('M ≥ 7');
+    expect(bigKml).toContain('M 9.5');
   });
 });

@@ -63,8 +63,16 @@ export function eventsToGeoJSON(
   events: MergedEvent[],
   metadata?: ExportMetadata
 ): string {
-  const geoJson = {
+  // RFC 7946 §5 — emit a bbox member when all four bounds are available.
+  const bb = metadata?.boundingBox;
+  const hasBbox = bb != null &&
+    bb.minLongitude != null && bb.minLatitude != null &&
+    bb.maxLongitude != null && bb.maxLatitude != null;
+
+  const geoJson: Record<string, unknown> = {
     type: 'FeatureCollection',
+    // bbox order: [west, south, east, north] (RFC 7946)
+    ...(hasBbox ? { bbox: [bb!.minLongitude, bb!.minLatitude, bb!.maxLongitude, bb!.maxLatitude] } : {}),
     metadata: {
       title: metadata?.catalogueName || 'Earthquake Catalogue',
       description: metadata?.description,
@@ -118,11 +126,11 @@ export function eventsToGeoJSON(
         type: 'Point',
         // GeoJSON coordinates are [longitude, latitude, elevation].
         // For earthquakes, depth (km below surface) becomes negative elevation.
-        coordinates: [
-          event.longitude,
-          event.latitude,
-          event.depth !== null ? -event.depth : 0,
-        ],
+        // When depth is unknown (null) we emit a 2D point [lon, lat] rather than
+        // implying a surface location with elevation=0 (RFC 7946 §3.1.1).
+        coordinates: event.depth !== null
+          ? [event.longitude, event.latitude, -event.depth]
+          : [event.longitude, event.latitude],
       },
       properties: {
         // Identifiers
@@ -233,20 +241,9 @@ export function eventsToKML(
       .replace(/'/g, '&apos;');
   };
 
-  const getMagnitudeColor = (magnitude: number): string => {
-    // Color scale from green (small) to red (large)
-    if (magnitude < 3) return 'ff00ff00'; // Green (AABBGGRR format)
-    if (magnitude < 4) return 'ff00ffff'; // Yellow
-    if (magnitude < 5) return 'ff0099ff'; // Orange
-    if (magnitude < 6) return 'ff0066ff'; // Red-Orange
-    if (magnitude < 7) return 'ff0000ff'; // Red
-    return 'ff0000cc'; // Dark Red
-  };
-
-  const getMagnitudeScale = (magnitude: number): number => {
-    // Scale marker size based on magnitude
-    return Math.max(0.5, Math.min(3.0, magnitude / 3));
-  };
+  // Returns a KML icon scale (0.5–3.0) that grows with magnitude.
+  const getMagnitudeScale = (magnitude: number): number =>
+    Math.max(0.5, Math.min(3.0, magnitude / 3));
 
   let kml = '<?xml version="1.0" encoding="UTF-8"?>\n';
   kml += '<kml xmlns="http://www.opengis.net/kml/2.2">\n';
@@ -309,23 +306,29 @@ export function eventsToKML(
     kml += `    <description><![CDATA[${descriptionParts.join('\n')}]]></description>\n`;
   }
 
-  // Define styles for different magnitude ranges
+  // Define styles for different magnitude ranges.
+  // max: Infinity for the last range so all M7+ events are captured.
   const magnitudeRanges = [
     { min: 0, max: 3, name: 'mag_0_3', color: 'ff00ff00', label: 'M < 3' },
     { min: 3, max: 4, name: 'mag_3_4', color: 'ff00ffff', label: 'M 3-4' },
     { min: 4, max: 5, name: 'mag_4_5', color: 'ff0099ff', label: 'M 4-5' },
     { min: 5, max: 6, name: 'mag_5_6', color: 'ff0066ff', label: 'M 5-6' },
     { min: 6, max: 7, name: 'mag_6_7', color: 'ff0000ff', label: 'M 6-7' },
-    { min: 7, max: 10, name: 'mag_7_plus', color: 'ff0000cc', label: 'M ≥ 7' },
+    { min: 7, max: Infinity, name: 'mag_7_plus', color: 'ff0000cc', label: 'M ≥ 7' },
   ];
 
   magnitudeRanges.forEach(range => {
+    // Use midpoint of the range (capped at 9 for the open-ended M7+ range) to
+    // determine a representative icon scale so larger-magnitude folders have bigger icons.
+    const representativeMag = isFinite(range.max) ? (range.min + range.max) / 2 : range.min + 1;
+    const scale = getMagnitudeScale(representativeMag).toFixed(1);
+
     kml += `    <Style id="${range.name}">\n`;
     kml += '      <IconStyle>\n';
     kml += `        <color>${range.color}</color>\n`;
-    kml += '        <scale>1.0</scale>\n';
+    kml += `        <scale>${scale}</scale>\n`;
     kml += '        <Icon>\n';
-    kml += '          <href>http://maps.google.com/mapfiles/kml/shapes/earthquake.png</href>\n';
+    kml += '          <href>https://maps.google.com/mapfiles/kml/shapes/earthquake.png</href>\n';
     kml += '        </Icon>\n';
     kml += '      </IconStyle>\n';
     kml += '      <LabelStyle>\n';

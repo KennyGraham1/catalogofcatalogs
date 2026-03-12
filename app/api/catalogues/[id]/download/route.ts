@@ -31,9 +31,7 @@ export async function GET(
     const eventsResult = await dbQueries.getEventsByCatalogueId(params.id);
     const events: MergedEvent[] = Array.isArray(eventsResult) ? eventsResult : eventsResult.data;
 
-    if (!events || events.length === 0) {
-      throw new NotFoundError('Events for catalogue');
-    }
+    // An empty catalogue is valid — return headers-only CSV rather than a 404.
 
     // Build metadata header comments
     const metadataLines: string[] = [];
