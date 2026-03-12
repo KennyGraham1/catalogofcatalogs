@@ -136,29 +136,29 @@ Historical catalogs compiled from written and oral records and derived catalogs 
 \end{itemize}
 
 \section{Earthquake Catalogs: New Zealand and International Practices}
-Earthquake catalogs record key details such as time, location, depth, and magnitude, and are essential for seismic hazard analysis, research, and engineering design. New Zealand's catalog, maintained by GNS Science through GeoNet, has evolved since the 1930s, combining instrumental data and historical records \citep{GeoNetEqCatalogue, GeoNetAPI, gns_neid}. Similar catalogs exist globally (e.g., USGS, Swiss Seismological Service, EMSC). This section compares New Zealand's catalog with international counterparts, identifies core attributes of robust catalogs, and outlines steps toward a harmonised global framework for earthquake science and engineering.
+Earthquake catalogs record key details such as time, location, depth, and magnitude, and are essential for seismic hazard analysis, research, and engineering design \citep{woessner2010instrumental, corssa_woessner}. New Zealand's catalog, maintained by GNS Science through GeoNet, has evolved since the 1930s, combining instrumental data and historical records \citep{GeoNetEqCatalogue, GeoNetAPI, gns_neid}. Similar catalogs exist globally (e.g., USGS, Swiss Seismological Service, EMSC). This section compares New Zealand's catalog with international counterparts, identifies core attributes of robust catalogs, and outlines steps toward a harmonised global framework for earthquake science and engineering.
 
 \subsection{New Zealand (GeoNet)}
-GeoNet maintains New Zealand's earthquake catalog as part of the National Earthquake Information Database, serving as the central repository for NZ seismic events\cite{gns_neid}. The catalog contains origin time, location, magnitude, and seismic phase data\cite{GeoNetEqCatalogue}, with each event assigned a unique Public ID\cite{GeoNetEqCatalogue}. Coverage spans instrumentally recorded earthquakes (1930s--present) and historical events from oral/written records\cite{gns_neid}.
+GeoNet maintains New Zealand's earthquake catalog as part of the National Earthquake Information Database, serving as the central repository for NZ seismic events\citep{gns_neid}. The catalog contains origin time, location, magnitude, and seismic phase data\citep{GeoNetEqCatalogue}, with each event assigned a unique Public ID\citep{GeoNetEqCatalogue}. Coverage spans instrumentally recorded earthquakes (1930s--present) and historical events from oral/written records\citep{gns_neid}.
 
-Data access includes Quake Search (CSV, GeoJSON, KML, GML)\cite{GeoNetEqCatalogue} and FDSN/WFS services delivering QuakeML with uncertainties, phase arrivals, velocity models, and multiple magnitude determinations\cite{GeoNetFDSN,GeoNetLocationInfo}. The catalog covers NZ and offshore regions with $M_L$ 1--2 completeness in monitored areas, featuring automatic and reviewed solutions\cite{GeoNetLocationInfo} and event type classification\cite{GeoNetFDSN}. A 2022 update standardised magnitude scales nationwide\cite{gns_neid}.
+Data access includes Quake Search (CSV, GeoJSON, KML, GML)\citep{GeoNetEqCatalogue} and FDSN/WFS services delivering QuakeML with uncertainties, phase arrivals, velocity models, and multiple magnitude determinations\citep{GeoNetFDSN,GeoNetLocationInfo}. The catalog covers NZ and offshore regions with $M_L$ 1--2 completeness in monitored areas, featuring automatic and reviewed solutions\citep{GeoNetLocationInfo} and event type classification\citep{GeoNetFDSN}. A 2022 update standardised magnitude scales nationwide\citep{gns_neid}.
 
 \subsection{United States (USGS ComCat)}
-USGS operates the federated ANSS ComCat, covering global earthquakes ($M$4.5+ complete globally; $M$1--2.5 in US)\cite{usgs_comcat}. Accessed via FDSN Event API\cite{USGSFDSN} with QuakeML default output\cite{USGSFDSN} and optional CSV/GeoJSON/KML\cite{USGSFDSN}, plus real-time GeoJSON feeds\cite{USGSFDSN}. Catalog entries include standard parameters plus quality metrics (stations used, azimuthal gap, RMS residuals)\cite{usgs_comcat} and magnitude uncertainty\cite{usgs_comcat}.
+USGS operates the federated ANSS ComCat, covering global earthquakes ($M$4.5+ complete globally; $M$1--2.5 in US)\citep{usgs_comcat}. Accessed via FDSN Event API\citep{USGSFDSN} with QuakeML default output\citep{USGSFDSN} and optional CSV/GeoJSON/KML\citep{USGSFDSN}, plus real-time GeoJSON feeds\citep{USGSFDSN}. Catalog entries include standard parameters plus quality metrics (stations used, azimuthal gap, RMS residuals)\citep{usgs_comcat} and magnitude uncertainty\citep{usgs_comcat}.
 
-ComCat integrates 100+ networks (California, Alaska, Hawaii, ISC-GEM, others)\cite{usgs_comcat}, storing multiple solutions per event with one flagged as preferred\cite{usgs_comcat}. Additional products include ShakeMap and crowdsourced intensity data\cite{usgs_comcat}.
+ComCat integrates 100+ networks (California, Alaska, Hawaii, ISC-GEM, others)\citep{usgs_comcat}, storing multiple solutions per event with one flagged as preferred\citep{usgs_comcat}. Additional products include ShakeMap and crowdsourced intensity data\citep{usgs_comcat}.
 
 \subsection{Switzerland (SED)}
-The Swiss Seismological Service maintains a high-quality catalog dating to 1879\cite{sed_report}, with historical events to 250 AD. Dense network achieves $M_c$ 1.0--1.5 completeness\cite{sed_report}. SED introduced updated magnitude scales ($M_{Lhc}$, 2020)\cite{sed_report}, employs 3D velocity models and relative relocation\cite{sed_report}, and provides formal uncertainties via QuakeML since 2013\cite{sed_report}.
+The Swiss Seismological Service maintains a high-quality catalog dating to 1879\citep{sed_report}, with historical events to 250 AD. Dense network achieves $M_c$ 1.0--1.5 completeness\citep{sed_report}. SED introduced updated magnitude scales ($M_{Lhc}$, 2020)\citep{sed_report}, employs 3D velocity models and relative relocation\citep{sed_report}, and provides formal uncertainties via QuakeML since 2013\citep{sed_report}.
 
-Data accessible through FDSN webservices\cite{sed_report}. Notable cross-border collaboration integrates 60+ stations from France, Germany, Italy, Austria for improved border coverage\cite{sed_report}. The ECOS project unified historical records into a homogenized database.
+Data accessible through FDSN webservices\citep{sed_report}. Notable cross-border collaboration integrates 60+ stations from France, Germany, Italy, Austria for improved border coverage\citep{sed_report}. The ECOS project unified historical records into a homogenized database \citep{ECOS09}.
 
 \subsection{European/International}
-\textbf{EMSC} operates the European Seismic Portal, aggregating data from multiple networks via FDSN-compliant services\cite{emsc_home,emsc_webservices}, providing multiple solutions and phase data\cite{emsc_webservices}.
+\textbf{EMSC} operates the European Seismic Portal, aggregating data from multiple networks via FDSN-compliant services\citep{emsc_home,emsc_webservices}, providing multiple solutions and phase data\citep{emsc_webservices}.
 
-\textbf{ISC} archives global bulletin data from 130+ agencies\cite{isc_data_collection}, accepting multiple formats (Nordic, GSE, ISF, QuakeML)\cite{isc_data_collection} with output in ISF or QuakeML\cite{isc_bulletin}.
+\textbf{ISC} archives global bulletin data from 130+ agencies\citep{isc_data_collection}, accepting multiple formats (Nordic, GSE, ISF, QuakeML)\citep{isc_data_collection} with output in ISF or QuakeML\citep{isc_bulletin}.
 
-Other agencies (JMA, Geoscience Australia, EIDA) have adopted FDSN services, enabling uniform access. Major catalogs (USGS, GeoNet, SED, EMSC, ISC) now share common standards for open, interoperable data access\cite{EPOSSeisTCS,QuakeML}.
+Other agencies (JMA, Geoscience Australia, EIDA) have adopted FDSN services, enabling uniform access. Major catalogs (USGS, GeoNet, SED, EMSC, ISC) now share common standards for open, interoperable data access\citep{EPOSSeisTCS,QuakeML}.
 
 
 
@@ -167,7 +167,7 @@ Other agencies (JMA, Geoscience Australia, EIDA) have adopted FDSN services, ena
 
 Table~\ref{tab:catalog_comparison} provides a comprehensive comparison of New Zealand's earthquake catalog capabilities against international benchmarks, specifically the USGS ComCat (United States) and Swiss SED/EPOS systems. The comparison evaluates ten critical dimensions: core event parameters, metadata and provenance documentation, versioning and review processes, data access mechanisms, historical data integration, uncertainty quantification, multi-catalog federation, special-purpose products, standards compliance, and governance structures. While New Zealand's GeoNet catalog demonstrates strong technical capabilities, particularly in API provision and QuakeML support, several gaps emerge relative to international leaders. Key priorities include: (1) universal uncertainty reporting across all catalog entries, (2) formalized version control with DOIs and changelogs, (3) development of an Event ID mapping service to link disparate catalogs, (4) stronger integration of historical and pre-instrumental data, and (5) establishment of formal governance structures with dedicated funding. Addressing these gaps will position New Zealand as a global leader in FAIR earthquake catalog practices.
 
-International earthquake catalogs demonstrate varying scales and capabilities. GeoNet (NZ) provides regional coverage ($M_L$ 1--2 completeness, 1930s+) with unique Public IDs and QuakeML support. USGS ComCat operates globally (M4.5+ complete worldwide, M1--2.5 in US, 1900+), federating 100+ networks with ShakeMap products. The Swiss SED achieves exceptional resolution ($M_c$ 1.0--1.5, 1879+ with historical to 250 AD) through 3D models and cross-border collaboration. EMSC rapidly aggregates European data with EventID mapping, while ISC archives global data from 130+ agencies as a long-term reference (1900+).
+International earthquake catalogs demonstrate varying scales and capabilities. GeoNet (NZ) provides regional coverage ($M_L$ 1--2 completeness, 1930s+) with unique Public IDs and QuakeML support \citep{GeoNetEqCatalogue, gns_neid}. USGS ComCat operates globally (M4.5+ complete worldwide, M1--2.5 in US, 1900+), federating 100+ networks with ShakeMap products \citep{usgs_comcat}. The Swiss SED achieves exceptional resolution ($M_c$ 1.0--1.5, 1879+ with historical to 250 AD) through 3D models and cross-border collaboration \citep{sed_report}. EMSC rapidly aggregates European data with EventID mapping \citep{emsc_webservices}, while ISC archives global data from 130+ agencies as a long-term reference (1900+) \citep{isc_data_collection}.
 
 
 \begin{landscape}
@@ -208,7 +208,7 @@ Need consistent, centralized metadata policies \\
 
 \textbf{Versioning \& review} &
 Rapid + review workflows; some reprocessing &
-Versioned updates, multiple origins per event, revisions over time &
+Versioned updates, multiple origins per event, revisions over time \citep{usgs_comcat} &
 Unified access to evolving datasets, harmonization &
 Formalize version control (DOIs, changelogs) \\
 \addlinespace
@@ -236,28 +236,28 @@ Universal uncertainty reporting needed \\
 
 \textbf{Multi-catalog linking} &
 Mostly separate; limited cross-catalog mapping &
-Aggregates many networks, links multiple origins per event &
+Aggregates many networks, links multiple origins per event \citep{usgs_comcat} &
 Harmonized catalogs across Europe; cross-border exchange \citep{EPOSSeisTCS} &
 Build Event ID mapping service, federated portal \\
 \addlinespace
 
 \textbf{Special products} &
 Focal mechanisms, moment tensors, slow slip as standalone datasets &
-Hosts moment tensors, additional products tied to events &
+Hosts moment tensors, additional products tied to events \citep{usgs_comcat} &
 Integrates fault, slip, seismological products &
 Better integrate special-purpose catalogs \\
 \addlinespace
 
 \textbf{Standards compliance} &
 Supports FDSN/QuakeML; not all catalogs fully adhere &
-FDSN and QuakeML in APIs and exports &
+FDSN and QuakeML in APIs and exports \citep{USGSFDSN} &
 Full QuakeML, StationXML, FDSN compliance \citep{sed_report} &
 Ensure full compliance across all catalogs \\
 \addlinespace
 
 \textbf{Governance \& sustainability} &
 GNS/GeoNet or individual researchers; less formal structure &
-Formal governance, funding, institutional roles (USGS/ANSS/NEIC) &
+Formal governance, funding, institutional roles (USGS/ANSS/NEIC) \citep{usgs_comcat} &
 Robust institutional backing, cross-national coordination &
 Establish formal governance, roles, funding \\
 
@@ -390,7 +390,7 @@ A known challenge in multi-agency seismology is that the same earthquake carries
 
 The framework includes an event identity mapping service that maintains a table of cross-agency equivalences. Events are matched using configurable spatial, temporal, and magnitude thresholds (e.g., separation $<$\,20\,km, time offset $<$\,30\,s, magnitude difference $<$\,0.5). Ambiguous matches are flagged for expert review. The API exposes equivalence queries, allowing downstream tools to retrieve all known agency identifiers for a given event, deduplicate federated results, and trace the origin of merged solutions to their contributing source records.
 
-Event ID mapping records include the matching agency, the matched identifier, a confidence score, and the thresholds applied. This service aligns with the approach used by EMSC and extends it to the New Zealand context, facilitating interoperability with USGS, ISC, and regional networks.
+Event ID mapping records include the matching agency, the matched identifier, a confidence score, and the thresholds applied. This service aligns with the approach used by EMSC \citep{emsc_webservices} and extends it to the New Zealand context, facilitating interoperability with USGS, ISC, and regional networks.
 
 \subsection{Portal and Infrastructure for Data Discovery}
 
@@ -413,7 +413,7 @@ Catalog conflation — combining events from multiple independent catalogs into 
 Conflicts are detected and logged when contributing solutions disagree beyond configurable thresholds: spatial separation, temporal offset, magnitude difference, depth range, and network mismatch. Each merged event retains explicit lineage to its contributing source events and the merge configuration used, enabling full audit and reproducibility. A dry-run preview mode returns conflict statistics and quality flags without committing a new catalog version.
 
 \subsubsection{Analytics}
-The portal provides in-browser analytical tools to support quality assessment and comparative analysis. Implemented capabilities include: Gutenberg-Richter $b$-value estimation with confidence intervals, completeness magnitude ($M_c$) detection, energy release summaries, spatial cluster detection, focal mechanism visualisation, and magnitude-frequency distribution comparison across multiple catalogs. These tools enable researchers to identify potential biases or artefacts before downloading data for further analysis.
+The portal provides in-browser analytical tools to support quality assessment and comparative analysis. Implemented capabilities include: Gutenberg-Richter $b$-value estimation with confidence intervals \citep{Aki1965}, completeness magnitude ($M_c$) detection \citep{Wiemer2000}, energy release summaries, spatial cluster detection, focal mechanism visualisation, and magnitude-frequency distribution comparison across multiple catalogs. These tools enable researchers to identify potential biases or artefacts before downloading data for further analysis.
 
 \subsection{Licensing and Access Conditions}
 
@@ -485,7 +485,7 @@ To strengthen reproducibility, provenance fields should follow a consistent mode
 
 Uncertainty quantification is essential for scientific reusability. The framework specifies a standard representation to ensure consistency across catalogs and comparability in merged products.
 
-\textbf{Origin location and time uncertainties} are reported as standard deviations: \texttt{time\_uncertainty} (seconds), \texttt{horizontal\_uncertainty} (kilometres), and \texttt{depth\_uncertainty} (kilometres). Where horizontal uncertainty is anisotropic, the semi-major and semi-minor axes of the 68\% confidence ellipse and its azimuth are reported. These map directly to QuakeML \texttt{OriginUncertainty} elements.
+\textbf{Origin location and time uncertainties} are reported as standard deviations: \texttt{time\_uncertainty} (seconds), \texttt{horizontal\_uncertainty} (kilometres), and \texttt{depth\_uncertainty} (kilometres). Where horizontal uncertainty is anisotropic, the semi-major and semi-minor axes of the 68\% confidence ellipse and its azimuth are reported. These map directly to QuakeML \texttt{OriginUncertainty} elements \citep{QuakeML}.
 
 \textbf{Magnitude uncertainties} are reported as the standard deviation of the magnitude estimate on the stated scale. Because uncertainty is scale-dependent (local magnitude estimates carry different error profiles from moment magnitude estimates), the magnitude type code must always accompany the uncertainty value.
 
@@ -535,7 +535,7 @@ F  & $<$35   & Not recommended for quantitative analysis. \\
 Quality grades are computed and displayed per catalog in the portal, and per event where event-level quality flags are populated. A quality report exportable as JSON or CSV provides a full breakdown of scores, flag descriptions, and actionable recommendations for catalog contributors.
 
 \subsubsection{Specific Quality Checks}
-Representative automated checks include: events ordered chronologically; no future-dated events; depth within the range 0--1000\,km; magnitude within a plausible range for the declared region; uncertainty values non-negative and not exceeding twice the parameter value; no coordinate pair repeated for distinct events at an identical time (duplicate detection); station count $\geq$\,5 for the event to be considered well-constrained; and azimuthal gap $<$\,180° for reliable depth estimates. Results are summarised as passed, warning, or failed for each check category.
+Representative automated checks include: events ordered chronologically; no future-dated events; depth within the range 0--1000\,km; magnitude within a plausible range for the declared region; uncertainty values non-negative and not exceeding twice the parameter value; no coordinate pair repeated for distinct events at an identical time (duplicate detection); station count $\geq$\,5 for the event to be considered well-constrained; and azimuthal gap $<$\,180° for reliable depth estimates \citep{usgs_comcat}. Results are summarised as passed, warning, or failed for each check category.
 
 \subsubsection{Anomaly Detection}
 Statistical outlier detection flags events whose parameters fall outside expected distributions for the catalog as a whole. Events with unusually high magnitudes relative to surrounding events in time and space, or with depths inconsistent with the regional tectonic setting, are flagged for expert review. Flagged events are not removed automatically; the system annotates them so that users can apply appropriate caution.
@@ -555,7 +555,7 @@ Historical catalogs present distinct challenges: location precision may be tens 
 
 \begin{itemize}
   \item Qualitative location confidence classes (e.g.\ ``well-constrained'', ``approximate'', ``felt-only'') in place of or alongside numeric uncertainties.
-  \item Support for macroseismic intensity fields (Modified Mercalli or EMS-98) alongside or in place of instrumental magnitude.
+  \item Support for macroseismic intensity fields (Modified Mercalli or EMS-98 \citep{Grunthal1998}) alongside or in place of instrumental magnitude.
   \item Narrative description fields for source attribution (e.g.\ newspaper records, missionary accounts, oral tradition references).
   \item Separate quality thresholds for historical records, reflecting their inherently lower parameter precision.
 \end{itemize}
