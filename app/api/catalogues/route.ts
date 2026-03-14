@@ -68,6 +68,66 @@ export async function GET(request: NextRequest) {
 
 // Maximum request body size (100MB for events array)
 const MAX_BODY_SIZE = 100 * 1024 * 1024;
+const EVENT_INSERT_BATCH_SIZE = 500;
+const BATCH_INSERT_MAX_RETRIES = 4;
+const BATCH_INSERT_BASE_DELAY_MS = 250;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+function isRetryableBatchInsertError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+
+  const err = error as {
+    code?: number;
+    codeName?: string;
+    errorLabels?: string[];
+    message?: string;
+  };
+
+  const retryableCodes = new Set([
+    6, // HostUnreachable
+    7, // HostNotFound
+    89, // NetworkTimeout
+    91, // ShutdownInProgress
+    112, // WriteConflict
+    189, // PrimarySteppedDown
+    262, // ExceededTimeLimit
+    9001, // SocketException
+    11600, // InterruptedAtShutdown
+    11602, // InterruptedDueToReplStateChange
+    13435, // NotPrimaryNoSecondaryOk
+    13436, // NotPrimaryOrSecondary
+    10107, // NotWritablePrimary
+  ]);
+
+  if (typeof err.code === 'number' && retryableCodes.has(err.code)) {
+    return true;
+  }
+
+  if (err.codeName && ['WriteConflict', 'InterruptedAtShutdown', 'NotWritablePrimary'].includes(err.codeName)) {
+    return true;
+  }
+
+  const labels = err.errorLabels || [];
+  if (labels.includes('RetryableWriteError') || labels.includes('TransientTransactionError')) {
+    return true;
+  }
+
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes('wiredtiger') ||
+    message.includes('oldest pinned transaction id') ||
+    message.includes('write conflict') ||
+    message.includes('temporarily unavailable')
+  );
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -392,43 +452,89 @@ export async function POST(request: NextRequest) {
       : 0;
     const isPartialImport = failedValidation > 0;
 
-    // Use transaction to ensure atomic insertion of catalogue and events
-    // If any operation fails, the entire transaction is rolled back
-    // Note: dbQueries is guaranteed non-null after check at line 229
+    // Avoid long-running multi-document transactions during large imports.
+    // A single transaction spanning insertMany over many events can pin
+    // WiredTiger state and fail under load. Insert in small retryable batches
+    // and clean up the catalogue on failure to preserve all-or-nothing behavior.
     const db = dbQueries!;
-    await db.transaction(async (session) => {
-      // Insert catalogue with ACTUAL imported event count (not total submitted)
-      await db.insertCatalogue(
-        catalogueId,
-        trimmedName,
-        JSON.stringify([{ source: 'upload', description: isPartialImport ? 'Uploaded catalogue (partial import)' : 'Uploaded catalogue' }]),
-        JSON.stringify({
-          uploadDate: new Date().toISOString(),
-          partialImport: isPartialImport,
-          validationSummary: {
-            totalSubmitted,
-            successfullyImported,
-            failedValidation,
-            successRate,
-          }
-        }),
-        successfullyImported, // Use count of VALID events, not total
-        'complete',
-        {
-          ...metadata,
-          min_latitude: minLat,
-          max_latitude: maxLat,
-          min_longitude: minLon,
-          max_longitude: maxLon,
-        },
-        session
-      );
-
-      // Insert only valid events in bulk
-      if (eventsToInsert.length > 0) {
-        await db.bulkInsertEvents(eventsToInsert as Parameters<typeof db.bulkInsertEvents>[0], session);
+    await db.insertCatalogue(
+      catalogueId,
+      trimmedName,
+      JSON.stringify([{ source: 'upload', description: isPartialImport ? 'Uploaded catalogue (partial import)' : 'Uploaded catalogue' }]),
+      JSON.stringify({
+        uploadDate: new Date().toISOString(),
+        partialImport: isPartialImport,
+        validationSummary: {
+          totalSubmitted,
+          successfullyImported,
+          failedValidation,
+          successRate,
+        }
+      }),
+      successfullyImported,
+      'processing',
+      {
+        ...metadata,
+        min_latitude: minLat,
+        max_latitude: maxLat,
+        min_longitude: minLon,
+        max_longitude: maxLon,
       }
-    });
+    );
+
+    let insertedCount = 0;
+    try {
+      for (let i = 0; i < eventsToInsert.length; i += EVENT_INSERT_BATCH_SIZE) {
+        const batch = eventsToInsert.slice(i, i + EVENT_INSERT_BATCH_SIZE);
+
+        let attempt = 0;
+        while (true) {
+          try {
+            await db.bulkInsertEvents(batch as Parameters<typeof db.bulkInsertEvents>[0]);
+            insertedCount += batch.length;
+            break;
+          } catch (error) {
+            if (attempt >= BATCH_INSERT_MAX_RETRIES || !isRetryableBatchInsertError(error)) {
+              throw error;
+            }
+
+            const delay = BATCH_INSERT_BASE_DELAY_MS * (2 ** attempt) + Math.floor(Math.random() * 100);
+            logger.warn('Retrying batch event insert after transient MongoDB error', {
+              catalogueId,
+              batchStart: i,
+              batchSize: batch.length,
+              attempt: attempt + 1,
+              delayMs: delay,
+              error: getErrorMessage(error),
+            });
+            await sleep(delay);
+            attempt += 1;
+          }
+        }
+      }
+
+      await db.updateCatalogueStatus('complete', catalogueId);
+      await db.updateCatalogueEventCount(catalogueId, insertedCount);
+    } catch (error) {
+      logger.error('Catalogue import failed; cleaning up partially inserted data', {
+        catalogueId,
+        insertedCount,
+        error: getErrorMessage(error),
+      });
+
+      try {
+        await db.deleteCatalogue(catalogueId);
+      } catch (cleanupError) {
+        logger.error('Failed to clean up partially imported catalogue', {
+          catalogueId,
+          cleanupError: getErrorMessage(cleanupError),
+        });
+        await db.updateCatalogueStatus('error', catalogueId);
+        await db.updateCatalogueEventCount(catalogueId, insertedCount);
+      }
+
+      throw error;
+    }
 
     // Clean up pending uploads now that the catalogue is saved — best-effort,
     // TTL will expire the documents automatically after 24 hours.
