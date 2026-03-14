@@ -31,6 +31,9 @@ type CrossFieldValidationBatchResult = ReturnType<typeof validateEventsCrossFiel
 
 // Maximum number of files allowed per upload
 const MAX_FILES = 20;
+// Files above this threshold are uploaded in 3 MB chunks and may take up to
+// 60 seconds to process on the server — warn the user so they are not surprised.
+const LARGE_FILE_WARN_BYTES = 200 * 1024 * 1024; // 200 MB
 
 type UploadStatus = 'idle' | 'uploading' | 'validating' | 'mapping' | 'metadata' | 'processing' | 'complete' | 'error';
 
@@ -51,6 +54,9 @@ export default function UploadPage() {
   const [qualityCheckResult, setQualityCheckResult] = useState<QualityCheckResult | null>(null);
   const [crossFieldValidation, setCrossFieldValidation] = useState<CrossFieldValidationBatchResult | null>(null);
   const [parsedEvents, setParsedEvents] = useState<ParsedEvent[]>([]);
+  // Pending upload IDs keyed by file name — used to retrieve full QuakeML data
+  // on the server when creating the catalogue (see lib/pending-uploads.ts).
+  const [pendingUploadIds, setPendingUploadIds] = useState<Record<string, string>>({});
   const [fieldMappings, setFieldMappings] = useState<Record<string, string>>({});
   const [isSchemaReady, setIsSchemaReady] = useState(false);
   const [catalogueName, setCatalogueName] = useState('');
@@ -132,6 +138,16 @@ export default function UploadPage() {
       return;
     }
     setFiles([...files, ...newFiles]);
+
+    // Warn about large files so the user knows to expect a longer wait
+    const largeFiles = newFiles.filter(f => f.size > LARGE_FILE_WARN_BYTES);
+    if (largeFiles.length > 0) {
+      const names = largeFiles.map(f => `${f.name} (${(f.size / 1024 / 1024).toFixed(0)} MB)`).join(', ');
+      toast({
+        title: 'Large file detected',
+        description: `${names} will be uploaded in chunks and may take up to 60 seconds to process on the server.`,
+      });
+    }
   };
 
   const handleFileRemoved = (fileName: string) => {
@@ -145,6 +161,7 @@ export default function UploadPage() {
     setQualityCheckResult(null);
     setCrossFieldValidation(null);
     setParsedEvents([]);
+    setPendingUploadIds({});
     setFieldMappings({});
     setIsSchemaReady(false);
     setCatalogueName('');
@@ -333,6 +350,24 @@ export default function UploadPage() {
       const uploadResults: any[] = [];
       let bytesCompleted = 0;
 
+      // Vercel hard limit: 4.5 MB per serverless function payload.
+      // Files above LARGE_FILE_THRESHOLD use the three-step chunked flow:
+      //   1. POST /api/upload/init   → sessionId
+      //   2. POST /api/upload/chunk  × N  (one per 3 MB chunk)
+      //   3. POST /api/upload/finalize   → same response shape as /api/upload
+      // Smaller files use the existing single-request upload.
+      const LARGE_FILE_THRESHOLD = 3.5 * 1024 * 1024; // 3.5 MB
+      const CHUNK_SIZE = 3 * 1024 * 1024;              // 3 MB per chunk
+
+      // Helper: throw on non-ok responses with user-readable messages
+      const assertOk = async (res: Response, label: string) => {
+        if (res.ok) return;
+        if (res.status === 401) throw new Error('Please log in to upload files.');
+        if (res.status === 403) throw new Error('Editor or Admin access is required to upload files.');
+        const errorInfo = await getApiError(res, label);
+        throw new Error(errorInfo.message);
+      };
+
       // Upload files sequentially to track progress accurately
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
@@ -342,47 +377,97 @@ export default function UploadPage() {
           stage: 'uploading',
           currentFile: file.name,
           message: `Uploading ${file.name}...`,
-          progress: Math.round((bytesCompleted / totalBytes) * 40) // 0-40% for upload
+          progress: Math.round((bytesCompleted / totalBytes) * 40)
         }));
 
-        const formData = new FormData();
-        formData.append('file', file);
+        let result: any;
 
-        // Add delimiter parameter if not auto-detect
-        if (delimiter !== 'auto') {
-          formData.append('delimiter', delimiter);
-        }
+        if (file.size > LARGE_FILE_THRESHOLD) {
+          // ── Chunked upload ───────────────────────────────────────────────
+          const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
-        // Add date format parameter if not auto-detect
-        if (dateFormat !== 'auto') {
-          formData.append('dateFormat', dateFormat);
-        }
+          // Step 1: init
+          const initRes = await fetch('/api/upload/init', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fileName: file.name,
+              fileSize: file.size,
+              totalChunks,
+              delimiter: delimiter !== 'auto' ? delimiter : undefined,
+              dateFormat: dateFormat !== 'auto' ? dateFormat : undefined,
+            }),
+          });
+          await assertOk(initRes, 'Failed to initialise upload');
+          const { sessionId } = await initRes.json();
 
-        const response = await fetch('/api/upload', {
-          method: 'POST',
-          body: formData,
-        });
+          // Step 2: send each chunk
+          for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+            const start = chunkIndex * CHUNK_SIZE;
+            const end   = Math.min(start + CHUNK_SIZE, file.size);
+            const chunk = file.slice(start, end);
 
-        if (!response.ok) {
-          if (response.status === 401) {
-            throw new Error('Please log in to upload files.');
+            const chunkForm = new FormData();
+            chunkForm.append('sessionId',  sessionId);
+            chunkForm.append('chunkIndex', String(chunkIndex));
+            chunkForm.append('chunk',      chunk, file.name);
+
+            const chunkRes = await fetch('/api/upload/chunk', {
+              method: 'POST',
+              body: chunkForm,
+            });
+            await assertOk(chunkRes, `Failed to upload chunk ${chunkIndex + 1}/${totalChunks}`);
+
+            // Update progress proportionally within the 0-40% upload band
+            const chunkBytesCompleted = bytesCompleted + end;
+            setUploadProgress(prev => ({
+              ...prev,
+              bytesUploaded: chunkBytesCompleted,
+              message: `Uploading ${file.name} — part ${chunkIndex + 1} of ${totalChunks}...`,
+              progress: Math.round((chunkBytesCompleted / totalBytes) * 40),
+            }));
           }
-          if (response.status === 403) {
-            throw new Error('Editor or Admin access is required to upload files.');
-          }
-          const errorInfo = await getApiError(response, 'Upload failed');
-          throw new Error(errorInfo.message);
+
+          // Step 3: finalize — server reassembles, parses, returns events
+          setUploadProgress(prev => ({
+            ...prev,
+            message: `Processing ${file.name}...`,
+          }));
+          const finalRes = await fetch('/api/upload/finalize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId }),
+          });
+          await assertOk(finalRes, 'Upload finalisation failed');
+          result = await finalRes.json();
+
+        } else {
+          // ── Direct upload (small files) ───────────────────────────────────
+          const formData = new FormData();
+          formData.append('file', file);
+          if (delimiter !== 'auto') formData.append('delimiter', delimiter);
+          if (dateFormat !== 'auto') formData.append('dateFormat', dateFormat);
+
+          const response = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData,
+          });
+          await assertOk(response, 'Upload failed');
+          result = await response.json();
         }
 
-        const result = await response.json();
         uploadResults.push(result);
+        // Record server-side pending upload token for QuakeML files
+        if (result.pendingUploadId) {
+          setPendingUploadIds(prev => ({ ...prev, [file.name]: result.pendingUploadId }));
+        }
         bytesCompleted += file.size;
 
         setUploadProgress(prev => ({
           ...prev,
           bytesUploaded: bytesCompleted,
           filesCompleted: i + 1,
-          progress: Math.round((bytesCompleted / totalBytes) * 40) // 0-40% for upload
+          progress: Math.round((bytesCompleted / totalBytes) * 40)
         }));
       }
 
@@ -586,7 +671,11 @@ export default function UploadPage() {
         body: JSON.stringify({
           name: catalogueName.trim(),
           events: finalEvents,
-          metadata: metadataPayload
+          metadata: metadataPayload,
+          // One pendingUploadId per file, in upload order.  The server fetches
+          // and concatenates the full parsed events for every file so that no
+          // data is lost in multi-file uploads.
+          pendingUploadIds: Object.values(pendingUploadIds),
         }),
       });
 

@@ -4,6 +4,7 @@ import { type Delimiter } from '@/lib/delimiter-detector';
 import { type DateFormat } from '@/lib/date-format-detector';
 import { requireEditor } from '@/lib/auth/middleware';
 import { Logger } from '@/lib/errors';
+import { storePendingUpload } from '@/lib/pending-uploads';
 
 const logger = new Logger('UploadAPI');
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
@@ -62,7 +63,6 @@ export async function POST(request: NextRequest) {
     // Parse date format parameter if provided
     let dateFormat: DateFormat | undefined;
     if (dateFormatParam) {
-      // Map user-friendly names to DateFormat type
       const dateFormatMap: Record<string, DateFormat> = {
         'us': 'US',
         'international': 'International',
@@ -74,14 +74,45 @@ export async function POST(request: NextRequest) {
     // Read file content
     const content = await file.text();
 
-    // Parse the file
+    // Parse the file — full ParsedEvent objects are in memory here, including
+    // the quakeml: QuakeMLEvent field for QuakeML files.
     const parseResult = parseFile(content, file.name, delimiter, dateFormat);
+
+    // ── Pending upload store ────────────────────────────────────────────────
+    //
+    // All parsed events are persisted in MongoDB under a pendingUploadId
+    // (TTL: 24 hours).  The browser receives only lightweight scalar fields
+    // for display/mapping plus the pendingUploadId token.  When the user
+    // creates the catalogue the catalogue API retrieves the full data
+    // directly from MongoDB — no data is ever discarded.
+    // ───────────────────────────────────────────────────────────────────────
+
+    let pendingUploadId: string | undefined;
+
+    if (parseResult.events.length > 0) {
+      pendingUploadId = await storePendingUpload(parseResult.events);
+      logger.info('Stored pending upload', {
+        pendingUploadId,
+        eventCount: parseResult.events.length,
+      });
+    }
+
+    // Build the lightweight events for the browser response.  For QuakeML
+    // files we strip the quakeml object; all other fields (scalars) are kept
+    // so the UI can display and remap them normally.
+    const events = parseResult.events.map(event => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { quakeml: _quakeml, ...rest } = event;
+      return rest;
+    });
 
     return NextResponse.json({
       fileName: file.name,
       fileSize: file.size,
       format: extension.toUpperCase(),
-      ...parseResult
+      ...parseResult,
+      events,
+      ...(pendingUploadId ? { pendingUploadId } : {}),
     });
 
   } catch (error) {

@@ -5,6 +5,10 @@ import { apiCache, generateCacheKey, catalogueCache, invalidateCacheByPrefix } f
 import { applyRateLimit, readRateLimiter, apiRateLimiter } from '@/lib/rate-limiter';
 import { requireEditor } from '@/lib/auth/middleware';
 import { v4 as uuidv4 } from 'uuid';
+import { getPendingUploadEvents, deletePendingUpload } from '@/lib/pending-uploads';
+import { quakemlEventToDbFields } from '@/lib/quakeml-to-db';
+import { parsedEventToDbFields } from '@/lib/parsed-event-to-db';
+import type { ParsedEvent } from '@/types/upload';
 
 // Force dynamic rendering for this API route
 export const dynamic = 'force-dynamic';
@@ -125,7 +129,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    const { name, events, metadata } = body;
+    const { name, events, metadata, pendingUploadId, pendingUploadIds: pendingUploadIdList } = body;
 
     // Validate required fields
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -156,6 +160,39 @@ export async function POST(request: NextRequest) {
       const num = typeof value === 'number' ? value : parseFloat(String(value));
       return isNaN(num) ? null : num;
     };
+
+    // ── Pending upload retrieval ────────────────────────────────────────────
+    //
+    // The upload API stores the complete parsed events in MongoDB and returns
+    // one pendingUploadId per file.  For multi-file uploads the page sends an
+    // array (pendingUploadIds); single-file uploads may still send the legacy
+    // scalar pendingUploadId.  We normalise to an ordered array, fetch each
+    // token's events, and concatenate them so pendingEvents[i] aligns with
+    // events[i] in the request body (both are in file-then-event order).
+    let pendingEvents: ParsedEvent[] | null = null;
+    const ids: string[] = Array.isArray(pendingUploadIdList)
+      ? pendingUploadIdList.filter((id: unknown) => typeof id === 'string')
+      : pendingUploadId && typeof pendingUploadId === 'string'
+        ? [pendingUploadId]
+        : [];
+
+    if (ids.length > 0) {
+      try {
+        const batches = await Promise.all(ids.map(id => getPendingUploadEvents(id)));
+        const combined: ParsedEvent[] = [];
+        for (let i = 0; i < batches.length; i++) {
+          const b = batches[i];
+          if (b) {
+            combined.push(...b);
+          } else {
+            logger.warn('Pending upload not found or expired', { pendingUploadId: ids[i] });
+          }
+        }
+        if (combined.length > 0) pendingEvents = combined;
+      } catch (err) {
+        logger.warn('Failed to retrieve pending uploads, falling back to scalar events', { ids, err });
+      }
+    }
 
     // Comprehensive validation of ALL events - check required fields and value ranges
     // Partition events into valid and invalid arrays for partial import support
@@ -257,63 +294,48 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Prepare ONLY VALID events for insertion
-    const eventsToInsert = validEvents.map(({ event }) => {
-      // Parse required numeric fields - already validated above, so these are guaranteed to be valid
-      const latitude = safeParseNumber(event.latitude)!;
+    // Prepare ONLY VALID events for insertion.
+    //
+    // pendingEvents holds the complete server-side ParsedEvent objects for all
+    // formats (CSV, JSON, GeoJSON, QuakeML) when a pendingUploadId was supplied.
+    // Each valid event's `.index` is its original position in the events array,
+    // which is the same order as pendingEvents, so we join by position.
+    const eventsToInsert = validEvents.map(({ event, index }) => {
+      // Parse required numeric fields — already validated above
+      const latitude  = safeParseNumber(event.latitude)!;
       const longitude = safeParseNumber(event.longitude)!;
       const magnitude = safeParseNumber(event.magnitude)!;
 
-      return {
-        // Always generate a unique UUID for the primary ID to avoid duplicate key errors
-        // Store original IDs in source_id for reference
+      type InsertRow = Partial<import('@/lib/db').MergedEvent> & {
+        id: string; catalogue_id: string; time: string;
+        latitude: number; longitude: number; magnitude: number; source_events: string;
+      };
+      const row: InsertRow = {
         id: uuidv4(),
         catalogue_id: catalogueId,
-        source_id: event.source_id || event.eventId || event.id || undefined,
-        time: event.time, // Already validated to be a valid timestamp above
+        time: event.time,
         latitude,
         longitude,
         magnitude,
         source_events: JSON.stringify([{ source: 'upload', eventId: event.id || event.eventId }]),
-
-        // Optional fields
         depth: safeParseNumber(event.depth) ?? undefined,
-        region: event.region,
-        location_name: event.location_name,
-        event_public_id: event.event_public_id || event.publicID,
-        event_type: event.event_type || event.eventType,
-        event_type_certainty: event.event_type_certainty,
-
-        // Uncertainties (ensure numeric types)
-        time_uncertainty: safeParseNumber(event.time_uncertainty) ?? undefined,
-        latitude_uncertainty: safeParseNumber(event.latitude_uncertainty) ?? undefined,
-        longitude_uncertainty: safeParseNumber(event.longitude_uncertainty) ?? undefined,
-        depth_uncertainty: safeParseNumber(event.depth_uncertainty) ?? undefined,
-
-        // Magnitude details
-        magnitude_type: event.magnitude_type || event.magnitudeType,
-        magnitude_uncertainty: safeParseNumber(event.magnitude_uncertainty) ?? undefined,
-        magnitude_station_count: safeParseNumber(event.magnitude_station_count) ?? undefined,
-
-        // Quality metrics (ensure numeric types)
-        azimuthal_gap: safeParseNumber(event.azimuthal_gap || event.azimuthalGap) ?? undefined,
-        minimum_distance: safeParseNumber(event.minimum_distance) ?? undefined,
-        used_phase_count: safeParseNumber(event.used_phase_count || event.usedPhaseCount) ?? undefined,
-        used_station_count: safeParseNumber(event.used_station_count || event.usedStationCount) ?? undefined,
-        standard_error: safeParseNumber(event.standard_error) ?? undefined,
-
-        // Evaluation
-        evaluation_mode: event.evaluation_mode,
-        evaluation_status: event.evaluation_status,
-
-        // Agency info
-        author: event.author,
-        agency_id: event.agency_id,
-
-        // Additional info
-        comment: event.comment,
-        creation_info: event.creation_info ? JSON.stringify(event.creation_info) : undefined,
       };
+
+      const pendingEvent = pendingEvents?.[index];
+
+      if (pendingEvent?.quakeml) {
+        // QuakeML: extract all DB fields from the rich QuakeMLEvent structure
+        // (preferred origin, preferred magnitude, picks, arrivals, focal
+        // mechanisms, amplitudes, station magnitudes, quality metrics, etc.)
+        Object.assign(row, quakemlEventToDbFields(pendingEvent.quakeml));
+      } else {
+        // CSV / JSON / GeoJSON (or QuakeML fallback when pending record expired):
+        // map every scalar field that ParsedEvent carries to its DB column.
+        const source = pendingEvent ?? event;
+        Object.assign(row, parsedEventToDbFields(source as ParsedEvent));
+      }
+
+      return row;
     });
 
     // Calculate validation statistics for the response
@@ -359,9 +381,15 @@ export async function POST(request: NextRequest) {
 
       // Insert only valid events in bulk
       if (eventsToInsert.length > 0) {
-        await db.bulkInsertEvents(eventsToInsert, session);
+        await db.bulkInsertEvents(eventsToInsert as Parameters<typeof db.bulkInsertEvents>[0], session);
       }
     });
+
+    // Clean up pending uploads now that the catalogue is saved — best-effort,
+    // TTL will expire the documents automatically after 24 hours.
+    for (const id of ids) {
+      deletePendingUpload(id).catch(() => {/* TTL will clean up */});
+    }
 
     // Invalidate cache only after successful insertion
     invalidateCacheByPrefix('catalogues');

@@ -447,11 +447,26 @@ export function parseQuakeML(content: string): ParseResult {
   const validationAccumulator = createValidationAccumulator();
 
   try {
-    // Extract all event elements
-    const eventRegex = /<event[^>]*publicID="[^"]*"[^>]*>[\s\S]*?<\/event>/g;
-    const eventMatches = content.match(eventRegex);
+    // Extract event elements by scanning for open/close tags without loading
+    // all matches into memory simultaneously.  A single global regex with
+    // [\s\S]*? on a 70 MB string both allocates a large match array and risks
+    // catastrophic backtracking on malformed XML.  Instead we locate each
+    // <event …> open tag, then find its matching </event> close tag and slice
+    // that substring out — O(n) total, no backtracking risk.
+    const openTagRe  = /<event\b[^>]*>/g;
+    const closeTag   = '</event>';
+    const eventMatches: string[] = [];
+    let openMatch: RegExpExecArray | null;
+    while ((openMatch = openTagRe.exec(content)) !== null) {
+      const start = openMatch.index;
+      const closeIdx = content.indexOf(closeTag, start + openMatch[0].length);
+      if (closeIdx === -1) break; // malformed; stop scanning
+      eventMatches.push(content.slice(start, closeIdx + closeTag.length));
+      // Advance past the end of this event so the next exec starts after it
+      openTagRe.lastIndex = closeIdx + closeTag.length;
+    }
 
-    if (!eventMatches || eventMatches.length === 0) {
+    if (eventMatches.length === 0) {
       appendParserFailure(validationAccumulator, { line: 0 }, 'No events found in QuakeML file');
       return {
         success: false,
