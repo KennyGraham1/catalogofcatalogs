@@ -19,7 +19,7 @@ import { CatalogueMetadataForm, CatalogueMetadata } from '@/components/upload/Ca
 import { ProcessingProgressIndicator, ProcessingProgressInfo } from '@/components/upload/ProcessingProgressIndicator';
 import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import { toast } from '@/hooks/use-toast';
-import { performQualityCheck, QualityCheckResult } from '@/lib/data-quality-checker';
+import { performQualityCheck, QualityCheckResult, getQualityGrade } from '@/lib/data-quality-checker';
 import { validateEventsCrossFields } from '@/lib/cross-field-validation';
 import { useAuth } from '@/lib/auth/hooks';
 import { UserRole } from '@/lib/auth/types';
@@ -781,8 +781,186 @@ export default function UploadPage() {
     router.push('/catalogues');
   };
 
+  const buildProcessingReportContent = (): any | null => {
+    if (!processingReport) return null;
+
+    const formatBytes = (bytes: number) => {
+      if (!Number.isFinite(bytes) || bytes < 0) return '0 B';
+      const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+      let value = bytes;
+      let unitIndex = 0;
+      while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024;
+        unitIndex += 1;
+      }
+      return `${value.toFixed(unitIndex === 0 ? 0 : 2)} ${units[unitIndex]}`;
+    };
+
+    const formatPercent = (value: number) => `${value.toFixed(2)}%`;
+    const generatedAt = new Date();
+    const processedAt = new Date(processingReport.processedAt);
+
+    const summary = (processingReport.validationSummary || {}) as any;
+    const totalEvents = Number(summary.totalEvents ?? processingReport.totalEvents ?? 0);
+    const validEvents = Number(summary.validEvents ?? totalEvents);
+    const invalidEvents = Number(summary.invalidEvents ?? Math.max(totalEvents - validEvents, 0));
+    const validationPassRate = totalEvents > 0 ? (validEvents / totalEvents) * 100 : 100;
+    const filesProcessedCount = processingReport.filesProcessed.length;
+
+    const qualityScore = processingReport.qualityScore;
+    const qualityGrade = qualityScore !== null ? getQualityGrade(qualityScore) : null;
+    const qualityInterpretation = qualityGrade
+      ? `${qualityGrade.label} (${qualityGrade.grade})`
+      : 'Quality assessment was not available for this run';
+
+    const totalFileSizeBytes = processingReport.filesProcessed.reduce((sum, file) => sum + (file.size || 0), 0);
+    const fileFormats = Array.from(new Set(processingReport.filesProcessed.map(file => file.format)));
+
+    const aggregateValidationByCategory: Record<string, number> = {};
+    const aggregateSeverity = { error: 0, warning: 0, info: 0 };
+    const validationByFile = (processingReport.validationResults || []).map((result: any) => {
+      const reportSummary = result.validationReport?.summary || {};
+      const byCategory = reportSummary.byCategory || {};
+      Object.entries(byCategory).forEach(([category, count]) => {
+        aggregateValidationByCategory[category] = (aggregateValidationByCategory[category] || 0) + Number(count);
+      });
+
+      aggregateSeverity.error += Number(reportSummary.errorCount || result.errors?.length || 0);
+      aggregateSeverity.warning += Number(reportSummary.warningCount || result.warnings?.length || 0);
+      aggregateSeverity.info += Number(reportSummary.infoCount || 0);
+
+      return {
+        fileName: result.fileName,
+        format: result.format,
+        isValid: result.isValid,
+        eventCount: Number(result.eventCount || 0),
+        errorCount: Number(reportSummary.errorCount || result.errors?.length || 0),
+        warningCount: Number(reportSummary.warningCount || result.warnings?.length || 0),
+        infoCount: Number(reportSummary.infoCount || 0),
+        validationSummary: reportSummary,
+      };
+    });
+
+    const qualityReport = qualityCheckResult?.report;
+    const reportContent = {
+      reportMetadata: {
+        reportType: 'Catalogue Processing Report',
+        reportVersion: '2.0',
+        generatedAt: {
+          iso: generatedAt.toISOString(),
+          local: generatedAt.toLocaleString(),
+        },
+        generatedBy: 'Upload Workflow',
+        description: 'Comprehensive processing report for catalogue ingestion, validation, and quality assessment.',
+      },
+      executiveSummary: {
+        description: 'High-level metrics for stakeholders.',
+        keyMetrics: {
+          totalEventsProcessed: totalEvents,
+          filesProcessed: filesProcessedCount,
+          overallQualityScore: qualityScore,
+          qualityInterpretation,
+          validationPassRate: {
+            percent: Number(validationPassRate.toFixed(2)),
+            display: formatPercent(validationPassRate),
+            validEvents,
+            invalidEvents,
+            totalEvents,
+          },
+        },
+      },
+      sections: {
+        catalogueInformation: {
+          description: 'Core catalogue identity and processing timestamps.',
+          catalogueId: processingReport.catalogueId,
+          catalogueName: processingReport.catalogueName,
+          processedAt: {
+            iso: processingReport.processedAt,
+            local: processedAt.toLocaleString(),
+          },
+        },
+        fileProcessingDetails: {
+          description: 'Uploaded files and processing footprint.',
+          totals: {
+            filesProcessed: filesProcessedCount,
+            totalFileSizeBytes,
+            totalFileSizeHuman: formatBytes(totalFileSizeBytes),
+            formats: fileFormats,
+          },
+          files: processingReport.filesProcessed.map(file => ({
+            fileName: file.name,
+            format: file.format,
+            sizeBytes: file.size,
+            sizeHuman: formatBytes(file.size),
+          })),
+        },
+        qualityAssessment: {
+          description: 'Overall catalogue quality score and supporting metrics.',
+          overall: {
+            score: qualityScore,
+            grade: qualityGrade?.grade || null,
+            label: qualityGrade?.label || null,
+            interpretation: qualityInterpretation,
+          },
+          metrics: qualityReport ? {
+            completenessPercent: qualityReport.completeness,
+            consistencyPercent: qualityReport.consistency,
+            accuracyPercent: qualityReport.accuracy,
+          } : null,
+          qualityChecks: {
+            reportChecks: qualityCheckResult?.report?.checks || [],
+            anomalyChecks: qualityCheckResult?.anomalies || [],
+            geographicChecks: qualityCheckResult?.geographicChecks || [],
+            recommendations: qualityCheckResult?.recommendations || [],
+          },
+          statistics: qualityReport ? {
+            totalEvents: qualityReport.statistics.totalEvents,
+            validEvents: qualityReport.statistics.validEvents,
+            eventsWithUncertainties: qualityReport.statistics.eventsWithUncertainties,
+            eventsWithQualityMetrics: qualityReport.statistics.eventsWithQualityMetrics,
+            timeRange: qualityReport.statistics.timeRange || null,
+            spatialExtent: qualityReport.statistics.spatialExtent || null,
+          } : null,
+        },
+        validationResults: {
+          description: 'Validation outcomes by file, category, and severity.',
+          summary: {
+            totalEvents,
+            validEvents,
+            invalidEvents,
+            passRatePercent: Number(validationPassRate.toFixed(2)),
+            passRateDisplay: formatPercent(validationPassRate),
+            errorCount: Number(summary.errorCount ?? aggregateSeverity.error),
+            warningCount: Number(summary.warningCount ?? aggregateSeverity.warning),
+            infoCount: Number(summary.infoCount ?? aggregateSeverity.info),
+          },
+          byCategory: Object.keys(summary.byCategory || {}).length > 0
+            ? summary.byCategory
+            : aggregateValidationByCategory,
+          bySeverity: aggregateSeverity,
+          byFile: validationByFile,
+        },
+        metadata: {
+          description: 'User-provided catalogue metadata submitted during upload.',
+          values: processingReport.metadata,
+        },
+      },
+      technicalAppendix: {
+        rawValidationResults: processingReport.validationResults,
+        rawValidationSummary: processingReport.validationSummary,
+        notes: [
+          'Timestamps include ISO and locale-formatted variants.',
+          'Percentages are rounded to 2 decimal places.',
+          'Quality interpretation is derived from getQualityGrade(score).',
+        ],
+      },
+    };
+    return reportContent;
+  };
+
   const handleDownloadReport = () => {
-    if (!processingReport) {
+    const reportContent = buildProcessingReportContent();
+    if (!reportContent || !processingReport) {
       toast({
         title: "No report available",
         description: "Please complete the upload process first.",
@@ -791,23 +969,6 @@ export default function UploadPage() {
       return;
     }
 
-    // Generate report content
-    const reportContent = {
-      title: "Catalogue Processing Report",
-      generatedAt: new Date().toISOString(),
-      catalogue: {
-        name: processingReport.catalogueName,
-        processedAt: processingReport.processedAt,
-      },
-      files: processingReport.filesProcessed,
-      summary: {
-        totalEvents: processingReport.totalEvents,
-        qualityScore: processingReport.qualityScore,
-      },
-      validation: processingReport.validationResults,
-      metadata: processingReport.metadata
-    };
-
     // Create and download JSON report
     // Issue #20 fix: Use try-finally to ensure URL cleanup even if download fails
     const blob = new Blob([JSON.stringify(reportContent, null, 2)], { type: 'application/json' });
@@ -815,7 +976,7 @@ export default function UploadPage() {
     const a = document.createElement('a');
     try {
       a.href = url;
-      a.download = `${processingReport.catalogueName.replace(/\s+/g, '_')}_report.json`;
+      a.download = `${processingReport.catalogueName.replace(/\s+/g, '_')}_processing_report.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -855,6 +1016,8 @@ export default function UploadPage() {
         return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300';
     }
   };
+
+  const reportPreview = buildProcessingReportContent();
 
   return (
     <div className="container py-6 max-w-7xl mx-auto">
@@ -1036,6 +1199,63 @@ export default function UploadPage() {
                     <Button variant="outline" onClick={handleDownloadReport}>Download Report</Button>
                   </div>
                 </div>
+
+                {reportPreview && (
+                  <div className="mt-6 space-y-4">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Report Preview</CardTitle>
+                        <CardDescription>
+                          Preview of the downloadable processing report.
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-6">
+                        <section className="space-y-2">
+                          <h4 className="font-medium">Executive Summary</h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                            <div>Total Events: <span className="font-medium">{reportPreview.executiveSummary.keyMetrics.totalEventsProcessed.toLocaleString()}</span></div>
+                            <div>Files Processed: <span className="font-medium">{reportPreview.executiveSummary.keyMetrics.filesProcessed}</span></div>
+                            <div>Validation Pass Rate: <span className="font-medium">{reportPreview.executiveSummary.keyMetrics.validationPassRate.display}</span></div>
+                            <div>Quality: <span className="font-medium">{reportPreview.executiveSummary.keyMetrics.qualityInterpretation}</span></div>
+                          </div>
+                        </section>
+
+                        <section className="space-y-2">
+                          <h4 className="font-medium">Catalogue Information</h4>
+                          <div className="text-sm space-y-1">
+                            <div>Name: <span className="font-medium">{reportPreview.sections.catalogueInformation.catalogueName}</span></div>
+                            <div>ID: <span className="font-mono text-xs">{reportPreview.sections.catalogueInformation.catalogueId}</span></div>
+                            <div>Processed: <span className="font-medium">{reportPreview.sections.catalogueInformation.processedAt.local}</span></div>
+                          </div>
+                        </section>
+
+                        <section className="space-y-2">
+                          <h4 className="font-medium">Validation Overview</h4>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                            <div>Errors: <span className="font-medium">{reportPreview.sections.validationResults.summary.errorCount}</span></div>
+                            <div>Warnings: <span className="font-medium">{reportPreview.sections.validationResults.summary.warningCount}</span></div>
+                            <div>Info: <span className="font-medium">{reportPreview.sections.validationResults.summary.infoCount}</span></div>
+                          </div>
+                        </section>
+
+                        <section className="space-y-2">
+                          <h4 className="font-medium">File Processing Details</h4>
+                          <div className="text-sm mb-2">
+                            Total size: <span className="font-medium">{reportPreview.sections.fileProcessingDetails.totals.totalFileSizeHuman}</span>
+                          </div>
+                          <div className="space-y-1">
+                            {reportPreview.sections.fileProcessingDetails.files.map((file: any) => (
+                              <div key={file.fileName} className="text-sm flex justify-between border rounded px-3 py-2">
+                                <span>{file.fileName} ({file.format})</span>
+                                <span className="font-medium">{file.sizeHuman}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
               </TabsContent>
             </Tabs>
           </CardContent>
