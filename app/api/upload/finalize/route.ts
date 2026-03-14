@@ -82,11 +82,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Strip quakeml from the browser-facing events
-    const events = parseResult.events.map(event => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { quakeml: _q, ...rest } = event;
-      return rest;
-    });
+    const events = parseResult.events.map(({ quakeml: _q, ...rest }) => rest);
 
     // Delete chunks now — they are no longer needed
     deleteUploadSession(sessionId).catch(() => {/* TTL fallback */});

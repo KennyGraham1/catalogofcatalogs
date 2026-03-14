@@ -100,11 +100,7 @@ export async function POST(request: NextRequest) {
     // Build the lightweight events for the browser response.  For QuakeML
     // files we strip the quakeml object; all other fields (scalars) are kept
     // so the UI can display and remap them normally.
-    const events = parseResult.events.map(event => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { quakeml: _quakeml, ...rest } = event;
-      return rest;
-    });
+    const events = parseResult.events.map(({ quakeml: _quakeml, ...rest }) => rest);
 
     return NextResponse.json({
       fileName: file.name,
