@@ -476,7 +476,7 @@ export interface QuakeMLEvent {
   magnitudes?: Magnitude[];
   stationMagnitudes?: StationMagnitude[];
   picks?: Pick[];
+  arrivals?: Arrival[];
   amplitudes?: Amplitude[];
   focalMechanisms?: FocalMechanism[];
 }
-

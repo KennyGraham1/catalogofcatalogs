@@ -9,6 +9,8 @@ import { validateEvent, normalizeTimestamp } from './earthquake-utils';
 import { summarizeValidationFailures, validateEventWithDetails, type FieldMappingTrace, type ValidationEventContext, type ValidationFailureDetail, type ValidationFailureReport } from './validation';
 import { validateEventCrossFields } from './cross-field-validation';
 import { parseQuakeMLEvent } from './quakeml-parser';
+import { quakemlEventToDbFields } from './quakeml-to-db';
+import * as sax from 'sax';
 import { createReadStream } from 'fs';
 import { createInterface } from 'readline';
 import { detectDelimiter, parseLine, parseWithDelimiter, type Delimiter } from './delimiter-detector';
@@ -34,7 +36,90 @@ export interface ParseResult {
   errors: Array<{ line: number; message: string }>;
   warnings: Array<{ line: number; message: string }>;
   detectedFields: string[];
+  warningsTruncated?: boolean;
   validationReport?: ValidationFailureReport;
+}
+
+const MAX_PARSE_WARNINGS = 200;
+const LARGE_QUAKEML_STREAM_THRESHOLD = 5 * 1024 * 1024;
+
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function serializeOpenTag(node: any): string {
+  let out = `<${node.name}`;
+  for (const [key, val] of Object.entries(node.attributes || {})) {
+    out += ` ${key}="${escapeXml(String(val))}"`;
+  }
+  out += '>';
+  return out;
+}
+
+function isEventTagName(tagName: string): boolean {
+  return tagName === 'event' || tagName.endsWith(':event');
+}
+
+function extractQuakeMLEventsWithSax(content: string): string[] {
+  const parser = sax.parser(true, { trim: false, normalize: false });
+  const events: string[] = [];
+
+  let insideEvent = false;
+  let eventDepth = 0;
+  let currentEventXML = '';
+
+  parser.onopentag = (node: any) => {
+    if (isEventTagName(node.name)) {
+      insideEvent = true;
+      eventDepth = 1;
+      currentEventXML = serializeOpenTag(node);
+      return;
+    }
+
+    if (!insideEvent) return;
+    eventDepth += 1;
+    currentEventXML += serializeOpenTag(node);
+  };
+
+  parser.ontext = (text: string) => {
+    if (insideEvent && text.length > 0) {
+      currentEventXML += escapeXml(text);
+    }
+  };
+
+  parser.oncdata = (text: string) => {
+    if (insideEvent) {
+      currentEventXML += `<![CDATA[${text}]]>`;
+    }
+  };
+
+  parser.onclosetag = (tagName: string) => {
+    if (!insideEvent) return;
+    currentEventXML += `</${tagName}>`;
+    eventDepth -= 1;
+    if (eventDepth === 0) {
+      events.push(currentEventXML);
+      currentEventXML = '';
+      insideEvent = false;
+    }
+  };
+
+  parser.onerror = (err: Error) => {
+    throw err;
+  };
+
+  const chunkSize = 64 * 1024;
+  for (let i = 0; i < content.length; i += chunkSize) {
+    parser.write(content.slice(i, i + chunkSize));
+  }
+  parser.close();
+
+  return events;
 }
 
 interface ValidationAccumulator {
@@ -445,25 +530,34 @@ export function parseQuakeML(content: string): ParseResult {
   const events: ParsedEvent[] = [];
   const detectedFields = new Set<string>(['time', 'latitude', 'longitude', 'depth', 'magnitude']);
   const validationAccumulator = createValidationAccumulator();
+  let suppressedWarnings = 0;
+
+  const addWarning = (line: number, message: string) => {
+    if (warnings.length < MAX_PARSE_WARNINGS) {
+      warnings.push({ line, message });
+      return;
+    }
+    suppressedWarnings += 1;
+  };
 
   try {
-    // Extract event elements by scanning for open/close tags without loading
-    // all matches into memory simultaneously.  A single global regex with
-    // [\s\S]*? on a 70 MB string both allocates a large match array and risks
-    // catastrophic backtracking on malformed XML.  Instead we locate each
-    // <event …> open tag, then find its matching </event> close tag and slice
-    // that substring out — O(n) total, no backtracking risk.
-    const openTagRe  = /<event\b[^>]*>/g;
-    const closeTag   = '</event>';
-    const eventMatches: string[] = [];
-    let openMatch: RegExpExecArray | null;
-    while ((openMatch = openTagRe.exec(content)) !== null) {
-      const start = openMatch.index;
-      const closeIdx = content.indexOf(closeTag, start + openMatch[0].length);
-      if (closeIdx === -1) break; // malformed; stop scanning
-      eventMatches.push(content.slice(start, closeIdx + closeTag.length));
-      // Advance past the end of this event so the next exec starts after it
-      openTagRe.lastIndex = closeIdx + closeTag.length;
+    // Use SAX extraction for large payloads to avoid regex-heavy scanning.
+    let eventMatches: string[] = [];
+    if (content.length >= LARGE_QUAKEML_STREAM_THRESHOLD) {
+      eventMatches = extractQuakeMLEventsWithSax(content);
+    } else {
+      const openTagRe = /<((?:[\w.-]+:)?event)\b[^>]*>/g;
+      let openMatch: RegExpExecArray | null;
+
+      while ((openMatch = openTagRe.exec(content)) !== null) {
+        const start = openMatch.index;
+        const tagName = openMatch[1];
+        const closeTag = `</${tagName}>`;
+        const closeIdx = content.indexOf(closeTag, start + openMatch[0].length);
+        if (closeIdx === -1) break; // malformed; stop scanning
+        eventMatches.push(content.slice(start, closeIdx + closeTag.length));
+        openTagRe.lastIndex = closeIdx + closeTag.length;
+      }
     }
 
     if (eventMatches.length === 0) {
@@ -535,6 +629,14 @@ export function parseQuakeML(content: string): ParseResult {
           quakeml: quakemlEvent // Store full QuakeML data
         };
 
+        // Flatten all DB-storable QuakeML fields onto ParsedEvent so they
+        // appear as source fields in Stage 4 mapping (same UX parity as CSV).
+        const flattenedFields = quakemlEventToDbFields(quakemlEvent) as Record<string, unknown>;
+        for (const [key, value] of Object.entries(flattenedFields)) {
+          if (value === undefined || value === null) continue;
+          (event as any)[key] = value;
+        }
+
         // Add optional fields if available
         if (magnitude.type) {
           event.magnitudeType = magnitude.type;
@@ -549,6 +651,20 @@ export function parseQuakeML(content: string): ParseResult {
         if (quakemlEvent.publicID) {
           event.eventId = quakemlEvent.publicID;
           detectedFields.add('eventId');
+        }
+
+        // Keep common aliases in sync for mapping auto-detection.
+        if ((event as any).magnitude_type && !event.magnitudeType) {
+          event.magnitudeType = String((event as any).magnitude_type);
+        }
+        if ((event as any).event_public_id && !event.eventId) {
+          event.eventId = String((event as any).event_public_id);
+        }
+
+        // Add every flattened key as a detectable source field for UI mapping.
+        for (const key of Object.keys(event)) {
+          if (key === 'quakeml') continue;
+          detectedFields.add(key);
         }
 
         // Validate basic fields
@@ -573,19 +689,8 @@ export function parseQuakeML(content: string): ParseResult {
         }
 
         // Add warnings for missing optional data
-        if (!origin.depth) {
-          warnings.push({
-            line: index,
-            message: 'Event missing depth information'
-          });
-        }
-
-        if (!origin.quality) {
-          warnings.push({
-            line: index,
-            message: 'Event missing origin quality metrics'
-          });
-        }
+        if (!origin.depth) addWarning(index, 'Event missing depth information');
+        if (!origin.quality) addWarning(index, 'Event missing origin quality metrics');
 
         validationAccumulator.validEvents += 1;
         validationAccumulator.failures.push(...validation.failures);
@@ -624,6 +729,7 @@ export function parseQuakeML(content: string): ParseResult {
     errors,
     warnings,
     detectedFields: Array.from(detectedFields),
+    warningsTruncated: suppressedWarnings > 0,
     validationReport: summarizeValidationFailures(validationAccumulator.failures, {
       totalEvents: validationAccumulator.totalEvents,
       validEvents: validationAccumulator.validEvents,

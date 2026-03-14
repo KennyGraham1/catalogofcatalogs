@@ -155,6 +155,157 @@ invalid,100,200,-1,2000`;
       expect(result.events).toHaveLength(0);
       expect(result.errors).toHaveLength(1);
     });
+
+    it('should flatten rich QuakeML fields into mappable source fields', () => {
+      const xml = `<?xml version="1.0"?>
+<quakeml>
+  <event publicID="quakeml:test/event/rich2">
+    <type>earthquake</type>
+    <typeCertainty>known</typeCertainty>
+    <description><text>Test Region</text><type>region name</type></description>
+    <origin publicID="quakeml:test/origin/rich2">
+      <time><value>2024-01-01T00:00:00Z</value><uncertainty>0.2</uncertainty></time>
+      <latitude><value>-41.2865</value><uncertainty>0.01</uncertainty></latitude>
+      <longitude><value>174.7762</value><uncertainty>0.01</uncertainty></longitude>
+      <depth><value>10000</value><uncertainty>500</uncertainty></depth>
+      <depthType>from location</depthType>
+      <earthModelID>iasp91</earthModelID>
+      <methodID>method:origin</methodID>
+      <evaluationMode>manual</evaluationMode>
+      <evaluationStatus>reviewed</evaluationStatus>
+      <quality>
+        <azimuthalGap>85.5</azimuthalGap>
+        <usedPhaseCount>38</usedPhaseCount>
+        <usedStationCount>22</usedStationCount>
+        <standardError>0.42</standardError>
+      </quality>
+      <originUncertainty>
+        <horizontalUncertainty>850</horizontalUncertainty>
+      </originUncertainty>
+      <arrival>
+        <pickID>quakeml:test/pick/2</pickID>
+        <phase>P</phase>
+      </arrival>
+      <creationInfo>
+        <agencyID>NZ.GEONET</agencyID>
+        <author>SeisComP</author>
+      </creationInfo>
+    </origin>
+    <pick publicID="quakeml:test/pick/2">
+      <time><value>2024-01-01T00:00:01Z</value></time>
+      <waveformID networkCode="NZ" stationCode="ABC"/>
+    </pick>
+    <amplitude publicID="quakeml:test/amplitude/2">
+      <genericAmplitude><value>2.1</value></genericAmplitude>
+    </amplitude>
+    <stationMagnitude publicID="quakeml:test/stamag/2">
+      <mag><value>4.9</value></mag>
+    </stationMagnitude>
+    <magnitude publicID="quakeml:test/magnitude/rich2">
+      <mag><value>5.0</value><uncertainty>0.1</uncertainty></mag>
+      <type>ML</type>
+      <stationCount>22</stationCount>
+      <evaluationMode>manual</evaluationMode>
+      <evaluationStatus>reviewed</evaluationStatus>
+      <methodID>method:mag</methodID>
+    </magnitude>
+    <focalMechanism publicID="quakeml:test/fm/2">
+      <methodID>method:fm</methodID>
+    </focalMechanism>
+  </event>
+</quakeml>`;
+
+      const result = parseQuakeML(xml);
+      expect(result.success).toBe(true);
+      expect(result.events).toHaveLength(1);
+
+      const event = result.events[0] as any;
+      expect(event.event_public_id).toBe('quakeml:test/event/rich2');
+      expect(event.event_type).toBe('earthquake');
+      expect(event.event_type_certainty).toBe('known');
+      expect(event.time_uncertainty).toBe(0.2);
+      expect(event.latitude_uncertainty).toBe(0.01);
+      expect(event.longitude_uncertainty).toBe(0.01);
+      expect(event.depth_uncertainty).toBe(500);
+      expect(event.horizontal_uncertainty).toBe(850);
+      expect(event.depth_type).toBe('from location');
+      expect(event.earth_model_id).toBe('iasp91');
+      expect(event.method_id).toBe('method:origin');
+      expect(event.azimuthal_gap).toBe(85.5);
+      expect(event.used_phase_count).toBe(38);
+      expect(event.used_station_count).toBe(22);
+      expect(event.standard_error).toBe(0.42);
+      expect(event.magnitude_type).toBe('ML');
+      expect(event.magnitude_uncertainty).toBe(0.1);
+      expect(event.magnitude_station_count).toBe(22);
+      expect(event.magnitude_method_id).toBe('method:mag');
+      expect(event.magnitude_evaluation_mode).toBe('manual');
+      expect(event.magnitude_evaluation_status).toBe('reviewed');
+      expect(event.evaluation_mode).toBe('manual');
+      expect(event.evaluation_status).toBe('reviewed');
+      expect(event.agency_id).toBe('NZ.GEONET');
+      expect(event.author).toBe('SeisComP');
+      expect(typeof event.origins).toBe('string');
+      expect(typeof event.magnitudes).toBe('string');
+      expect(typeof event.picks).toBe('string');
+      expect(typeof event.arrivals).toBe('string');
+      expect(typeof event.focal_mechanisms).toBe('string');
+      expect(typeof event.amplitudes).toBe('string');
+      expect(typeof event.station_magnitudes).toBe('string');
+
+      expect(result.detectedFields).toContain('event_public_id');
+      expect(result.detectedFields).toContain('event_type');
+      expect(result.detectedFields).toContain('time_uncertainty');
+      expect(result.detectedFields).toContain('horizontal_uncertainty');
+      expect(result.detectedFields).toContain('arrivals');
+      expect(result.detectedFields).toContain('focal_mechanisms');
+      expect(result.detectedFields).toContain('station_magnitudes');
+    });
+
+    it('should parse namespaced event tags in catalogue-level QuakeML', () => {
+      const xml = `<?xml version="1.0"?>
+<q:quakeml xmlns:q="http://quakeml.org/xmlns/quakeml/1.2">
+  <q:event publicID="quakeml:test/event/ns2">
+    <q:origin publicID="quakeml:test/origin/ns2">
+      <q:time><q:value>2024-01-01T00:00:00Z</q:value></q:time>
+      <q:latitude><q:value>-41.2865</q:value></q:latitude>
+      <q:longitude><q:value>174.7762</q:value></q:longitude>
+    </q:origin>
+    <q:magnitude publicID="quakeml:test/magnitude/ns2">
+      <q:mag><q:value>5.0</q:value></q:mag>
+    </q:magnitude>
+  </q:event>
+</q:quakeml>`;
+
+      const result = parseQuakeML(xml);
+      expect(result.success).toBe(true);
+      expect(result.events).toHaveLength(1);
+      expect(result.events[0].eventId).toBe('quakeml:test/event/ns2');
+    });
+
+    it('should cap warning volume for large warning-producing files', () => {
+      const eventXml = `<event publicID="quakeml:test/warn/event">
+  <origin publicID="quakeml:test/warn/origin">
+    <time><value>2024-01-01T00:00:00Z</value></time>
+    <latitude><value>-41.2865</value></latitude>
+    <longitude><value>174.7762</value></longitude>
+  </origin>
+  <magnitude publicID="quakeml:test/warn/mag">
+    <mag><value>5.0</value></mag>
+  </magnitude>
+</event>`;
+
+      const manyEvents = Array.from({ length: 230 }, (_, i) =>
+        eventXml.replace('quakeml:test/warn/event', `quakeml:test/warn/event/${i}`)
+      ).join('\n');
+      const xml = `<quakeml>${manyEvents}</quakeml>`;
+      const result = parseQuakeML(xml);
+
+      expect(result.success).toBe(true);
+      expect(result.events.length).toBe(230);
+      expect(result.warnings.length).toBe(200);
+      expect(result.warningsTruncated).toBe(true);
+    });
   });
 
   describe('parseFile', () => {
@@ -321,4 +472,3 @@ invalid,100,200,-1,2000`;
     });
   });
 });
-

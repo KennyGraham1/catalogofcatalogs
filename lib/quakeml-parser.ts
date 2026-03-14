@@ -29,11 +29,20 @@ import type {
   WaveformStreamID
 } from './types/quakeml';
 
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function nsTag(tag: string): string {
+  return `(?:[\\w.-]+:)?${escapeRegex(tag)}`;
+}
+
 /**
  * Extract text content from XML tag
  */
 function extractTagValue(xml: string, tagName: string): string | undefined {
-  const regex = new RegExp(`<${tagName}[^>]*>([^<]*)<\/${tagName}>`, 's');
+  const tag = nsTag(tagName);
+  const regex = new RegExp(`<${tag}\\b[^>]*>([^<]*)<\\/${tag}>`, 's');
   const match = xml.match(regex);
   return match ? match[1].trim() : undefined;
 }
@@ -42,7 +51,9 @@ function extractTagValue(xml: string, tagName: string): string | undefined {
  * Extract nested value tag (e.g., <magnitude><value>5.2</value></magnitude>)
  */
 function extractNestedValue(xml: string, parentTag: string): string | undefined {
-  const regex = new RegExp(`<${parentTag}[^>]*>.*?<value>([^<]*)<\/value>.*?<\/${parentTag}>`, 's');
+  const parent = nsTag(parentTag);
+  const value = nsTag('value');
+  const regex = new RegExp(`<${parent}\\b[^>]*>.*?<${value}>([^<]*)<\\/${value}>.*?<\\/${parent}>`, 's');
   const match = xml.match(regex);
   return match ? match[1].trim() : undefined;
 }
@@ -51,7 +62,8 @@ function extractNestedValue(xml: string, parentTag: string): string | undefined 
  * Extract RealQuantity (value with optional uncertainty)
  */
 function extractRealQuantity(xml: string, parentTag: string): RealQuantity | undefined {
-  const regex = new RegExp(`<${parentTag}[^>]*>(.*?)<\/${parentTag}>`, 's');
+  const parent = nsTag(parentTag);
+  const regex = new RegExp(`<${parent}\\b[^>]*>(.*?)<\\/${parent}>`, 's');
   const match = xml.match(regex);
   if (!match) return undefined;
 
@@ -89,7 +101,8 @@ function extractRealQuantity(xml: string, parentTag: string): RealQuantity | und
  * Extract TimeQuantity (datetime with optional uncertainty)
  */
 function extractTimeQuantity(xml: string, parentTag: string): TimeQuantity | undefined {
-  const regex = new RegExp(`<${parentTag}[^>]*>(.*?)<\/${parentTag}>`, 's');
+  const parent = nsTag(parentTag);
+  const regex = new RegExp(`<${parent}\\b[^>]*>(.*?)<\\/${parent}>`, 's');
   const match = xml.match(regex);
   if (!match) return undefined;
 
@@ -118,16 +131,16 @@ function extractCreationInfo(xml: string, excludeNested: boolean = false): Creat
   // If excludeNested, remove nested elements that might contain creationInfo
   if (excludeNested) {
     // Remove comment elements
-    searchXML = searchXML.replace(/<comment[^>]*>[\s\S]*?<\/comment>/g, '');
+    searchXML = searchXML.replace(/<(?:[\w.-]+:)?comment\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?comment>/g, '');
     // Remove origin elements
-    searchXML = searchXML.replace(/<origin[^>]*>[\s\S]*?<\/origin>/g, '');
+    searchXML = searchXML.replace(/<(?:[\w.-]+:)?origin\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?origin>/g, '');
     // Remove magnitude elements
-    searchXML = searchXML.replace(/<magnitude[^>]*>[\s\S]*?<\/magnitude>/g, '');
+    searchXML = searchXML.replace(/<(?:[\w.-]+:)?magnitude\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?magnitude>/g, '');
     // Remove description elements
-    searchXML = searchXML.replace(/<description[^>]*>[\s\S]*?<\/description>/g, '');
+    searchXML = searchXML.replace(/<(?:[\w.-]+:)?description\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?description>/g, '');
   }
 
-  const regex = /<creationInfo[^>]*>(.*?)<\/creationInfo>/s;
+  const regex = /<(?:[\w.-]+:)?creationInfo\b[^>]*>(.*?)<\/(?:[\w.-]+:)?creationInfo>/s;
   const match = searchXML.match(regex);
   if (!match) return undefined;
 
@@ -154,7 +167,7 @@ function extractCreationInfo(xml: string, excludeNested: boolean = false): Creat
  */
 function extractComments(xml: string): Comment[] | undefined {
   const comments: Comment[] = [];
-  const regex = /<comment([^>]*)>(.*?)<\/comment>/gs;
+  const regex = /<(?:[\w.-]+:)?comment([^>]*)>(.*?)<\/(?:[\w.-]+:)?comment>/gs;
   const matchesArray = Array.from(xml.matchAll(regex));
 
   for (let i = 0; i < matchesArray.length; i++) {
@@ -181,7 +194,7 @@ function extractComments(xml: string): Comment[] | undefined {
  */
 function extractEventDescriptions(xml: string): EventDescription[] | undefined {
   const descriptions: EventDescription[] = [];
-  const regex = /<description[^>]*>(.*?)<\/description>/gs;
+  const regex = /<(?:[\w.-]+:)?description\b[^>]*>(.*?)<\/(?:[\w.-]+:)?description>/gs;
   const matchesArray = Array.from(xml.matchAll(regex));
 
   for (let i = 0; i < matchesArray.length; i++) {
@@ -203,7 +216,7 @@ function extractEventDescriptions(xml: string): EventDescription[] | undefined {
  * Extract OriginQuality
  */
 function extractOriginQuality(xml: string): OriginQuality | undefined {
-  const regex = /<quality[^>]*>(.*?)<\/quality>/s;
+  const regex = /<(?:[\w.-]+:)?quality\b[^>]*>(.*?)<\/(?:[\w.-]+:)?quality>/s;
   const match = xml.match(regex);
   if (!match) return undefined;
 
@@ -244,7 +257,7 @@ function extractOriginQuality(xml: string): OriginQuality | undefined {
  * Extract OriginUncertainty
  */
 function extractOriginUncertainty(xml: string): OriginUncertainty | undefined {
-  const regex = /<originUncertainty[^>]*>(.*?)<\/originUncertainty>/s;
+  const regex = /<(?:[\w.-]+:)?originUncertainty\b[^>]*>(.*?)<\/(?:[\w.-]+:)?originUncertainty>/s;
   const match = xml.match(regex);
   if (!match) return undefined;
 
@@ -270,7 +283,7 @@ function extractOriginUncertainty(xml: string): OriginUncertainty | undefined {
  * Extract Origin
  */
 function extractOrigin(xml: string): Origin | undefined {
-  const publicIDMatch = xml.match(/<origin[^>]*publicID="([^"]*)"[^>]*>/);
+  const publicIDMatch = xml.match(/<(?:[\w.-]+:)?origin\b[^>]*publicID="([^"]*)"[^>]*>/);
   if (!publicIDMatch) return undefined;
 
   const publicID = publicIDMatch[1];
@@ -326,7 +339,7 @@ function extractOrigin(xml: string): Origin | undefined {
  */
 function extractWaveformID(xml: string): WaveformStreamID | undefined {
   // waveformID can be a self-closing tag with attributes
-  const match = xml.match(/<waveformID([^>]*)\/?>/);
+  const match = xml.match(/<(?:[\w.-]+:)?waveformID([^>]*)\/?>/);
   if (!match) return undefined;
 
   const attrs = match[1];
@@ -349,7 +362,7 @@ function extractWaveformID(xml: string): WaveformStreamID | undefined {
  * Extract Pick
  */
 function extractPick(xml: string): Pick | undefined {
-  const publicIDMatch = xml.match(/<pick[^>]*publicID="([^"]*)"[^>]*>/);
+  const publicIDMatch = xml.match(/<(?:[\w.-]+:)?pick\b[^>]*publicID="([^"]*)"[^>]*>/);
   if (!publicIDMatch) return undefined;
 
   const publicID = publicIDMatch[1];
@@ -395,7 +408,7 @@ function extractPick(xml: string): Pick | undefined {
  * Extract Magnitude
  */
 function extractMagnitude(xml: string): Magnitude | undefined {
-  const publicIDMatch = xml.match(/<magnitude[^>]*publicID="([^"]*)"[^>]*>/);
+  const publicIDMatch = xml.match(/<(?:[\w.-]+:)?magnitude\b[^>]*publicID="([^"]*)"[^>]*>/);
   if (!publicIDMatch) return undefined;
 
   const publicID = publicIDMatch[1];
@@ -434,12 +447,202 @@ function extractMagnitude(xml: string): Magnitude | undefined {
 }
 
 /**
+ * Extract Arrival
+ */
+function extractArrival(xml: string): Arrival | undefined {
+  const pickID = extractTagValue(xml, 'pickID');
+  const phase = extractTagValue(xml, 'phase');
+  if (!pickID || !phase) return undefined;
+
+  const publicIDMatch = xml.match(/<(?:[\w.-]+:)?arrival\b[^>]*publicID="([^"]*)"[^>]*>/);
+  const arrival: Arrival = { pickID, phase };
+  if (publicIDMatch) arrival.publicID = publicIDMatch[1];
+
+  const timeCorrection = extractTagValue(xml, 'timeCorrection');
+  if (timeCorrection) arrival.timeCorrection = parseFloat(timeCorrection);
+  const azimuth = extractTagValue(xml, 'azimuth');
+  if (azimuth) arrival.azimuth = parseFloat(azimuth);
+  const distance = extractTagValue(xml, 'distance');
+  if (distance) arrival.distance = parseFloat(distance);
+  const takeoffAngle = extractRealQuantity(xml, 'takeoffAngle');
+  if (takeoffAngle) arrival.takeoffAngle = takeoffAngle;
+  const timeResidual = extractTagValue(xml, 'timeResidual');
+  if (timeResidual) arrival.timeResidual = parseFloat(timeResidual);
+  const horizontalSlownessResidual = extractTagValue(xml, 'horizontalSlownessResidual');
+  if (horizontalSlownessResidual) arrival.horizontalSlownessResidual = parseFloat(horizontalSlownessResidual);
+  const backazimuthResidual = extractTagValue(xml, 'backazimuthResidual');
+  if (backazimuthResidual) arrival.backazimuthResidual = parseFloat(backazimuthResidual);
+  const timeWeight = extractTagValue(xml, 'timeWeight');
+  if (timeWeight) arrival.timeWeight = parseFloat(timeWeight);
+  const horizontalSlownessWeight = extractTagValue(xml, 'horizontalSlownessWeight');
+  if (horizontalSlownessWeight) arrival.horizontalSlownessWeight = parseFloat(horizontalSlownessWeight);
+  const backazimuthWeight = extractTagValue(xml, 'backazimuthWeight');
+  if (backazimuthWeight) arrival.backazimuthWeight = parseFloat(backazimuthWeight);
+  const earthModelID = extractTagValue(xml, 'earthModelID');
+  if (earthModelID) arrival.earthModelID = earthModelID;
+
+  const creationInfo = extractCreationInfo(xml);
+  if (creationInfo) arrival.creationInfo = creationInfo;
+  const comments = extractComments(xml);
+  if (comments) arrival.comment = comments;
+
+  return arrival;
+}
+
+/**
+ * Extract Amplitude
+ */
+function extractAmplitude(xml: string): Amplitude | undefined {
+  const publicIDMatch = xml.match(/<(?:[\w.-]+:)?amplitude\b[^>]*publicID="([^"]*)"[^>]*>/);
+  if (!publicIDMatch) return undefined;
+
+  const genericAmplitude = extractRealQuantity(xml, 'genericAmplitude');
+  if (!genericAmplitude) return undefined;
+
+  const amplitude: Amplitude = {
+    publicID: publicIDMatch[1],
+    genericAmplitude
+  };
+
+  const type = extractTagValue(xml, 'type');
+  if (type) amplitude.type = type;
+  const category = extractTagValue(xml, 'category');
+  if (category) amplitude.category = category as any;
+  const unit = extractTagValue(xml, 'unit');
+  if (unit) amplitude.unit = unit;
+  const methodID = extractTagValue(xml, 'methodID');
+  if (methodID) amplitude.methodID = methodID;
+  const period = extractRealQuantity(xml, 'period');
+  if (period) amplitude.period = period;
+  const snr = extractTagValue(xml, 'snr');
+  if (snr) amplitude.snr = parseFloat(snr);
+  const pickID = extractTagValue(xml, 'pickID');
+  if (pickID) amplitude.pickID = pickID;
+  const waveformID = extractWaveformID(xml);
+  if (waveformID) amplitude.waveformID = waveformID;
+  const filterID = extractTagValue(xml, 'filterID');
+  if (filterID) amplitude.filterID = filterID;
+  const scalingTime = extractTimeQuantity(xml, 'scalingTime');
+  if (scalingTime) amplitude.scalingTime = scalingTime;
+  const magnitudeHint = extractTagValue(xml, 'magnitudeHint');
+  if (magnitudeHint) amplitude.magnitudeHint = magnitudeHint;
+  const evaluationMode = extractTagValue(xml, 'evaluationMode');
+  if (evaluationMode) amplitude.evaluationMode = evaluationMode as any;
+  const evaluationStatus = extractTagValue(xml, 'evaluationStatus');
+  if (evaluationStatus) amplitude.evaluationStatus = evaluationStatus as any;
+
+  const creationInfo = extractCreationInfo(xml);
+  if (creationInfo) amplitude.creationInfo = creationInfo;
+  const comments = extractComments(xml);
+  if (comments) amplitude.comment = comments;
+
+  return amplitude;
+}
+
+/**
+ * Extract StationMagnitude
+ */
+function extractStationMagnitude(xml: string): StationMagnitude | undefined {
+  const publicIDMatch = xml.match(/<(?:[\w.-]+:)?stationMagnitude\b[^>]*publicID="([^"]*)"[^>]*>/);
+  if (!publicIDMatch) return undefined;
+
+  const mag = extractRealQuantity(xml, 'mag');
+  if (!mag) return undefined;
+
+  const stationMagnitude: StationMagnitude = {
+    publicID: publicIDMatch[1],
+    mag
+  };
+
+  const originID = extractTagValue(xml, 'originID');
+  if (originID) stationMagnitude.originID = originID;
+  const type = extractTagValue(xml, 'type');
+  if (type) stationMagnitude.type = type;
+  const amplitudeID = extractTagValue(xml, 'amplitudeID');
+  if (amplitudeID) stationMagnitude.amplitudeID = amplitudeID;
+  const methodID = extractTagValue(xml, 'methodID');
+  if (methodID) stationMagnitude.methodID = methodID;
+  const waveformID = extractWaveformID(xml);
+  if (waveformID) stationMagnitude.waveformID = waveformID;
+
+  const creationInfo = extractCreationInfo(xml);
+  if (creationInfo) stationMagnitude.creationInfo = creationInfo;
+  const comments = extractComments(xml);
+  if (comments) stationMagnitude.comment = comments;
+
+  return stationMagnitude;
+}
+
+/**
+ * Extract FocalMechanism
+ */
+function extractFocalMechanism(xml: string): FocalMechanism | undefined {
+  const publicIDMatch = xml.match(/<(?:[\w.-]+:)?focalMechanism\b[^>]*publicID="([^"]*)"[^>]*>/);
+  if (!publicIDMatch) return undefined;
+
+  const focalMechanism: FocalMechanism = {
+    publicID: publicIDMatch[1]
+  };
+
+  const triggeringOriginID = extractTagValue(xml, 'triggeringOriginID');
+  if (triggeringOriginID) focalMechanism.triggeringOriginID = triggeringOriginID;
+  const azimuthalGap = extractTagValue(xml, 'azimuthalGap');
+  if (azimuthalGap) focalMechanism.azimuthalGap = parseFloat(azimuthalGap);
+  const stationPolarityCount = extractTagValue(xml, 'stationPolarityCount');
+  if (stationPolarityCount) focalMechanism.stationPolarityCount = parseInt(stationPolarityCount);
+  const misfit = extractTagValue(xml, 'misfit');
+  if (misfit) focalMechanism.misfit = parseFloat(misfit);
+  const stationDistributionRatio = extractTagValue(xml, 'stationDistributionRatio');
+  if (stationDistributionRatio) focalMechanism.stationDistributionRatio = parseFloat(stationDistributionRatio);
+  const methodID = extractTagValue(xml, 'methodID');
+  if (methodID) focalMechanism.methodID = methodID;
+  const evaluationMode = extractTagValue(xml, 'evaluationMode');
+  if (evaluationMode) focalMechanism.evaluationMode = evaluationMode as any;
+  const evaluationStatus = extractTagValue(xml, 'evaluationStatus');
+  if (evaluationStatus) focalMechanism.evaluationStatus = evaluationStatus as any;
+
+  const momentTensorMatch = xml.match(/<(?:[\w.-]+:)?momentTensor\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?momentTensor>/);
+  if (momentTensorMatch) {
+    const mtXml = momentTensorMatch[0];
+    const derivedOriginID = extractTagValue(mtXml, 'derivedOriginID');
+    if (derivedOriginID) {
+      const momentTensor: MomentTensor = { derivedOriginID };
+      const momentMagnitudeID = extractTagValue(mtXml, 'momentMagnitudeID');
+      if (momentMagnitudeID) momentTensor.momentMagnitudeID = momentMagnitudeID;
+      const scalarMoment = extractRealQuantity(mtXml, 'scalarMoment');
+      if (scalarMoment) momentTensor.scalarMoment = scalarMoment;
+      const methodID = extractTagValue(mtXml, 'methodID');
+      if (methodID) momentTensor.methodID = methodID;
+      const category = extractTagValue(mtXml, 'category');
+      if (category) momentTensor.category = category;
+      const inversionType = extractTagValue(mtXml, 'inversionType');
+      if (inversionType) momentTensor.inversionType = inversionType;
+      const creationInfo = extractCreationInfo(mtXml);
+      if (creationInfo) momentTensor.creationInfo = creationInfo;
+      focalMechanism.momentTensor = momentTensor;
+    }
+  }
+
+  const waveformIDs = Array.from(xml.matchAll(/<(?:[\w.-]+:)?waveformID\b[^>]*\/?>/g))
+    .map(match => extractWaveformID(match[0]))
+    .filter((item): item is WaveformStreamID => !!item);
+  if (waveformIDs.length > 0) focalMechanism.waveformID = waveformIDs;
+
+  const creationInfo = extractCreationInfo(xml);
+  if (creationInfo) focalMechanism.creationInfo = creationInfo;
+  const comments = extractComments(xml);
+  if (comments) focalMechanism.comment = comments;
+
+  return focalMechanism;
+}
+
+/**
  * Parse QuakeML event and extract all fields
  */
 export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
   try {
     // Extract publicID
-    const publicIDMatch = eventXML.match(/<event[^>]*publicID="([^"]*)"[^>]*>/);
+    const publicIDMatch = eventXML.match(/<(?:[\w.-]+:)?event\b[^>]*publicID="([^"]*)"[^>]*>/);
     if (!publicIDMatch) return null;
 
     const event: QuakeMLEvent = {
@@ -472,8 +675,11 @@ export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
     const preferredMagnitudeID = extractTagValue(eventXML, 'preferredMagnitudeID');
     if (preferredMagnitudeID) event.preferredMagnitudeID = preferredMagnitudeID;
 
+    const preferredFocalMechanismID = extractTagValue(eventXML, 'preferredFocalMechanismID');
+    if (preferredFocalMechanismID) event.preferredFocalMechanismID = preferredFocalMechanismID;
+
     // Extract origins
-    const originMatchesArray = Array.from(eventXML.matchAll(/<origin[^>]*publicID="[^"]*"[^>]*>(.*?)<\/origin>/gs));
+    const originMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?origin\b[^>]*publicID="[^"]*"[^>]*>(.*?)<\/(?:[\w.-]+:)?origin>/gs));
     const origins: Origin[] = [];
     for (let j = 0; j < originMatchesArray.length; j++) {
       const match = originMatchesArray[j];
@@ -484,7 +690,7 @@ export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
     if (origins.length > 0) event.origins = origins;
 
     // Extract magnitudes
-    const magnitudeMatchesArray = Array.from(eventXML.matchAll(/<magnitude[^>]*publicID="[^"]*"[^>]*>(.*?)<\/magnitude>/gs));
+    const magnitudeMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?magnitude\b[^>]*publicID="[^"]*"[^>]*>(.*?)<\/(?:[\w.-]+:)?magnitude>/gs));
     const magnitudes: Magnitude[] = [];
     for (let j = 0; j < magnitudeMatchesArray.length; j++) {
       const match = magnitudeMatchesArray[j];
@@ -495,13 +701,49 @@ export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
     if (magnitudes.length > 0) event.magnitudes = magnitudes;
 
     // Extract picks
-    const pickMatchesArray = Array.from(eventXML.matchAll(/<pick[^>]*publicID="[^"]*"[^>]*>[\s\S]*?<\/pick>/g));
+    const pickMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?pick\b[^>]*publicID="[^"]*"[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?pick>/g));
     const picks: Pick[] = [];
     for (let j = 0; j < pickMatchesArray.length; j++) {
       const pick = extractPick(pickMatchesArray[j][0]);
       if (pick) picks.push(pick);
     }
     if (picks.length > 0) event.picks = picks;
+
+    // Extract arrivals (typically nested under origins)
+    const arrivalMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?arrival\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?arrival>/g));
+    const arrivals: Arrival[] = [];
+    for (let j = 0; j < arrivalMatchesArray.length; j++) {
+      const arrival = extractArrival(arrivalMatchesArray[j][0]);
+      if (arrival) arrivals.push(arrival);
+    }
+    if (arrivals.length > 0) event.arrivals = arrivals;
+
+    // Extract station magnitudes
+    const stationMagnitudeMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?stationMagnitude\b[^>]*publicID="[^"]*"[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?stationMagnitude>/g));
+    const stationMagnitudes: StationMagnitude[] = [];
+    for (let j = 0; j < stationMagnitudeMatchesArray.length; j++) {
+      const stationMagnitude = extractStationMagnitude(stationMagnitudeMatchesArray[j][0]);
+      if (stationMagnitude) stationMagnitudes.push(stationMagnitude);
+    }
+    if (stationMagnitudes.length > 0) event.stationMagnitudes = stationMagnitudes;
+
+    // Extract amplitudes
+    const amplitudeMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?amplitude\b[^>]*publicID="[^"]*"[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?amplitude>/g));
+    const amplitudes: Amplitude[] = [];
+    for (let j = 0; j < amplitudeMatchesArray.length; j++) {
+      const amplitude = extractAmplitude(amplitudeMatchesArray[j][0]);
+      if (amplitude) amplitudes.push(amplitude);
+    }
+    if (amplitudes.length > 0) event.amplitudes = amplitudes;
+
+    // Extract focal mechanisms
+    const focalMechanismMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?focalMechanism\b[^>]*publicID="[^"]*"[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?focalMechanism>/g));
+    const focalMechanisms: FocalMechanism[] = [];
+    for (let j = 0; j < focalMechanismMatchesArray.length; j++) {
+      const focalMechanism = extractFocalMechanism(focalMechanismMatchesArray[j][0]);
+      if (focalMechanism) focalMechanisms.push(focalMechanism);
+    }
+    if (focalMechanisms.length > 0) event.focalMechanisms = focalMechanisms;
 
     return event;
   } catch (error) {

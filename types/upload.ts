@@ -191,6 +191,16 @@ export interface ParsedEvent {
   // Additional data
   comment?: string;
   creation_info?: Record<string, unknown>;
+  origin_quality?: string;
+  origins?: string;
+  magnitudes?: string;
+  picks?: string;
+  arrivals?: string;
+  focal_mechanisms?: string;
+  amplitudes?: string;
+  station_magnitudes?: string;
+  event_descriptions?: string;
+  comments?: string;
 
   // QuakeML 1.2 extended data (when parsing QuakeML files)
   quakeml?: import('@/lib/types/quakeml').QuakeMLEvent;

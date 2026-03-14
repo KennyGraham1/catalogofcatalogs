@@ -250,6 +250,73 @@ describe('QuakeML Parser', () => {
       const event = parseQuakeMLEvent(xmlWithoutPublicID);
       expect(event).toBeNull();
     });
+
+    it('should parse namespaced QuakeML tags', () => {
+      const quakemlXML = `
+        <q:event publicID="quakeml:test/event/ns1">
+          <q:type>earthquake</q:type>
+          <q:origin publicID="quakeml:test/origin/ns1">
+            <q:time><q:value>2024-01-15T10:25:30Z</q:value></q:time>
+            <q:latitude><q:value>-41.5</q:value></q:latitude>
+            <q:longitude><q:value>174.0</q:value></q:longitude>
+          </q:origin>
+          <q:magnitude publicID="quakeml:test/magnitude/ns1">
+            <q:mag><q:value>4.5</q:value></q:mag>
+          </q:magnitude>
+        </q:event>
+      `;
+
+      const event = parseQuakeMLEvent(quakemlXML);
+
+      expect(event).not.toBeNull();
+      expect(event?.publicID).toBe('quakeml:test/event/ns1');
+      expect(event?.type).toBe('earthquake');
+      expect(event?.origins?.[0].latitude.value).toBe(-41.5);
+      expect(event?.magnitudes?.[0].mag.value).toBe(4.5);
+    });
+
+    it('should parse arrivals, amplitudes, station magnitudes and focal mechanisms', () => {
+      const quakemlXML = `
+        <event publicID="quakeml:test/event/rich1">
+          <origin publicID="quakeml:test/origin/rich1">
+            <time><value>2024-01-15T10:25:30Z</value></time>
+            <latitude><value>-41.5</value></latitude>
+            <longitude><value>174.0</value></longitude>
+            <arrival publicID="quakeml:test/arrival/1">
+              <pickID>quakeml:test/pick/1</pickID>
+              <phase>P</phase>
+            </arrival>
+          </origin>
+          <pick publicID="quakeml:test/pick/1">
+            <time><value>2024-01-15T10:25:35Z</value></time>
+            <waveformID networkCode="NZ" stationCode="ABC"/>
+          </pick>
+          <amplitude publicID="quakeml:test/amplitude/1">
+            <genericAmplitude><value>3.2</value></genericAmplitude>
+            <pickID>quakeml:test/pick/1</pickID>
+          </amplitude>
+          <stationMagnitude publicID="quakeml:test/stamag/1">
+            <mag><value>4.4</value></mag>
+            <amplitudeID>quakeml:test/amplitude/1</amplitudeID>
+          </stationMagnitude>
+          <magnitude publicID="quakeml:test/magnitude/rich1">
+            <mag><value>4.5</value></mag>
+          </magnitude>
+          <focalMechanism publicID="quakeml:test/fm/1">
+            <methodID>quakeml:test/method/fm</methodID>
+          </focalMechanism>
+        </event>
+      `;
+
+      const event = parseQuakeMLEvent(quakemlXML);
+
+      expect(event).not.toBeNull();
+      expect(event?.arrivals).toHaveLength(1);
+      expect(event?.arrivals?.[0].pickID).toBe('quakeml:test/pick/1');
+      expect(event?.amplitudes).toHaveLength(1);
+      expect(event?.stationMagnitudes).toHaveLength(1);
+      expect(event?.focalMechanisms).toHaveLength(1);
+      expect(event?.focalMechanisms?.[0].methodID).toBe('quakeml:test/method/fm');
+    });
   });
 });
-
