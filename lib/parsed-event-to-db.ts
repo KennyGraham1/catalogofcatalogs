@@ -41,24 +41,37 @@ export function parsedEventToDbFields(event: ParsedEvent): DbEventFields {
   if (event.longitude_uncertainty != null) fields.longitude_uncertainty = Number(event.longitude_uncertainty);
   if (event.depth_uncertainty     != null) fields.depth_uncertainty     = Number(event.depth_uncertainty);
 
+  // ── Origin metadata (from FIELD_ALIASES-mapped CSV/JSON/GeoJSON) ──────────
+  if (event.horizontal_uncertainty != null) fields.horizontal_uncertainty = Number(event.horizontal_uncertainty);
+  if (event.depth_type)                     fields.depth_type             = String(event.depth_type);
+  if (event.earth_model_id)                 fields.earth_model_id         = String(event.earth_model_id);
+  if (event.method_id)                      fields.method_id              = String(event.method_id);
+
   // ── Magnitude details ─────────────────────────────────────────────────────
   const magnitudeType = event.magnitude_type || event.magnitudeType;
-  if (magnitudeType)                         fields.magnitude_type          = String(magnitudeType);
-  if (event.magnitude_uncertainty  != null)  fields.magnitude_uncertainty   = Number(event.magnitude_uncertainty);
-  if (event.magnitude_station_count != null) fields.magnitude_station_count = Number(event.magnitude_station_count);
+  if (magnitudeType)                         fields.magnitude_type              = String(magnitudeType);
+  if (event.magnitude_uncertainty  != null)  fields.magnitude_uncertainty       = Number(event.magnitude_uncertainty);
+  if (event.magnitude_station_count != null) fields.magnitude_station_count     = Number(event.magnitude_station_count);
+  if (event.magnitude_method_id)             fields.magnitude_method_id         = String(event.magnitude_method_id);
+  if (event.magnitude_evaluation_mode)       fields.magnitude_evaluation_mode   = String(event.magnitude_evaluation_mode);
+  if (event.magnitude_evaluation_status)     fields.magnitude_evaluation_status = String(event.magnitude_evaluation_status);
 
   // ── Origin quality metrics ────────────────────────────────────────────────
-  const azimuthalGap = event.azimuthal_gap ?? (event as any).azimuthalGap;
+  const azimuthalGap = event.azimuthal_gap ?? event.azimuthalGap;
   if (azimuthalGap    != null) fields.azimuthal_gap    = Number(azimuthalGap);
 
-  const usedPhaseCount = event.used_phase_count ?? (event as any).usedPhaseCount;
+  const usedPhaseCount = event.used_phase_count ?? event.usedPhaseCount;
   if (usedPhaseCount  != null) fields.used_phase_count = Number(usedPhaseCount);
 
-  const usedStationCount = event.used_station_count ?? (event as any).usedStationCount;
+  const usedStationCount = event.used_station_count ?? event.usedStationCount;
   if (usedStationCount != null) fields.used_station_count = Number(usedStationCount);
 
-  if (event.minimum_distance != null) fields.minimum_distance = Number(event.minimum_distance);
-  if (event.standard_error   != null) fields.standard_error   = Number(event.standard_error);
+  if (event.minimum_distance         != null) fields.minimum_distance         = Number(event.minimum_distance);
+  if (event.maximum_distance         != null) fields.maximum_distance         = Number(event.maximum_distance);
+  if (event.standard_error           != null) fields.standard_error           = Number(event.standard_error);
+  if (event.associated_phase_count   != null) fields.associated_phase_count   = Number(event.associated_phase_count);
+  if (event.associated_station_count != null) fields.associated_station_count = Number(event.associated_station_count);
+  if (event.depth_phase_count        != null) fields.depth_phase_count        = Number(event.depth_phase_count);
 
   // ── Evaluation ────────────────────────────────────────────────────────────
   if (event.evaluation_mode)   fields.evaluation_mode   = String(event.evaluation_mode);

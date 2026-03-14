@@ -636,13 +636,26 @@ export default function UploadPage() {
         message: 'Applying field mappings to events...',
       }));
 
-      const finalEvents = applyUIMappings(parsedEvents);
+      // When every uploaded file has a server-side pending record, omit the
+      // events array from the catalogue request entirely — it can be hundreds
+      // of MB for large catalogs and would exceed Vercel's 4.5 MB hard limit.
+      // Instead we send only the fieldMappings config (a tiny object); the
+      // server applies them to the stored pendingEvents and reconstructs the
+      // full event list there.
+      //
+      // If any file is missing a pending record (e.g. it was a tiny in-memory
+      // upload that never went through the pending store) we fall back to
+      // sending the events inline as before.
+      const pendingIds = Object.values(pendingUploadIds);
+      const allFilesHavePendingId = files.length > 0 && files.every(f => pendingUploadIds[f.name]);
+
+      const finalEvents = allFilesHavePendingId ? [] : applyUIMappings(parsedEvents);
 
       setProcessingProgress(prev => ({
         ...prev,
         progress: 25,
         message: 'Building validation reports...',
-        eventsProcessed: finalEvents.length,
+        eventsProcessed: parsedEvents.length,
       }));
 
       const validationSummary = buildValidationSummary();
@@ -660,7 +673,7 @@ export default function UploadPage() {
         ...prev,
         stage: 'saving',
         progress: 35,
-        message: `Saving catalogue with ${finalEvents.length.toLocaleString()} events...`,
+        message: `Saving catalogue with ${parsedEvents.length.toLocaleString()} events...`,
       }));
 
       const response = await fetch('/api/catalogues', {
@@ -670,12 +683,17 @@ export default function UploadPage() {
         },
         body: JSON.stringify({
           name: catalogueName.trim(),
-          events: finalEvents,
+          // Omit events when all files are covered by pendingUploadIds — the
+          // server reconstructs them from the pending store to stay under
+          // Vercel's 4.5 MB request body limit.
+          ...(allFilesHavePendingId ? {} : { events: finalEvents }),
           metadata: metadataPayload,
-          // One pendingUploadId per file, in upload order.  The server fetches
-          // and concatenates the full parsed events for every file so that no
-          // data is lost in multi-file uploads.
-          pendingUploadIds: Object.values(pendingUploadIds),
+          pendingUploadIds: pendingIds,
+          // Send field mappings config so the server can apply them to
+          // pendingEvents when events are not included in the body.
+          ...(allFilesHavePendingId && Object.keys(fieldMappings).length > 0
+            ? { fieldMappings }
+            : {}),
         }),
       });
 

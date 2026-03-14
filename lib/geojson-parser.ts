@@ -257,8 +257,8 @@ function parseGeoJSONFeature(
   };
 
   // Add optional fields
-  if (props.magnitudeType || props.magtype || props.mag_type) {
-    event.magnitudeType = props.magnitudeType || props.magtype || props.mag_type;
+  if (props.magnitudeType || props.magtype || props.mag_type || props.magType) {
+    event.magnitudeType = props.magnitudeType || props.magtype || props.mag_type || props.magType;
     detectedFields.add('magnitudeType');
   }
 
@@ -272,10 +272,22 @@ function parseGeoJSONFeature(
     detectedFields.add('eventId');
   }
 
-  if (props.source || props.agency || props.agency_id) {
-    event.source = props.source || props.agency || props.agency_id;
-    detectedFields.add('source');
+  // Agency — prefer explicit agency_id, then USGS `net`, then generic aliases
+  const agencyId = props.agency_id || props.net || props.agency || props.source || props.network;
+  if (agencyId) {
+    event.agency_id = String(agencyId);
+    detectedFields.add('agency_id');
   }
+
+  // ── USGS standard GeoJSON property names → normalised field names ─────────
+  // FIELD_ALIASES knows these aliases but the GeoJSON parser doesn't call
+  // mapCommonFields(), so we map the most common USGS names explicitly here.
+  if (props.gap        != null) { event.azimuthal_gap           = Number(props.gap);        detectedFields.add('azimuthal_gap'); }
+  if (props.dmin       != null) { event.minimum_distance        = Number(props.dmin);       detectedFields.add('minimum_distance'); }
+  if (props.nst        != null) { event.used_station_count      = Number(props.nst);        detectedFields.add('used_station_count'); }
+  if (props.rms        != null) { event.standard_error          = Number(props.rms);        detectedFields.add('standard_error'); }
+  if (props.status)             { event.evaluation_status       = String(props.status);     detectedFields.add('evaluation_status'); }
+  if (props.type)               { event.event_type              = String(props.type);       detectedFields.add('event_type'); }
 
   // Add all other properties to the event
   Object.keys(props).forEach(key => {

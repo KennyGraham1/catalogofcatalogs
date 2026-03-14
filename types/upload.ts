@@ -156,16 +156,29 @@ export interface ParsedEvent {
   magnitudeType?: string;
   magnitude_uncertainty?: number;
   magnitude_station_count?: number;
+  magnitude_method_id?: string;
+  magnitude_evaluation_mode?: string;
+  magnitude_evaluation_status?: string;
 
   // Quality metrics
   azimuthal_gap?: number;
   azimuthalGap?: number;
   minimum_distance?: number;
+  maximum_distance?: number;
   used_phase_count?: number;
   usedPhaseCount?: number;
   used_station_count?: number;
   usedStationCount?: number;
   standard_error?: number;
+  associated_phase_count?: number;
+  associated_station_count?: number;
+  depth_phase_count?: number;
+  horizontal_uncertainty?: number;
+
+  // Origin metadata
+  depth_type?: string;
+  earth_model_id?: string;
+  method_id?: string;
 
   // Evaluation
   evaluation_mode?: string;

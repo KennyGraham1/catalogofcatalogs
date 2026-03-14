@@ -129,7 +129,14 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    const { name, events, metadata, pendingUploadId, pendingUploadIds: pendingUploadIdList } = body;
+    const {
+      name,
+      events: bodyEvents,
+      metadata,
+      pendingUploadId,
+      pendingUploadIds: pendingUploadIdList,
+      fieldMappings,
+    } = body;
 
     // Validate required fields
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -143,13 +150,6 @@ export async function POST(request: NextRequest) {
     if (trimmedName.length > 255) {
       return NextResponse.json(
         { error: 'Catalogue name must be 255 characters or less', code: 'NAME_TOO_LONG' },
-        { status: 400 }
-      );
-    }
-
-    if (!events || !Array.isArray(events)) {
-      return NextResponse.json(
-        { error: 'Events array is required', code: 'INVALID_EVENTS' },
         { status: 400 }
       );
     }
@@ -192,6 +192,51 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         logger.warn('Failed to retrieve pending uploads, falling back to scalar events', { ids, err });
       }
+    }
+
+    // ── Resolve events source ───────────────────────────────────────────────
+    //
+    // When the client sends pendingUploadIds but no events array, it means the
+    // payload was too large to include inline.  We derive the events array from
+    // pendingEvents (already fetched above) and apply any fieldMappings the
+    // user configured in the UI.  This is the normal path for files > ~3 MB.
+    //
+    // For small files the client may still send events inline; pendingEvents
+    // then supplements with extended fields (QuakeML, etc.).
+    let events: any[];
+
+    if (!bodyEvents || !Array.isArray(bodyEvents) || bodyEvents.length === 0) {
+      if (!pendingEvents || pendingEvents.length === 0) {
+        return NextResponse.json(
+          { error: 'Events array is required', code: 'INVALID_EVENTS' },
+          { status: 400 }
+        );
+      }
+      // Build a minimal events array from pendingEvents so the rest of the
+      // route (validation, bounds calculation, row construction) works
+      // identically regardless of how the client sent the data.
+      const mappings: Record<string, string> =
+        fieldMappings && typeof fieldMappings === 'object' ? fieldMappings : {};
+      const numericFields = new Set([
+        'latitude', 'longitude', 'depth', 'magnitude',
+        'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty',
+        'depth_uncertainty', 'horizontal_uncertainty', 'magnitude_uncertainty',
+        'azimuthal_gap', 'used_phase_count', 'used_station_count', 'standard_error',
+        'minimum_distance', 'maximum_distance', 'associated_phase_count',
+        'associated_station_count', 'depth_phase_count', 'magnitude_station_count',
+      ]);
+      events = pendingEvents.map(pe => {
+        const ev: Record<string, unknown> = { ...pe };
+        for (const [src, tgt] of Object.entries(mappings)) {
+          if (!tgt || pe[src] === undefined) continue;
+          ev[tgt] = numericFields.has(tgt)
+            ? (typeof pe[src] === 'number' ? pe[src] : parseFloat(String(pe[src])))
+            : pe[src];
+        }
+        return ev;
+      });
+    } else {
+      events = bodyEvents;
     }
 
     // Comprehensive validation of ALL events - check required fields and value ranges

@@ -150,19 +150,23 @@ function extractCreationInfo(xml: string, excludeNested: boolean = false): Creat
 }
 
 /**
- * Extract Comments
+ * Extract Comments (preserves id attribute, text, and creationInfo)
  */
 function extractComments(xml: string): Comment[] | undefined {
   const comments: Comment[] = [];
-  const regex = /<comment[^>]*>(.*?)<\/comment>/gs;
+  const regex = /<comment([^>]*)>(.*?)<\/comment>/gs;
   const matchesArray = Array.from(xml.matchAll(regex));
 
   for (let i = 0; i < matchesArray.length; i++) {
     const match = matchesArray[i];
-    const content = match[1];
+    const attrs = match[1];
+    const content = match[2];
     const text = extractTagValue(content, 'text');
     if (text) {
       const comment: Comment = { text };
+      // Preserve the comment's id attribute (e.g. id="smi:local/…")
+      const idMatch = attrs.match(/\bid="([^"]*)"/);
+      if (idMatch) comment.id = idMatch[1];
       const creationInfo = extractCreationInfo(content);
       if (creationInfo) comment.creationInfo = creationInfo;
       comments.push(comment);
@@ -318,6 +322,76 @@ function extractOrigin(xml: string): Origin | undefined {
 }
 
 /**
+ * Extract WaveformStreamID from an XML element (e.g. <waveformID …/>)
+ */
+function extractWaveformID(xml: string): WaveformStreamID | undefined {
+  // waveformID can be a self-closing tag with attributes
+  const match = xml.match(/<waveformID([^>]*)\/?>/);
+  if (!match) return undefined;
+
+  const attrs = match[1];
+  const networkCode  = (attrs.match(/\bnetworkCode="([^"]*)"/)  || [])[1];
+  const stationCode  = (attrs.match(/\bstationCode="([^"]*)"/)  || [])[1];
+  if (!networkCode || !stationCode) return undefined;
+
+  const waveformID: WaveformStreamID = { networkCode, stationCode };
+  const locationCode = (attrs.match(/\blocationCode="([^"]*)"/) || [])[1];
+  if (locationCode !== undefined) waveformID.locationCode = locationCode;
+  const channelCode  = (attrs.match(/\bchannelCode="([^"]*)"/)  || [])[1];
+  if (channelCode !== undefined) waveformID.channelCode = channelCode;
+  const resourceURI  = (attrs.match(/\bresourceURI="([^"]*)"/)  || [])[1];
+  if (resourceURI !== undefined) waveformID.resourceURI = resourceURI;
+
+  return waveformID;
+}
+
+/**
+ * Extract Pick
+ */
+function extractPick(xml: string): Pick | undefined {
+  const publicIDMatch = xml.match(/<pick[^>]*publicID="([^"]*)"[^>]*>/);
+  if (!publicIDMatch) return undefined;
+
+  const publicID = publicIDMatch[1];
+  const time = extractTimeQuantity(xml, 'time');
+  if (!time) return undefined;
+
+  const waveformID = extractWaveformID(xml);
+  if (!waveformID) return undefined;
+
+  const pick: Pick = { publicID, time, waveformID };
+
+  const filterID = extractTagValue(xml, 'filterID');
+  if (filterID) pick.filterID = filterID;
+
+  const methodID = extractTagValue(xml, 'methodID');
+  if (methodID) pick.methodID = methodID;
+
+  const onset = extractTagValue(xml, 'onset');
+  if (onset) pick.onset = onset as any;
+
+  const phaseHint = extractTagValue(xml, 'phaseHint');
+  if (phaseHint) pick.phaseHint = phaseHint;
+
+  const polarity = extractTagValue(xml, 'polarity');
+  if (polarity) pick.polarity = polarity as any;
+
+  const evaluationMode = extractTagValue(xml, 'evaluationMode');
+  if (evaluationMode) pick.evaluationMode = evaluationMode as any;
+
+  const evaluationStatus = extractTagValue(xml, 'evaluationStatus');
+  if (evaluationStatus) pick.evaluationStatus = evaluationStatus as any;
+
+  const creationInfo = extractCreationInfo(xml);
+  if (creationInfo) pick.creationInfo = creationInfo;
+
+  const comments = extractComments(xml);
+  if (comments) pick.comment = comments;
+
+  return pick;
+}
+
+/**
  * Extract Magnitude
  */
 function extractMagnitude(xml: string): Magnitude | undefined {
@@ -419,6 +493,15 @@ export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
       if (magnitude) magnitudes.push(magnitude);
     }
     if (magnitudes.length > 0) event.magnitudes = magnitudes;
+
+    // Extract picks
+    const pickMatchesArray = Array.from(eventXML.matchAll(/<pick[^>]*publicID="[^"]*"[^>]*>[\s\S]*?<\/pick>/g));
+    const picks: Pick[] = [];
+    for (let j = 0; j < pickMatchesArray.length; j++) {
+      const pick = extractPick(pickMatchesArray[j][0]);
+      if (pick) picks.push(pick);
+    }
+    if (picks.length > 0) event.picks = picks;
 
     return event;
   } catch (error) {
