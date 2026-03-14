@@ -7,6 +7,11 @@ import { eventCache, generateCacheKey } from '@/lib/cache';
 export const dynamic = 'force-dynamic';
 
 const logger = new Logger('CatalogueEventsAPI');
+const MAX_EVENTS_REQUEST_LIMIT = Number.parseInt(process.env.MAX_EVENTS_REQUEST_LIMIT || '0', 10);
+
+function exceedsConfiguredLimit(value: number): boolean {
+  return Number.isFinite(MAX_EVENTS_REQUEST_LIMIT) && MAX_EVENTS_REQUEST_LIMIT > 0 && value > MAX_EVENTS_REQUEST_LIMIT;
+}
 
 export async function GET(
   request: NextRequest,
@@ -52,9 +57,13 @@ export async function GET(
       // Cursor-based pagination (most efficient for large datasets)
       const limitNum = limit ? parseInt(limit, 10) : 100;
 
-      if (isNaN(limitNum) || limitNum < 1 || limitNum > 40000) {
+      if (isNaN(limitNum) || limitNum < 1 || exceedsConfiguredLimit(limitNum)) {
         return NextResponse.json(
-          { error: 'Invalid limit. Must be between 1 and 40000' },
+          {
+            error: MAX_EVENTS_REQUEST_LIMIT > 0
+              ? `Invalid limit. Must be between 1 and ${MAX_EVENTS_REQUEST_LIMIT}`
+              : 'Invalid limit. Must be >= 1'
+          },
           { status: 400 }
         );
       }
@@ -92,9 +101,13 @@ export async function GET(
         );
       }
 
-      if (isNaN(pageSizeNum) || pageSizeNum < 1 || pageSizeNum > 40000) {
+      if (isNaN(pageSizeNum) || pageSizeNum < 1 || exceedsConfiguredLimit(pageSizeNum)) {
         return NextResponse.json(
-          { error: 'Invalid page size. Must be between 1 and 40000' },
+          {
+            error: MAX_EVENTS_REQUEST_LIMIT > 0
+              ? `Invalid page size. Must be between 1 and ${MAX_EVENTS_REQUEST_LIMIT}`
+              : 'Invalid page size. Must be >= 1'
+          },
           { status: 400 }
         );
       }
@@ -117,9 +130,13 @@ export async function GET(
       const limitNum = limit ? parseInt(limit, 10) : 100;
       const offsetNum = offset ? parseInt(offset, 10) : 0;
 
-      if (isNaN(limitNum) || limitNum < 1 || limitNum > 40000) {
+      if (isNaN(limitNum) || limitNum < 1 || exceedsConfiguredLimit(limitNum)) {
         return NextResponse.json(
-          { error: 'Invalid limit. Must be between 1 and 40000' },
+          {
+            error: MAX_EVENTS_REQUEST_LIMIT > 0
+              ? `Invalid limit. Must be between 1 and ${MAX_EVENTS_REQUEST_LIMIT}`
+              : 'Invalid limit. Must be >= 1'
+          },
           { status: 400 }
         );
       }

@@ -117,7 +117,6 @@ const UnifiedEarthquakeMap = dynamic(() => import('@/components/visualize/Unifie
 });
 
 // Performance constants
-const MAX_EVENTS_PER_CATALOGUE = 40000; // Limit per catalogue (API max is 40000)
 const MAX_CHART_DATA_POINTS = 500; // Limit for scatter plots
 const MAX_TIMELINE_POINTS = 365; // Max days for timeline chart
 const FILTER_DEBOUNCE_MS = 150; // Debounce delay for filter changes
@@ -647,7 +646,7 @@ export default function AnalyticsPage() {
 
     try {
       const eventsResponse = await fetch(
-        `/api/catalogues/${catalogueId}/events?limit=${MAX_EVENTS_PER_CATALOGUE}&direction=desc`
+        `/api/catalogues/${catalogueId}/events`
       );
 
       if (eventsResponse.ok) {
@@ -692,11 +691,11 @@ export default function AnalyticsPage() {
       const allEvents: AnalyticsEvent[] = [];
       const totalCatalogues = catalogues.length;
 
-      // Fetch events in parallel with limits using Promise.allSettled
+      // Fetch events in parallel using Promise.allSettled
       const eventPromises = catalogues.map(async (catalogue) => {
         try {
           const eventsResponse = await fetch(
-            `/api/catalogues/${catalogue.id}/events?limit=${MAX_EVENTS_PER_CATALOGUE}&direction=desc`
+            `/api/catalogues/${catalogue.id}/events`
           );
           if (eventsResponse.ok) {
             const eventsData = await eventsResponse.json();

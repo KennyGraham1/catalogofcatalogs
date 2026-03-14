@@ -366,6 +366,16 @@ export interface FilteredEventsResult {
   limit: number;
 }
 
+function parseOptionalPositiveInt(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return parsed;
+}
+
+const UNPAGINATED_EVENTS_LIMIT = parseOptionalPositiveInt(process.env.UNPAGINATED_EVENTS_LIMIT);
+const FILTERED_EVENTS_LIMIT = parseOptionalPositiveInt(process.env.FILTERED_EVENTS_LIMIT);
+
 // Helper function to convert MongoDB document to plain object (remove _id)
 function toPlainObject<T>(doc: WithId<Document> | null): T | undefined {
   if (!doc) return undefined;
@@ -580,17 +590,18 @@ if (typeof window === 'undefined') {
     getEventsByCatalogueId: async (catalogueId: string, params?: PaginationParams): Promise<MergedEvent[] | PaginatedResult<MergedEvent>> => {
       const collection = await getCollection(COLLECTIONS.EVENTS);
 
-      // Performance optimization: Always use a limit to prevent loading massive datasets
-      // Default to 50000 events max if no pagination specified (for backward compatibility)
-      const DEFAULT_MAX_EVENTS = 50000;
-
       if (!params || (!params.page && !params.pageSize)) {
-        // Return all events but with a safety limit
-        const docs = await collection
+        let query = collection
           .find({ catalogue_id: catalogueId })
-          .sort({ time: -1 })
-          .limit(DEFAULT_MAX_EVENTS)
-          .toArray();
+          .sort({ time: -1 });
+
+        // Optional cap for deployments that want to bound unpaginated payloads.
+        // If UNPAGINATED_EVENTS_LIMIT is unset, return all matching events.
+        if (UNPAGINATED_EVENTS_LIMIT) {
+          query = query.limit(UNPAGINATED_EVENTS_LIMIT);
+        }
+
+        const docs = await query.toArray();
         return toPlainArray<MergedEvent>(docs);
       }
 
@@ -813,9 +824,6 @@ if (typeof window === 'undefined') {
     getFilteredEvents: async (catalogueId: string, filters: EventFilters): Promise<FilteredEventsResult> => {
       const collection = await getCollection(COLLECTIONS.EVENTS);
 
-      // Safety limit to prevent memory exhaustion
-      const MAX_FILTERED_EVENTS = 50000;
-
       const query: Record<string, unknown> = { catalogue_id: catalogueId };
 
       if (filters.minMagnitude !== undefined) query.magnitude = { ...(query.magnitude as object), $gte: filters.minMagnitude };
@@ -837,14 +845,23 @@ if (typeof window === 'undefined') {
       if (filters.minLongitude !== undefined) query.longitude = { ...(query.longitude as object), $gte: filters.minLongitude };
       if (filters.maxLongitude !== undefined) query.longitude = { ...(query.longitude as object), $lte: filters.maxLongitude };
 
-      const docs = await collection.find(query).sort({ time: -1 }).limit(MAX_FILTERED_EVENTS + 1).toArray();
-      const truncated = docs.length > MAX_FILTERED_EVENTS;
-      const limitedDocs = truncated ? docs.slice(0, MAX_FILTERED_EVENTS) : docs;
+      let docs: WithId<Document>[];
+      let truncated = false;
+
+      if (FILTERED_EVENTS_LIMIT) {
+        docs = await collection.find(query).sort({ time: -1 }).limit(FILTERED_EVENTS_LIMIT + 1).toArray();
+        truncated = docs.length > FILTERED_EVENTS_LIMIT;
+      } else {
+        docs = await collection.find(query).sort({ time: -1 }).toArray();
+      }
+
+      const limitedDocs = truncated && FILTERED_EVENTS_LIMIT ? docs.slice(0, FILTERED_EVENTS_LIMIT) : docs;
 
       return {
         events: toPlainArray<MergedEvent>(limitedDocs),
         truncated,
-        limit: MAX_FILTERED_EVENTS,
+        // 0 means "no configured server-side cap" for this endpoint.
+        limit: FILTERED_EVENTS_LIMIT || 0,
       };
     },
 
