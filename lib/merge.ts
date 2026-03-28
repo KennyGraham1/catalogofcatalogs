@@ -243,6 +243,11 @@ async function executeMergeOperation(
     throw new Error('Database not initialized');
   }
 
+  // Reset the conflict log so getMergeConflictLog() always reflects this operation only.
+  // (Node.js is single-threaded for JS execution, so this is safe for sequential requests;
+  //  concurrent async merge calls would still interleave — avoid that at the call site.)
+  mergeConflictLog.clear();
+
   try {
     // Insert the merged catalogue record (skip if export-only mode)
     if (!exportOnly) {
@@ -731,10 +736,19 @@ function splitNode(
   ];
 
   for (const bounds of childBounds) {
+    // Use half-open intervals [min, mid) for the lower quadrants and [mid, max] for the
+    // upper quadrants.  The strict `< bounds.maxLat/Lon` check previously dropped events
+    // whose coordinate exactly equalled the node's maximum boundary — they were assigned
+    // to no child and silently lost when eventIndices was cleared below.
+    // The fix: when a child's upper bound matches the *parent's* upper bound, use `<=`
+    // (inclusive) so those boundary events are captured by the upper-bound child.
     const childIndices = node.eventIndices.filter(i => {
       const e = events[i];
-      return e.latitude >= bounds.minLat && e.latitude < bounds.maxLat &&
-             e.longitude >= bounds.minLon && e.longitude < bounds.maxLon;
+      const latOk = e.latitude >= bounds.minLat &&
+        (bounds.maxLat === maxLat ? e.latitude <= bounds.maxLat : e.latitude < bounds.maxLat);
+      const lonOk = e.longitude >= bounds.minLon &&
+        (bounds.maxLon === maxLon ? e.longitude <= bounds.maxLon : e.longitude < bounds.maxLon);
+      return latOk && lonOk;
     });
 
     if (childIndices.length > 0) {
@@ -848,37 +862,38 @@ function getGridKey(lat: number, lon: number, cellSize: number): string {
 }
 
 /**
- * Get all grid cells within distance threshold of a point
- * Returns the center cell and all 8 neighboring cells
+ * Get all grid cells within distance threshold of a point.
  *
- * IMPROVEMENT (Issue #5): Handles International Date Line wrapping
- * Ensures longitude cells wrap correctly at ±180°
+ * IMPROVEMENT (Issue #5): Handles International Date Line wrapping.
+ * IMPROVEMENT (Issue #1): Accepts radiusCells so callers can widen the search
+ * neighbourhood for large/deep events whose adaptive threshold exceeds one cell width.
  *
  * @param lat - Latitude in degrees
  * @param lon - Longitude in degrees
  * @param cellSize - Cell size in degrees
+ * @param radiusCells - How many cells to extend in each direction (default 1 → 3×3 grid)
  * @returns Array of grid cell keys
  */
-function getNearbyCells(lat: number, lon: number, cellSize: number): string[] {
+function getNearbyCells(lat: number, lon: number, cellSize: number, radiusCells: number = 1): string[] {
   const normalizedLon = normalizeLongitude(lon);
   const centerLatCell = Math.floor(lat / cellSize);
   const centerLonCell = Math.floor(normalizedLon / cellSize);
 
   const cells: string[] = [];
 
-  // Include center cell and all 8 neighbors
-  for (let latOffset = -1; latOffset <= 1; latOffset++) {
-    for (let lonOffset = -1; lonOffset <= 1; lonOffset++) {
+  for (let latOffset = -radiusCells; latOffset <= radiusCells; latOffset++) {
+    for (let lonOffset = -radiusCells; lonOffset <= radiusCells; lonOffset++) {
       const latCell = centerLatCell + latOffset;
       let lonCell = centerLonCell + lonOffset;
 
-      // Handle date line wrapping
-      // If the longitude cell goes beyond ±180°, wrap it around
+      // Handle date line wrapping. Use Math.round so that the number of cells
+      // subtracted/added represents exactly 360° regardless of floating-point
+      // rounding in cellSize (Math.floor can be off by 1 for non-integer ratios).
       const lonDegrees = lonCell * cellSize;
       if (lonDegrees > 180) {
-        lonCell -= Math.floor(360 / cellSize);
+        lonCell -= Math.round(360 / cellSize);
       } else if (lonDegrees < -180) {
-        lonCell += Math.floor(360 / cellSize);
+        lonCell += Math.round(360 / cellSize);
       }
 
       cells.push(`${latCell},${lonCell}`);
@@ -1014,6 +1029,53 @@ function eventsMatchAdaptive(
 }
 
 /**
+ * IMPROVEMENT (Issue #9): Re-group events from a failed validation group.
+ *
+ * When a group fails validateEventGroup (e.g. one outlier pushes the magnitude range
+ * over threshold), the previous behaviour turned every event into a singleton, losing
+ * valid cross-catalogue duplicates that happened to share the group with the outlier.
+ *
+ * This function runs a one-level greedy pairwise match strictly within the failed group:
+ * - Two events in the group are paired if eventsMatchAdaptive returns true.
+ * - Each resulting sub-group is validated; if it passes it is kept as a merge group.
+ * - Sub-groups that still fail validation, and any unmatched events, become singletons.
+ *
+ * @param events - Events from the failed group (already known to co-locate)
+ * @param config - Merge configuration
+ * @returns Array of sub-groups (each sub-group is an array of 1+ events to merge together)
+ */
+function regroupFailedEvents(events: EventData[], config: MergeConfig): EventData[][] {
+  const result: EventData[][] = [];
+  const processed = new Set<number>();
+
+  for (let i = 0; i < events.length; i++) {
+    if (processed.has(i)) continue;
+
+    const group: EventData[] = [events[i]];
+    processed.add(i);
+
+    for (let j = i + 1; j < events.length; j++) {
+      if (processed.has(j)) continue;
+      if (eventsMatchAdaptive(events[i], events[j], config.timeThreshold, config.distanceThreshold)) {
+        group.push(events[j]);
+        processed.add(j);
+      }
+    }
+
+    if (group.length === 1 || validateEventGroup(group)) {
+      result.push(group);
+    } else {
+      // Sub-group still invalid — emit each as a singleton rather than recursing
+      for (const e of group) {
+        result.push([e]);
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
  * Core merge algorithm - matches events across catalogues
  *
  * Performance Optimization: Uses spatial indexing to reduce complexity from O(n²) to O(n log n)
@@ -1053,11 +1115,18 @@ function performMerge(
     const matchingEvents: EventData[] = [currentEvent];
     processedIndices.add(i);
 
-    // Performance Optimization: Only search events in nearby grid cells
+    // IMPROVEMENT (Issue #1): Widen the neighbourhood to cover the adaptive distance
+    // threshold.  The cell size was built for the base config threshold; large/deep events
+    // can have effective thresholds up to 4.0 × 1.5 = 6× larger, so we need more cells.
+    const distCells = Math.ceil(
+      getDistanceMultiplier(currentEvent.magnitude) *
+      getDepthMultiplier(currentEvent.depth ?? null)
+    );
     const nearbyCells = getNearbyCells(
       currentEvent.latitude,
       currentEvent.longitude,
-      spatialIndex.cellSize
+      spatialIndex.cellSize,
+      distCells
     );
 
     const candidateIndices = new Set<number>();
@@ -1081,11 +1150,13 @@ function performMerge(
       const j = candidateArray[k];
       const candidateEvent = sortedEvents[j];
 
-      // Early termination: since candidates are now sorted by time,
-      // if time difference exceeds threshold, all remaining candidates will too
-      const timeDiff = Math.abs(currentEvent._timestamp - candidateEvent._timestamp) / 1000; // Convert ms to seconds
-      if (timeDiff > config.timeThreshold * getTimeMultiplier(currentEvent.magnitude)) {
-        break; // Safe to break since candidates are time-sorted
+      // IMPROVEMENT (Issue #2): Early termination uses max(currentMagnitude,
+      // candidateMagnitude) so we never break before eventsMatchAdaptive (which uses
+      // the average) would accept a candidate with a higher magnitude than currentEvent.
+      const timeDiff = Math.abs(currentEvent._timestamp - candidateEvent._timestamp) / 1000;
+      const maxMagnitude = Math.max(currentEvent.magnitude, candidateEvent.magnitude);
+      if (timeDiff > config.timeThreshold * getTimeMultiplier(maxMagnitude)) {
+        break; // Safe: candidates are time-sorted, so all remaining also exceed threshold
       }
 
       // Use adaptive thresholds based on magnitude and depth
@@ -1100,14 +1171,13 @@ function performMerge(
       }
     }
 
-    // IMPROVEMENT (Issue #9): Validate event group before merging
+    // IMPROVEMENT (Issue #9): Validate event group before merging.
+    // When validation fails, try to salvage valid sub-groups instead of making all singletons.
     if (matchingEvents.length > 1 && !validateEventGroup(matchingEvents)) {
-      console.warn(`[Merge] Skipping suspicious event group with ${matchingEvents.length} events - validation failed`);
-      // Process events individually instead of merging
-      matchingEvents.forEach(event => {
-        const singleEvent = mergeEventGroup([event], config);
-        mergedEvents.push(singleEvent);
-      });
+      console.warn(`[Merge] Event group with ${matchingEvents.length} events failed validation — attempting sub-grouping`);
+      for (const subGroup of regroupFailedEvents(matchingEvents, config)) {
+        mergedEvents.push(mergeEventGroup(subGroup, config));
+      }
       continue;
     }
 
@@ -1252,7 +1322,10 @@ function validateEventGroup(events: EventData[]): boolean {
     const lats = events.map(e => e.latitude);
     const lons = events.map(e => e.longitude);
     const latSpread = Math.max(...lats) - Math.min(...lats);
-    const lonSpread = Math.max(...lons) - Math.min(...lons);
+    // Handle date line crossing: raw spread > 180° means events cluster near ±180°
+    // and the true angular gap is the complement (e.g. 178° and -178° are only 4° apart).
+    const rawLonSpread = Math.max(...lons) - Math.min(...lons);
+    const lonSpread = rawLonSpread > 180 ? 360 - rawLonSpread : rawLonSpread;
 
     // Convert to approximate km (rough estimate)
     const spreadKm = Math.sqrt(
@@ -1282,6 +1355,56 @@ function validateEventGroup(events: EventData[]): boolean {
     }
   }
 
+  // IMPROVEMENT (Issue #7): network_mismatch — same source appearing more than once in a
+  // group means the same network reported two events for the same physical earthquake.
+  // Most likely these are two distinct earthquakes that happen to be close in time/space
+  // (e.g. foreshock/aftershock pair), so we should not merge them.
+  const sourceCounts = new Map<string, number>();
+  for (const e of events) {
+    sourceCounts.set(e.source, (sourceCounts.get(e.source) ?? 0) + 1);
+  }
+  const duplicateSources = Array.from(sourceCounts.entries()).filter(([, count]) => count > 1);
+  if (duplicateSources.length > 0) {
+    mergeConflictLog.log(
+      'network_mismatch',
+      'warning',
+      `Same network appears multiple times in group: ${duplicateSources.map(([s]) => s).join(', ')} — likely distinct events`,
+      {
+        eventIds,
+        sources,
+        values: { duplicateSources: Object.fromEntries(duplicateSources) },
+        location: { lat: avgLat, lon: avgLon },
+        time: avgTime,
+      }
+    );
+    return false;
+  }
+
+  // IMPROVEMENT (Issue #7): time_inconsistency — informational flag when the time spread
+  // within an otherwise valid group is unusually large.  The hard gate is in
+  // eventsMatchAdaptive; this is a softer QC note for reviewers.
+  const timestamps = events.map(e => (e as any)._timestamp ?? new Date(e.time).getTime());
+  const timeSpreadSec = (Math.max(...timestamps) - Math.min(...timestamps)) / 1000;
+  const timeConsistencyThreshold = avgMag < 5 ? 30 : 60; // seconds
+  if (timeSpreadSec > timeConsistencyThreshold) {
+    mergeConflictLog.log(
+      'time_inconsistency',
+      'info',
+      `Wide time spread within group: ${timeSpreadSec.toFixed(1)}s (informational threshold: ${timeConsistencyThreshold}s)`,
+      {
+        eventIds,
+        sources,
+        values: { timeSpreadSec },
+        threshold: timeConsistencyThreshold,
+        actualValue: timeSpreadSec,
+        location: { lat: avgLat, lon: avgLon },
+        time: avgTime,
+      }
+    );
+    // Do not return false — time was already validated by eventsMatchAdaptive;
+    // this is logged for QC review only.
+  }
+
   return true;
 }
 
@@ -1298,7 +1421,7 @@ function mergeEventGroup(
     return {
       ...events[0],
       sourceEvents: [{
-        catalogueId: events[0].id || 'unknown',
+        catalogueId: events[0].catalogueId ?? events[0].id ?? 'unknown',
         source: events[0].source,
         originalData: events[0]
       }]
@@ -2271,7 +2394,7 @@ function mergeByAverage(events: EventData[]): MergedEventData {
     magnitude: bestMagnitude.value,
     source: 'merged',
     sourceEvents: events.map(e => ({
-      catalogueId: e.id || 'unknown',
+      catalogueId: e.catalogueId ?? e.id ?? 'unknown',
       source: e.source,
       originalData: e
     }))
@@ -2292,7 +2415,7 @@ function mergeByNewest(events: EventData[]): MergedEventData {
   return {
     ...newestEvent,
     sourceEvents: events.map(e => ({
-      catalogueId: e.id || 'unknown',
+      catalogueId: e.catalogueId ?? e.id ?? 'unknown',
       source: e.source,
       originalData: e
     }))
@@ -2304,54 +2427,34 @@ function mergeByNewest(events: EventData[]): MergedEventData {
  * Considers both basic fields and QuakeML extended data
  */
 function mergeByCompleteness(events: EventData[]): MergedEventData {
-  const mostComplete = events.reduce((best, e) => {
-    // Count basic fields
-    const eFieldCount = Object.values(e).filter(v => v != null).length;
-    const bestFieldCount = Object.values(best).filter(v => v != null).length;
-
-    // Add bonus for QuakeML data
-    let eScore = eFieldCount;
-    let bestScore = bestFieldCount;
-
+  // Score each event once to avoid re-computing the accumulator's score on every
+  // reduce iteration (which was O(n²) field-count traversals).
+  const scoreEvent = (e: EventData): number => {
+    let score = Object.values(e).filter(v => v != null).length;
     if (e.quakeml) {
-      // Add points for having QuakeML data
-      eScore += 10;
-
-      // Add points for each type of detailed data
-      if (e.quakeml.origins && e.quakeml.origins.length > 0) eScore += 5;
-      if (e.quakeml.magnitudes && e.quakeml.magnitudes.length > 0) eScore += 5;
-      if (e.quakeml.picks && e.quakeml.picks.length > 0) eScore += 3;
-      if ((e.quakeml as any).arrivals && (e.quakeml as any).arrivals.length > 0) eScore += 3;
-      if (e.quakeml.focalMechanisms && e.quakeml.focalMechanisms.length > 0) eScore += 2;
-      if (e.quakeml.amplitudes && e.quakeml.amplitudes.length > 0) eScore += 2;
-
-      // Add points for quality metrics
+      score += 10;
+      if (e.quakeml.origins && e.quakeml.origins.length > 0) score += 5;
+      if (e.quakeml.magnitudes && e.quakeml.magnitudes.length > 0) score += 5;
+      if (e.quakeml.picks && e.quakeml.picks.length > 0) score += 3;
+      if ((e.quakeml as any).arrivals && (e.quakeml as any).arrivals.length > 0) score += 3;
+      if (e.quakeml.focalMechanisms && e.quakeml.focalMechanisms.length > 0) score += 2;
+      if (e.quakeml.amplitudes && e.quakeml.amplitudes.length > 0) score += 2;
       const preferredOrigin = e.quakeml.origins?.find(o => o.publicID === e.quakeml?.preferredOriginID) || e.quakeml.origins?.[0];
-      if (preferredOrigin?.quality) eScore += 3;
-      if (preferredOrigin?.uncertainty) eScore += 2;
+      if (preferredOrigin?.quality) score += 3;
+      if (preferredOrigin?.uncertainty) score += 2;
     }
+    return score;
+  };
 
-    if (best.quakeml) {
-      bestScore += 10;
-      if (best.quakeml.origins && best.quakeml.origins.length > 0) bestScore += 5;
-      if (best.quakeml.magnitudes && best.quakeml.magnitudes.length > 0) bestScore += 5;
-      if (best.quakeml.picks && best.quakeml.picks.length > 0) bestScore += 3;
-      if ((best.quakeml as any).arrivals && (best.quakeml as any).arrivals.length > 0) bestScore += 3;
-      if (best.quakeml.focalMechanisms && best.quakeml.focalMechanisms.length > 0) bestScore += 2;
-      if (best.quakeml.amplitudes && best.quakeml.amplitudes.length > 0) bestScore += 2;
-
-      const preferredOrigin = best.quakeml.origins?.find(o => o.publicID === best.quakeml?.preferredOriginID) || best.quakeml.origins?.[0];
-      if (preferredOrigin?.quality) bestScore += 3;
-      if (preferredOrigin?.uncertainty) bestScore += 2;
-    }
-
-    return eScore > bestScore ? e : best;
-  });
+  const mostComplete = events
+    .map(e => ({ event: e, score: scoreEvent(e) }))
+    .reduce((best, curr) => curr.score > best.score ? curr : best)
+    .event;
 
   return {
     ...mostComplete,
     sourceEvents: events.map(e => ({
-      catalogueId: e.id || 'unknown',
+      catalogueId: e.catalogueId ?? e.id ?? 'unknown',
       source: e.source,
       originalData: e
     }))
@@ -2518,16 +2621,17 @@ function calculateQualityScore(event: EventData): number {
  * @returns Merged event with best quality
  */
 function mergeByQuality(events: EventData[]): MergedEventData {
-  const bestEvent = events.reduce((best, e) => {
-    const eScore = calculateQualityScore(e);
-    const bestScore = calculateQualityScore(best);
-    return eScore > bestScore ? e : best;
-  });
+  // Pre-score all events once to avoid O(n²) recalculation of the accumulator
+  // on every iteration of a plain reduce.
+  const bestEvent = events
+    .map(e => ({ event: e, score: calculateQualityScore(e) }))
+    .reduce((best, curr) => curr.score > best.score ? curr : best)
+    .event;
 
   return {
     ...bestEvent,
     sourceEvents: events.map(e => ({
-      catalogueId: e.id || 'unknown',
+      catalogueId: e.catalogueId ?? e.id ?? 'unknown',
       source: e.source,
       originalData: e
     }))
@@ -2575,7 +2679,7 @@ function mergeByPriority(events: EventData[], priority: string): MergedEventData
   return {
     ...selectedEvent,
     sourceEvents: events.map(e => ({
-      catalogueId: e.id || 'unknown',
+      catalogueId: e.catalogueId ?? e.id ?? 'unknown',
       source: e.source,
       originalData: e
     }))
@@ -2627,11 +2731,9 @@ export async function previewMerge(
   const totalEventsAfter = duplicateGroups.length;
   const duplicatesRemoved = totalEventsBefore - totalEventsAfter;
 
-  // Identify suspicious matches
-  const suspiciousGroups = duplicateGroups.filter(group => {
-    if (group.events.length < 2) return false;
-    return !validateEventGroup(group.events);
-  });
+  // Identify suspicious matches — use the flag already set by performMergeWithGroups
+  // to avoid calling validateEventGroup a second time (which would double-log conflicts).
+  const suspiciousGroups = duplicateGroups.filter(group => group.isSuspicious);
 
   return {
     duplicateGroups: duplicateGroups.map(group => ({
@@ -2710,11 +2812,16 @@ function performMergeWithGroups(
     const matchingEvents: EventData[] = [currentEvent];
     processedIndices.add(i);
 
-    // Find matching events
+    // IMPROVEMENT (Issue #1): Adaptive neighbourhood radius
+    const distCells = Math.ceil(
+      getDistanceMultiplier(currentEvent.magnitude) *
+      getDepthMultiplier(currentEvent.depth ?? null)
+    );
     const nearbyCells = getNearbyCells(
       currentEvent.latitude,
       currentEvent.longitude,
-      spatialIndex.cellSize
+      spatialIndex.cellSize,
+      distCells
     );
 
     const candidateIndices = new Set<number>();
@@ -2728,7 +2835,6 @@ function performMergeWithGroups(
     }
 
     // Sort candidates by timestamp for efficient early termination
-    // (spatial grid returns unsorted indices)
     const candidateArray = Array.from(candidateIndices).sort(
       (a, b) => sortedEvents[a]._timestamp - sortedEvents[b]._timestamp
     );
@@ -2737,11 +2843,11 @@ function performMergeWithGroups(
       const j = candidateArray[k];
       const candidateEvent = sortedEvents[j];
 
-      // Early termination: since candidates are now sorted by time,
-      // if time difference exceeds threshold, all remaining candidates will too
-      const timeDiff = Math.abs(currentEvent._timestamp - candidateEvent._timestamp) / 1000; // Convert ms to seconds
-      if (timeDiff > config.timeThreshold * getTimeMultiplier(currentEvent.magnitude)) {
-        break; // Safe to break since candidates are time-sorted
+      // IMPROVEMENT (Issue #2): Use max magnitude for early termination
+      const timeDiff = Math.abs(currentEvent._timestamp - candidateEvent._timestamp) / 1000;
+      const maxMagnitude = Math.max(currentEvent.magnitude, candidateEvent.magnitude);
+      if (timeDiff > config.timeThreshold * getTimeMultiplier(maxMagnitude)) {
+        break;
       }
 
       if (eventsMatchAdaptive(
@@ -2760,32 +2866,50 @@ function performMergeWithGroups(
     const validationWarnings: string[] = [];
 
     if (matchingEvents.length > 1) {
-      // Check magnitude consistency
+      // Use the same graduated thresholds as validateEventGroup so the preview
+      // warnings are consistent with what actually gates the merge.
       const magnitudes = matchingEvents.map(e => e.magnitude);
+      const avgMagPreview = magnitudes.reduce((a, b) => a + b, 0) / magnitudes.length;
       const magRange = Math.max(...magnitudes) - Math.min(...magnitudes);
-      if (magRange > 1.0) {
-        validationWarnings.push(`Large magnitude range: ${magRange.toFixed(2)} units`);
+      const maxMagRange = avgMagPreview < 4.0 ? 0.5
+        : avgMagPreview < 5.5 ? 0.8
+        : avgMagPreview < 7.0 ? 1.2
+        : 1.5;
+      if (magRange > maxMagRange) {
+        validationWarnings.push(`Large magnitude range: ${magRange.toFixed(2)} units (threshold: ${maxMagRange})`);
       }
 
-      // Check depth consistency
       const depths = matchingEvents.filter(e => e.depth != null).map(e => e.depth!);
       if (depths.length > 1) {
         const depthRange = Math.max(...depths) - Math.min(...depths);
-        const maxDepth = Math.max(...depths);
-        const threshold = maxDepth > 300 ? 200 : 100;
-        if (depthRange > threshold) {
-          validationWarnings.push(`Large depth range: ${depthRange.toFixed(1)} km`);
+        const avgDepth = depths.reduce((a, b) => a + b, 0) / depths.length;
+        const maxDepthRange = avgDepth < 70
+          ? (avgMagPreview < 5 ? 30 : 50)
+          : avgDepth < 300
+            ? (avgMagPreview < 5 ? 50 : 100)
+            : (avgMagPreview < 5 ? 100 : 150);
+        if (depthRange > maxDepthRange) {
+          validationWarnings.push(`Large depth range: ${depthRange.toFixed(1)} km (threshold: ${maxDepthRange} km)`);
         }
       }
     }
 
-    // Determine which event would be selected
+    // Determine which event would be selected.
+    // For 'average' the merged location is interpolated and won't match any source event
+    // exactly — identify the contributing event by time alone (mergeByAverage uses the
+    // earliest event's timestamp). For all other strategies a single source event is
+    // selected wholesale, so all three fields must agree.
     const mergedEvent = mergeEventGroup(matchingEvents, config);
-    const selectedEventIndex = matchingEvents.findIndex(e =>
-      e.time === mergedEvent.time &&
-      e.latitude === mergedEvent.latitude &&
-      e.longitude === mergedEvent.longitude
-    );
+    let selectedEventIndex: number;
+    if (config.mergeStrategy === 'average') {
+      selectedEventIndex = matchingEvents.findIndex(e => e.time === mergedEvent.time);
+    } else {
+      selectedEventIndex = matchingEvents.findIndex(e =>
+        e.time === mergedEvent.time &&
+        e.latitude === mergedEvent.latitude &&
+        e.longitude === mergedEvent.longitude
+      );
+    }
 
     groups.push({
       id: `group-${i}`,
@@ -2822,6 +2946,7 @@ export async function getMergedEvents(catalogueId: string) {
 
 // Export internal functions for testing
 export {
+  regroupFailedEvents,
   normalizeLongitude,
   getDistanceMultiplier,
   getDepthMultiplier,
