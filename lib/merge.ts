@@ -1610,6 +1610,22 @@ function unionMergeFields(base: MergedEventData, events: EventData[]): MergedEve
 }
 
 /**
+ * Strip transient/redundant fields from an event before it is stored inside
+ * the `source_events` JSON column.
+ *
+ * - `_timestamp` is an internal performance cache added during the sort sweep;
+ *   it must not be persisted.
+ * - `quakeml` is the full parsed QuakeML object.  Its fields are already
+ *   serialised individually into `origins`, `picks`, `magnitudes`, etc., so
+ *   embedding it again inside every source-event entry would be massive
+ *   redundancy that bloats the `source_events` blob for no benefit.
+ */
+function toSourceEventData(e: EventData): EventData {
+  const { _timestamp, quakeml, ...rest } = e as any;
+  return rest as EventData;
+}
+
+/**
  * Merge a group of matching events based on the selected strategy.
  * After the strategy selects the base record, a field-level union pass
  * fills in any optional fields that the base event lacks from other sources.
@@ -1624,7 +1640,7 @@ function mergeEventGroup(
       sourceEvents: [{
         catalogueId: events[0].catalogueId ?? events[0].id ?? 'unknown',
         source: events[0].source,
-        originalData: events[0]
+        originalData: toSourceEventData(events[0])
       }]
     };
   }
@@ -2610,7 +2626,7 @@ function mergeByAverage(events: EventData[]): MergedEventData {
     sourceEvents: events.map(e => ({
       catalogueId: e.catalogueId ?? e.id ?? 'unknown',
       source: e.source,
-      originalData: e
+      originalData: toSourceEventData(e)
     }))
   };
 }
@@ -2631,7 +2647,7 @@ function mergeByNewest(events: EventData[]): MergedEventData {
     sourceEvents: events.map(e => ({
       catalogueId: e.catalogueId ?? e.id ?? 'unknown',
       source: e.source,
-      originalData: e
+      originalData: toSourceEventData(e)
     }))
   };
 }
@@ -2670,7 +2686,7 @@ function mergeByCompleteness(events: EventData[]): MergedEventData {
     sourceEvents: events.map(e => ({
       catalogueId: e.catalogueId ?? e.id ?? 'unknown',
       source: e.source,
-      originalData: e
+      originalData: toSourceEventData(e)
     }))
   };
 }
@@ -2847,7 +2863,7 @@ function mergeByQuality(events: EventData[]): MergedEventData {
     sourceEvents: events.map(e => ({
       catalogueId: e.catalogueId ?? e.id ?? 'unknown',
       source: e.source,
-      originalData: e
+      originalData: toSourceEventData(e)
     }))
   };
 }
@@ -2897,7 +2913,7 @@ function mergeByPriority(events: EventData[], priority: string): MergedEventData
     sourceEvents: events.map(e => ({
       catalogueId: e.catalogueId ?? e.id ?? 'unknown',
       source: e.source,
-      originalData: e
+      originalData: toSourceEventData(e)
     }))
   };
 }
