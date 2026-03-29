@@ -342,6 +342,26 @@ async function executeMergeOperation(
       source_events: string;
     }> = [];
 
+    // Declared once outside the loop — avoids allocating a new array per event.
+    const OPTIONAL_DB_FIELDS: ReadonlyArray<string> = [
+      'source_id', 'region', 'location_name',
+      'event_public_id', 'event_type', 'event_type_certainty',
+      'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty',
+      'depth_uncertainty', 'horizontal_uncertainty',
+      'depth_type', 'earth_model_id', 'method_id',
+      'agency_id', 'author',
+      'magnitude_type', 'magnitude_uncertainty', 'magnitude_station_count',
+      'magnitude_method_id', 'magnitude_evaluation_mode', 'magnitude_evaluation_status',
+      'azimuthal_gap', 'used_phase_count', 'used_station_count', 'standard_error',
+      'minimum_distance', 'maximum_distance',
+      'associated_phase_count', 'associated_station_count', 'depth_phase_count',
+      'evaluation_mode', 'evaluation_status',
+      'preferred_origin_id', 'preferred_magnitude_id',
+      'origin_quality', 'origins', 'magnitudes', 'picks', 'arrivals',
+      'focal_mechanisms', 'amplitudes', 'station_magnitudes',
+      'event_descriptions', 'comments', 'creation_info',
+    ];
+
     for (const event of mergedEvents) {
       // Extract QuakeML data if available
       const quakeml = event.quakeml;
@@ -462,6 +482,19 @@ async function executeMergeOperation(
         }
         if (quakeml.creationInfo) {
           dbEvent.creation_info = JSON.stringify(quakeml.creationInfo);
+        }
+      }
+
+      // Null-normalise every optional MergedEvent field.
+      // MongoDB stores only keys that are present on the inserted document, which
+      // means a missing field produces `undefined` on read — indistinguishable at
+      // the application layer from a field that was explicitly cleared.  By writing
+      // an explicit `null` for every absent optional field we establish a single
+      // canonical "no data" sentinel and make schema introspection reliable.
+      // (OPTIONAL_DB_FIELDS is hoisted above the loop to avoid per-event allocation.)
+      for (const field of OPTIONAL_DB_FIELDS) {
+        if ((dbEvent as any)[field] === undefined) {
+          (dbEvent as any)[field] = null;
         }
       }
 
@@ -1045,23 +1078,45 @@ function eventsMatchAdaptive(
  * @returns Array of sub-groups (each sub-group is an array of 1+ events to merge together)
  */
 function regroupFailedEvents(events: EventData[], config: MergeConfig): EventData[][] {
-  const result: EventData[][] = [];
-  const processed = new Set<number>();
+  const n = events.length;
 
-  for (let i = 0; i < events.length; i++) {
-    if (processed.has(i)) continue;
-
-    const group: EventData[] = [events[i]];
-    processed.add(i);
-
-    for (let j = i + 1; j < events.length; j++) {
-      if (processed.has(j)) continue;
+  // Build an adjacency list: edge[i] contains all j>i where events match.
+  // This avoids the transitivity problem of a greedy left-to-right sweep: A may
+  // match B and B may match C without A matching C; each must be seeded as its
+  // own group anchor so the correct pairings are found regardless of order.
+  const adj: Set<number>[] = Array.from({ length: n }, () => new Set<number>());
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
       if (eventsMatchAdaptive(events[i], events[j], config.timeThreshold, config.distanceThreshold)) {
-        group.push(events[j]);
-        processed.add(j);
+        adj[i].add(j);
+        adj[j].add(i);
+      }
+    }
+  }
+
+  // Connected-components via BFS — each component is a maximally connected sub-group.
+  const visited = new Set<number>();
+  const result: EventData[][] = [];
+
+  for (let start = 0; start < n; start++) {
+    if (visited.has(start)) continue;
+
+    const component: number[] = [];
+    const queue = [start];
+    visited.add(start);
+
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      component.push(cur);
+      for (const neighbour of Array.from(adj[cur])) {
+        if (!visited.has(neighbour)) {
+          visited.add(neighbour);
+          queue.push(neighbour);
+        }
       }
     }
 
+    const group = component.map(i => events[i]);
     if (group.length === 1 || validateEventGroup(group)) {
       result.push(group);
     } else {
@@ -1213,7 +1268,7 @@ function validateEventGroup(events: EventData[]): boolean {
   const eventIds = events.map(e => e.id || 'unknown');
   const sources = events.map(e => e.source);
   const avgLat = events.reduce((sum, e) => sum + e.latitude, 0) / events.length;
-  const avgLon = events.reduce((sum, e) => sum + e.longitude, 0) / events.length;
+  const avgLon = averageLongitudes(events.map(e => e.longitude));
   const avgTime = events[0]?.time;
 
   // Get magnitude range and average
@@ -1408,10 +1463,156 @@ function validateEventGroup(events: EventData[]): boolean {
   return true;
 }
 
+// ============================================================================
+// FIELD-LEVEL UNION MERGE
+// ============================================================================
+
 /**
- * Merge a group of matching events based on the selected strategy
+ * Optional scalar fields from EventData that are eligible for field-level union.
  *
- * IMPROVEMENT (Issue #6): Added 'quality' strategy for quality-based selection
+ * These are fields that (a) are not computed by the merge algorithm itself and
+ * (b) have a clear "present beats absent" semantics — i.e. any non-null value
+ * from any source is better than null on the merged record.
+ *
+ * Fields deliberately excluded:
+ *   - time / latitude / longitude / depth / magnitude — overwritten by strategy
+ *   - source / id / catalogue_id — identity fields, not inherited
+ *   - quakeml — complex object; handled separately via JSON blob fields
+ *   - _timestamp — internal performance cache, not persisted
+ */
+const UNION_SCALAR_FIELDS: ReadonlyArray<keyof MergedEvent> = [
+  'region',
+  'location_name',
+  'source_id',
+  'event_public_id',
+  'event_type',
+  'event_type_certainty',
+  'time_uncertainty',
+  'latitude_uncertainty',
+  'longitude_uncertainty',
+  'depth_uncertainty',
+  'horizontal_uncertainty',
+  'depth_type',
+  'earth_model_id',
+  'method_id',
+  'agency_id',
+  'author',
+  'magnitude_type',
+  'magnitude_uncertainty',
+  'magnitude_station_count',
+  'magnitude_method_id',
+  'magnitude_evaluation_mode',
+  'magnitude_evaluation_status',
+  'azimuthal_gap',
+  'used_phase_count',
+  'used_station_count',
+  'standard_error',
+  'minimum_distance',
+  'maximum_distance',
+  'associated_phase_count',
+  'associated_station_count',
+  'depth_phase_count',
+  'evaluation_mode',
+  'evaluation_status',
+] as const;
+
+/**
+ * Optional JSON-blob fields: arrays of rich objects serialised as strings.
+ * For these, the highest-quality source that carries the field wins, but if
+ * the primary donor lacks the field entirely another source can fill it in.
+ */
+const UNION_BLOB_FIELDS: ReadonlyArray<keyof MergedEvent> = [
+  'origins',
+  'magnitudes',
+  'picks',
+  'arrivals',
+  'focal_mechanisms',
+  'amplitudes',
+  'station_magnitudes',
+  'event_descriptions',
+  'comments',
+  'creation_info',
+  'origin_quality',
+] as const;
+
+/**
+ * Apply a field-level union over a group of source events onto the already-
+ * selected merged base event.
+ *
+ * Strategy:
+ *   - For each optional scalar field: use the first non-null value found,
+ *     ranked by descending quality score (so better sources fill gaps first).
+ *   - For each JSON-blob field: same — take the first source that carries it.
+ *   - Fields that are already non-null on the base event are not overwritten.
+ *
+ * This means the merged record can carry `picks` from ISC even when the
+ * selected (highest-quality) base event came from GeoNet which had none.
+ *
+ * @param base   - Already-merged event from the strategy function
+ * @param events - All source events in the group, in any order
+ * @returns New event object with union-filled optional fields
+ */
+function unionMergeFields(base: MergedEventData, events: EventData[]): MergedEventData {
+  if (events.length <= 1) return base;
+
+  // Sort sources by descending quality so better data fills gaps first.
+  const ranked = events
+    .map(e => ({ event: e, score: calculateQualityScore(e) }))
+    .sort((a, b) => b.score - a.score)
+    .map(s => s.event);
+
+  const result: MergedEventData = { ...base };
+
+  // Scalar fields: first non-null value across ranked sources wins.
+  for (const field of UNION_SCALAR_FIELDS) {
+    if (result[field] != null) continue; // base already has it
+    for (const src of ranked) {
+      if (src[field] != null) {
+        (result as any)[field] = src[field];
+        break;
+      }
+    }
+  }
+
+  // JSON-blob fields: first source that carries the field wins.
+  // We also promote from the source event's quakeml when the field is absent
+  // on the top-level event object (quakeml blobs are serialised in executeMergeOperation).
+  for (const field of UNION_BLOB_FIELDS) {
+    if (result[field] != null) continue;
+    for (const src of ranked) {
+      if (src[field] != null) {
+        (result as any)[field] = src[field];
+        break;
+      }
+    }
+  }
+
+  // Focal mechanism: promote from any source with quakeml focalMechanisms when
+  // the base event's quakeml lacks them.
+  if (!result.quakeml?.focalMechanisms?.length) {
+    for (const src of ranked) {
+      if (src.quakeml?.focalMechanisms?.length) {
+        if (!result.quakeml) {
+          (result as any).quakeml = { ...src.quakeml };
+        } else {
+          (result as any).quakeml = {
+            ...result.quakeml,
+            focalMechanisms: src.quakeml.focalMechanisms,
+            preferredFocalMechanismID: src.quakeml.preferredFocalMechanismID,
+          };
+        }
+        break;
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Merge a group of matching events based on the selected strategy.
+ * After the strategy selects the base record, a field-level union pass
+ * fills in any optional fields that the base event lacks from other sources.
  */
 function mergeEventGroup(
   events: EventData[],
@@ -1449,7 +1650,9 @@ function mergeEventGroup(
       break;
   }
 
-  return mergedEvent;
+  // Apply field-level union: fill optional fields the base event lacks
+  // from other sources in the group.
+  return unionMergeFields(mergedEvent, events);
 }
 
 // ============================================================================
@@ -2078,13 +2281,13 @@ function selectByNetworkAuthority(
     return events[0];
   }
 
-  // Get first event for regional context
-  const referenceEvent = events[0];
-
-  // Score events by network priority and quality
+  // Score events by network priority and quality.
+  // Each event uses its own location as the regional reference so that events
+  // on region boundaries get the correct hierarchy (e.g. an event just inside
+  // NZ bounds is ranked by the NZ hierarchy, not by its neighbour's region).
   const scored = events.map(e => ({
     event: e,
-    networkPriority: getNetworkPriority(e.source, referenceEvent, customHierarchy),
+    networkPriority: getNetworkPriority(e.source, e, customHierarchy),
     qualityScore: calculateQualityScore(e),
   }));
 
@@ -2386,12 +2589,23 @@ function mergeByAverage(events: EventData[]): MergedEventData {
     return eTime < earliestTime ? e : earliest;
   });
 
+  // Spread the highest-quality source event so that QuakeML data, focal mechanisms,
+  // agency fields, and all other metadata are preserved on the merged record.
+  // The averaged location, best-hierarchy magnitude, best-uncertainty depth, and
+  // earliest time then overwrite only the fields that were actually computed.
+  const bestQualityEvent = events
+    .map(e => ({ event: e, score: calculateQualityScore(e) }))
+    .reduce((best, curr) => curr.score > best.score ? curr : best)
+    .event;
+
   return {
+    ...bestQualityEvent,
     time: earliestEvent.time,
     latitude: avgLat,
     longitude: avgLon,
     depth: bestDepth,
     magnitude: bestMagnitude.value,
+    magnitude_type: bestMagnitude.type !== 'unknown' ? bestMagnitude.type : bestQualityEvent.magnitude_type,
     source: 'merged',
     sourceEvents: events.map(e => ({
       catalogueId: e.catalogueId ?? e.id ?? 'unknown',
@@ -2655,9 +2869,11 @@ function mergeByPriority(events: EventData[], priority: string): MergedEventData
   let selectedEvent: EventData | undefined;
 
   if (priority === 'newest') {
-    selectedEvent = events.reduce((newest, e) =>
-      new Date(e.time) > new Date(newest.time) ? e : newest
-    );
+    selectedEvent = events.reduce((newest, e) => {
+      const eTime = (e as any)._timestamp ?? new Date(e.time).getTime();
+      const newestTime = (newest as any)._timestamp ?? new Date(newest.time).getTime();
+      return eTime > newestTime ? e : newest;
+    });
   } else if (priority === 'quality') {
     // Use quality-based selection
     return mergeByQuality(events);
@@ -2946,6 +3162,9 @@ export async function getMergedEvents(catalogueId: string) {
 
 // Export internal functions for testing
 export {
+  unionMergeFields,
+  UNION_SCALAR_FIELDS,
+  UNION_BLOB_FIELDS,
   regroupFailedEvents,
   normalizeLongitude,
   getDistanceMultiplier,

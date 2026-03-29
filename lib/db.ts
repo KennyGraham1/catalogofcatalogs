@@ -337,6 +337,178 @@ export interface SavedFilter {
   updated_at: string;
 }
 
+// ============================================================================
+// EVENT VALIDATION
+// ============================================================================
+
+/**
+ * Allowed values for QuakeML enumerated string fields.
+ * Sources: QuakeML 1.2 schema, ISC-GEM, FDSN standards.
+ * Exported so upload pipelines and tests can reuse the same constraints.
+ */
+export const ALLOWED_EVALUATION_STATUS = new Set([
+  'preliminary', 'confirmed', 'reviewed', 'final', 'rejected',
+]);
+
+export const ALLOWED_EVALUATION_MODE = new Set(['manual', 'automatic']);
+
+export const ALLOWED_DEPTH_TYPE = new Set([
+  'from location', 'from moment tensor inversion',
+  'from modeling of broad-band P waveforms',
+  'constrained by depth phases', 'constrained by direct phases',
+  'constrained by S-P time differences',
+  'operator assigned', 'other',
+]);
+
+export const ALLOWED_EVENT_TYPE = new Set([
+  'not existing', 'not reported', 'earthquake', 'anthropogenic event',
+  'collapse', 'cavity collapse', 'mine collapse', 'building collapse',
+  'explosion', 'accidental explosion', 'chemical explosion',
+  'controlled explosion', 'experimental explosion', 'industrial explosion',
+  'mining explosion', 'quarry blast', 'road cut', 'blasting levee',
+  'nuclear explosion', 'induced or triggered event', 'rock burst',
+  'reservoir loading', 'fluid injection', 'fluid extraction',
+  'crash', 'plane crash', 'train crash', 'boat crash',
+  'other event', 'atmospheric event', 'sonic boom', 'sonic blast',
+  'acoustic noise', 'thunder', 'avalanche', 'snow avalanche',
+  'debris avalanche', 'hydroacoustic event', 'ice quake', 'slide',
+  'landslide', 'rockslide', 'volcanic eruption', 'tremor',
+  'volcanic tremor', 'tectonic', 'volcanic', 'meteorite',
+]);
+
+export const ALLOWED_EVENT_TYPE_CERTAINTY = new Set(['suspected', 'known']);
+
+/**
+ * Validate a single MergedEvent record: required fields (coordinates, magnitude,
+ * timestamp, depth) plus optional enum and numeric-range fields.
+ *
+ * Throws an Error with a descriptive message on the first violation found.
+ * Call this before any insert operation to guarantee data integrity.
+ */
+export function validateMergedEvent(event: Partial<MergedEvent> & {
+  id: string;
+  catalogue_id: string;
+  time: string;
+  latitude: number;
+  longitude: number;
+  magnitude: number;
+  source_events: string;
+}): void {
+  // --- Required scalar fields ------------------------------------------------
+  if (event.latitude < -90 || event.latitude > 90) {
+    throw new Error(`[Event ${event.id}] Invalid latitude: ${event.latitude}. Must be between -90 and 90`);
+  }
+  if (event.longitude < -180 || event.longitude > 180) {
+    throw new Error(`[Event ${event.id}] Invalid longitude: ${event.longitude}. Must be between -180 and 180`);
+  }
+  if (event.magnitude < -3 || event.magnitude > 10) {
+    throw new Error(`[Event ${event.id}] Invalid magnitude: ${event.magnitude}. Must be between -3 and 10`);
+  }
+  if (event.depth !== null && event.depth !== undefined && (event.depth < -5 || event.depth > 1000)) {
+    throw new Error(`[Event ${event.id}] Invalid depth: ${event.depth}. Must be between -5 and 1000 km`);
+  }
+  const parsedTime = new Date(event.time);
+  if (isNaN(parsedTime.getTime())) {
+    throw new Error(`[Event ${event.id}] Invalid timestamp: ${event.time}`);
+  }
+
+  // --- Optional enum fields --------------------------------------------------
+  if (event.evaluation_status != null &&
+      !ALLOWED_EVALUATION_STATUS.has(event.evaluation_status.toLowerCase())) {
+    throw new Error(
+      `[Event ${event.id}] Invalid evaluation_status: "${event.evaluation_status}". ` +
+      `Allowed: ${Array.from(ALLOWED_EVALUATION_STATUS).join(', ')}`
+    );
+  }
+  if (event.evaluation_mode != null &&
+      !ALLOWED_EVALUATION_MODE.has(event.evaluation_mode.toLowerCase())) {
+    throw new Error(
+      `[Event ${event.id}] Invalid evaluation_mode: "${event.evaluation_mode}". ` +
+      `Allowed: ${Array.from(ALLOWED_EVALUATION_MODE).join(', ')}`
+    );
+  }
+  if (event.magnitude_evaluation_status != null &&
+      !ALLOWED_EVALUATION_STATUS.has(event.magnitude_evaluation_status.toLowerCase())) {
+    throw new Error(
+      `[Event ${event.id}] Invalid magnitude_evaluation_status: "${event.magnitude_evaluation_status}". ` +
+      `Allowed: ${Array.from(ALLOWED_EVALUATION_STATUS).join(', ')}`
+    );
+  }
+  if (event.magnitude_evaluation_mode != null &&
+      !ALLOWED_EVALUATION_MODE.has(event.magnitude_evaluation_mode.toLowerCase())) {
+    throw new Error(
+      `[Event ${event.id}] Invalid magnitude_evaluation_mode: "${event.magnitude_evaluation_mode}". ` +
+      `Allowed: ${Array.from(ALLOWED_EVALUATION_MODE).join(', ')}`
+    );
+  }
+  if (event.depth_type != null &&
+      !ALLOWED_DEPTH_TYPE.has(event.depth_type.toLowerCase())) {
+    throw new Error(
+      `[Event ${event.id}] Invalid depth_type: "${event.depth_type}". ` +
+      `Allowed: ${Array.from(ALLOWED_DEPTH_TYPE).join(', ')}`
+    );
+  }
+  if (event.event_type != null &&
+      !ALLOWED_EVENT_TYPE.has(event.event_type.toLowerCase())) {
+    throw new Error(
+      `[Event ${event.id}] Invalid event_type: "${event.event_type}". ` +
+      `Allowed: ${Array.from(ALLOWED_EVENT_TYPE).join(', ')}`
+    );
+  }
+  if (event.event_type_certainty != null &&
+      !ALLOWED_EVENT_TYPE_CERTAINTY.has(event.event_type_certainty.toLowerCase())) {
+    throw new Error(
+      `[Event ${event.id}] Invalid event_type_certainty: "${event.event_type_certainty}". ` +
+      `Allowed: ${Array.from(ALLOWED_EVENT_TYPE_CERTAINTY).join(', ')}`
+    );
+  }
+
+  // --- Optional numeric range fields -----------------------------------------
+  if (event.azimuthal_gap != null && (event.azimuthal_gap < 0 || event.azimuthal_gap > 360)) {
+    throw new Error(`[Event ${event.id}] Invalid azimuthal_gap: ${event.azimuthal_gap}. Must be between 0 and 360`);
+  }
+  if (event.magnitude_uncertainty != null && event.magnitude_uncertainty < 0) {
+    throw new Error(`[Event ${event.id}] Invalid magnitude_uncertainty: ${event.magnitude_uncertainty}. Must be >= 0`);
+  }
+  if (event.time_uncertainty != null && event.time_uncertainty < 0) {
+    throw new Error(`[Event ${event.id}] Invalid time_uncertainty: ${event.time_uncertainty}. Must be >= 0`);
+  }
+  if (event.latitude_uncertainty != null && event.latitude_uncertainty < 0) {
+    throw new Error(`[Event ${event.id}] Invalid latitude_uncertainty: ${event.latitude_uncertainty}. Must be >= 0`);
+  }
+  if (event.longitude_uncertainty != null && event.longitude_uncertainty < 0) {
+    throw new Error(`[Event ${event.id}] Invalid longitude_uncertainty: ${event.longitude_uncertainty}. Must be >= 0`);
+  }
+  if (event.depth_uncertainty != null && event.depth_uncertainty < 0) {
+    throw new Error(`[Event ${event.id}] Invalid depth_uncertainty: ${event.depth_uncertainty}. Must be >= 0`);
+  }
+  if (event.horizontal_uncertainty != null && event.horizontal_uncertainty < 0) {
+    throw new Error(`[Event ${event.id}] Invalid horizontal_uncertainty: ${event.horizontal_uncertainty}. Must be >= 0`);
+  }
+  if (event.used_station_count != null && event.used_station_count < 0) {
+    throw new Error(`[Event ${event.id}] Invalid used_station_count: ${event.used_station_count}. Must be >= 0`);
+  }
+  if (event.used_phase_count != null && event.used_phase_count < 0) {
+    throw new Error(`[Event ${event.id}] Invalid used_phase_count: ${event.used_phase_count}. Must be >= 0`);
+  }
+  if (event.standard_error != null && event.standard_error < 0) {
+    throw new Error(`[Event ${event.id}] Invalid standard_error: ${event.standard_error}. Must be >= 0`);
+  }
+  if (event.minimum_distance != null && event.minimum_distance < 0) {
+    throw new Error(`[Event ${event.id}] Invalid minimum_distance: ${event.minimum_distance}. Must be >= 0`);
+  }
+  if (event.maximum_distance != null && event.maximum_distance < 0) {
+    throw new Error(`[Event ${event.id}] Invalid maximum_distance: ${event.maximum_distance}. Must be >= 0`);
+  }
+  if (event.maximum_distance != null &&
+      event.minimum_distance != null &&
+      event.maximum_distance < event.minimum_distance) {
+    throw new Error(
+      `[Event ${event.id}] maximum_distance (${event.maximum_distance}) must be >= minimum_distance (${event.minimum_distance})`
+    );
+  }
+}
+
 // Event filter interface
 export interface EventFilters {
   minMagnitude?: number;
@@ -462,29 +634,7 @@ if (typeof window === 'undefined') {
       magnitude: number;
       source_events: string;
     }, session?: ClientSession): Promise<void> => {
-      // Validate coordinates
-      if (event.latitude < -90 || event.latitude > 90) {
-        throw new Error(`Invalid latitude: ${event.latitude}. Must be between -90 and 90`);
-      }
-      if (event.longitude < -180 || event.longitude > 180) {
-        throw new Error(`Invalid longitude: ${event.longitude}. Must be between -180 and 180`);
-      }
-
-      // Validate magnitude (allow negative for microquakes)
-      if (event.magnitude < -3 || event.magnitude > 10) {
-        throw new Error(`Invalid magnitude: ${event.magnitude}. Must be between -3 and 10`);
-      }
-
-      // Validate depth
-      if (event.depth !== null && event.depth !== undefined && (event.depth < 0 || event.depth > 1000)) {
-        throw new Error(`Invalid depth: ${event.depth}. Must be between 0 and 1000 km`);
-      }
-
-      // Validate timestamp
-      const date = new Date(event.time);
-      if (isNaN(date.getTime())) {
-        throw new Error(`Invalid timestamp: ${event.time}`);
-      }
+      validateMergedEvent(event);
 
       const collection = await getCollection(COLLECTIONS.EVENTS);
 
@@ -517,24 +667,10 @@ if (typeof window === 'undefined') {
         return;
       }
 
-      // Validate all events first
+      // Validate all events before touching the database — fail fast on the
+      // first invalid record so no partial batch is ever written.
       for (const event of events) {
-        if (event.latitude < -90 || event.latitude > 90) {
-          throw new Error(`Invalid latitude: ${event.latitude}. Must be between -90 and 90`);
-        }
-        if (event.longitude < -180 || event.longitude > 180) {
-          throw new Error(`Invalid longitude: ${event.longitude}. Must be between -180 and 180`);
-        }
-        if (event.magnitude < -3 || event.magnitude > 10) {
-          throw new Error(`Invalid magnitude: ${event.magnitude}. Must be between -3 and 10`);
-        }
-        if (event.depth !== null && event.depth !== undefined && (event.depth < -5 || event.depth > 1000)) {
-          throw new Error(`Invalid depth: ${event.depth}. Must be between -5 and 1000 km (negative = above sea level)`);
-        }
-        const date = new Date(event.time);
-        if (isNaN(date.getTime())) {
-          throw new Error(`Invalid timestamp: ${event.time}`);
-        }
+        validateMergedEvent(event);
       }
 
       const collection = await getCollection(COLLECTIONS.EVENTS);
