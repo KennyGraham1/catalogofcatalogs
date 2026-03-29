@@ -1,85 +1,227 @@
 % =============================================================================
-% CATALOGUE MERGING STRATEGIES
+% CATALOGUE MERGING STRATEGIES  —  detailed literature review
 % Self-contained section; include in main.tex with \input{merge_strategies}
-% Uses natbib \citep / \citet, booktabs, amsmath, and cleveref already loaded
-% in main.tex.
+% Requires: natbib (round), booktabs, amsmath, amssymb, longtable, float,
+%           cleveref (nameinlink,noabbrev), hyperref — all loaded in main.tex.
 % =============================================================================
 
-\section{Strategies for Merging Earthquake \catalogs}
+\section{Strategies for Merging Earthquake \Catalogs: A Literature Review}
 \label{sec:merging}
 
-Combining records from multiple seismic networks into a single unified \catalog\
-is a prerequisite for seismic-hazard analysis, time-series studies of regional
-seismicity, and magnitude-frequency assessments that draw on heterogeneous data
-archives \citep{woessner2010instrumental, corssa_woessner}.  The task
-decomposes into two conceptually distinct steps that must be treated
-separately in any robust implementation.
+% --  overview paragraph  -----------------------------------------------------
+
+The construction of unified earthquake \catalogs\ from multiple heterogeneous
+source networks is one of the central methodological challenges of observational
+seismology.  The need arises at every level of the discipline: global hazard
+models require decades of stable, magnitude-homogeneous records spanning
+multiple agencies \citep{Pagani2014}; regional seismic-rate studies must combine
+specialist national networks with global bulletins to fill spatial coverage gaps
+\citep{Woessner2005}; historical and pre-instrumental periods demand careful
+integration of macroseismic and early-instrumental data
+\citep{Grunthal1998, CPTI15}; and the growth of dense, heterogeneous strong-
+motion and nodal-sensor networks creates new challenges at sub-local scales
+\citep{Cochran2020}.
+
+Despite the ubiquity of the problem, no single standard algorithmic pipeline
+has emerged across the community.  Different groups have developed independent
+solutions—from the rule-based proximity approaches of the
+\citeauthor{NCEDCComCat}~(\citeyear{NCEDCComCat}) and the ISC bulletin
+\citep{Bondár2011}, to the graph-theoretic frameworks of
+\citet{Benz2019}, to the physics-based nearest-neighbour discriminant of
+\citet{Tanaka2022}—each optimised for different data volumes, network
+configurations, and seismicity regimes.  The goal of this review is to
+synthesise the methodological state of the art into a coherent framework that
+can inform automated merging implementations.
+
+\subsection{The Two-Step Decomposition}
+\label{sec:twostep}
+
+Any robust merging pipeline must separate two operations that are logically
+distinct but are frequently conflated in practice:
 
 \begin{enumerate}
-  \item \textbf{Event association and deduplication.}  Determining which records
+  \item \textbf{Event association and deduplication} — determining which records
         across source \catalogs\ describe the \emph{same physical earthquake}
-        and grouping them into clusters.
+        and grouping them into equivalence classes.
 
-  \item \textbf{Parameter selection and homogenisation.}  From each cluster,
-        selecting or computing a single best origin time, hypocenter, and
-        magnitude, and converting all magnitude estimates to a common scale.
+  \item \textbf{Parameter selection and homogenisation} — from each equivalence
+        class, deriving a single best origin time, hypocentre, and magnitude,
+        and expressing all magnitudes on a common scale.
 \end{enumerate}
 
-Conflating these steps—for instance by applying a magnitude conversion formula
-\emph{before} deciding whether two records are duplicates—introduces systematic
-biases that propagate into downstream analyses
-\citep{Storchak2013, Bondár2011}.
+The distinction matters because applying a magnitude conversion formula
+\emph{before} the association step—for instance to make thresholds
+magnitude-scale-independent—introduces feedback loops: converted magnitudes may
+shift an event across an association threshold, altering which pairs are grouped,
+which in turn changes the sample from which conversion coefficients are estimated
+\citep{Storchak2013, Grunthal2016}.  The correct order is always: associate
+first using raw reported values; homogenise second using the confirmed groups.
+
+\subsection{Historical Development and the Heterogeneous Network Problem}
+\label{sec:history}
+
+\subsubsection{The pre-digital era: 1900–1970}
+
+Early global earthquake \catalogs—the Gutenberg-Richter Seismicity of the Earth
+\citep{GutenbergRichter1954}, the Abe \catalog\ of large historical earthquakes
+\citep{Abe1981}, and the pre-1964 portion of the Engdahl-van der Hilst-Buland
+(EHB) dataset \citep{Engdahl1998}—were assembled by manual examination of
+seismogram archives, station bulletins, and published macroseismic accounts.
+Cross-network event identification was performed by inspection, using timing
+differences of several minutes and epicentral discrepancies of hundreds of
+kilometres as acceptable tolerances for the analogue recording era
+\citep{Bondár2011}.
+
+The International Seismological Summary (ISS, predecessor to the ISC bulletin)
+began assembling global phase data in 1918.  Its practice of retaining all
+contributing agency solutions alongside a centralised re-location—still followed
+by the ISC today—established the principle of \emph{solution provenance} that
+underpins modern best practice \citep{ISCBulletinRebuild2020}.
+
+\subsubsection{The WWSSN and NEIC era: 1960–1990}
+
+The deployment of the World-Wide Standardized Seismograph Network (WWSSN) from
+1961 onward provided the first globally uniform recording infrastructure and
+enabled systematic relocation of events at $M \geq 5$ using common velocity
+models \citep{Engdahl1998}.  The 1964 establishment of the National Earthquake
+Information Center (NEIC, initially the National Earthquake Information Service)
+created the first dedicated fusion centre for global earthquake data, introducing
+the concept of a \emph{preferred solution} from a ranked list of contributing
+agencies \citep{usgs_comcat}.
+
+The ANSS Composite \catalog, which consolidates the NEIC global bulletin with
+authoritative regional networks across North America, employs a proximity rule
+of 16\,s in time and 100\,km in distance to identify duplicate reports submitted
+by different networks for the same event \citep{NCEDCComCat}.  This rule was
+formulated for the digital WWSSN era and remains the most precisely documented
+operational threshold in any publicly available system documentation.
+
+\subsubsection{The digital broadband era: 1990–present}
+
+The transition to digital broadband recording in the late 1980s and 1990s, the
+expansion of the IRIS/IDA Global Seismographic Network (GSN), and the growth of
+the FDSN data-exchange standard \citep{QuakeML} transformed the scale of the
+deduplication problem.  By 2010, the ISC bulletin was receiving origin reports
+from more than 130 contributing agencies worldwide, each applying different
+velocity models, phase identification algorithms, and location programs
+\citep{ISCBulletinRebuild2020}.  The ISC-GEM Global Instrumental Earthquake
+\Catalog\ \citep{Storchak2013, ISCGEM2018}, released in 2013 and subsequently
+extended through 2021, represents the most comprehensive attempt to
+retrospectively homogenise this heterogeneous archive for events $M \geq 5.5$.
+
+The proliferation of dense regional networks—GeoNet in Aotearoa New Zealand
+\citep{GeoNetEqCatalogue}, Hi-net in Japan \citep{Obara2005}, the Southern
+California Seismic Network \citep{Hutton2010}, and the European EPOS infrastructure
+\citep{EPOSSeisTCS}—has simultaneously improved detection thresholds for small
+events ($M < 3$) while creating new challenges for merging: specialist local
+networks now routinely detect thousands of microseismic events per year that
+global agencies never report, making one-to-one association across scales
+difficult \citep{Woessner2005, Illsley2025}.
 
 % -----------------------------------------------------------------------------
-\subsection{Event Association: Spatio-Temporal Matching}
+\subsection{Event Association: Spatio-Temporal Matching Algorithms}
 \label{sec:matching}
 
-\subsubsection{Window-based forward-sweep (classical approach)}
+\subsubsection{Physical basis for proximity thresholds}
+\label{sec:physicalbasis}
+
+The rationale for any spatio-temporal matching window is that the reported
+origin time and hypocentre of two records for the same physical earthquake will
+differ only by the combined effect of (i) timing errors at each recording
+network, (ii) location uncertainties arising from network geometry and velocity
+model errors, and (iii) any deliberate choices such as depth fixing.
+
+For digital networks with GPS-synchronised clocks, origin time errors are
+typically well below 1\,s \citep{Bondár2011}.  Location errors depend strongly
+on network geometry: the azimuthal gap (the largest angular gap between
+contributing stations) and the minimum station distance are the dominant
+predictors.  \citet{Bondár2004} showed empirically from the ISC bulletin that
+the 90th percentile of location error is approximately:
+
+\begin{equation}
+  \sigma_r \approx 0.51 + 0.038\,\text{GAP} + 0.0055\,\Delta_{\min}^{-1},
+  \label{eq:locerrBondar}
+\end{equation}
+
+where GAP is the azimuthal gap in degrees and $\Delta_{\min}$ is the closest
+station distance in degrees.  For a typical global network with
+GAP $\approx 120^\circ$ and $\Delta_{\min} \approx 3^\circ$, this yields
+$\sigma_r \approx 5$\,km.  For poorly-constrained events with
+GAP $\approx 270^\circ$, $\sigma_r$ can exceed 50\,km, justifying wider
+matching windows.
+
+Pre-digital era timing errors of several seconds per station translate to origin
+time uncertainties of 1--10\,s for well-recorded events and up to 30--60\,s for
+poorly-recorded events in the pre-1960 period \citep{Bondár2011}.  This is the
+physical basis for the wider windows in \cref{tab:windows}.
+
+\subsubsection{Window-based forward-sweep}
+\label{sec:forwardsweep}
 
 The oldest and most widely deployed method sorts all incoming origin reports by
 origin time and scans forward with a sliding window.  If two reports from
 \emph{different} networks fall within a fixed time window $\Delta t_{\max}$ and
-within a fixed epicentral distance $\Delta d_{\max}$, they are flagged as
-candidate duplicates \citep{NCEDCComCat}.
-
-\paragraph{Operational thresholds.}
-\Cref{tab:windows} summarises documented threshold choices from major
-operational systems.
+an epicentral distance $\Delta d_{\max}$, they are flagged as candidate
+duplicates \citep{NCEDCComCat, Woessner2005}.  \Cref{tab:windows} summarises
+documented threshold choices from major operational systems.
 
 \begin{table}[H]
   \centering
   \caption{Spatio-temporal matching thresholds documented in major operational
-           catalogue systems.  $\Delta t$ = time window, $\Delta d$ = distance
-           window.  ANSS thresholds apply to inter-network pairs only;
-           intra-network deduplication is assumed upstream.}
+           earthquake \catalog\ systems.  $\Delta t$ = origin-time window,
+           $\Delta d$ = epicentral distance window.  ANSS thresholds apply to
+           inter-network duplicate pairs only; intra-network deduplication is
+           assumed to have been handled upstream by each contributing agency.}
   \label{tab:windows}
-  \begin{tabular}{llll}
+  \begin{tabular}{p{4.8cm}lll}
     \toprule
-    System & $\Delta t$ (s) & $\Delta d$ (km) & Reference \\
+    System / Study & $\Delta t$ (s) & $\Delta d$ (km) & Reference \\
     \midrule
     ANSS Composite \catalog & 16 & 100 & \citet{NCEDCComCat} \\
-    Typical regional build ($M \geq 4$) & 60 & 100 & \citet{Storchak2013} \\
-    Local / small-event ($M < 4$) & 30 & 30 & \citet{Woessner2005} \\
+    Typical global build ($M \geq 4.5$) & 60 & 100 & \citet{Storchak2013} \\
+    Local events ($M < 4$) & 30 & 30 & \citet{Woessner2005} \\
     Pre-digital era (pre-1960) & 300 & 200 & \citet{Bondár2011} \\
     Dead Sea Transform region & 60 & 100 & \citet{DeadSea2022} \\
-    Mexico unified \catalog & 60 & $\approx$111 ($1^{\circ}$) & \citet{Zuniga2019} \\
+    Mexico unified \catalog & 60 & $\approx 111$ ($1^\circ$) & \citet{Zuniga2019} \\
+    Turkey homogeneous \catalog & 60 & 100 & \citet{Tan2021} \\
+    Italy CPTI15 pipeline & 30--120 & 50--150 & \citet{CPTI15} \\
+    ISC-GEM global ($M \geq 5.5$) & 60 & 100 & \citet{ISCGEM2018} \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-The 16\,s / 100\,km rule of the ANSS Composite \catalog\ is the most precisely
-documented public threshold for an active operational system
-\citep{NCEDCComCat}.  For global teleseismic events ($M \geq 4.5$) the broader
-60\,s / 100\,km window is standard; the ISC bulletin uses a comparable
-proximity criterion internally when auto-grouping agency solutions prior to
+The 16\,s / 100\,km rule of the ANSS is the most precisely documented publicly
+available threshold for a production system.  It was chosen empirically to
+balance false-positive (erroneously merging distinct earthquakes) against
+false-negative (missing genuine duplicate pairs) rates for the population of
+events in the North American digital-era database \citep{NCEDCComCat}.  For
+teleseismic events the 60\,s / 100\,km window is widely cited; the ISC uses a
+comparable criterion internally when auto-grouping agency solutions prior to
 relocation \citep{ISCBulletinRebuild2020}.
+
+\paragraph{Algorithmic complexity and spatial indexing.}
+A naive implementation of the forward sweep compares all ordered pairs
+$(E_i, E_j)$ with $j > i$, giving $O(n^2)$ complexity for $n$ events.
+For large \catalogs\ ($n > 10^5$), this is prohibitive.  The standard
+optimisation builds a \emph{spatial index} over event locations: a uniform
+grid (hash grid), k-d tree, or R-tree, allowing events within $\Delta d_{\max}$
+to be retrieved in $O(\log n)$ time.  Combined with a time-sorted event list
+and an early-exit rule when the candidate's origin time exceeds
+$t_i + \Delta t_{\max}$, the algorithm achieves $O(n \log n)$ overall
+complexity in the typical case \citep{Benz2019}.
+
+Grid-based indexes use a fixed cell size calibrated to the distance threshold.
+At high latitudes, degrees of longitude subtend shorter distances, so the cell
+size must be adjusted by $\cos(\phi)$ where $\phi$ is the latitude
+\citep{Tan2021}.  Near the International Date Line (longitude $\pm 180^\circ$),
+grid cell keys must wrap correctly; failure to implement wrapping silently loses
+candidates for events in the Pacific \citep{DeadSea2022}.
 
 \paragraph{Adaptive thresholds.}
 Fixed windows perform poorly across the full magnitude range because larger
 events are subject to greater timing and location uncertainty at distant
-networks.  The standard remedy, used in the ISC-GEM pipeline and adopted in the
-current implementation, is to scale the effective window by the event magnitude
-and depth \citep{ISCGEM2018}:
+networks.  The standard remedy, used in the ISC-GEM pipeline, is to scale the
+effective window by event magnitude and depth \citep{ISCGEM2018}:
 
 \begin{equation}
   \Delta t_{\mathrm{eff}} = \Delta t_{\mathrm{config}} \cdot f_t(M),
@@ -88,213 +230,499 @@ and depth \citep{ISCGEM2018}:
   \label{eq:adaptive}
 \end{equation}
 
-where $f_t$, $f_d$ are magnitude multipliers (e.g., 1.0 for $M < 4$, 1.5 for
-$4 \leq M < 5.5$, 2.5 for $5.5 \leq M < 7$, 4.0 for $M \geq 7$) and $g(h)$
-is a depth multiplier (1.0 for $h < 100$\,km, 1.2 for $100 \leq h < 300$\,km,
-1.5 for $h \geq 300$\,km), consistent with ISC-GEM practice
-\citep{ISCGEM2018, Engdahl2020}.
+where representative multiplier functions consistent with ISC-GEM practice
+\citep{ISCGEM2018, Engdahl2020} are:
+
+\begin{align}
+  f_t(M) &=
+  \begin{cases}
+    1.0 & M < 4.0 \\
+    1.5 & 4.0 \leq M < 5.5 \\
+    2.0 & 5.5 \leq M < 7.0 \\
+    3.0 & M \geq 7.0
+  \end{cases}
+  \label{eq:ft}
+  \\[6pt]
+  f_d(M) &=
+  \begin{cases}
+    1.0 & M < 4.0 \\
+    1.5 & 4.0 \leq M < 5.5 \\
+    2.5 & 5.5 \leq M < 7.0 \\
+    4.0 & M \geq 7.0
+  \end{cases}
+  \label{eq:fd}
+  \\[6pt]
+  g(h) &=
+  \begin{cases}
+    1.0 & h < 100\,\text{km} \\
+    1.2 & 100 \leq h < 300\,\text{km} \\
+    1.5 & h \geq 300\,\text{km}
+  \end{cases}
+  \label{eq:gh}
+\end{align}
+
+The depth multiplier $g(h)$ reflects the well-established result that intermediate
+and deep-focus earthquakes are harder to locate precisely because depth-sensitive
+phases (pP, sP) are often absent from or misidentified in network phase datasets
+\citep{Engdahl1998, Engdahl2020}.  For $M \geq 7$ deep events, the combined
+multiplier can reach $4.0 \times 1.5 = 6.0$, requiring the spatial search
+radius to extend to six times the configured baseline threshold.
+
+\paragraph{Early termination and threshold consistency.}
+A subtle but important correctness issue arises when combining the forward-sweep
+time-sorted early exit with adaptive thresholds.  The early-exit condition
+\begin{equation}
+  t_j - t_i > \Delta t_{\mathrm{config}} \cdot f_t(M_i)
+  \label{eq:earlyexit}
+\end{equation}
+uses only the anchor event's magnitude $M_i$.  However, the adaptive matching
+function \eqref{eq:adaptive} uses the \emph{average} of both event magnitudes.
+If the candidate $j$ has a substantially higher magnitude than $i$, the correct
+effective threshold (evaluated at the average magnitude) may exceed the
+early-exit threshold (evaluated at $M_i$ alone), causing valid matches to be
+discarded.  The conservative fix is to replace $f_t(M_i)$ in
+\eqref{eq:earlyexit} with $f_t(\max(M_i, M_j))$, or equivalently to use the
+maximum expected candidate magnitude (e.g.\ $M_i + 2$) as a conservative upper
+bound when evaluating the exit condition \citep{Benz2019}.
 
 \paragraph{Limitation: dense aftershock sequences.}
-During intense aftershock sequences the time gap between consecutive legitimate
-aftershocks can fall well below 60\,s.  \citet{Tanaka2022} demonstrated that in
-the 24 hours following the 2011 Tōhoku $M_\mathrm{w}$\,9.0 earthquake, more
-than 599 genuine aftershock pairs had inter-event times under 60\,s—the same
-interval used as a duplicate window.  Fixed-window methods therefore cannot
-distinguish a duplicate pair from an aftershock pair in such sequences without
-additional information.
+During intense aftershock sequences the inter-event time between consecutive
+legitimate aftershocks can fall well below the duplicate-detection window.
+\citet{Tanaka2022} demonstrated that in the 24 hours following the 2011 Tōhoku
+$M_\mathrm{w}$\,9.0, more than 599 genuine aftershock pairs had inter-event
+times under 60\,s — the same interval used as a duplicate window in the ISC-GEM
+pipeline.  Fixed-window methods therefore cannot discriminate a duplicate pair
+from an aftershock pair in high-seismicity periods without additional physical
+information, a problem that grows more severe as network density increases and
+detection completeness lowers the magnitude threshold into the range where
+aftershock rates are high \citep{Hainzl2016}.
 
 % - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 \subsubsection{Nearest-neighbour proximity function}
 \label{sec:nn}
 
 \citet{Tanaka2022} introduced a physics-based proximity function that
-discriminates duplicates from aftershocks by exploiting their different
-topological signatures in event-pair space: duplicates form \emph{pairs}
-(reports of one earthquake), whereas aftershocks form \emph{branching trees}
-(one parent, many offspring).
+discriminates duplicate pairs from aftershock pairs by exploiting their
+different topological signatures in event-pair space.  The method builds on the
+nearest-neighbour statistics introduced by \citet{Zaliapin2008} for aftershock
+sequence identification.  Genuine duplicates form \emph{isolated pairs} in
+rescaled event space — their nearest-neighbour distances cluster tightly below
+a network-error-derived threshold — whereas aftershocks form \emph{branching
+trees} following Omori-law temporal decay \citep{Omori1894, Utsu1961}.
 
-The proximity between two events $i$ and $j$ is defined as
+The proximity between two events $i$ and $j$ (with $j$ following $i$ in time)
+is defined as
 
 \begin{equation}
   \eta(i,j) = t_{ij}\; r_{ij}^{d_f}\; 10^{-b m_i},
   \label{eq:proximity}
 \end{equation}
 
-where $t_{ij}$ is the inter-event time, $r_{ij}$ is the epicentral distance,
-$d_f \approx 1.6$ is the fractal dimension of the epicentre distribution,
-$b \approx 1.0$ is the Gutenberg-Richter $b$-value, and $m_i$ is the magnitude
-of the preceding event.  Events whose nearest-neighbour distance in this space
-falls \emph{below} a threshold derived from network location error (rather than
-from earthquake-physics considerations) are classified as duplicates.  Applied
-to the Tōhoku sequence, duplicate identification reliability exceeded 97\,\%
-\citep{Tanaka2022}.
+where $t_{ij}$ is the inter-event time (s), $r_{ij}$ is the epicentral distance
+(km), $d_f \approx 1.6$ is the fractal dimension of the epicentre distribution
+\citep{Kagan1991}, $b \approx 1.0$ is the Gutenberg-Richter $b$-value
+\citep{Aki1965}, and $m_i$ is the magnitude of the preceding event.  In this
+rescaled space, aftershocks cluster near their parent event (small $\eta$),
+while duplicates cluster near zero regardless of the parent-event magnitude
+\citep{Zaliapin2008, Tanaka2022}.
 
-The method requires estimates of $d_f$ and $b$ for the target seismicity, both
-of which can be obtained from the source \catalogs\ themselves via standard
-routines \citep{Aki1965, Wiemer2000}.
+The duplicate-detection threshold in $\eta$-space is calibrated against the
+distribution of location errors for the specific network under analysis, not
+against earthquake physics.  This is the key advantage: the threshold adapts
+to network capability rather than assuming a fixed proximity tolerance
+\citep{Tanaka2022}.  Applied to the Tōhoku sequence, the method achieved
+duplicate identification reliability $> 97$\,\% even during periods with
+aftershock rates of several hundred events per hour.
+
+\paragraph{Parameter estimation.}
+The fractal dimension $d_f$ can be estimated from the slope of the correlation
+integral of hypocentre coordinates in log-log space \citep{Kagan1991}.  The
+$b$-value is estimated via maximum likelihood from the observed
+frequency-magnitude distribution \citep{Aki1965}, with magnitude of
+completeness $M_c$ determined by the \citet{Wiemer2000} goodness-of-fit method
+before fitting.  Both estimates should be computed from the target region's
+seismicity, not borrowed from global averages, as both parameters show
+significant regional variability \citep{Woessner2005}.
+
+\paragraph{Limitations.}
+The nearest-neighbour method performs less well for very sparse \catalogs\ where
+the nearest-neighbour distance distribution is dominated by background seismicity
+rather than aftershock clusters, reducing the bimodal separation that enables
+discrimination \citep{Hainzl2016}.  It also requires a minimum \catalog\ length
+(typically several years) to estimate $b$ and $d_f$ reliably.
 
 % - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 \subsubsection{Graph-based connected-components association}
 \label{sec:graph}
 
-The methodologically strongest approach constructs an undirected association
-graph in which each origin report is a node and each candidate same-event pair
-is an edge \citep{Benz2019}.  Connected components of this graph—found in
-$O(n\,\alpha(n))$ time via the Union-Find algorithm, where $\alpha$ is the
-inverse Ackermann function—correspond to clusters of reports for the same
-physical earthquake.
+The methodologically strongest general-purpose approach constructs an undirected
+association graph $G = (V, E)$ in which each node $v \in V$ is an origin report
+and each edge $e \in E$ connects a pair of reports that satisfy a proximity
+criterion \citep{Benz2019, Zaliapin2013}.  Connected components of $G$,
+recoverable in $O(n\,\alpha(n))$ time via the Union-Find (Disjoint-Set Union)
+algorithm \citep{Tarjan1975} — where $\alpha$ is the inverse Ackermann
+function and is effectively constant for all practical $n$ — correspond to
+clusters of reports describing the same physical earthquake.
 
-\paragraph{Algorithm sketch.}
+\paragraph{Algorithm.}
 \begin{enumerate}
-  \item Sort all reports by origin time; build a spatial index (R-tree or
-        uniform grid).
-  \item For each report $E$, query the index for all reports within
-        $\Delta t_{\max}$ and $\Delta d_{\max}$ from \emph{different} source
-        networks.
-  \item Add a graph edge for each qualifying pair $(E, F)$.
-  \item Find connected components; each component is one physical earthquake.
-  \item Apply a preference-selection step within each component
-        (\cref{sec:selection}).
+  \item Sort all origin reports by origin time; build a spatial index (uniform
+        grid, k-d tree, or R-tree) over event hypocentres.
+  \item For each report $E_i$, query the index for all reports within
+        $\Delta t_{\max}$ and $\Delta d_{\max}$ from networks \emph{other than}
+        the network of $E_i$.
+  \item For each qualifying candidate pair $(E_i, E_j)$, add edge $e_{ij}$ to
+        $G$.
+  \item Find all connected components of $G$ using Union-Find.
+  \item For each component, apply parameter-selection rules
+        (\cref{sec:selection}) to derive a single merged event record.
 \end{enumerate}
 
-Compared with the greedy forward sweep, the graph approach naturally handles
-\emph{transitive associations}: if network A matches network B, and B matches
-network C, all three are placed in the same component even if A and C do not
-independently satisfy the proximity criterion.  The greedy sweep can miss such
-cases when B has already been marked as processed before A is examined.
+\paragraph{Advantage over the greedy forward sweep.}
+The greedy sweep implicitly assumes that pairwise matching is transitive: if
+event A matches B, and B matches C, all three are merged.  In the sweep
+implementation this is only guaranteed when events are processed strictly in
+time order and no candidate is marked processed before its later matches are
+evaluated.  When the sweep marks B as processed upon matching with A, a
+subsequent evaluation of C against B is never performed, and the A-B-C cluster
+is incorrectly split \citep{Benz2019}.  The graph approach has no such
+pathology: transitivity is guaranteed by the connected-component structure.
 
 \paragraph{Integer linear programming refinement.}
-\citet{Benz2019} further applied Integer Linear Programming (ILP) to the
-connected-component solution to resolve cases where a component might span two
-closely spaced genuine earthquakes.  The ILP minimises the number of source
-events required to explain all associations subject to consistency constraints.
-Applied to Chile 2010--2017, the method detected 817\,000+ earthquakes at
-greater than 95\,\% accuracy on synthetic validation data.
+\citet{Benz2019} extended the graph approach by applying Integer Linear
+Programming (ILP) to resolve ambiguous components — cases where a connected
+component may span two closely spaced but genuinely distinct earthquakes.  The
+ILP minimises the total number of source events $k$ required to explain all
+edges in a component, subject to the constraint that no two reports assigned to
+the same source event originate from the same network:
+
+\begin{equation}
+  \text{minimise} \quad k
+  \quad \text{subject to} \quad
+  \forall (i,j) \in E : \mathrm{source}(i) = \mathrm{source}(j),
+  \quad
+  \forall i,j : \mathrm{net}(i) = \mathrm{net}(j) \Rightarrow \mathrm{source}(i) \neq \mathrm{source}(j).
+  \label{eq:ilp}
+\end{equation}
+
+Applied to the Chilean catalogue 2010--2017, this two-stage approach detected
+817\,000+ earthquakes at $> 95$\,\% accuracy against a synthetic validation
+dataset generated by forward modelling known network detection probabilities.
+
+The ILP constraint that \emph{no two reports from the same network belong to the
+same source event} is the algorithmic expression of what we term the
+\emph{same-agency duplicate flag}: if two records from the same agency fall
+within the proximity window, they almost certainly describe two distinct physical
+earthquakes, not two observations of one \citep{Benz2019, Tanaka2022}.
 
 The USGS NEIC Hydra production system uses a graph-association framework
-conceptually similar to \citet{Benz2019} \citep{usgs_comcat}.
+conceptually equivalent to the first stage of \citet{Benz2019}
+\citep{usgs_comcat}.
+
+% -----------------------------------------------------------------------------
+\subsection{Location Uncertainty and Its Effect on Matching}
+\label{sec:locuncert}
+
+\subsubsection{Sources of location uncertainty}
+
+Hypocentre location uncertainty arises from five primary sources
+\citep{Bondár2004, Engdahl1998}:
+
+\begin{enumerate}
+  \item \textbf{Phase picking errors.}  Manual or automated picks of $P$, $S$,
+        and depth phases carry random timing errors (typically 0.1--1\,s for
+        digital data, 1--5\,s for analogue).
+
+  \item \textbf{Network geometry.}  The azimuthal gap and minimum station
+        distance control the conditioning of the location inversion.  A gap
+        $> 180^\circ$ leaves the hypocentre poorly constrained in the
+        ungapped direction; a large minimum distance makes depth poorly
+        constrained.
+
+  \item \textbf{Velocity model errors.}  All location algorithms use an
+        approximation to Earth structure; residual travel-time prediction errors
+        are correlated among nearby stations, biasing the location estimate.
+        \citet{Bondár2011} introduced a correlated error covariance model to
+        account for this.
+
+  \item \textbf{Depth-phase absence.}  Without $pP$, $sP$, or $pwP$ phases,
+        depth is often fixed at a default value (10, 33, or 100\,km depending
+        on agency convention), introducing a systematic depth error that can
+        exceed 50\,km \citep{Engdahl1998, Engdahl2020}.
+
+  \item \textbf{Reporting delays and partial phase sets.}  Rapid preliminary
+        solutions from real-time networks (e.g.\ NEIC PDL) use fewer phases
+        than the reviewed bulletin solution and therefore carry larger
+        uncertainties \citep{usgs_comcat}.
+\end{enumerate}
+
+\subsubsection{Quantifying location quality for merging decisions}
+
+The ISC bulletin quality scoring system \citep{Bondár2011} provides a practical
+framework for weighting competing hypocentre solutions within a merged group.
+The primary quality indicators are:
+
+\begin{itemize}
+  \item Azimuthal gap: $\text{GAP} < 180^\circ$ for acceptable, $< 120^\circ$
+        for good.
+  \item Secondary azimuthal gap (gap ignoring the single most distant station):
+        $< 180^\circ$ is the ISC-GEM criterion for a usable depth
+        \citep{ISCGEM2018}.
+  \item Number of defining phases: $\geq 6$ minimum; $\geq 20$ for well-
+        constrained depth.
+  \item RMS travel-time residual: $< 1.0$\,s for well-located events
+        \citep{Bondár2011}; the ISC bulletin flags events with
+        RMS $> 2.0$\,s as poorly located \citep{ISCBulletinRebuild2020}.
+  \item Horizontal uncertainty: expressed as the semi-major axis of the 90\,\%
+        confidence ellipse in km \citep{Bondár2004}.
+\end{itemize}
+
+These metrics should be used to rank competing solutions within a merged
+event group (\cref{sec:selection}), not merely to flag events after the
+fact.
+
+\subsubsection{Depth fixing and its consequences}
+
+A significant fraction of agencies fix the focal depth at a standard value when
+insufficient depth-sensitive phases are available.  \citet{Engdahl2020} estimate
+that approximately 30\,\% of events in the pre-1990 ISC bulletin have fixed
+depths.  Fixed-depth solutions carry no depth uncertainty information and should
+be assigned lowest priority in any depth-selection step.  The depth type
+(free or fixed, and if fixed, the value and reason) should be preserved as event
+metadata to enable downstream filtering \citep{ISCGEM2018, Engdahl2020}.
+
+The three most common fixed-depth conventions are 10\,km (shallow crustal
+default, used by many regional agencies), 33\,km (Conrad discontinuity, a
+historical NEIC convention), and 100\,km (subduction-zone intermediate-depth
+default).  Events with these three depths should be treated with heightened
+scrutiny in any depth-sensitive analysis \citep{Engdahl1998}.
 
 % -----------------------------------------------------------------------------
 \subsection{The ISC-GEM Reference Methodology}
 \label{sec:iscgem}
 
-The ISC-GEM Global Instrumental Earthquake \catalog\ \citep{Storchak2013,
-ISCGEM2018} covers 1904--2021 for $M \geq 5.5$ globally and $M \geq 5.0$ over
-continental regions.  It represents the most thoroughly documented end-to-end
-merging pipeline in the seismological literature and serves as the benchmark
-against which other implementations are measured.
+The ISC-GEM Global Instrumental Earthquake \Catalog\
+\citep{Storchak2013, ISCGEM2018} is the most thoroughly documented end-to-end
+merging pipeline in the seismological literature.  Its fifth revision
+\citep{ISCGEM2018} covers 1904--2014 for $M_\mathrm{w} \geq 5.5$ globally and
+$M_\mathrm{w} \geq 5.0$ over continental regions, with subsequent extensions to
+2021.  The pipeline is described in sufficient detail to serve as a reference
+implementation for any automated merging system.
+
+\subsubsection{Data sources and ingestion}
+
+Source data include the ISC bulletin (phase data and agency origin solutions
+from 1904 onward), the NEIC PDE and predecessors, GCMT solutions from 1976
+\citep{Dziewonski1981, Ekstrom2012}, regional CMT and MT catalogues (GeoNet,
+INGV, GEOFON, ETH, NIED), and macroseismic intensity data for the pre-1960
+period \citep{Storchak2013}.  Each source is assigned a priority tier and a
+data quality flag based on known limitations (e.g.\ analogue vs.\ digital
+recording, reporting latency, known velocity model biases).
 
 \subsubsection{Event association}
-The ISC automated grouping program compares origin times and hypocentre
-locations from all contributing agencies and assembles groups using a
-proximity-scoring system that weights azimuthal gap, distance range, station
-count, and phase count \citep{Bondár2011}.  Groups may be split or new events
-created where the evidence supports distinct earthquakes.
 
-\subsubsection{Relocation}
-The ISC applies a two-tier relocation to all grouped events:
+The ISC automated grouping algorithm compares origin times and epicentre
+coordinates from all contributing agencies and assembles candidate groups using
+a proximity-scoring system that weights azimuthal gap, phase count, distance
+range, and network geometry \citep{Bondár2011}.  Groups that appear to span two
+distinct earthquakes — identified by anomalously large within-group
+hypocentre scatter or by the same-agency rule — are split by the ISC analyst
+team \citep{ISCBulletinRebuild2020}.
+
+\subsubsection{Relocation using all available phase data}
+
+The ISC does not simply select the best existing agency solution; it
+\emph{re-locates every event} from scratch using all contributed phase data.
+The two-stage relocation procedure is:
+
 \begin{enumerate}
-  \item \textbf{EHB algorithm} \citep{Engdahl1998}: improved hypocenters with
-        particular attention to focal depth, using reidentified phases.
+  \item \textbf{EHB algorithm} \citep{Engdahl1998}: an iterative relocation
+        using the ak135 reference velocity model \citep{Kennett1995} with
+        improved phase identification, particularly for $pP$ and $sP$ depth
+        phases.  The EHB procedure reduced systematic depth biases in the
+        pre-1990 bulletin by 10--30\,km for subduction-zone events
+        \citep{Engdahl1998}.
+
   \item \textbf{ISC location algorithm} \citep{Bondár2011}: fixes the depth
-        output from EHB and reduces systematic location bias by modelling
-        correlated travel-time prediction errors across the station network.
+        output from EHB and further reduces systematic hypocentre bias by
+        modelling the spatial correlation of travel-time prediction errors
+        using an empirical covariance function estimated from the bulletin's
+        residual distribution.
 \end{enumerate}
-The ISC-authored solution is designated \emph{prime} when sufficient phase data
-are available.  All agency solutions are retained as secondary hypocenters,
-preserving full audit traceability \citep{ISCBulletinRebuild2020}.
 
-\subsubsection{Magnitude assembly}
-ISC-GEM reports a single $M_\mathrm{w}$ per event, derived by \citep{ISCGEM2018}:
+The ISC-authored solution is designated \emph{prime} when at least 6 defining
+phases are available and the azimuthal gap is $< 180^\circ$.  Where these
+criteria are not met, the highest-ranked contributing agency solution is used
+as prime \citep{ISCGEM2018}.
+
+Crucially, \emph{all} agency solutions are retained as secondary (non-prime)
+hypocentres in the ISC bulletin.  This traceability model — derived from the
+practice of the original ISS — ensures that all downstream applications can
+reproduce the selection logic and compare solutions across agencies
+\citep{ISCBulletinRebuild2020}.
+
+\subsubsection{Magnitude assembly in ISC-GEM}
+
+ISC-GEM reports a single $M_\mathrm{w}$ per event using the following protocol
+\citep{ISCGEM2018}:
+
 \begin{enumerate}
-  \item Direct $M_\mathrm{w}$ from global moment-tensor \catalogs\ (GCMT, USGS
-        W-phase, EMSC MT, regional CMT solutions).
-  \item $M_\mathrm{w}$ proxies from re-computed $M_\mathrm{s}$ using an
-        \textbf{alpha-trimmed median} (removing the top and bottom 10\,\% of
-        contributing station estimates) to suppress outliers from poorly
-        calibrated stations.
-  \item $M_\mathrm{w}$ proxies from re-computed $m_\mathrm{b}$.
-  \item \textbf{Exponential (non-linear) conversion models} for $M_\mathrm{s}
-        \to M_\mathrm{w}$ and $m_\mathrm{b} \to M_\mathrm{w}$, preferred over
-        linear relationships at magnitude extremes.
+  \item \textbf{Direct $M_\mathrm{w}$} from global moment-tensor \catalogs:
+        GCMT \citep{Dziewonski1981, Ekstrom2012} (preferred),
+        USGS W-phase, EMSC MT, GeoNet CMT, ETH CMT.
+
+  \item \textbf{$M_\mathrm{w}$ proxy from $M_\mathrm{s}$}: the ISC re-computes
+        $M_\mathrm{s}$ using an \emph{alpha-trimmed median} (10\,\% trimming on
+        each tail) of individual station amplitudes, suppressing outliers from
+        poorly calibrated stations.  The resulting $M_\mathrm{s}$ is converted
+        to $M_\mathrm{w}$ via an exponential (non-linear) regression.
+
+  \item \textbf{$M_\mathrm{w}$ proxy from $m_\mathrm{b}$}: similarly trimmed
+        and converted via a non-linear regression that accounts for
+        $m_\mathrm{b}$ saturation above $\approx M_\mathrm{w}$\,6.2.
 \end{enumerate}
+
+The alpha-trimmed median is a robust location estimator in the statistical
+sense: its breakdown point (the fraction of outliers that can corrupt the
+estimate) is 10\,\%, compared with 0\,\% for the simple mean
+\citep{Huber1981}.  For the station-level amplitude data used to compute
+$M_\mathrm{s}$, where a single poorly calibrated station can deviate by
+1--2 magnitude units, this robustness is practically important.
 
 % -----------------------------------------------------------------------------
-\subsection{Magnitude Homogenisation}
+\subsection{Magnitude Homogenisation: Theory and Practice}
 \label{sec:maghomog}
 
-\subsubsection{The target scale}
+\subsubsection{The physical basis for moment magnitude}
 
-Moment magnitude $M_\mathrm{w}$ is the universal target for homogenised
-\catalogs.  It is physically grounded (proportional to seismic moment $M_0$
-via $M_\mathrm{w} = \tfrac{2}{3}\log_{10} M_0 - 10.7$), does not saturate at
-large magnitudes, and is directly comparable across regions and recording eras
-\citep{HanksKanamori1979}.
-
-\subsubsection{Regression method: orthogonal vs.\ ordinary least squares}
-
-Standard Ordinary Least Squares (OLS) regression is inappropriate for magnitude
-conversion because \emph{both} the predictor (e.g., $M_\mathrm{s}$) and the
-response ($M_\mathrm{w}$) carry measurement error.  OLS assumes the predictor
-is error-free; violation of this assumption produces an attenuation bias in the
-estimated slope, which in turn biases the frequency-magnitude distribution of
-the converted \catalog.
-
-The current consensus best practice is \textbf{Generalised Orthogonal
-Regression} (GOR), sometimes called errors-in-variables regression or
-orthogonal distance regression \citep{Grunthal2016, Akkar2014, Cotton2013,
-DeadSea2022}.  GOR minimises the sum of squared perpendicular distances from
-the data points to the regression line, weighted by the ratio of the variances
-of the two variables:
+Moment magnitude $M_\mathrm{w}$ was introduced by \citet{HanksKanamori1979} as
+a logarithmic measure of the seismic moment $M_0$ (measured in dyne-cm):
 
 \begin{equation}
-  \eta = \frac{\sigma^2_{M_\mathrm{w}}}{\sigma^2_{M_x}},
-  \label{eq:eta}
+  M_\mathrm{w} = \tfrac{2}{3}(\log_{10} M_0 - 16.1).
+  \label{eq:mwdef}
 \end{equation}
 
-where $M_x$ is the predictor magnitude type.  When $\eta = 1$ (equal
-uncertainties), GOR reduces to the standard geometric mean regression.
+The seismic moment $M_0 = \mu A \bar{D}$, where $\mu$ is the shear modulus,
+$A$ is the fault rupture area, and $\bar{D}$ is the mean slip, is a
+physically meaningful measure of earthquake size that does not saturate at
+large magnitudes \citep{Kanamori1977}.  In contrast, $m_\mathrm{b}$ saturates
+above $M_\mathrm{w} \approx 6.0$--6.2 (because short-period body waves become
+insensitive to the growing fault area), and $M_\mathrm{s}$ saturates above
+$M_\mathrm{w} \approx 8.0$--8.2 \citep{Bormann2012}.
 
-\paragraph{Functional form.}
-Linear GOR is adequate for most of the magnitude range.  The ISC-GEM pipeline
-explicitly chose \emph{exponential (non-linear) relationships} for
-$M_\mathrm{s} \to M_\mathrm{w}$ and $m_\mathrm{b} \to M_\mathrm{w}$, citing
-better behaviour at extremes where both scales have physical non-linearities
-\citep{ISCGEM2018}.  Piecewise-linear models with optimised crossover points
-(as in the CPTI15 Italian \catalog\ pipeline, \citealt{CPTI15}) offer a
-practical middle ground.
+The saturation problem directly affects merging: a network reporting
+$m_\mathrm{b} = 6.5$ for an $M_\mathrm{w}$\,7.5 event is not recording a
+different earthquake; it is simply using a saturated scale.  Magnitude-based
+filtering or association thresholds that do not account for scale-dependent
+saturation will therefore misclassify or incorrectly reject legitimate matches
+\citep{Bormann2012, ISCGEM2018}.
 
-The commonly cited \citet{Scordilis2006} linear coefficients
-(e.g., $M_\mathrm{w} = 0.67\,M_\mathrm{L} + 1.17$) are derived from OLS and
-should be understood as an approximation; they systematically overestimate
-$M_\mathrm{w}$ for small events and underestimate it near the saturation
-boundary of each scale.
+\subsubsection{Regression method: orthogonal vs.\ ordinary least squares}
+\label{sec:regression}
+
+The fundamental flaw in using Ordinary Least Squares (OLS) for magnitude
+conversion is that OLS minimises the sum of squared vertical residuals,
+implicitly assuming the predictor variable is measured without error.  When
+both the predictor $M_x$ and the response $M_\mathrm{w}$ carry measurement
+error of comparable magnitude, OLS produces a biased slope estimator
+\citep{Fuller1987}:
+
+\begin{equation}
+  \hat{\beta}_{\mathrm{OLS}} = \beta \cdot \frac{\sigma_{M_x}^2}{\sigma_{M_x}^2 + \sigma_{\varepsilon}^2},
+  \label{eq:olsbias}
+\end{equation}
+
+where $\beta$ is the true slope, $\sigma_{M_x}^2$ is the variance of the
+true predictor, and $\sigma_{\varepsilon}^2$ is the measurement error variance.
+The ratio is always $\leq 1$, so OLS systematically underestimates the true
+conversion slope — an \emph{attenuation bias} that compresses the converted
+magnitude range and biases $b$-value estimates from the homogenised \catalog\
+\citep{Grunthal2016, Carroll2019}.
+
+\paragraph{Generalised Orthogonal Regression.}
+The solution is \textbf{Generalised Orthogonal Regression} (GOR), which
+minimises the sum of squared perpendicular distances weighted by the ratio
+$\eta = \sigma_{M_\mathrm{w}}^2 / \sigma_{M_x}^2$
+\citep{Grunthal2016, Akkar2014, Cotton2013}.  The GOR slope is:
+
+\begin{equation}
+  \hat{\beta}_{\mathrm{GOR}} = \frac{
+    (\mathit{SYY} - \eta\,\mathit{SXX}) + \sqrt{(\mathit{SYY} - \eta\,\mathit{SXX})^2 + 4\eta\,\mathit{SXY}^2}
+  }{2\,\mathit{SXY}},
+  \label{eq:gorslope}
+\end{equation}
+
+where $\mathit{SXX}$, $\mathit{SYY}$, $\mathit{SXY}$ are the corrected sums of
+squares and cross-products.  When $\eta = 1$ (equal uncertainties), GOR reduces
+to the standard geometric mean (GM) regression; when $\eta \to 0$
+(predictor error-free), GOR approaches OLS; and when $\eta \to \infty$
+(response error-free), GOR approaches the reverse OLS regression of $M_x$ on
+$M_\mathrm{w}$ \citep{Fuller1987}.
+
+The SHEEC (SHARE European Earthquake Catalogue) project \citep{Grunthal2016}
+provides published GOR coefficients for $M_\mathrm{L}$, $M_\mathrm{s}$, and
+$m_\mathrm{b}$ to $M_\mathrm{w}$ conversion for European seismicity, estimated
+from the overlap period of the EMS98 national \catalogs\ and the ISC-GEM
+dataset.  These coefficients are recommended as defaults for European and
+Mediterranean merging applications \citep{Grunthal2016}.
+
+\paragraph{Non-linear functional forms.}
+For $m_\mathrm{b}$ and $M_\mathrm{s}$, the ISC-GEM pipeline
+\citep{ISCGEM2018} chose exponential (non-linear) conversion models rather than
+linear GOR, on the basis that the physical saturation of both scales introduces
+a non-linear relationship at the extremes that linear regression cannot capture.
+Piecewise-linear models with optimised crossover points — as implemented in
+the CPTI15 Italian \catalog\ pipeline using the \citet{Gasperini2012} framework
+— offer a practical middle ground that approximates non-linearity without the
+extrapolation risks of exponential models.
+
+\paragraph{The \citet{Scordilis2006} coefficients.}
+The widely used Scordilis (\citeyear{Scordilis2006}) linear relationships
+(e.g.\ $M_\mathrm{w} = 0.67\,M_\mathrm{L} + 1.17$,
+$M_\mathrm{w} = 0.85\,m_\mathrm{b} + 1.03$,
+$M_\mathrm{w} = 0.67\,M_\mathrm{s} + 2.07$ for $M_\mathrm{s} < 6.2$)
+are OLS regressions on a global dataset.  As such they carry the attenuation
+bias in \eqref{eq:olsbias} and are known to systematically underestimate
+$M_\mathrm{w}$ for large events near each scale's saturation boundary
+\citep{Grunthal2016}.  They are appropriate as a first approximation and for
+applications where the bias is small compared to other uncertainties, but should
+be replaced by GOR-derived relationships for research-grade \catalogs.
 
 \subsubsection{Magnitude type priority hierarchy}
+\label{sec:maghierarchy}
 
-When multiple magnitude estimates of different types coexist for one event, the
-priority order recommended by ISC-GEM and supported by the broader literature
-\citep{ISCGEM2018, Grunthal2016} is:
+The ISC-GEM priority order \citep{ISCGEM2018}, consistent with
+\citet{Grunthal2016} and the ISC bulletin operational practice, is:
 
 \begin{enumerate}
-  \item $M_\mathrm{w}$ from GCMT waveform inversion (gold standard)
-  \item $M_\mathrm{w}$ from USGS/NEIC W-phase or broadband solution
-  \item $M_\mathrm{w}$ from regional CMT (e.g., GeoNet CMT, EMSC MT)
-  \item $M_\mathrm{w}$ proxy converted from $M_\mathrm{s}$
-  \item $M_\mathrm{w}$ proxy converted from $m_\mathrm{b}$
-  \item $M_\mathrm{w}$ proxy converted from $M_\mathrm{L}$
-  \item $M_\mathrm{w}$ proxy converted from $M_\mathrm{d}$ (least reliable)
+  \item $M_\mathrm{w}$ from GCMT waveform inversion \citep{Dziewonski1981,
+        Ekstrom2012} — gold standard; does not require conversion.
+  \item $M_\mathrm{w}$ from USGS/NEIC W-phase or broadband CMT solution.
+  \item $M_\mathrm{w}$ from regional CMT (GeoNet \citep{GeoNetEqCatalogue},
+        INGV, GEOFON/GFZ, ETH).
+  \item $M_\mathrm{w}$ proxy from $M_\mathrm{s}$ (preferred over $m_\mathrm{b}$
+        because $M_\mathrm{s}$ saturates at higher magnitude and the conversion
+        scatter is smaller \citep{Bormann2012}).
+  \item $M_\mathrm{w}$ proxy from $m_\mathrm{b}$.
+  \item $M_\mathrm{w}$ proxy from $M_\mathrm{L}$ (most region-dependent;
+        highly variable station corrections).
+  \item $M_\mathrm{w}$ proxy from $M_\mathrm{d}$ or $M_\mathrm{c}$ (duration /
+        coda magnitude; least reliable, used only when nothing else is
+        available).
 \end{enumerate}
 
-Within each priority tier, the estimate with the lower reported uncertainty is
-preferred \citep{ISCGEM2018}.
+Within each priority tier, the estimate with lower reported uncertainty is
+preferred \citep{ISCGEM2018}.  Where no uncertainty is reported, network
+authority from \cref{tab:hierarchy} acts as a tie-breaker.
 
-\subsubsection{Bayesian magnitude merging}
+\subsubsection{Bayesian magnitude merging across networks}
 
-When several authoritative $M_\mathrm{w}$ estimates are available for the same
-event, simple priority selection discards valid information.  \citet{Schorlemmer2024}
-proposed a Bayesian framework in which each network's observed magnitude is
-modelled as a linear function of the unknown true magnitude:
+Simple priority selection discards valid information when multiple authoritative
+$M_\mathrm{w}$ estimates exist for the same event.
+\citet{Schorlemmer2024} proposed a Bayesian framework in which each network $i$'s
+observed magnitude is modelled as a linear function of the unknown true magnitude
+$M_\mathrm{true}$:
 
 \begin{equation}
   M_{\mathrm{obs},i} = a_i + b_i\,M_{\mathrm{true}} + \varepsilon_i,
@@ -302,139 +730,396 @@ modelled as a linear function of the unknown true magnitude:
   \label{eq:bayesmag}
 \end{equation}
 
-with a Gutenberg-Richter prior on $M_{\mathrm{true}}$.  The posterior mean
-provides an optimal merged estimate.  When two authoritative solutions agree
-within $0.1\,M$ units, the posterior is insensitive to the choice of prior;
-when they disagree by more than $0.3\,M$ units, a data quality flag should be
-raised regardless of which method is used \citep{Schorlemmer2024}.
-
-\paragraph{Uncertainty propagation.}
-For events where the conversion is applied, the propagated uncertainty is
+where $a_i$ and $b_i$ are network-specific intercept and slope (estimated from
+the overlap period), and $\sigma_i^2$ is the within-network reporting variance.
+A Gutenberg-Richter prior $p(M_\mathrm{true}) \propto 10^{-b M_\mathrm{true}}$
+is placed on the true magnitude.  The posterior mean is:
 
 \begin{equation}
-  \sigma_{M_\mathrm{w}}^2
-      = \sigma_{\hat{a}}^2
-      + \left(\frac{\partial f}{\partial M_x}\right)^2 \sigma_{M_x}^2,
+  \hat{M}_\mathrm{true} = \frac{
+    \sum_i b_i (M_{\mathrm{obs},i} - a_i)/\sigma_i^2
+    - b \ln(10) \cdot \sigma_\mathrm{post}^2
+  }{
+    \sum_i b_i^2/\sigma_i^2
+  },
+  \label{eq:bayesposterior}
+\end{equation}
+
+where $\sigma_\mathrm{post}^2 = (\sum_i b_i^2/\sigma_i^2)^{-1}$ is the
+posterior variance.  When two authoritative solutions agree within
+$0.1\,M_\mathrm{w}$ units, the posterior is insensitive to the choice of $b$;
+when they disagree by $> 0.3\,M_\mathrm{w}$ units, a data quality flag should
+be raised regardless of which method is used \citep{Schorlemmer2024}.
+
+\paragraph{Uncertainty propagation for converted magnitudes.}
+When $M_\mathrm{w}$ is estimated via conversion from $M_x$, the total
+uncertainty is \citep{DeadSea2022, Grunthal2016}:
+
+\begin{equation}
+  \sigma_{M_\mathrm{w}}^2 = \sigma_{\hat{\alpha}}^2
+    + \left(\frac{\partial f}{\partial M_x}\right)^2 \sigma_{M_x}^2
+    + \sigma_{\mathrm{model}}^2,
   \label{eq:uncert}
 \end{equation}
 
-where $\hat{a}$ represents the conversion-equation intercept uncertainty and
-$f(M_x)$ is the conversion function.  This formulation, used in
-\citet{DeadSea2022} and \citet{Grunthal2016}, ensures that uncertainty is
-correctly amplified when the conversion slope departs from unity (e.g., for
-$m_\mathrm{b}$ where $\partial f/\partial m_b \approx 0.85$).
+where $\hat{\alpha}$ is the conversion-equation intercept (with uncertainty
+$\sigma_{\hat{\alpha}}^2$ from the GOR fit), $f(M_x)$ is the conversion
+function, $\sigma_{M_x}^2$ is the individual measurement uncertainty of the
+predictor magnitude, and $\sigma_{\mathrm{model}}^2$ is the residual scatter
+of the regression (model uncertainty).  For the Scordilis
+$m_\mathrm{b} \to M_\mathrm{w}$ conversion with slope $\approx 0.85$, the
+conversion amplifies the input uncertainty by a factor $0.85^2 \approx 0.72$
+(a reduction), but the model residual ($\sigma_{\mathrm{model}} \approx 0.3$)
+typically dominates \citep{Scordilis2006, Grunthal2016}.
 
 \subsubsection{Combining macroseismic and instrumental estimates}
 
-Where both macroseismic ($M_{\mathrm{w,macro}}$) and instrumental
-($M_{\mathrm{w,inst}}$) estimates exist, the CPTI15 pipeline
-\citep{CPTI15} uses inverse-variance weighting:
+Where both macroseismic ($M_{\mathrm{w,macro}}$, derived from intensity data
+via \citealt{Grunthal1998}) and instrumental ($M_{\mathrm{w,inst}}$) estimates
+exist—a common situation for the historical period 1900--1960—the CPTI15
+Italian pipeline \citep{CPTI15} uses inverse-variance weighting:
 
 \begin{equation}
-  M_{\mathrm{w,comb}}
-    = \frac{
-        M_{\mathrm{w,macro}} / \sigma_{\mathrm{macro}}^2
-        + M_{\mathrm{w,inst}} / \sigma_{\mathrm{inst}}^2
-      }{
-        1/\sigma_{\mathrm{macro}}^2 + 1/\sigma_{\mathrm{inst}}^2
-      }.
+  M_{\mathrm{w,comb}} = \frac{
+    M_{\mathrm{w,macro}} / \sigma_{\mathrm{macro}}^2
+    + M_{\mathrm{w,inst}} / \sigma_{\mathrm{inst}}^2
+  }{
+    1/\sigma_{\mathrm{macro}}^2 + 1/\sigma_{\mathrm{inst}}^2
+  }.
   \label{eq:ivw}
 \end{equation}
 
+This is the minimum-variance unbiased estimator under the assumption of
+independent Gaussian errors \citep{Kay1993}.  For the Italian \catalog,
+$\sigma_{\mathrm{macro}} \approx 0.3$--0.5 and
+$\sigma_{\mathrm{inst}} \approx 0.1$--0.2 \citep{CPTI15}, so the combined
+estimate is dominated by the instrumental solution when both are available but
+gracefully falls back to the macroseismic estimate for events with no
+instrumental record.
+
 % -----------------------------------------------------------------------------
-\subsection{Network Authority Hierarchies}
+\subsection{Network Authority Hierarchies and Regional Overrides}
 \label{sec:authority}
 
-\subsubsection{The ANSS ComCat model}
+\subsubsection{The philosophical distinction: selection vs.\ re-analysis}
 
-The ANSS Comprehensive Earthquake \catalog\ assigns a \texttt{preferredWeight}
-to each product submission from each contributing network \citep{usgs_comcat}.
-The network with the highest weight for a given product type (origin, magnitude,
-focal mechanism) is the preferred source.  Where weights are equal, the most
-recently updated product takes precedence.  Regional networks are authoritative
-within their monitoring footprint; USGS NEIC fills gaps globally
-\citep{usgs_comcat, Woessner2005}.
+Two fundamentally different philosophies underlie network authority models:
 
-\subsubsection{The ISC model}
+\begin{description}
+  \item[Selection model (ANSS ComCat).] Each contributing network submits its
+        preferred solution.  A weight is assigned to each network per product
+        type; the highest-weight solution is the ``preferred'' product
+        \citep{usgs_comcat}.  Where weights are equal, the most recently updated
+        solution takes precedence.  No re-analysis is performed by the
+        aggregator.
 
-The ISC applies a fundamentally different philosophy: it does not simply pass
-through one agency's solution.  Instead it re-locates \emph{every} event using
-all contributed phase data and designates the ISC-authored hypocenter as prime.
-All agency solutions remain in the bulletin as secondary hypocenters
-\citep{ISCBulletinRebuild2020}.  This preserves full traceability and is the
-gold standard for research-grade \catalogs.
+  \item[Re-analysis model (ISC).] The aggregator receives all raw phase data
+        and performs its own relocation and magnitude computation using all
+        contributed data simultaneously.  The aggregator's solution is prime;
+        contributing solutions are retained as secondary
+        \citep{ISCBulletinRebuild2020}.
+\end{description}
 
-\subsubsection{A recommended default hierarchy}
+For research-grade applications, the re-analysis model is strongly preferred
+because it provides a single uniform solution computed with a common algorithm
+and velocity model, eliminating inter-agency biases \citep{Storchak2013}.  For
+rapid operational applications where relocation latency is unacceptable, the
+selection model is appropriate.
 
-Drawing on the ANSS, ISC-GEM, and EMSC models, \cref{tab:hierarchy} lists a
-practical global priority ranking.  Regional events should override the global
-ranking when a specialist regional network has lower azimuthal gap and higher
-station count than any global agency for the event in question.
+\subsubsection{Regional authority and the ``authoritative network'' principle}
+
+The ANSS ComCat implements the \emph{authoritative network} principle: for
+earthquakes occurring within a defined geographic footprint, the regional
+specialist network is given the highest preferred weight, overriding the NEIC
+global solution \citep{usgs_comcat}.  Examples include the Caltech/USGS Southern
+California Seismic Network (SCSN, code \texttt{ci}) for Southern California,
+the University of Utah Seismograph Stations (\texttt{uu}) for the Intermountain
+West, and GeoNet (\texttt{nz}) for Aotearoa New Zealand \citep{GeoNetEqCatalogue}.
+
+The justification is that regional networks operate denser station arrays with
+local velocity models specifically calibrated to regional structure, producing
+lower-uncertainty locations and completeness to smaller magnitudes than any
+global agency \citep{Woessner2005, Hutton2010}.  For the New Zealand region,
+\citet{GeoNetEqCatalogue} document that GeoNet solutions achieve completeness to
+approximately $M_\mathrm{L}$\,1.5 in the North Island, compared to the ISC's
+practical completeness limit of $\approx M$\,4.5 for the same region.
 
 \begin{table}[H]
   \centering
   \caption{Recommended global network authority hierarchy for parameter
-           selection.  Priority 1 = most authoritative.  ``Regional override''
-           indicates that this network takes precedence for events within its
-           defined geographic footprint.}
+           selection.  Priority 1 = highest authority.  Regional overrides
+           (marked with $\dagger$) take precedence over all entries above them
+           in the table for earthquakes within the network's geographic
+           footprint.}
   \label{tab:hierarchy}
   \begin{tabular}{cllp{4.5cm}}
     \toprule
-    Priority & Network / Agency & Code & Notes \\
+    Priority & Network / Agency & Code(s) & Notes \\
     \midrule
-    1 & GCMT / Global CMT & \texttt{gcmt} & Waveform $M_\mathrm{w}$; gold standard \\
-    2 & ISC / ISC-GEM & \texttt{isc} & Relocated; full phase data \\
-    3 & USGS NEIC & \texttt{us} & Global; W-phase $M_\mathrm{w}$ \\
+    1 & GCMT & \texttt{gcmt} & Waveform CMT; gold-standard $M_\mathrm{w}$ \\
+    2 & ISC / ISC-GEM & \texttt{isc} & Re-located; full phase data retained \\
+    3 & USGS NEIC & \texttt{us} & W-phase $M_\mathrm{w}$; global coverage \\
     4 & EMSC & \texttt{emsc} & Euro-Med aggregator \\
-    5 & JMA & \texttt{jp} & Regional override: Japan \\
-    6 & GeoNet / GNS & \texttt{nz} & Regional override: Aotearoa NZ \\
-    7 & GEOFON / GFZ & \texttt{gfz} & Broadband; rapid solutions \\
-    8 & INGV & \texttt{ingv} & Regional override: Italy \\
-    9 & IGN & \texttt{ign} & Regional override: Spain \\
+    5 & GEOFON / GFZ & \texttt{gfz} & Broadband; rapid solutions \\
+    6$^\dagger$ & GeoNet / GNS & \texttt{nz} & Regional override: Aotearoa NZ \\
+    6$^\dagger$ & JMA & \texttt{jp} & Regional override: Japan \\
+    6$^\dagger$ & INGV & \texttt{ingv} & Regional override: Italy \\
+    6$^\dagger$ & IGN & \texttt{ign} & Regional override: Spain \\
+    6$^\dagger$ & BGR / GFZ & \texttt{de} & Regional override: Germany \\
+    7 & IRIS / FDSN & \texttt{ir} & Waveform archive; no preferred solution \\
     \bottomrule
   \end{tabular}
 \end{table}
+
+\subsubsection{Temporal variation in network authority}
+
+Network capabilities change over time: networks expand or contract, recording
+equipment is upgraded, velocity models are revised.  The authority hierarchy
+should therefore be applied with awareness of the recording era.  For example,
+the GCMT \catalog\ begins in 1976 \citep{Dziewonski1981}; for events before
+that date, the tier-1 authority falls to ISC or NEIC.  GeoNet's digital
+broadband network was not fully operational until the early 2000s; for
+pre-2000 New Zealand events, ISC or the GNS analogue bulletin should be used
+as the primary source \citep{GeoNetEqCatalogue}.
+
+% -----------------------------------------------------------------------------
+\subsection{Regional Catalogue Merging: Case Studies}
+\label{sec:casestudies}
+
+\subsubsection{Dead Sea Transform region}
+
+\citet{DeadSea2022} described an automated pipeline for the Dead Sea Transform
+region (DST-CAT), covering 1900--2017 and $M_\mathrm{w} \geq 3.0$, assembled
+from ISC, the Geophysical Institute of Israel (GII), and several regional
+networks.  Key methodological choices were:
+
+\begin{itemize}
+  \item \textbf{Association}: 60\,s / 100\,km window with manual review of
+        borderline cases.
+  \item \textbf{Preferred solution}: specialist regional agency (GII) for
+        events within the DST zone; ISC for the broader region; GCMT where
+        available.
+  \item \textbf{Magnitude conversion}: GOR-based $M_\mathrm{L}$, $M_\mathrm{s}$,
+        and $m_\mathrm{b}$ to $M_\mathrm{w}$ relationships derived from the
+        1976--2017 overlap period, with uncertainties propagated via
+        \eqref{eq:uncert}.
+  \item \textbf{Era-dependent windows}: wider windows (90\,s / 150\,km) for
+        the pre-1960 period to account for analogue timing errors.
+\end{itemize}
+
+The study explicitly noted the failure of fixed-window methods during the 1995
+$M_\mathrm{w}$\,7.2 Aqaba mainshock sequence, where aftershock rates exceeded
+10 events per hour for two days, and adopted a hybrid approach with manual
+review for the highest-rate periods.
+
+\subsubsection{Mexico unified catalogue}
+
+\citet{Zuniga2019} assembled a unified Mexican seismicity \catalog\
+(1750--2018, $M \geq 3$) from seven source \catalogs\ including the SSN
+(Servicio Sismológico Nacional), NEIC PDE, ISC, and the Reyes-Dávila regional
+bulletins.  The deduplication procedure used a 60\,s / $1^\circ$ ($\approx$
+111\,km) window and a source priority list with the SSN as authoritative for
+events within Mexico.  The study documents a magnitude change point in 1963
+(transition from analogue to digital recording) requiring separate
+completeness analyses for the two periods.
+
+\subsubsection{Turkey homogeneous catalogue}
+
+\citet{Tan2021} constructed a homogeneous $M_\mathrm{w}$ \catalog\ for Turkey
+(1900--2018) from TURKNET, AFAD, ISC, GCMT, and several historical sources.
+The study used a 60\,s / 100\,km proximity window and applied GOR conversions
+with era-specific coefficients.  A key finding was that the Scordilis OLS
+coefficients produced a systematic overestimate of $M_\mathrm{w}$ for Turkish
+$M_\mathrm{L}$ values below 3.5, by approximately 0.2\,units — confirming the
+OLS attenuation bias described in \cref{sec:regression}.  The homogenised
+\catalog\ was then declustered using the \citet{Reasenberg1985} algorithm
+before use in seismic hazard calculations.
+
+\subsubsection{Italy: CPTI15}
+
+The Parametric Catalogue of Italian Earthquakes (CPTI15, \citealt{CPTI15})
+is the most comprehensive regional merging effort for a seismically active
+European country, covering 1000--2014 with $M_\mathrm{w} \geq 4.0$ for the
+instrumental period and extending to smaller magnitudes and earlier periods
+for historical events.  It merges multiple national bulletins
+(INGV, GNDT, ING), the ISC bulletin, GCMT solutions, and a rich archive of
+macroseismic intensity data \citep{DBMI15}.
+
+CPTI15 uses a piecewise-linear GOR framework \citep{Gasperini2012} for
+magnitude conversion and the inverse-variance-weighted combination of
+\eqref{eq:ivw} for events with both instrumental and macroseismic estimates.
+The catalogue is tied to the INGV ShakeMap intensity model to ensure
+consistency with ground-motion prediction equations used in Italian national
+hazard maps \citep{Stucchi2011}.
+
+\subsubsection{Aotearoa New Zealand}
+
+The GeoNet \catalog\ \citep{GeoNetEqCatalogue} is the authoritative source for
+New Zealand seismicity, providing real-time and reviewed solutions from the
+national seismograph network.  \citet{Illsley2025} recently produced a new
+high-precision \catalog\ for the Taupō Volcanic Zone (TVZ) by re-processing
+GeoNet waveforms with a template-matching algorithm \citep{Chamberlain2018},
+demonstrating that merged \catalogs\ for New Zealand should treat the TVZ and
+broader crustal seismicity as distinct populations with different completeness
+thresholds.
+
+The National Seismic Hazard Model \citep{NSHM2022BSSA} integrates the GeoNet
+\catalog\ with paleo-seismic and geological data, requiring careful
+synchronisation of magnitude scales: GeoNet reports primarily $M_\mathrm{L}$
+for small events and $M_\mathrm{w}$ for larger events, but the transition
+between scales is not uniformly applied across the \catalog's recording history
+\citep{GeoNetLocationInfo}.  For input to ground-motion models, all magnitudes
+must be expressed in $M_\mathrm{w}$, necessitating the conversion procedures
+discussed in \cref{sec:maghomog}.
 
 % -----------------------------------------------------------------------------
 \subsection{Parameter Selection Within a Merged Group}
 \label{sec:selection}
 
-Once all records for a physical earthquake are grouped (via any of the methods
-in \cref{sec:matching}), the following selection rules reflect the consensus
-of the ISC-GEM, ANSS, and Dead Sea Transform pipeline documentations.
+Once event groups have been identified by one of the methods in
+\cref{sec:matching}, parameter selection determines the single origin time,
+hypocentre, and magnitude that will represent the physical earthquake in the
+merged \catalog.
 
 \subsubsection{Hypocenter and origin time}
-Select the hypocenter from the highest-priority agency whose solution satisfies
-\emph{all} of:
+
+The preferred hypocentre is selected from the contributing solutions according
+to the priority order in \cref{tab:hierarchy}, subject to quality thresholds.
+The ISC-GEM criteria for accepting a prime hypocentre
+\citep{ISCGEM2018, Bondár2011} are:
+
 \begin{itemize}
-  \item azimuthal gap $< 180^\circ$,
-  \item at least 6 defining phases,
-  \item depth not fixed (free-floating solution preferred),
+  \item Azimuthal gap $< 180^\circ$,
+  \item At least 6 defining phases,
+  \item Free depth (not fixed at a default value),
   \item RMS travel-time residual $< 2.0$\,s.
 \end{itemize}
-The origin time is taken from the selected hypocenter and is \emph{not}
-averaged across agencies \citep{Storchak2013}.
 
-Where no agency meets all criteria, the priority order in \cref{tab:hierarchy}
-determines the fallback, with a QC flag attached.
+The origin time is taken from the selected hypocentre \emph{without averaging}.
+Averaging origin times across agencies is incorrect because agencies use
+different phase sets and velocity models; their origin times are not independent
+estimates of a common truth but are each internally consistent with their
+respective location procedures \citep{Storchak2013}.
 
-\subsubsection{Depth}
-Among qualifying hypocenters, prefer the solution with the smallest depth
-uncertainty.  Where uncertainty information is absent, prefer the solution with
-the greater station count.  Depth solutions fixed at standard values
-(e.g., 10\,km, 33\,km, 100\,km) are given lowest priority \citep{Engdahl2020}.
+Where no single agency meets all criteria, the highest-priority solution is
+used with a downgraded quality flag, and the criteria violation is recorded as
+event metadata.
 
-\subsubsection{Magnitude}
-Apply the priority hierarchy in \cref{sec:maghomog}.  When multiple estimates
-exist at the same priority tier, the Bayesian posterior mean of
-\cref{eq:bayesmag} is preferred; the alpha-trimmed median of \citet{ISCGEM2018}
-is an acceptable substitute requiring no prior specification.
+\subsubsection{Depth selection}
+
+Among qualifying hypocentres, the solution with the smallest formal depth
+uncertainty is preferred.  Where formal uncertainty is unavailable, the
+solution with the largest number of depth-sensitive phases ($pP$, $sP$,
+$pwP$, depth phases) is preferred.  Depth solutions fixed at standard values
+(10, 33, 100\,km) are given lowest priority and flagged with
+\texttt{depth\_type = fixed} \citep{Engdahl2020}.
+
+For events with no free-depth solution from any contributing agency, the
+depth should be reported as the fixed value of the best-available agency,
+with explicit documentation of the fixing convention used.
+
+\subsubsection{Magnitude selection and conversion}
+
+Apply the priority hierarchy of \cref{sec:maghierarchy}.  When multiple
+estimates exist at the same priority tier and formal uncertainties are
+available, the Bayesian posterior mean \eqref{eq:bayesposterior} is the
+optimal estimator \citep{Schorlemmer2024}.  The alpha-trimmed median
+\citep{ISCGEM2018} is an acceptable substitute when the Bayesian framework
+cannot be calibrated (e.g.\ for sparse regional \catalogs\ without sufficient
+overlap for network intercept estimation).  When neither is applicable,
+select the estimate from the highest-priority agency and document the choice.
 
 \subsubsection{Focal mechanism}
-Select the focal mechanism following \citet{ISCGEM2018} source authority:
-GCMT $>$ regional CMT $>$ USGS first-motion $>$ automated solutions.  Within
-each tier, rank by quality score integrating station polarity count, misfit, and
-variance reduction.  Retain all available mechanisms as supplementary products.
+
+For events where focal mechanisms are available from multiple sources, the
+following priority order is recommended based on the ISC-GEM protocol and
+established reliability assessments \citep{Dziewonski1981, Ekstrom2012}:
+
+\begin{enumerate}
+  \item GCMT (waveform centroid moment tensor);
+  \item USGS/NEIC broadband CMT or W-phase solution;
+  \item GEOFON/GFZ regional moment tensor;
+  \item GeoNet CMT (for New Zealand events, \citealt{GeoNetEqCatalogue});
+  \item INGV CMT (for Italian events);
+  \item First-motion polarity solution with $\geq 20$ station polarities;
+  \item Automated first-motion solution.
+\end{enumerate}
+
+Within each tier, rank by: (i) variance reduction (higher is better),
+(ii) station polarity count (more is better), (iii) misfit (lower is better).
+All available mechanisms should be retained as supplementary products to
+enable downstream comparison studies \citep{ISCBulletinRebuild2020}.
+
+% -----------------------------------------------------------------------------
+\subsection{Declustering and Its Relationship to Merging}
+\label{sec:declustering}
+
+Declustering — the removal of aftershocks and foreshocks to obtain a Poissonian
+background catalogue — is a separate post-processing step from merging but is
+closely related in practice.  Two points of interaction are important.
+
+\paragraph{Merging before declustering.}
+Declustering algorithms (e.g.\ \citealt{GardnerKnopoff1974, Reasenberg1985,
+Zaliapin2013}) require an internally consistent, homogeneous magnitude scale and
+a complete event listing to correctly identify cluster members.  If two \catalogs\
+are merged \emph{after} independent declustering, cluster members that appear
+in only one source \catalog\ may be lost, biasing the background rate estimate
+\citep{Hainzl2016}.  The correct order is: merge first (retaining all events
+from all sources), then decluster.
+
+\paragraph{Duplicate detection vs.\ foreshock-aftershock discrimination.}
+The nearest-neighbour proximity function (\cref{sec:nn}) was introduced
+specifically to address the case where duplicate detection and aftershock
+identification are conflated \citep{Tanaka2022}.  This is a real operational
+hazard: aftershocks occurring within seconds of the mainshock are easily
+misidentified as duplicates by fixed-window methods during the most intense
+phase of a sequence.  Systems that merge and decluster simultaneously (e.g.\
+using a single proximity window) can lose genuine aftershocks and overcount
+the mainshock, distorting both the $b$-value and the Omori-law parameters of
+the sequence \citep{Hainzl2016, Reasenberg1985}.
+
+% -----------------------------------------------------------------------------
+\subsection{Data Exchange Standards and Provenance}
+\label{sec:standards}
+
+\subsubsection{QuakeML and FDSN}
+
+The QuakeML 1.2 schema \citep{QuakeML} is the de facto standard for representing
+earthquake event metadata in XML.  It natively supports the representation of
+multiple competing origin solutions, multiple magnitude estimates per origin,
+focal mechanism solutions with full moment tensors, and phase arrival data.
+The \texttt{preferredOriginID} and \texttt{preferredMagnitudeID} attributes
+are the schema's mechanism for expressing a selection decision, while retaining
+all contributing solutions as first-class objects.
+
+FDSN event web services \citep{USGSFDSN} provide HTTP access to QuakeML records
+from participating agencies, enabling automated ingestion of source \catalogs\
+in a standard format.  For merging systems that ingest from multiple FDSN nodes
+simultaneously, the \texttt{contributor} and \texttt{author} fields within each
+QuakeML origin provide the information needed to implement the same-agency rule
+(\cref{sec:sameagency}) \citep{QuakeML, USGSFDSN}.
+
+\subsubsection{Provenance tracking}
+
+Any merged \catalog\ intended for research use should preserve the full
+derivation chain of each event record.  The W3C PROV data model
+\citep{PROVO} provides a formal language for expressing provenance graphs.
+For earthquake \catalogs, provenance records should document:
+
+\begin{itemize}
+  \item The source \catalog\ identifier and version for each contributing record;
+  \item The association algorithm and threshold values used;
+  \item The selection rule applied for each parameter type (origin, magnitude,
+        focal mechanism);
+  \item The conversion equation and coefficients applied to any magnitude
+        requiring homogenisation, with uncertainty estimates.
+\end{itemize}
+
+The FAIR data principles \citep{FAIRPrinciples2016} require that merged
+\catalogs\ be assigned persistent identifiers (DOIs) with version tracking
+\citep{DataCiteVersioning}.  Where the input \catalogs\ have their own DOIs,
+the provenance record should cite them explicitly to enable users to trace
+any merged event back to its source records \citep{GOFAIR}.
 
 % -----------------------------------------------------------------------------
 \subsection{Conflict Detection and Quality Control}
@@ -442,99 +1127,128 @@ variance reduction.  Retain all available mechanisms as supplementary products.
 
 \subsubsection{Within-group consistency flags}
 
-\Cref{tab:qcflags} lists the primary quality flags recommended following the
-ISC bulletin and ANSS ComCat quality models.  These should be computed and
-stored for every merged event, not used as hard-rejection criteria.
+Quality flags should be computed for every merged event and stored as first-class
+metadata.  \Cref{tab:qcflags} lists the recommended set, drawing on the ISC
+bulletin quality model \citep{Bondár2011, ISCBulletinRebuild2020} and the ANSS
+ComCat practice \citep{usgs_comcat}.  Flags are informational unless marked
+as ``Error''; error-severity flags indicate that the group should be dissolved
+and re-evaluated before the event is included in the merged output.
 
-\begin{table}[H]
-  \centering
-  \caption{Recommended within-group QC flags.  All flags should be stored as
-           event metadata; only the most severe (``error'' severity) justify
-           dissolving a group without merging.}
-  \label{tab:qcflags}
-  \begin{tabular}{p{3.8cm}p{2.5cm}lp{3.8cm}}
-    \toprule
-    Condition & Threshold & Severity & Reference \\
-    \midrule
-    Azimuthal gap & $> 180^\circ$ & Warning & \citet{Bondár2011} \\
-    Defining phase count & $< 6$ & Warning & \citet{Bondár2011} \\
-    Depth type & Fixed & Info & \citet{Engdahl2020} \\
-    RMS residual & $> 2.0$\,s & Warning & \citet{ISCBulletinRebuild2020} \\
-    $|\Delta M_\mathrm{w}|$ between two authoritative sources & $> 0.3$ & Warning & \citet{Schorlemmer2024} \\
-    $|\Delta M_\mathrm{w}|$ converted vs.\ observed & $> 0.5$ & Warning & \citet{Grunthal2016} \\
-    Group size (events from different agencies) & $> 10$ & Error & \citet{Tanaka2022} \\
-    Same agency appears twice in group & any & Error & Section~\ref{sec:sameagency} \\
-    Spatial spread of epicentres & $>100$\,km for $M<5$ & Warning & \citet{Benz2019} \\
-    \bottomrule
-  \end{tabular}
-\end{table}
+\begin{longtable}{p{4.0cm}p{2.4cm}lp{3.5cm}}
+  \caption{Recommended within-group quality flags for merged earthquake events.
+           Severity: I = informational, W = warning, E = error (group should be
+           dissolved).}
+  \label{tab:qcflags} \\
+  \toprule
+  Condition & Threshold & Severity & Reference \\
+  \midrule
+  \endfirsthead
+  \multicolumn{4}{l}{\small\textit{(continued)}} \\
+  \toprule
+  Condition & Threshold & Severity & Reference \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  Azimuthal gap & $> 180^\circ$ & W & \citet{Bondár2011} \\
+  Defining phase count & $< 6$ & W & \citet{Bondár2011} \\
+  Depth fixed (not free) & any & I & \citet{Engdahl2020} \\
+  RMS travel-time residual & $> 2.0$\,s & W & \citet{ISCBulletinRebuild2020} \\
+  Horizontal uncertainty & $> 50$\,km & W & \citet{Bondár2004} \\
+  $|\Delta M_\mathrm{w}|$: two authoritative sources & $> 0.3$ & W & \citet{Schorlemmer2024} \\
+  $|\Delta M_\mathrm{w}|$: converted vs.\ observed & $> 0.5$ & W & \citet{Grunthal2016} \\
+  Magnitude range in group & $> 1.0$ (for $M < 5$) & W & \citet{Tanaka2022} \\
+  Group size (events from different networks) & $> 10$ & E & \citet{Benz2019} \\
+  Same network appears twice in group & any & E & \citet{Benz2019} \\
+  Spatial epicentre spread & $> 100$\,km for $M < 5$ & W & \citet{Benz2019} \\
+  Depth range within group & $> 50$\,km (shallow) & W & \citet{ISCGEM2018} \\
+  Wide time spread (informational) & $> 30$\,s for $M < 5$ & I & \citet{ISCGEM2018} \\
+\end{longtable}
 
-\subsubsection{Same-agency duplicate flag}
+\subsubsection{The same-agency rule}
 \label{sec:sameagency}
 
 If the same network contributes two records to a single merged group, the group
-almost certainly spans two distinct earthquakes (e.g., a foreshock-mainshock
-pair or a genuine aftershock).  This should be treated as an error-severity
-conflict and the group dissolved into sub-groups via a secondary pairwise
-matching pass \citep{Tanaka2022, Benz2019}.
+almost certainly spans two distinct physical earthquakes.  This is because any
+competent network applies intra-network deduplication upstream of its data
+submission; consequently, two records from the same network in the same time-
+distance window represent genuinely distinct detected events, not two reports
+of one event \citep{Benz2019}.  The group should be dissolved and a secondary
+pairwise pass performed on its members, constrained by the same-agency rule as
+in the ILP constraint \eqref{eq:ilp}.
+
+\subsubsection{Failed-group recovery}
+
+When a group fails validation (e.g.\ because of a same-agency clash or
+anomalous magnitude range), the correct response is not to emit all members as
+singletons, but to attempt a constrained re-grouping.  A one-level secondary
+greedy pass within the failed group — where the same-agency rule is enforced as
+a hard constraint — can recover valid sub-groups \citep{Benz2019, Tanaka2022}.
+Sub-groups that still fail validation after the secondary pass are emitted as
+singletons with a QC flag recording the failed-group origin.
 
 \subsubsection{Magnitude completeness audit}
 \label{sec:mc}
 
-Following \citet{Wiemer2000}, the magnitude of completeness $M_c$ should be
-estimated for the merged \catalog\ in rolling temporal bins (5-year windows are
-standard) using either the Maximum Curvature (MAXC) or Goodness-of-Fit (GFT)
-method.  Events below $M_c$ must be flagged as potentially incomplete in any
-time bin where $M_c$ is elevated, and excluded from $b$-value or seismicity
-rate calculations that assume completeness \citep{Aki1965, Woessner2005}.
-Sudden changes in $M_c$ should be documented alongside the network history that
-explains them.
+The magnitude of completeness $M_c$ should be estimated for the merged \catalog\
+in rolling temporal bins (5-year windows are recommended by \citealt{Woessner2005})
+using either the Maximum Curvature (MAXC) or Goodness-of-Fit (GFT) method
+\citep{Wiemer2000}.  Events below $M_c$ must be flagged as potentially incomplete
+in any bin where $M_c$ is elevated and excluded from $b$-value or seismicity rate
+calculations that assume completeness \citep{Aki1965}.  Sudden upward steps in
+$M_c$ correspond to network deterioration or data gaps and should be documented
+alongside the network history that explains them \citep{Woessner2005}.
 
 % -----------------------------------------------------------------------------
-\subsection{Algorithm Recommendations and Current Implementation}
+\subsection{Algorithmic Recommendations}
 \label{sec:recommendations}
 
 \Cref{tab:recommendations} maps the key algorithmic decisions to the methods
-recommended by the literature and summarises the current state of the
-implementation described in this work.
+recommended by the literature reviewed above, and summarises the current
+implementation status.
 
-\begin{table}[H]
-  \centering
-  \caption{Algorithmic decisions in earthquake \catalog\ merging, recommended
-           approaches from the literature, and the current implementation
-           status.  GOR = Generalised Orthogonal Regression.  OLS = Ordinary
-           Least Squares.}
-  \label{tab:recommendations}
-  \renewcommand{\arraystretch}{1.25}
-  \begin{tabular}{p{3.0cm}p{3.5cm}p{4.0cm}p{2.0cm}}
-    \toprule
-    Decision area & Literature recommendation & Current implementation & Priority \\
-    \midrule
-    Event association & Graph connected-components \citep{Benz2019} & Greedy forward-sweep & Medium \\
-    Dense sequences & Nearest-neighbour proximity \citep{Tanaka2022} & Adaptive time/distance windows & Low–Medium \\
-    Magnitude regression & GOR / non-linear \citep{Grunthal2016, ISCGEM2018} & Linear Scordilis OLS \citep{Scordilis2006} & High \\
-    Multi-estimate averaging & Alpha-trimmed median \citep{ISCGEM2018} or Bayesian \citep{Schorlemmer2024} & Priority selection & Medium \\
-    Source preservation & All solutions retained (ISC model) & JSON in \texttt{source\_events} field & Low \\
-    Depth selection & Uncertainty-weighted \citep{Engdahl2020} & Uncertainty-weighted & --- (done) \\
-    Focal mechanism & GCMT $>$ regional CMT priority & Implemented per hierarchy & --- (done) \\
-    QC flags & 9-flag ISC/ANSS model & 7 flags implemented & Low \\
-    Magnitude completeness & Rolling $M_c$ in 5-year bins \citep{Wiemer2000} & Not implemented & Medium \\
-    \bottomrule
-  \end{tabular}
-\end{table}
+\begin{longtable}{p{2.8cm}p{3.3cm}p{3.5cm}p{1.5cm}}
+  \caption{Algorithmic decisions in earthquake \catalog\ merging:
+           literature recommendations, current implementation, and priority for
+           future work.  GOR = Generalised Orthogonal Regression;
+           OLS = Ordinary Least Squares; DSU = Disjoint-Set Union.}
+  \label{tab:recommendations} \\
+  \toprule
+  Decision & Recommended & Current & Priority \\
+  \midrule
+  \endfirsthead
+  \multicolumn{4}{l}{\small\textit{(continued)}} \\
+  \toprule
+  Decision & Recommended & Current & Priority \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  Event association & Graph DSU \citep{Benz2019} & Greedy forward-sweep & Medium \\
+  Dense sequences & Nearest-neighbour $\eta$ \citep{Tanaka2022} & Adaptive windows & Low \\
+  Magnitude conversion & GOR / non-linear \citep{Grunthal2016, ISCGEM2018} & Linear OLS \citep{Scordilis2006} & \textbf{High} \\
+  Multi-estimate averaging & $\alpha$-trimmed median \citep{ISCGEM2018} or Bayesian \citep{Schorlemmer2024} & Priority selection & Medium \\
+  Source provenance & All solutions retained (ISC model) & JSON in \texttt{source\_events} & Low \\
+  Depth selection & Uncertainty-weighted \citep{Engdahl2020} & Implemented & Done \\
+  Focal mechanism & GCMT $>$ regional CMT & Implemented & Done \\
+  QC flags & 13-flag model (\cref{tab:qcflags}) & 9 flags implemented & Low \\
+  $M_c$ audit & Rolling 5-yr bins \citep{Wiemer2000} & Not implemented & Medium \\
+  Declustering order & Merge first, then decluster & N/A (user responsibility) & Info \\
+  Provenance & W3C PROV records \citep{PROVO} & Partial (JSON lineage) & Medium \\
+\end{longtable}
 
-The highest-priority gap is the regression methodology.  Replacing the current
-linear OLS Scordilis (\citeyear{Scordilis2006}) coefficients with GOR-derived
-relationships—either the published SHEEC coefficients of
-\citet{Grunthal2016} or region-specific coefficients computed from the
-overlap period of the source \catalogs—would reduce systematic bias in the
-converted frequency-magnitude distribution without requiring any architectural
-changes to the merging pipeline.
+The single highest-priority gap is the regression methodology.  Replacing
+linear OLS \citet{Scordilis2006} coefficients with GOR-derived relationships
+\citep{Grunthal2016} would reduce systematic bias in the converted
+frequency-magnitude distribution without requiring architectural changes.  For
+applications in the New Zealand region specifically, region-calibrated
+$M_\mathrm{L} \to M_\mathrm{w}$ GOR coefficients estimated from the GeoNet
+and ISC-GEM overlap period (1976--present) should be derived and used in
+preference to global coefficients \citep{GeoNetLocationInfo, NSHM2022BSSA}.
 
-The second highest-priority gap is the adoption of a graph-based connected-
-components step (see \cref{sec:graph}).  The current greedy forward-sweep misses
-transitive associations and processes each event against only future events in
-time order, meaning that when event B has already been consumed into a group
-containing A, C cannot subsequently be merged with the A-B group even if C
-matches B within threshold.  A Union-Find graph implementation would resolve
-this in $O(n\,\alpha(n))$ time with no change to the downstream selection logic.
+The second highest-priority gap is the adoption of a Union-Find graph
+association step (\cref{sec:graph}).  The current greedy forward-sweep misses
+transitive associations that arise when an intermediate-time event B links two
+events A and C that would not independently satisfy the proximity criterion.
+A Union-Find graph implementation resolves this in $O(n\,\alpha(n))$ time with
+no change to the downstream parameter-selection logic.
