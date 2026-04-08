@@ -114,7 +114,7 @@ export async function GET(
       .filter((c): c is number => c !== null && c !== undefined);
 
     const eventsWithUncertainty = events.filter(e =>
-      e.latitude_uncertainty !== null || e.longitude_uncertainty !== null
+      e.latitude_uncertainty != null || e.longitude_uncertainty != null
     ).length;
 
     const eventsWithFocalMechanism = events.filter(e =>

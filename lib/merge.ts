@@ -251,6 +251,21 @@ function buildMergedEventFields(
     source_events: JSON.stringify(event.sourceEvents),
   };
 
+  // Copy flat optional fields from the event object first.
+  // When merging events that were previously saved to (or fetched from) the DB,
+  // the raw QuakeMLEvent is NOT stored — only the extracted flat columns are
+  // (e.g. latitude_uncertainty, agency_id).  In that case event.quakeml is
+  // always undefined, so without this copy the quakeml block below is never
+  // reached and every optional field is wiped to null.  The quakeml block below
+  // may override individual fields with re-extracted values when the in-memory
+  // QuakeMLEvent is available (i.e. on first export-only merge before any DB write).
+  for (const field of optionalFields) {
+    const val = (event as any)[field];
+    if (val !== undefined && val !== null) {
+      fields[field] = val;
+    }
+  }
+
   if (quakeml) {
     fields.event_public_id = quakeml.publicID;
     fields.event_type = quakeml.type;

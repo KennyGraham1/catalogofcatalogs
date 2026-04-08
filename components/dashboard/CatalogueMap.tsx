@@ -174,7 +174,7 @@ export const CatalogueMap = memo(function CatalogueMap() {
                   {event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°
                 </span>
               </div>
-              {event.depth !== null && (
+              {event.depth != null && (
                 <div className="flex items-center gap-2">
                   <Ruler className="h-3 w-3 text-muted-foreground" />
                   <span>{event.depth.toFixed(1)} km depth</span>
@@ -392,7 +392,7 @@ const EventPopup = memo(function EventPopup({ event, getMagnitudeLabel }: { even
             <TechnicalTermTooltip term="magnitude" />
           </div>
         </div>
-        {event.depth !== null && (
+        {event.depth != null && (
           <div className="flex items-center gap-2 text-sm">
             <Ruler className="h-4 w-4 text-primary" />
             <div className="flex items-center gap-1.5">

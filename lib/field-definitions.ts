@@ -506,7 +506,7 @@ export const FIELD_ALIASES: Record<string, { exactMatches: string[]; aliases: st
   },
   event_type: {
     exactMatches: ['event_type', 'EventType', 'eventType'],
-    aliases: ['eventtype', 'type', 'etype', 'seismic_type']
+    aliases: ['eventtype', 'etype', 'seismic_type']
   },
   event_type_certainty: {
     exactMatches: ['event_type_certainty', 'typeCertainty'],
@@ -552,7 +552,7 @@ export const FIELD_ALIASES: Record<string, { exactMatches: string[]; aliases: st
   // Agency/Author
   agency_id: {
     exactMatches: ['agency_id', 'agencyID', 'Agency'],
-    aliases: ['agencyid', 'agency', 'source_agency', 'contributor', 'source', 'network', 'net']
+    aliases: ['agencyid', 'agency', 'source_agency', 'contributor', 'network', 'net']
   },
   author: {
     exactMatches: ['author', 'Author', 'AUTHOR'],
@@ -562,7 +562,7 @@ export const FIELD_ALIASES: Record<string, { exactMatches: string[]; aliases: st
   // Magnitude details
   magnitude_type: {
     exactMatches: ['magnitude_type', 'magnitudeType', 'MagType'],
-    aliases: ['magtype', 'mag_type', 'mtype', 'magnitudeclass']
+    aliases: ['magtype', 'mag_type', 'mtype', 'magnitudeclass', 'type']
   },
   magnitude_uncertainty: {
     exactMatches: ['magnitude_uncertainty', 'magnitudeUncertainty'],

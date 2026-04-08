@@ -189,25 +189,25 @@ describe('Catalogues API', () => {
 
   describe('Export Endpoints', () => {
     it('should export catalogue as QuakeML', async () => {
-      // GET /api/catalogues/1/export-quakeml
+      // GET /api/catalogues/1/export?format=quakeml
       // Expected: 200 OK with XML content
       expect(true).toBe(true);
     });
 
     it('should export catalogue as GeoJSON', async () => {
-      // GET /api/catalogues/1/export-geojson
+      // GET /api/catalogues/1/export?format=geojson
       // Expected: 200 OK with GeoJSON
       expect(true).toBe(true);
     });
 
     it('should export catalogue as CSV', async () => {
-      // GET /api/catalogues/1/export (defaults to CSV)
+      // GET /api/catalogues/1/export?format=csv
       // Expected: 200 OK with CSV content
       expect(true).toBe(true);
     });
 
     it('should export catalogue as KML', async () => {
-      // GET /api/catalogues/1/export-kml
+      // GET /api/catalogues/1/export?format=kml
       // Expected: 200 OK with KML content
       expect(true).toBe(true);
     });

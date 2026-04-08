@@ -415,8 +415,17 @@ export function eventsToKML(
         if (event.minimum_distance != null) {
           kml += `            <tr><td><b>Min Distance:</b></td><td>${event.minimum_distance}°</td></tr>\n`;
         }
+        if (event.maximum_distance != null) {
+          kml += `            <tr><td><b>Max Distance:</b></td><td>${event.maximum_distance}°</td></tr>\n`;
+        }
         if (event.associated_phase_count != null) {
           kml += `            <tr><td><b>Associated Phases:</b></td><td>${event.associated_phase_count}</td></tr>\n`;
+        }
+        if (event.associated_station_count != null) {
+          kml += `            <tr><td><b>Associated Stations:</b></td><td>${event.associated_station_count}</td></tr>\n`;
+        }
+        if (event.depth_phase_count != null) {
+          kml += `            <tr><td><b>Depth Phases:</b></td><td>${event.depth_phase_count}</td></tr>\n`;
         }
         if (event.evaluation_mode) {
           kml += `            <tr><td><b>Eval Mode:</b></td><td>${escapeXml(event.evaluation_mode)}</td></tr>\n`;
@@ -433,8 +442,10 @@ export function eventsToKML(
         kml += `        <styleUrl>#${range.name}</styleUrl>\n`;
         kml += `        <TimeStamp><when>${formattedDate}</when></TimeStamp>\n`;
         kml += '        <Point>\n';
-        // KML uses longitude, latitude, altitude (meters above sea level)
-        // For earthquakes, depth is negative altitude
+        // altitudeMode=absolute: altitude is meters above MSL; earthquakes are below
+        // surface so depth (km) becomes negative meters altitude.
+        // Without this mode Google Earth clamps all points to the ground and ignores altitude.
+        kml += '          <altitudeMode>absolute</altitudeMode>\n';
         const altitude = event.depth != null ? -event.depth * 1000 : 0;
         kml += `          <coordinates>${event.longitude},${event.latitude},${altitude}</coordinates>\n`;
         kml += '        </Point>\n';

@@ -80,7 +80,7 @@ const QuickPopupContent = memo(function QuickPopupContent({
         <div className="flex items-center gap-2">
           <Ruler className="h-3.5 w-3.5 text-primary flex-shrink-0" />
           <div className="flex items-center gap-1.5">
-            <span>{event.depth !== null ? `${event.depth.toFixed(1)} km depth` : 'Depth N/A'}</span>
+            <span>{event.depth != null ? `${event.depth.toFixed(1)} km depth` : 'Depth N/A'}</span>
             <TechnicalTermTooltip term="depth" />
           </div>
         </div>
@@ -320,7 +320,7 @@ export const SimpleEventPopup = memo(function SimpleEventPopup({
             <InfoTooltip content="Epicenter coordinates in decimal degrees." />
           </div>
         </div>
-        {event.depth !== null && (
+        {event.depth != null && (
           <div className="flex items-center gap-2">
             <Ruler className="h-3 w-3 text-muted-foreground" />
             <div className="flex items-center gap-1.5">

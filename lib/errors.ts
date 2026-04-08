@@ -214,9 +214,13 @@ export async function retryOperation<T>(
 /**
  * Safe JSON parse with error handling
  */
-export function safeJSONParse<T>(json: string, fallback: T): T {
+export function safeJSONParse<T>(json: string | null | undefined, fallback: T): T {
+  if (json == null) return fallback;
   try {
-    return JSON.parse(json) as T;
+    const parsed = JSON.parse(json);
+    // JSON.parse("null") returns null — treat that as missing and use fallback
+    if (parsed == null) return fallback;
+    return parsed as T;
   } catch (error) {
     const logger = new Logger('JSONParse');
     logger.warn('Failed to parse JSON, using fallback', { error });

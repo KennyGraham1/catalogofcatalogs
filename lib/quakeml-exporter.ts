@@ -664,15 +664,9 @@ export function eventToQuakeML(event: MergedEvent): string {
 
   let xml = `  <event publicID="${escapeXml(publicID)}">\n`;
 
-  // Event type
-  if (event.event_type) {
-    xml += `    <type>${escapeXml(event.event_type)}</type>\n`;
-  }
-
-  // Event type certainty
-  if (event.event_type_certainty) {
-    xml += `    <typeCertainty>${escapeXml(event.event_type_certainty)}</typeCertainty>\n`;
-  }
+  // QuakeML BED 1.2 schema event child element order:
+  // description*, comment*, focalMechanism*, amplitude*, magnitude*, stationMagnitude*,
+  // origin*, pick*, preferredOriginID?, preferredMagnitudeID?, type?, typeCertainty?, creationInfo?
 
   // Descriptions — use stored JSON if available, otherwise synthesise from scalar fields.
   if (event.event_descriptions) {
@@ -704,138 +698,31 @@ export function eventToQuakeML(event: MergedEvent): string {
     }
   }
 
-  // Preferred origin ID
-  if (event.preferred_origin_id) {
-    xml += `    <preferredOriginID>${escapeXml(event.preferred_origin_id)}</preferredOriginID>\n`;
-  }
-
-  // Preferred magnitude ID
-  if (event.preferred_magnitude_id) {
-    xml += `    <preferredMagnitudeID>${escapeXml(event.preferred_magnitude_id)}</preferredMagnitudeID>\n`;
-  }
-
-  // Origins — use stored JSON when available, otherwise reconstruct from scalar fields.
-  let parsedOrigins: Origin[] | null = null;
-  if (event.origins) {
+  // Focal Mechanisms (schema order: 3rd group, before amplitudes/magnitudes/origins)
+  if (event.focal_mechanisms) {
     try {
-      parsedOrigins = JSON.parse(event.origins);
-    } catch {
-      // unparseable JSON; fall through to scalar fallback
-    }
-  }
-  if (parsedOrigins && parsedOrigins.length > 0) {
-    parsedOrigins.forEach(origin => {
-      xml += formatOrigin(origin) + '\n';
-    });
-  } else {
-    // Fallback: reconstruct Origin from scalar database fields.
-    {
-      const originID = event.preferred_origin_id || `smi:local/origin/${event.id}`;
-      xml += `    <origin publicID="${escapeXml(originID)}">\n`;
-
-      // Time
-      xml += `      <time>\n        <value>${event.time}</value>\n`;
-      if (event.time_uncertainty != null) {
-        xml += `        <uncertainty>${event.time_uncertainty}</uncertainty>\n`;
-      }
-      xml += `      </time>\n`;
-
-      // Latitude
-      xml += `      <latitude>\n        <value>${event.latitude}</value>\n`;
-      if (event.latitude_uncertainty != null) {
-        xml += `        <uncertainty>${event.latitude_uncertainty}</uncertainty>\n`;
-      }
-      xml += `      </latitude>\n`;
-
-      // Longitude
-      xml += `      <longitude>\n        <value>${event.longitude}</value>\n`;
-      if (event.longitude_uncertainty != null) {
-        xml += `        <uncertainty>${event.longitude_uncertainty}</uncertainty>\n`;
-      }
-      xml += `      </longitude>\n`;
-
-      // Depth (QuakeML spec: depth value in meters)
-      if (event.depth != null) {
-        xml += `      <depth>\n        <value>${event.depth * 1000}</value>\n`;
-        if (event.depth_uncertainty != null) {
-          xml += `        <uncertainty>${event.depth_uncertainty * 1000}</uncertainty>\n`;
-        }
-        xml += `      </depth>\n`;
-      }
-
-      // Depth type (how depth was constrained)
-      if (event.depth_type) {
-        xml += `      <depthType>${escapeXml(event.depth_type)}</depthType>\n`;
-      }
-
-      // Velocity model and location method
-      if (event.earth_model_id) {
-        xml += `      <earthModelID>${escapeXml(event.earth_model_id)}</earthModelID>\n`;
-      }
-      if (event.method_id) {
-        xml += `      <methodID>${escapeXml(event.method_id)}</methodID>\n`;
-      }
-
-      // Origin uncertainty — horizontal (QuakeML OriginUncertainty element)
-      if (event.horizontal_uncertainty != null) {
-        xml += `      <originUncertainty>\n`;
-        // horizontalUncertainty in QuakeML is in meters
-        xml += `        <horizontalUncertainty>${event.horizontal_uncertainty * 1000}</horizontalUncertainty>\n`;
-        xml += `      </originUncertainty>\n`;
-      }
-
-      // Quality metrics — all available fields
-      const hasQuality = event.azimuthal_gap != null || event.used_phase_count != null ||
-        event.used_station_count != null || event.standard_error != null ||
-        event.minimum_distance != null || event.maximum_distance != null ||
-        event.associated_phase_count != null || event.associated_station_count != null ||
-        event.depth_phase_count != null;
-      if (hasQuality) {
-        xml += `      <quality>\n`;
-        if (event.associated_phase_count != null) xml += `        <associatedPhaseCount>${event.associated_phase_count}</associatedPhaseCount>\n`;
-        if (event.used_phase_count != null) xml += `        <usedPhaseCount>${event.used_phase_count}</usedPhaseCount>\n`;
-        if (event.associated_station_count != null) xml += `        <associatedStationCount>${event.associated_station_count}</associatedStationCount>\n`;
-        if (event.used_station_count != null) xml += `        <usedStationCount>${event.used_station_count}</usedStationCount>\n`;
-        if (event.depth_phase_count != null) xml += `        <depthPhaseCount>${event.depth_phase_count}</depthPhaseCount>\n`;
-        if (event.azimuthal_gap != null) xml += `        <azimuthalGap>${event.azimuthal_gap}</azimuthalGap>\n`;
-        if (event.minimum_distance != null) xml += `        <minimumDistance>${event.minimum_distance}</minimumDistance>\n`;
-        if (event.maximum_distance != null) xml += `        <maximumDistance>${event.maximum_distance}</maximumDistance>\n`;
-        if (event.standard_error != null) xml += `        <standardError>${event.standard_error}</standardError>\n`;
-        xml += `      </quality>\n`;
-      }
-
-      if (event.evaluation_mode) {
-        xml += `      <evaluationMode>${escapeXml(event.evaluation_mode)}</evaluationMode>\n`;
-      }
-      if (event.evaluation_status) {
-        xml += `      <evaluationStatus>${escapeXml(event.evaluation_status)}</evaluationStatus>\n`;
-      }
-
-      // Fallback creationInfo from scalar agency/author fields
-      if (event.agency_id || event.author) {
-        xml += `      <creationInfo>\n`;
-        if (event.agency_id) xml += `        <agencyID>${escapeXml(event.agency_id)}</agencyID>\n`;
-        if (event.author) xml += `        <author>${escapeXml(event.author)}</author>\n`;
-        xml += `      </creationInfo>\n`;
-      }
-
-      // Arrivals (child elements of Origin in QuakeML)
-      if (event.arrivals) {
-        try {
-          const arrivals: Arrival[] = JSON.parse(event.arrivals);
-          arrivals.forEach(arrival => {
-            xml += formatArrival(arrival) + '\n';
-          });
-        } catch {
-          // Ignore parse errors
-        }
-      }
-
-      xml += `    </origin>\n`;
+      const focalMechanisms: FocalMechanism[] = JSON.parse(event.focal_mechanisms);
+      focalMechanisms.forEach(fm => {
+        xml += formatFocalMechanism(fm) + '\n';
+      });
+    } catch (e) {
+      // Ignore parse errors
     }
   }
 
-  // Magnitudes — use stored JSON when available, otherwise reconstruct from scalar fields.
+  // Amplitudes (schema order: 4th group, before magnitudes/origins)
+  if (event.amplitudes) {
+    try {
+      const amplitudes: Amplitude[] = JSON.parse(event.amplitudes);
+      amplitudes.forEach(amplitude => {
+        xml += formatAmplitude(amplitude) + '\n';
+      });
+    } catch (e) {
+      // Ignore parse errors
+    }
+  }
+
+  // Magnitudes (schema order: 5th group, before origins)
   let parsedMagnitudes: Magnitude[] | null = null;
   if (event.magnitudes) {
     try {
@@ -892,7 +779,128 @@ export function eventToQuakeML(event: MergedEvent): string {
     }
   }
 
-  // Station Magnitudes
+  // Origins (schema order: 7th group, after magnitudes)
+  let parsedOrigins: Origin[] | null = null;
+  if (event.origins) {
+    try {
+      parsedOrigins = JSON.parse(event.origins);
+    } catch {
+      // unparseable JSON; fall through to scalar fallback
+    }
+  }
+  if (parsedOrigins && parsedOrigins.length > 0) {
+    parsedOrigins.forEach(origin => {
+      xml += formatOrigin(origin) + '\n';
+    });
+  } else {
+    // Fallback: reconstruct Origin from scalar database fields.
+    {
+      const originID = event.preferred_origin_id || `smi:local/origin/${event.id}`;
+      xml += `    <origin publicID="${escapeXml(originID)}">\n`;
+
+      // Origin uncertainty — horizontal (QuakeML OriginUncertainty, schema position: before time)
+      if (event.horizontal_uncertainty != null) {
+        xml += `      <originUncertainty>\n`;
+        // horizontalUncertainty in QuakeML is in meters; DB stores km
+        xml += `        <horizontalUncertainty>${event.horizontal_uncertainty * 1000}</horizontalUncertainty>\n`;
+        xml += `      </originUncertainty>\n`;
+      }
+
+      // Time
+      xml += `      <time>\n        <value>${event.time}</value>\n`;
+      if (event.time_uncertainty != null) {
+        xml += `        <uncertainty>${event.time_uncertainty}</uncertainty>\n`;
+      }
+      xml += `      </time>\n`;
+
+      // Latitude
+      xml += `      <latitude>\n        <value>${event.latitude}</value>\n`;
+      if (event.latitude_uncertainty != null) {
+        xml += `        <uncertainty>${event.latitude_uncertainty}</uncertainty>\n`;
+      }
+      xml += `      </latitude>\n`;
+
+      // Longitude
+      xml += `      <longitude>\n        <value>${event.longitude}</value>\n`;
+      if (event.longitude_uncertainty != null) {
+        xml += `        <uncertainty>${event.longitude_uncertainty}</uncertainty>\n`;
+      }
+      xml += `      </longitude>\n`;
+
+      // Depth (QuakeML spec: depth value in meters; DB stores km)
+      if (event.depth != null) {
+        xml += `      <depth>\n        <value>${event.depth * 1000}</value>\n`;
+        if (event.depth_uncertainty != null) {
+          xml += `        <uncertainty>${event.depth_uncertainty * 1000}</uncertainty>\n`;
+        }
+        xml += `      </depth>\n`;
+      }
+
+      // Depth type (how depth was constrained)
+      if (event.depth_type) {
+        xml += `      <depthType>${escapeXml(event.depth_type)}</depthType>\n`;
+      }
+
+      // Velocity model and location method
+      if (event.method_id) {
+        xml += `      <methodID>${escapeXml(event.method_id)}</methodID>\n`;
+      }
+      if (event.earth_model_id) {
+        xml += `      <earthModelID>${escapeXml(event.earth_model_id)}</earthModelID>\n`;
+      }
+
+      // Quality metrics — all available fields
+      const hasQuality = event.azimuthal_gap != null || event.used_phase_count != null ||
+        event.used_station_count != null || event.standard_error != null ||
+        event.minimum_distance != null || event.maximum_distance != null ||
+        event.associated_phase_count != null || event.associated_station_count != null ||
+        event.depth_phase_count != null;
+      if (hasQuality) {
+        xml += `      <quality>\n`;
+        if (event.associated_phase_count != null) xml += `        <associatedPhaseCount>${event.associated_phase_count}</associatedPhaseCount>\n`;
+        if (event.used_phase_count != null) xml += `        <usedPhaseCount>${event.used_phase_count}</usedPhaseCount>\n`;
+        if (event.associated_station_count != null) xml += `        <associatedStationCount>${event.associated_station_count}</associatedStationCount>\n`;
+        if (event.used_station_count != null) xml += `        <usedStationCount>${event.used_station_count}</usedStationCount>\n`;
+        if (event.depth_phase_count != null) xml += `        <depthPhaseCount>${event.depth_phase_count}</depthPhaseCount>\n`;
+        if (event.azimuthal_gap != null) xml += `        <azimuthalGap>${event.azimuthal_gap}</azimuthalGap>\n`;
+        if (event.minimum_distance != null) xml += `        <minimumDistance>${event.minimum_distance}</minimumDistance>\n`;
+        if (event.maximum_distance != null) xml += `        <maximumDistance>${event.maximum_distance}</maximumDistance>\n`;
+        if (event.standard_error != null) xml += `        <standardError>${event.standard_error}</standardError>\n`;
+        xml += `      </quality>\n`;
+      }
+
+      if (event.evaluation_mode) {
+        xml += `      <evaluationMode>${escapeXml(event.evaluation_mode)}</evaluationMode>\n`;
+      }
+      if (event.evaluation_status) {
+        xml += `      <evaluationStatus>${escapeXml(event.evaluation_status)}</evaluationStatus>\n`;
+      }
+
+      // Fallback creationInfo from scalar agency/author fields
+      if (event.agency_id || event.author) {
+        xml += `      <creationInfo>\n`;
+        if (event.agency_id) xml += `        <agencyID>${escapeXml(event.agency_id)}</agencyID>\n`;
+        if (event.author) xml += `        <author>${escapeXml(event.author)}</author>\n`;
+        xml += `      </creationInfo>\n`;
+      }
+
+      // Arrivals (child elements of Origin in QuakeML)
+      if (event.arrivals) {
+        try {
+          const arrivals: Arrival[] = JSON.parse(event.arrivals);
+          arrivals.forEach(arrival => {
+            xml += formatArrival(arrival) + '\n';
+          });
+        } catch {
+          // Ignore parse errors
+        }
+      }
+
+      xml += `    </origin>\n`;
+    }
+  }
+
+  // Station Magnitudes (schema order: 6th group)
   if (event.station_magnitudes) {
     try {
       const stationMagnitudes: StationMagnitude[] = JSON.parse(event.station_magnitudes);
@@ -904,7 +912,7 @@ export function eventToQuakeML(event: MergedEvent): string {
     }
   }
 
-  // Picks
+  // Picks (schema order: 8th group, after origins)
   if (event.picks) {
     try {
       const picks: Pick[] = JSON.parse(event.picks);
@@ -916,31 +924,23 @@ export function eventToQuakeML(event: MergedEvent): string {
     }
   }
 
-  // Amplitudes
-  if (event.amplitudes) {
-    try {
-      const amplitudes: Amplitude[] = JSON.parse(event.amplitudes);
-      amplitudes.forEach(amplitude => {
-        xml += formatAmplitude(amplitude) + '\n';
-      });
-    } catch (e) {
-      // Ignore parse errors
-    }
+  // Preferred IDs (schema order: after origin/magnitude elements)
+  if (event.preferred_origin_id) {
+    xml += `    <preferredOriginID>${escapeXml(event.preferred_origin_id)}</preferredOriginID>\n`;
+  }
+  if (event.preferred_magnitude_id) {
+    xml += `    <preferredMagnitudeID>${escapeXml(event.preferred_magnitude_id)}</preferredMagnitudeID>\n`;
   }
 
-  // Focal Mechanisms
-  if (event.focal_mechanisms) {
-    try {
-      const focalMechanisms: FocalMechanism[] = JSON.parse(event.focal_mechanisms);
-      focalMechanisms.forEach(fm => {
-        xml += formatFocalMechanism(fm) + '\n';
-      });
-    } catch (e) {
-      // Ignore parse errors
-    }
+  // Event type (schema order: after preferredIDs)
+  if (event.event_type) {
+    xml += `    <type>${escapeXml(event.event_type)}</type>\n`;
+  }
+  if (event.event_type_certainty) {
+    xml += `    <typeCertainty>${escapeXml(event.event_type_certainty)}</typeCertainty>\n`;
   }
 
-  // Creation info
+  // Creation info (schema order: last)
   if (event.creation_info) {
     try {
       const creationInfo: CreationInfo = JSON.parse(event.creation_info);
