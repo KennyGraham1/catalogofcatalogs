@@ -436,7 +436,15 @@ export async function POST(request: NextRequest) {
       } else {
         // CSV / JSON / GeoJSON (or QuakeML fallback when pending record expired):
         // map every scalar field that ParsedEvent carries to its DB column.
-        const source = pendingEvent ?? event;
+        //
+        // Use `event` (which includes any user-configured UI field mappings
+        // applied above) merged over the pending event (which carries JSON
+        // blob fields that the browser response may have stripped).  This
+        // ensures parsedEventToDbFields sees both the UI-mapped field names
+        // AND the full server-side data.
+        const source = pendingEvent
+          ? { ...pendingEvent, ...event }
+          : event;
         Object.assign(row, parsedEventToDbFields(source as ParsedEvent));
       }
 

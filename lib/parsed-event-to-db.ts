@@ -81,10 +81,20 @@ export function parsedEventToDbFields(event: ParsedEvent): DbEventFields {
   if (event.agency_id) fields.agency_id = String(event.agency_id);
   if (event.author)    fields.author    = String(event.author);
 
+  // ── Preferred IDs ────────────────────────────────────────────────────────
+  if (event.preferred_origin_id)    fields.preferred_origin_id    = String(event.preferred_origin_id);
+  if (event.preferred_magnitude_id) fields.preferred_magnitude_id = String(event.preferred_magnitude_id);
+
   // ── Narrative / metadata fields ───────────────────────────────────────────
   // comment (single string) → comments (JSON array, matching MergedEvent schema)
-  if (event.comment)
+  // If event.comments already exists as a JSON blob, prefer that.
+  if (event.comments) {
+    fields.comments = typeof event.comments === 'string'
+      ? event.comments
+      : JSON.stringify(event.comments);
+  } else if (event.comment) {
     fields.comments = JSON.stringify([{ text: event.comment }]);
+  }
 
   if (event.creation_info)
     fields.creation_info = typeof event.creation_info === 'string'
@@ -93,15 +103,28 @@ export function parsedEventToDbFields(event: ParsedEvent): DbEventFields {
 
   // ── Pre-serialised JSON arrays (passed through from CSV/JSON/GeoJSON) ─────
   // Some importers may already produce these as JSON strings on the event.
+  // When re-importing a previously exported JSON file, these may arrive as
+  // parsed objects (arrays) rather than strings — handle both.
   const jsonArrayFields = [
     'origins', 'magnitudes', 'picks', 'arrivals',
     'focal_mechanisms', 'amplitudes', 'station_magnitudes',
+    'event_descriptions',
   ] as const;
 
   for (const key of jsonArrayFields) {
     const val = (event as any)[key];
-    if (typeof val === 'string' && val.length > 0)
+    if (typeof val === 'string' && val.length > 0) {
       (fields as any)[key] = val;
+    } else if (val != null && typeof val === 'object') {
+      (fields as any)[key] = JSON.stringify(val);
+    }
+  }
+
+  // ── Origin quality (JSON blob) ────────────────────────────────────────────
+  if (event.origin_quality) {
+    fields.origin_quality = typeof event.origin_quality === 'string'
+      ? event.origin_quality
+      : JSON.stringify(event.origin_quality);
   }
 
   return fields;

@@ -188,6 +188,10 @@ export interface ParsedEvent {
   author?: string;
   agency_id?: string;
 
+  // Preferred IDs (for QuakeML cross-referencing)
+  preferred_origin_id?: string;
+  preferred_magnitude_id?: string;
+
   // Additional data
   comment?: string;
   creation_info?: Record<string, unknown>;
