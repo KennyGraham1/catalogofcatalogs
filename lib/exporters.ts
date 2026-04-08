@@ -128,7 +128,7 @@ export function eventsToGeoJSON(
         // For earthquakes, depth (km below surface) becomes negative elevation.
         // When depth is unknown (null) we emit a 2D point [lon, lat] rather than
         // implying a surface location with elevation=0 (RFC 7946 §3.1.1).
-        coordinates: event.depth !== null
+        coordinates: event.depth != null
           ? [event.longitude, event.latitude, -event.depth]
           : [event.longitude, event.latitude],
       },
@@ -368,7 +368,7 @@ export function eventsToKML(
         if (event.magnitude_station_count != null) {
           kml += `            <tr><td><b>Magnitude Stations:</b></td><td>${event.magnitude_station_count}</td></tr>\n`;
         }
-        kml += `            <tr><td><b>Depth:</b></td><td>${event.depth !== null ? event.depth.toFixed(1) + ' km' : 'Unknown'}</td></tr>\n`;
+        kml += `            <tr><td><b>Depth:</b></td><td>${event.depth != null ? event.depth.toFixed(1) + ' km' : 'Unknown'}</td></tr>\n`;
         if (event.depth_type) {
           kml += `            <tr><td><b>Depth Type:</b></td><td>${escapeXml(event.depth_type)}</td></tr>\n`;
         }
@@ -435,7 +435,7 @@ export function eventsToKML(
         kml += '        <Point>\n';
         // KML uses longitude, latitude, altitude (meters above sea level)
         // For earthquakes, depth is negative altitude
-        const altitude = event.depth !== null ? -event.depth * 1000 : 0;
+        const altitude = event.depth != null ? -event.depth * 1000 : 0;
         kml += `          <coordinates>${event.longitude},${event.latitude},${altitude}</coordinates>\n`;
         kml += '        </Point>\n';
         kml += '      </Placemark>\n';

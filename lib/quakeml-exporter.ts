@@ -755,7 +755,7 @@ export function eventToQuakeML(event: MergedEvent): string {
       xml += `      </longitude>\n`;
 
       // Depth (QuakeML spec: depth value in meters)
-      if (event.depth !== null) {
+      if (event.depth != null) {
         xml += `      <depth>\n        <value>${event.depth * 1000}</value>\n`;
         if (event.depth_uncertainty != null) {
           xml += `        <uncertainty>${event.depth_uncertainty * 1000}</uncertainty>\n`;

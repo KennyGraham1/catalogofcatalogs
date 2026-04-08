@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Download, Map, ChevronDown, List } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -73,16 +73,87 @@ interface CatalogueMetadata {
 
 interface MergeActionsProps {
   events: any[];
-  onDownload: () => void;
+  onDownload?: () => void;
   catalogueMetadata?: CatalogueMetadata;
 }
 
-export function MergeActions({ events, catalogueMetadata = {} }: MergeActionsProps) {
-  const [isMounted, setIsMounted] = useState(false);
+/**
+ * Build a complete ExportMetadata object from catalogue metadata.
+ * Handles fields that may arrive as JSON strings (keywords, reference_links, data_quality).
+ * Pure function — no side effects, safe to call outside React's render cycle.
+ */
+function buildExportMetadata(meta: CatalogueMetadata, eventCount: number) {
+  let dataQuality: { completeness?: string; accuracy?: string; reliability?: string } | undefined;
+  if (meta.data_quality) {
+    try {
+      dataQuality = typeof meta.data_quality === 'string'
+        ? JSON.parse(meta.data_quality)
+        : meta.data_quality;
+    } catch { /* ignore */ }
+  }
 
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
+  let keywords: string[] | undefined;
+  if (meta.keywords) {
+    try {
+      const kw = typeof meta.keywords === 'string' ? JSON.parse(meta.keywords) : meta.keywords;
+      if (Array.isArray(kw)) keywords = kw;
+    } catch { /* ignore */ }
+  }
+
+  let referenceLinks: string[] | undefined;
+  if (meta.reference_links) {
+    try {
+      const rl = typeof meta.reference_links === 'string' ? JSON.parse(meta.reference_links) : meta.reference_links;
+      if (Array.isArray(rl)) referenceLinks = rl;
+    } catch { /* ignore */ }
+  }
+
+  const hasBounds = meta.min_latitude != null || meta.max_latitude != null ||
+                    meta.min_longitude != null || meta.max_longitude != null;
+
+  return {
+    catalogueName: meta.name || 'Merged Earthquake Catalogue',
+    description: meta.description,
+    source: meta.data_source,
+    provider: meta.provider,
+    region: meta.geographic_region,
+    timePeriodStart: meta.time_period_start,
+    timePeriodEnd: meta.time_period_end,
+    license: meta.license,
+    citation: meta.citation,
+    eventCount,
+    generatedAt: new Date().toISOString(),
+    boundingBox: hasBounds ? {
+      minLatitude: meta.min_latitude ?? null,
+      maxLatitude: meta.max_latitude ?? null,
+      minLongitude: meta.min_longitude ?? null,
+      maxLongitude: meta.max_longitude ?? null,
+    } : undefined,
+    contactName: meta.contact_name,
+    contactEmail: meta.contact_email,
+    contactOrganization: meta.contact_organization,
+    dataQuality,
+    qualityNotes: meta.quality_notes,
+    doi: meta.doi,
+    version: meta.version,
+    keywords,
+    referenceLinks,
+    usageTerms: meta.usage_terms,
+    notes: meta.notes,
+    mergeDescription: meta.merge_description,
+    mergeUseCase: meta.merge_use_case,
+    mergeMethodology: meta.merge_methodology,
+    mergeQualityAssessment: meta.merge_quality_assessment,
+    createdBy: meta.created_by,
+    modifiedAt: meta.modified_at,
+  };
+}
+
+export function MergeActions({ events, catalogueMetadata = {} }: MergeActionsProps) {
+  const exportMetadata = useMemo(
+    () => buildExportMetadata(catalogueMetadata, events.length),
+    [catalogueMetadata, events.length]
+  );
 
   const downloadFile = (content: string, filename: string, mimeType: string) => {
     if (typeof window === 'undefined') return;
@@ -276,97 +347,20 @@ export function MergeActions({ events, catalogueMetadata = {} }: MergeActionsPro
     downloadFile(csvContent, filename, 'text/csv');
   };
 
-  // Build a complete ExportMetadata object from the catalogue metadata prop.
-  // Handles fields that may be stored as JSON strings (keywords, reference_links, data_quality).
-  const buildExportMetadata = () => {
-    const meta = catalogueMetadata;
-
-    let dataQuality: { completeness?: string; accuracy?: string; reliability?: string } | undefined;
-    if (meta.data_quality) {
-      try {
-        dataQuality = typeof meta.data_quality === 'string'
-          ? JSON.parse(meta.data_quality)
-          : meta.data_quality;
-      } catch { /* ignore */ }
-    }
-
-    let keywords: string[] | undefined;
-    if (meta.keywords) {
-      try {
-        const kw = typeof meta.keywords === 'string' ? JSON.parse(meta.keywords) : meta.keywords;
-        if (Array.isArray(kw)) keywords = kw;
-      } catch { /* ignore */ }
-    }
-
-    let referenceLinks: string[] | undefined;
-    if (meta.reference_links) {
-      try {
-        const rl = typeof meta.reference_links === 'string' ? JSON.parse(meta.reference_links) : meta.reference_links;
-        if (Array.isArray(rl)) referenceLinks = rl;
-      } catch { /* ignore */ }
-    }
-
-    const hasBounds = meta.min_latitude != null || meta.max_latitude != null ||
-                      meta.min_longitude != null || meta.max_longitude != null;
-
-    return {
-      catalogueName: meta.name || 'Merged Earthquake Catalogue',
-      description: meta.description,
-      source: meta.data_source,
-      provider: meta.provider,
-      region: meta.geographic_region,
-      timePeriodStart: meta.time_period_start,
-      timePeriodEnd: meta.time_period_end,
-      license: meta.license,
-      citation: meta.citation,
-      eventCount: events.length,
-      generatedAt: new Date().toISOString(),
-      // Geographic bounds
-      boundingBox: hasBounds ? {
-        minLatitude: meta.min_latitude ?? null,
-        maxLatitude: meta.max_latitude ?? null,
-        minLongitude: meta.min_longitude ?? null,
-        maxLongitude: meta.max_longitude ?? null,
-      } : undefined,
-      // Contact information
-      contactName: meta.contact_name,
-      contactEmail: meta.contact_email,
-      contactOrganization: meta.contact_organization,
-      // Data quality
-      dataQuality,
-      qualityNotes: meta.quality_notes,
-      // Additional metadata
-      doi: meta.doi,
-      version: meta.version,
-      keywords,
-      referenceLinks,
-      usageTerms: meta.usage_terms,
-      notes: meta.notes,
-      // Merge-specific metadata
-      mergeDescription: meta.merge_description,
-      mergeUseCase: meta.merge_use_case,
-      mergeMethodology: meta.merge_methodology,
-      mergeQualityAssessment: meta.merge_quality_assessment,
-      // Provenance
-      createdBy: meta.created_by,
-      modifiedAt: meta.modified_at,
-    };
-  };
-
   const downloadJSON = () => {
-    const jsonContent = eventsToJSON(events, buildExportMetadata());
+    const jsonContent = eventsToJSON(events, exportMetadata);
     const filename = generateMergedCatalogueFilename('json', events.length);
     downloadFile(jsonContent, filename, 'application/json');
   };
 
   const downloadGeoJSON = () => {
-    const geoJsonContent = eventsToGeoJSON(events, buildExportMetadata());
+    const geoJsonContent = eventsToGeoJSON(events, exportMetadata);
     const filename = generateMergedCatalogueFilename('geojson', events.length);
     downloadFile(geoJsonContent, filename, 'application/geo+json');
   };
 
   const downloadKML = () => {
-    const kmlContent = eventsToKML(events, buildExportMetadata());
+    const kmlContent = eventsToKML(events, exportMetadata);
     const filename = generateMergedCatalogueFilename('kml', events.length);
     downloadFile(kmlContent, filename, 'application/vnd.google-earth.kml+xml');
   };
@@ -375,15 +369,11 @@ export function MergeActions({ events, catalogueMetadata = {} }: MergeActionsPro
     const quakeMLContent = eventsToQuakeMLDocument(
       events,
       catalogueMetadata.name || 'Merged Earthquake Catalogue',
-      buildExportMetadata()
+      exportMetadata
     );
     const filename = generateMergedCatalogueFilename('xml', events.length);
     downloadFile(quakeMLContent, filename, 'application/xml');
   };
-
-  if (!isMounted) {
-    return null;
-  }
 
   return (
     <div className="space-y-6">
@@ -451,15 +441,21 @@ export function MergeActions({ events, catalogueMetadata = {} }: MergeActionsPro
               time: e.time,
               latitude: e.latitude,
               longitude: e.longitude,
-              depth: e.depth || 0,
+              depth: e.depth ?? 0,
               magnitude: e.magnitude,
-              magnitude_type: e.magnitude_type || null,
-              location_name: e.region || null,
-              event_type: e.event_type || null,
-              quality_score: e.quality_score || null,
-              azimuthal_gap: e.azimuthal_gap || null,
-              used_station_count: e.used_station_count || null,
-              public_id: e.public_id || null,
+              magnitude_type: e.magnitude_type ?? null,
+              location_name: e.location_name ?? e.region ?? null,
+              event_type: e.event_type ?? null,
+              quality_score: e.quality_score ?? null,
+              azimuthal_gap: e.azimuthal_gap ?? null,
+              used_station_count: e.used_station_count ?? null,
+              public_id: e.event_public_id ?? e.public_id ?? null,
+              horizontal_uncertainty: e.horizontal_uncertainty ?? null,
+              depth_type: e.depth_type ?? null,
+              agency_id: e.agency_id ?? null,
+              author: e.author ?? null,
+              evaluation_mode: e.evaluation_mode ?? null,
+              evaluation_status: e.evaluation_status ?? null,
             }))}
           />
         </TabsContent>

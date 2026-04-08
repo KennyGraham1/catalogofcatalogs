@@ -227,6 +227,107 @@ export async function mergeCatalogues(
 }
 
 /**
+ * Extract all event fields from a MergedEventData object for storage or export.
+ *
+ * Produces a flat record with the same shape as a MergedEvent database row
+ * (minus catalogue_id and id, which are caller-supplied).  Used by both the
+ * DB-save path and the export-only path so they always return identical field sets.
+ * Every optional field is null-normalised so consumers never see `undefined`.
+ */
+function buildMergedEventFields(
+  event: MergedEventData,
+  optionalFields: ReadonlyArray<string>
+): Record<string, unknown> {
+  const quakeml = event.quakeml;
+  const preferredOrigin = quakeml?.origins?.find(o => o.publicID === quakeml.preferredOriginID) || quakeml?.origins?.[0];
+  const preferredMagnitude = quakeml?.magnitudes?.find(m => m.publicID === quakeml.preferredMagnitudeID) || quakeml?.magnitudes?.[0];
+
+  const fields: Record<string, unknown> = {
+    time: event.time,
+    latitude: event.latitude,
+    longitude: event.longitude,
+    depth: event.depth ?? null,
+    magnitude: event.magnitude,
+    source_events: JSON.stringify(event.sourceEvents),
+  };
+
+  if (quakeml) {
+    fields.event_public_id = quakeml.publicID;
+    fields.event_type = quakeml.type;
+    fields.event_type_certainty = quakeml.typeCertainty;
+
+    if (preferredOrigin) {
+      // Uncertainties
+      fields.time_uncertainty = preferredOrigin.time.uncertainty;
+      fields.latitude_uncertainty = preferredOrigin.latitude.uncertainty;
+      fields.longitude_uncertainty = preferredOrigin.longitude.uncertainty;
+      fields.depth_uncertainty = preferredOrigin.depth?.uncertainty;
+      if (preferredOrigin.uncertainty?.horizontalUncertainty) {
+        fields.horizontal_uncertainty = preferredOrigin.uncertainty.horizontalUncertainty;
+      }
+
+      // Origin metadata
+      fields.depth_type = preferredOrigin.depthType;
+      fields.earth_model_id = preferredOrigin.earthModelID;
+      fields.method_id = preferredOrigin.methodID;
+      fields.region = preferredOrigin.region;
+
+      if (preferredOrigin.creationInfo) {
+        fields.agency_id = preferredOrigin.creationInfo.agencyID;
+        fields.author = preferredOrigin.creationInfo.author;
+      }
+
+      // Quality metrics
+      if (preferredOrigin.quality) {
+        fields.azimuthal_gap = preferredOrigin.quality.azimuthalGap;
+        fields.used_phase_count = preferredOrigin.quality.usedPhaseCount;
+        fields.used_station_count = preferredOrigin.quality.usedStationCount;
+        fields.standard_error = preferredOrigin.quality.standardError;
+        fields.minimum_distance = preferredOrigin.quality.minimumDistance;
+        fields.maximum_distance = preferredOrigin.quality.maximumDistance;
+        fields.associated_phase_count = preferredOrigin.quality.associatedPhaseCount;
+        fields.associated_station_count = preferredOrigin.quality.associatedStationCount;
+        fields.depth_phase_count = preferredOrigin.quality.depthPhaseCount;
+        fields.origin_quality = JSON.stringify(preferredOrigin.quality);
+      }
+
+      fields.evaluation_mode = preferredOrigin.evaluationMode;
+      fields.evaluation_status = preferredOrigin.evaluationStatus;
+    }
+
+    if (preferredMagnitude) {
+      fields.magnitude_type = preferredMagnitude.type;
+      fields.magnitude_uncertainty = preferredMagnitude.mag.uncertainty;
+      fields.magnitude_station_count = preferredMagnitude.stationCount;
+      fields.magnitude_method_id = preferredMagnitude.methodID;
+      fields.magnitude_evaluation_mode = preferredMagnitude.evaluationMode;
+      fields.magnitude_evaluation_status = preferredMagnitude.evaluationStatus;
+    }
+
+    // Complex nested data as JSON strings
+    if (quakeml.origins?.length) fields.origins = JSON.stringify(quakeml.origins);
+    if (quakeml.magnitudes?.length) fields.magnitudes = JSON.stringify(quakeml.magnitudes);
+    if (quakeml.picks?.length) fields.picks = JSON.stringify(quakeml.picks);
+    if ((quakeml as any).arrivals?.length) fields.arrivals = JSON.stringify((quakeml as any).arrivals);
+    if (quakeml.focalMechanisms?.length) fields.focal_mechanisms = JSON.stringify(quakeml.focalMechanisms);
+    if (quakeml.amplitudes?.length) fields.amplitudes = JSON.stringify(quakeml.amplitudes);
+    if (quakeml.stationMagnitudes?.length) fields.station_magnitudes = JSON.stringify(quakeml.stationMagnitudes);
+    if (quakeml.description?.length) fields.event_descriptions = JSON.stringify(quakeml.description);
+    if (quakeml.comment?.length) fields.comments = JSON.stringify(quakeml.comment);
+    if (quakeml.creationInfo) fields.creation_info = JSON.stringify(quakeml.creationInfo);
+  }
+
+  // Null-normalise every optional field so consumers never see `undefined`.
+  for (const field of optionalFields) {
+    if (fields[field] === undefined) {
+      fields[field] = null;
+    }
+  }
+
+  return fields;
+}
+
+/**
  * Internal merge operation implementation
  * Performs the actual merge logic with database writes
  */
@@ -308,41 +409,7 @@ async function executeMergeOperation(
     // Perform the merge
     const mergedEvents = performMerge(allEvents, config);
 
-    // If export-only mode, return events without saving to database
-    if (exportOnly) {
-      return {
-        success: true,
-        catalogueId: null,
-        eventCount: mergedEvents.length,
-        originalEventCount: allEvents.length,
-        events: mergedEvents.map(e => ({
-          id: e.id || uuidv4(),
-          time: e.time,
-          latitude: e.latitude,
-          longitude: e.longitude,
-          depth: e.depth,
-          magnitude: e.magnitude,
-          source: e.source,
-          sourceEvents: e.sourceEvents
-        }))
-      };
-    }
-
-    // Build all events for bulk insert (Performance Optimization)
-    // This avoids calling insertEvent individually for each event,
-    // which was causing repeated cache invalidation calls (N calls for N events).
-    // Using bulkInsertEvents inserts all events at once and only invalidates cache once.
-    const dbEvents: Array<Partial<MergedEvent> & {
-      id: string;
-      catalogue_id: string;
-      time: string;
-      latitude: number;
-      longitude: number;
-      magnitude: number;
-      source_events: string;
-    }> = [];
-
-    // Declared once outside the loop — avoids allocating a new array per event.
+    // Optional MergedEvent fields — declared once to avoid per-event allocation.
     const OPTIONAL_DB_FIELDS: ReadonlyArray<string> = [
       'source_id', 'region', 'location_name',
       'event_public_id', 'event_type', 'event_type_certainty',
@@ -362,143 +429,42 @@ async function executeMergeOperation(
       'event_descriptions', 'comments', 'creation_info',
     ];
 
-    for (const event of mergedEvents) {
-      // Extract QuakeML data if available
-      const quakeml = event.quakeml;
-      const preferredOrigin = quakeml?.origins?.find(o => o.publicID === quakeml.preferredOriginID) || quakeml?.origins?.[0];
-      const preferredMagnitude = quakeml?.magnitudes?.find(m => m.publicID === quakeml.preferredMagnitudeID) || quakeml?.magnitudes?.[0];
+    // If export-only mode, return full event records without saving to database.
+    // Uses the same field extraction as the DB save path so exports contain all
+    // available QuakeML/rich fields — not just the 7-field minimal shape.
+    if (exportOnly) {
+      return {
+        success: true,
+        catalogueId: null,
+        eventCount: mergedEvents.length,
+        originalEventCount: allEvents.length,
+        events: mergedEvents.map(e => ({
+          id: e.id || uuidv4(),
+          ...buildMergedEventFields(e, OPTIONAL_DB_FIELDS),
+        })),
+      };
+    }
 
-      // Build event object with all available QuakeML fields
-      const dbEvent: Partial<MergedEvent> & {
-        id: string;
-        catalogue_id: string;
-        time: string;
-        latitude: number;
-        longitude: number;
-        magnitude: number;
-        source_events: string;
-      } = {
+    // Build all events for bulk insert (Performance Optimization)
+    // This avoids calling insertEvent individually for each event,
+    // which was causing repeated cache invalidation calls (N calls for N events).
+    // Using bulkInsertEvents inserts all events at once and only invalidates cache once.
+    const dbEvents: Array<Partial<MergedEvent> & {
+      id: string;
+      catalogue_id: string;
+      time: string;
+      latitude: number;
+      longitude: number;
+      magnitude: number;
+      source_events: string;
+    }> = [];
+
+    for (const event of mergedEvents) {
+      dbEvents.push({
         id: uuidv4(),
         catalogue_id: catalogueId,
-        time: event.time,
-        latitude: event.latitude,
-        longitude: event.longitude,
-        depth: event.depth ?? null,
-        magnitude: event.magnitude,
-        source_events: JSON.stringify(event.sourceEvents)
-      };
-
-      // Add QuakeML metadata if available
-      if (quakeml) {
-        dbEvent.event_public_id = quakeml.publicID;
-        dbEvent.event_type = quakeml.type;
-        dbEvent.event_type_certainty = quakeml.typeCertainty;
-
-        // Add origin data
-        if (preferredOrigin) {
-          // Origin uncertainties
-          dbEvent.time_uncertainty = preferredOrigin.time.uncertainty;
-          dbEvent.latitude_uncertainty = preferredOrigin.latitude.uncertainty;
-          dbEvent.longitude_uncertainty = preferredOrigin.longitude.uncertainty;
-          dbEvent.depth_uncertainty = preferredOrigin.depth?.uncertainty;
-
-          // Horizontal uncertainty from originUncertainty
-          if (preferredOrigin.uncertainty?.horizontalUncertainty) {
-            dbEvent.horizontal_uncertainty = preferredOrigin.uncertainty.horizontalUncertainty;
-          }
-
-          // Origin metadata (QuakeML/GeoNet/ISC fields)
-          dbEvent.depth_type = preferredOrigin.depthType;
-          dbEvent.earth_model_id = preferredOrigin.earthModelID;
-          dbEvent.method_id = preferredOrigin.methodID;
-          dbEvent.region = preferredOrigin.region;
-
-          // Agency/Author from creationInfo
-          if (preferredOrigin.creationInfo) {
-            dbEvent.agency_id = preferredOrigin.creationInfo.agencyID;
-            dbEvent.author = preferredOrigin.creationInfo.author;
-          }
-
-          // Origin quality metrics
-          if (preferredOrigin.quality) {
-            dbEvent.azimuthal_gap = preferredOrigin.quality.azimuthalGap;
-            dbEvent.used_phase_count = preferredOrigin.quality.usedPhaseCount;
-            dbEvent.used_station_count = preferredOrigin.quality.usedStationCount;
-            dbEvent.standard_error = preferredOrigin.quality.standardError;
-            dbEvent.minimum_distance = preferredOrigin.quality.minimumDistance;
-            dbEvent.maximum_distance = preferredOrigin.quality.maximumDistance;
-            dbEvent.associated_phase_count = preferredOrigin.quality.associatedPhaseCount;
-            dbEvent.associated_station_count = preferredOrigin.quality.associatedStationCount;
-            dbEvent.depth_phase_count = preferredOrigin.quality.depthPhaseCount;
-          }
-
-          // Evaluation metadata
-          dbEvent.evaluation_mode = preferredOrigin.evaluationMode;
-          dbEvent.evaluation_status = preferredOrigin.evaluationStatus;
-
-          // Store full origin quality as JSON
-          if (preferredOrigin.quality) {
-            dbEvent.origin_quality = JSON.stringify(preferredOrigin.quality);
-          }
-        }
-
-        // Add magnitude details
-        if (preferredMagnitude) {
-          dbEvent.magnitude_type = preferredMagnitude.type;
-          dbEvent.magnitude_uncertainty = preferredMagnitude.mag.uncertainty;
-          dbEvent.magnitude_station_count = preferredMagnitude.stationCount;
-          dbEvent.magnitude_method_id = preferredMagnitude.methodID;
-          dbEvent.magnitude_evaluation_mode = preferredMagnitude.evaluationMode;
-          dbEvent.magnitude_evaluation_status = preferredMagnitude.evaluationStatus;
-        }
-
-        // Store complex nested data as JSON
-        if (quakeml.origins && quakeml.origins.length > 0) {
-          dbEvent.origins = JSON.stringify(quakeml.origins);
-        }
-        if (quakeml.magnitudes && quakeml.magnitudes.length > 0) {
-          dbEvent.magnitudes = JSON.stringify(quakeml.magnitudes);
-        }
-        if (quakeml.picks && quakeml.picks.length > 0) {
-          dbEvent.picks = JSON.stringify(quakeml.picks);
-        }
-        if ((quakeml as any).arrivals && (quakeml as any).arrivals.length > 0) {
-          dbEvent.arrivals = JSON.stringify((quakeml as any).arrivals);
-        }
-        if (quakeml.focalMechanisms && quakeml.focalMechanisms.length > 0) {
-          dbEvent.focal_mechanisms = JSON.stringify(quakeml.focalMechanisms);
-        }
-        if (quakeml.amplitudes && quakeml.amplitudes.length > 0) {
-          dbEvent.amplitudes = JSON.stringify(quakeml.amplitudes);
-        }
-        if (quakeml.stationMagnitudes && quakeml.stationMagnitudes.length > 0) {
-          dbEvent.station_magnitudes = JSON.stringify(quakeml.stationMagnitudes);
-        }
-        if (quakeml.description && quakeml.description.length > 0) {
-          dbEvent.event_descriptions = JSON.stringify(quakeml.description);
-        }
-        if (quakeml.comment && quakeml.comment.length > 0) {
-          dbEvent.comments = JSON.stringify(quakeml.comment);
-        }
-        if (quakeml.creationInfo) {
-          dbEvent.creation_info = JSON.stringify(quakeml.creationInfo);
-        }
-      }
-
-      // Null-normalise every optional MergedEvent field.
-      // MongoDB stores only keys that are present on the inserted document, which
-      // means a missing field produces `undefined` on read — indistinguishable at
-      // the application layer from a field that was explicitly cleared.  By writing
-      // an explicit `null` for every absent optional field we establish a single
-      // canonical "no data" sentinel and make schema introspection reliable.
-      // (OPTIONAL_DB_FIELDS is hoisted above the loop to avoid per-event allocation.)
-      for (const field of OPTIONAL_DB_FIELDS) {
-        if ((dbEvent as any)[field] === undefined) {
-          (dbEvent as any)[field] = null;
-        }
-      }
-
-      dbEvents.push(dbEvent);
+        ...buildMergedEventFields(event, OPTIONAL_DB_FIELDS),
+      } as any);
     }
 
     // Bulk insert all events at once (Performance Optimization)

@@ -387,7 +387,9 @@ function generateCSV(events: any[], catalogue: any): string {
 
   // Convert events to CSV rows
   const rows = events.map((event: any) => {
-    const sourceEvents = safeJSONParse<Array<{ source?: string }>>(event.source_events, []);
+    const sourceEvents = event.source_events
+      ? safeJSONParse<Array<{ source?: string }>>(event.source_events, [])
+      : [];
     const source = sourceEvents[0]?.source || 'unknown';
 
     return [
