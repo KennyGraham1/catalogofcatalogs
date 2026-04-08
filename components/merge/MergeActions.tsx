@@ -14,8 +14,9 @@ import {
 } from '@/components/ui/dropdown-menu';
 import dynamic from 'next/dynamic';
 import 'leaflet/dist/leaflet.css';
-import { generateMergedCatalogueFilename } from '@/lib/export-utils';
+import { generateMergedCatalogueFilename, csvField } from '@/lib/export-utils';
 import { eventsToGeoJSON, eventsToJSON, eventsToKML } from '@/lib/exporters';
+import { eventsToQuakeMLDocument } from '@/lib/quakeml-exporter';
 import { EventTable } from '@/components/events/EventTable';
 
 const MapWithNoSSR = dynamic(
@@ -40,8 +41,33 @@ interface CatalogueMetadata {
   time_period_end?: string;
   license?: string;
   citation?: string;
+  // Contact
+  contact_name?: string;
+  contact_email?: string;
+  contact_organization?: string;
+  // Data quality
+  data_quality?: { completeness?: string; accuracy?: string; reliability?: string } | string;
+  quality_notes?: string;
+  // Additional
+  doi?: string;
+  version?: string;
+  keywords?: string[] | string;
+  reference_links?: string[] | string;
+  usage_terms?: string;
+  notes?: string;
+  // Geographic bounds
+  min_latitude?: number | null;
+  max_latitude?: number | null;
+  min_longitude?: number | null;
+  max_longitude?: number | null;
+  // Merge-specific
   merge_description?: string;
+  merge_use_case?: string;
   merge_methodology?: string;
+  merge_quality_assessment?: string;
+  // Provenance
+  created_by?: string;
+  modified_at?: string;
   [key: string]: any;
 }
 
@@ -73,199 +99,284 @@ export function MergeActions({ events, catalogueMetadata = {} }: MergeActionsPro
   };
 
   const downloadCSV = () => {
-    // Build metadata header comments
+    const meta = catalogueMetadata;
     const metadataLines: string[] = [];
-    metadataLines.push('# Earthquake Catalogue Export');
-    metadataLines.push(`# Export Date: ${new Date().toISOString()}`);
-    metadataLines.push(`# Event Count: ${events.length}`);
 
-    if (catalogueMetadata.name) {
-      metadataLines.push(`# Catalogue: ${catalogueMetadata.name}`);
+    if (meta.name) metadataLines.push(`# Catalogue: ${meta.name}`);
+    if (meta.description) metadataLines.push(`# Description: ${meta.description}`);
+    if (meta.data_source) metadataLines.push(`# Source: ${meta.data_source}`);
+    if (meta.provider) metadataLines.push(`# Provider: ${meta.provider}`);
+    if (meta.geographic_region) metadataLines.push(`# Region: ${meta.geographic_region}`);
+    metadataLines.push(`# Event Count: ${events.length}`);
+    metadataLines.push(`# Generated: ${new Date().toISOString()}`);
+    if (meta.license) metadataLines.push(`# License: ${meta.license}`);
+    if (meta.citation) metadataLines.push(`# Citation: ${meta.citation}`);
+    if (meta.doi) metadataLines.push(`# DOI: ${meta.doi}`);
+    if (meta.version) metadataLines.push(`# Version: ${meta.version}`);
+    // Contact information
+    if (meta.contact_name) metadataLines.push(`# Contact Name: ${meta.contact_name}`);
+    if (meta.contact_email) metadataLines.push(`# Contact Email: ${meta.contact_email}`);
+    if (meta.contact_organization) metadataLines.push(`# Contact Organization: ${meta.contact_organization}`);
+    // Data quality
+    if (meta.data_quality) {
+      try {
+        const dq = typeof meta.data_quality === 'string' ? JSON.parse(meta.data_quality) : meta.data_quality;
+        if (dq.completeness) metadataLines.push(`# Data Completeness: ${dq.completeness}`);
+        if (dq.accuracy) metadataLines.push(`# Data Accuracy: ${dq.accuracy}`);
+        if (dq.reliability) metadataLines.push(`# Data Reliability: ${dq.reliability}`);
+      } catch { /* ignore parse errors */ }
     }
-    if (catalogueMetadata.description) {
-      metadataLines.push(`# Description: ${catalogueMetadata.description}`);
+    if (meta.quality_notes) metadataLines.push(`# Quality Notes: ${meta.quality_notes}`);
+    // Keywords
+    if (meta.keywords) {
+      try {
+        const kw = typeof meta.keywords === 'string' ? JSON.parse(meta.keywords) : meta.keywords;
+        if (Array.isArray(kw) && kw.length > 0) metadataLines.push(`# Keywords: ${kw.join(', ')}`);
+      } catch { /* ignore parse errors */ }
     }
-    if (catalogueMetadata.data_source) {
-      metadataLines.push(`# Source: ${catalogueMetadata.data_source}`);
+    // Reference links
+    if (meta.reference_links) {
+      try {
+        const rl = typeof meta.reference_links === 'string' ? JSON.parse(meta.reference_links) : meta.reference_links;
+        if (Array.isArray(rl) && rl.length > 0) metadataLines.push(`# References: ${rl.join(', ')}`);
+      } catch { /* ignore parse errors */ }
     }
-    if (catalogueMetadata.provider) {
-      metadataLines.push(`# Provider: ${catalogueMetadata.provider}`);
+    if (meta.usage_terms) metadataLines.push(`# Usage Terms: ${meta.usage_terms}`);
+    if (meta.notes) metadataLines.push(`# Notes: ${meta.notes}`);
+    // Geographic bounds
+    if (meta.min_latitude != null || meta.max_latitude != null ||
+        meta.min_longitude != null || meta.max_longitude != null) {
+      metadataLines.push(
+        `# Bounding Box: lat [${meta.min_latitude ?? '?'}, ${meta.max_latitude ?? '?'}], ` +
+        `lon [${meta.min_longitude ?? '?'}, ${meta.max_longitude ?? '?'}]`
+      );
     }
-    if (catalogueMetadata.geographic_region) {
-      metadataLines.push(`# Region: ${catalogueMetadata.geographic_region}`);
-    }
-    if (catalogueMetadata.time_period_start || catalogueMetadata.time_period_end) {
-      const start = catalogueMetadata.time_period_start || 'N/A';
-      const end = catalogueMetadata.time_period_end || 'N/A';
-      metadataLines.push(`# Time Period: ${start} to ${end}`);
-    }
-    if (catalogueMetadata.license) {
-      metadataLines.push(`# License: ${catalogueMetadata.license}`);
-    }
-    if (catalogueMetadata.citation) {
-      metadataLines.push(`# Citation: ${catalogueMetadata.citation}`);
-    }
-    if (catalogueMetadata.merge_description) {
-      metadataLines.push(`# Merge Description: ${catalogueMetadata.merge_description}`);
-    }
-    if (catalogueMetadata.merge_methodology) {
-      metadataLines.push(`# Merge Methodology: ${catalogueMetadata.merge_methodology}`);
-    }
+    // Merge-specific metadata
+    if (meta.merge_description) metadataLines.push(`# Merge Description: ${meta.merge_description}`);
+    if (meta.merge_use_case) metadataLines.push(`# Merge Use Case: ${meta.merge_use_case}`);
+    if (meta.merge_methodology) metadataLines.push(`# Merge Methodology: ${meta.merge_methodology}`);
+    if (meta.merge_quality_assessment) metadataLines.push(`# Merge Quality Assessment: ${meta.merge_quality_assessment}`);
+    // Provenance
+    if (meta.created_by) metadataLines.push(`# Created By: ${meta.created_by}`);
+    if (meta.modified_at) metadataLines.push(`# Modified At: ${meta.modified_at}`);
 
     metadataLines.push('#');
+    // Note: complex nested fields (origins, magnitudes, picks, arrivals, focal_mechanisms,
+    // amplitudes, station_magnitudes, event_descriptions, comments, creation_info, source_events)
+    // cannot be represented in flat CSV format; use JSON or QuakeML export for full fidelity.
 
-    const headers = ['Time', 'Latitude', 'Longitude', 'Depth', 'Magnitude', 'Region'];
-    const csvContent = [
-      ...metadataLines,
-      headers.join(','),
-      ...events.map(event => [
-        event.time,
-        event.latitude,
-        event.longitude,
-        event.depth || '',
-        event.magnitude,
-        event.region || ''
-      ].join(','))
-    ].join('\n');
+    const headers = [
+      'Time',
+      'Latitude',
+      'Longitude',
+      'Depth',
+      'Magnitude',
+      'MagnitudeType',
+      'EventType',
+      'EventTypeCertainty',
+      'Region',
+      'LocationName',
+      'Source',
+      'SourceID',
+      'PublicID',
+      // Location uncertainties
+      'TimeUncertainty',
+      'LatitudeUncertainty',
+      'LongitudeUncertainty',
+      'DepthUncertainty',
+      'HorizontalUncertainty',
+      'MagnitudeUncertainty',
+      // Origin metadata
+      'DepthType',
+      'EarthModelID',
+      'MethodID',
+      'AgencyID',
+      'Author',
+      // Magnitude details
+      'MagnitudeStationCount',
+      'MagnitudeMethodID',
+      'MagnitudeEvaluationMode',
+      'MagnitudeEvaluationStatus',
+      // Quality metrics
+      'AzimuthalGap',
+      'UsedStationCount',
+      'UsedPhaseCount',
+      'StandardError',
+      'MinimumDistance',
+      'MaximumDistance',
+      'AssociatedPhaseCount',
+      'AssociatedStationCount',
+      'DepthPhaseCount',
+      // Evaluation metadata
+      'EvaluationMode',
+      'EvaluationStatus',
+    ];
 
+    const n = (v: number | string | null | undefined) => (v !== null && v !== undefined ? v : '');
+
+    const rows = events.map((event: any) => {
+      let source = 'unknown';
+      if (event.source_events) {
+        try {
+          const sourceEvents = JSON.parse(event.source_events) as Array<{ source?: string }>;
+          source = sourceEvents[0]?.source || 'unknown';
+        } catch { /* ignore */ }
+      }
+
+      return [
+        csvField(event.time),
+        csvField(event.latitude),
+        csvField(event.longitude),
+        csvField(n(event.depth)),
+        csvField(event.magnitude),
+        csvField(event.magnitude_type),
+        csvField(event.event_type),
+        csvField(event.event_type_certainty),
+        csvField(event.region || event.location_name || ''),
+        csvField(event.location_name),
+        csvField(source),
+        csvField(event.source_id),
+        csvField(event.event_public_id),
+        // Location uncertainties
+        csvField(n(event.time_uncertainty)),
+        csvField(n(event.latitude_uncertainty)),
+        csvField(n(event.longitude_uncertainty)),
+        csvField(n(event.depth_uncertainty)),
+        csvField(n(event.horizontal_uncertainty)),
+        csvField(n(event.magnitude_uncertainty)),
+        // Origin metadata
+        csvField(event.depth_type),
+        csvField(event.earth_model_id),
+        csvField(event.method_id),
+        csvField(event.agency_id),
+        csvField(event.author),
+        // Magnitude details
+        csvField(n(event.magnitude_station_count)),
+        csvField(event.magnitude_method_id),
+        csvField(event.magnitude_evaluation_mode),
+        csvField(event.magnitude_evaluation_status),
+        // Quality metrics
+        csvField(n(event.azimuthal_gap)),
+        csvField(n(event.used_station_count)),
+        csvField(n(event.used_phase_count)),
+        csvField(n(event.standard_error)),
+        csvField(n(event.minimum_distance)),
+        csvField(n(event.maximum_distance)),
+        csvField(n(event.associated_phase_count)),
+        csvField(n(event.associated_station_count)),
+        csvField(n(event.depth_phase_count)),
+        // Evaluation metadata
+        csvField(event.evaluation_mode),
+        csvField(event.evaluation_status),
+      ].join(',');
+    });
+
+    const csvContent = [...metadataLines, headers.join(','), ...rows].join('\n');
     const filename = generateMergedCatalogueFilename('csv', events.length);
     downloadFile(csvContent, filename, 'text/csv');
   };
 
-  const downloadJSON = () => {
-    // Prepare metadata for export
-    const metadata = {
-      catalogueName: catalogueMetadata.name || 'Merged Earthquake Catalogue',
-      description: catalogueMetadata.description,
-      source: catalogueMetadata.data_source,
-      provider: catalogueMetadata.provider,
-      region: catalogueMetadata.geographic_region || 'New Zealand',
-      timePeriodStart: catalogueMetadata.time_period_start,
-      timePeriodEnd: catalogueMetadata.time_period_end,
-      license: catalogueMetadata.license,
-      citation: catalogueMetadata.citation,
+  // Build a complete ExportMetadata object from the catalogue metadata prop.
+  // Handles fields that may be stored as JSON strings (keywords, reference_links, data_quality).
+  const buildExportMetadata = () => {
+    const meta = catalogueMetadata;
+
+    let dataQuality: { completeness?: string; accuracy?: string; reliability?: string } | undefined;
+    if (meta.data_quality) {
+      try {
+        dataQuality = typeof meta.data_quality === 'string'
+          ? JSON.parse(meta.data_quality)
+          : meta.data_quality;
+      } catch { /* ignore */ }
+    }
+
+    let keywords: string[] | undefined;
+    if (meta.keywords) {
+      try {
+        const kw = typeof meta.keywords === 'string' ? JSON.parse(meta.keywords) : meta.keywords;
+        if (Array.isArray(kw)) keywords = kw;
+      } catch { /* ignore */ }
+    }
+
+    let referenceLinks: string[] | undefined;
+    if (meta.reference_links) {
+      try {
+        const rl = typeof meta.reference_links === 'string' ? JSON.parse(meta.reference_links) : meta.reference_links;
+        if (Array.isArray(rl)) referenceLinks = rl;
+      } catch { /* ignore */ }
+    }
+
+    const hasBounds = meta.min_latitude != null || meta.max_latitude != null ||
+                      meta.min_longitude != null || meta.max_longitude != null;
+
+    return {
+      catalogueName: meta.name || 'Merged Earthquake Catalogue',
+      description: meta.description,
+      source: meta.data_source,
+      provider: meta.provider,
+      region: meta.geographic_region,
+      timePeriodStart: meta.time_period_start,
+      timePeriodEnd: meta.time_period_end,
+      license: meta.license,
+      citation: meta.citation,
       eventCount: events.length,
       generatedAt: new Date().toISOString(),
+      // Geographic bounds
+      boundingBox: hasBounds ? {
+        minLatitude: meta.min_latitude ?? null,
+        maxLatitude: meta.max_latitude ?? null,
+        minLongitude: meta.min_longitude ?? null,
+        maxLongitude: meta.max_longitude ?? null,
+      } : undefined,
+      // Contact information
+      contactName: meta.contact_name,
+      contactEmail: meta.contact_email,
+      contactOrganization: meta.contact_organization,
+      // Data quality
+      dataQuality,
+      qualityNotes: meta.quality_notes,
+      // Additional metadata
+      doi: meta.doi,
+      version: meta.version,
+      keywords,
+      referenceLinks,
+      usageTerms: meta.usage_terms,
+      notes: meta.notes,
+      // Merge-specific metadata
+      mergeDescription: meta.merge_description,
+      mergeUseCase: meta.merge_use_case,
+      mergeMethodology: meta.merge_methodology,
+      mergeQualityAssessment: meta.merge_quality_assessment,
+      // Provenance
+      createdBy: meta.created_by,
+      modifiedAt: meta.modified_at,
     };
+  };
 
-    const jsonContent = eventsToJSON(events, metadata);
+  const downloadJSON = () => {
+    const jsonContent = eventsToJSON(events, buildExportMetadata());
     const filename = generateMergedCatalogueFilename('json', events.length);
     downloadFile(jsonContent, filename, 'application/json');
   };
 
   const downloadGeoJSON = () => {
-    // Prepare metadata for export
-    const metadata = {
-      catalogueName: catalogueMetadata.name || 'Merged Earthquake Catalogue',
-      description: catalogueMetadata.description,
-      source: catalogueMetadata.data_source,
-      provider: catalogueMetadata.provider,
-      region: catalogueMetadata.geographic_region || 'New Zealand',
-      timePeriodStart: catalogueMetadata.time_period_start,
-      timePeriodEnd: catalogueMetadata.time_period_end,
-      license: catalogueMetadata.license,
-      citation: catalogueMetadata.citation,
-      eventCount: events.length,
-      generatedAt: new Date().toISOString(),
-    };
-
-    const geoJsonContent = eventsToGeoJSON(events, metadata);
+    const geoJsonContent = eventsToGeoJSON(events, buildExportMetadata());
     const filename = generateMergedCatalogueFilename('geojson', events.length);
     downloadFile(geoJsonContent, filename, 'application/geo+json');
   };
 
   const downloadKML = () => {
-    // Prepare metadata for export
-    const metadata = {
-      catalogueName: catalogueMetadata.name || 'Merged Earthquake Catalogue',
-      description: catalogueMetadata.description,
-      source: catalogueMetadata.data_source,
-      provider: catalogueMetadata.provider,
-      region: catalogueMetadata.geographic_region || 'New Zealand',
-      timePeriodStart: catalogueMetadata.time_period_start,
-      timePeriodEnd: catalogueMetadata.time_period_end,
-      license: catalogueMetadata.license,
-      citation: catalogueMetadata.citation,
-      eventCount: events.length,
-      generatedAt: new Date().toISOString(),
-    };
-
-    const kmlContent = eventsToKML(events, metadata);
+    const kmlContent = eventsToKML(events, buildExportMetadata());
     const filename = generateMergedCatalogueFilename('kml', events.length);
     downloadFile(kmlContent, filename, 'application/vnd.google-earth.kml+xml');
   };
 
   const downloadQuakeML = () => {
-    const timestamp = new Date().toISOString();
-
-    // Build metadata comments
-    let metadataComments = '';
-    if (catalogueMetadata.name) {
-      metadataComments += `<!-- Catalogue: ${catalogueMetadata.name} -->\n`;
-    }
-    if (catalogueMetadata.description) {
-      metadataComments += `<!-- Description: ${catalogueMetadata.description} -->\n`;
-    }
-    if (catalogueMetadata.data_source) {
-      metadataComments += `<!-- Source: ${catalogueMetadata.data_source} -->\n`;
-    }
-    if (catalogueMetadata.provider) {
-      metadataComments += `<!-- Provider: ${catalogueMetadata.provider} -->\n`;
-    }
-    if (catalogueMetadata.license) {
-      metadataComments += `<!-- License: ${catalogueMetadata.license} -->\n`;
-    }
-    if (catalogueMetadata.citation) {
-      metadataComments += `<!-- Citation: ${catalogueMetadata.citation} -->\n`;
-    }
-
-    const quakeMLContent = `<?xml version="1.0" encoding="UTF-8"?>
-${metadataComments}<q:quakeml xmlns:q="http://quakeml.org/xmlns/quakeml/1.2" xmlns="http://quakeml.org/xmlns/bed/1.2">
-  <eventParameters publicID="quakeml:nz.geonet/merged_catalogue">
-    <creationInfo>
-      <creationTime>${timestamp}</creationTime>
-      <agencyID>NZ.MERGED</agencyID>
-      <author>Earthquake Catalogue Management System</author>
-    </creationInfo>
-${events.map((event, index) => `    <event publicID="quakeml:nz.geonet/event/${event.id || index}">
-      <preferredOriginID>quakeml:nz.geonet/origin/${event.id || index}</preferredOriginID>
-      <preferredMagnitudeID>quakeml:nz.geonet/magnitude/${event.id || index}</preferredMagnitudeID>
-      <type>earthquake</type>
-      <description>
-        <text>${event.region || 'New Zealand'}</text>
-        <type>region name</type>
-      </description>
-      <origin publicID="quakeml:nz.geonet/origin/${event.id || index}">
-        <time>
-          <value>${event.time}</value>
-        </time>
-        <latitude>
-          <value>${event.latitude}</value>
-        </latitude>
-        <longitude>
-          <value>${event.longitude}</value>
-        </longitude>
-        <depth>
-          <value>${(event.depth || 0) * 1000}</value>
-          <uncertainty>0</uncertainty>
-        </depth>
-        <creationInfo>
-          <creationTime>${timestamp}</creationTime>
-        </creationInfo>
-      </origin>
-      <magnitude publicID="quakeml:nz.geonet/magnitude/${event.id || index}">
-        <mag>
-          <value>${event.magnitude}</value>
-        </mag>
-        <type>ML</type>
-        <creationInfo>
-          <creationTime>${timestamp}</creationTime>
-        </creationInfo>
-      </magnitude>
-    </event>`).join('\n')}
-  </eventParameters>
-</q:quakeml>`;
-
+    const quakeMLContent = eventsToQuakeMLDocument(
+      events,
+      catalogueMetadata.name || 'Merged Earthquake Catalogue',
+      buildExportMetadata()
+    );
     const filename = generateMergedCatalogueFilename('xml', events.length);
     downloadFile(quakeMLContent, filename, 'application/xml');
   };
