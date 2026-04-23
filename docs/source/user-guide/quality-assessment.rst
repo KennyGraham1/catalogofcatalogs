@@ -98,7 +98,7 @@ Based on horizontal and vertical uncertainties:
 * Fair: 10-20 km
 * Poor: > 20 km
 
-2. Network Geometry (30%)
+2. Network Geometry (25%)
 ==========================
 
 Based on azimuthal gap and station distribution:
@@ -118,7 +118,7 @@ Based on azimuthal gap and station distribution:
 
 These criteria follow the network geometry recommendations of Bondár (2004).
 
-3. Solution Quality (25%)
+3. Solution Quality (15%)
 ==========================
 
 Based on phase counts and residuals:
@@ -144,10 +144,10 @@ Based on phase counts and residuals:
 * Fair: 0.5-1.0 s
 * Poor: > 1.0 s
 
-These thresholds align with the International Seismological Centre (ISC) 
+These thresholds align with the International Seismological Centre (ISC)
 standards for high-quality locations (Bondár & Storchak, 2011).
 
-4. Magnitude Quality (10%)
+4. Magnitude Quality (15%)
 ===========================
 
 Based on station count and uncertainty:
@@ -166,8 +166,18 @@ Based on station count and uncertainty:
 * Fair: 0.2-0.3
 * Poor: > 0.3
 
-Magnitude type preference (Mw > Ms > mb > ML) is based on the ISC-GEM 
+Magnitude type preference (Mw > Ms > mb > ML) is based on the ISC-GEM
 standards for magnitude reliability (Storchak et al., 2013).
+
+5. Evaluation Status (10%)
+===========================
+
+Based on the review status of the origin and magnitude solution:
+
+* **Final / Reviewed**: Full points — solution has been manually verified.
+* **Confirmed**: Partial points — solution has passed automated checks.
+* **Preliminary**: Minimal points — automatic solution, not yet reviewed.
+* **Rejected / Unknown**: No points.
 
 -----------------
 Quality Filtering

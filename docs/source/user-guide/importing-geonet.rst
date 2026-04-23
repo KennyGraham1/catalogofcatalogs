@@ -603,8 +603,8 @@ For programmatic imports, use the REST API:
      -H "Content-Type: application/json" \
      -d '{
        "catalogueId": "existing-catalogue-id",
-       "startTime": "2024-01-01T00:00:00Z",
-       "endTime": "2024-01-31T23:59:59Z",
+       "startDate": "2024-01-01T00:00:00Z",
+       "endDate": "2024-01-31T23:59:59Z",
        "minMagnitude": 3.0,
        "updateExisting": true
      }'

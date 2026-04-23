@@ -157,18 +157,29 @@ Create a new earthquake catalogue.
 
 **Response**: ``201 Created``
 
+The response spreads all catalogue fields plus a validation report:
+
 .. code-block:: json
 
    {
      "id": "550e8400-e29b-41d4-a716-446655440000",
      "name": "My Earthquake Catalogue",
      "event_count": 1,
-     "created_at": "2024-10-24T12:00:00.000Z"
+     "created_at": "2024-10-24T12:00:00.000Z",
+     "importMessage": "Successfully imported all 1 events.",
+     "partialImport": false,
+     "validationReport": {
+       "totalSubmitted": 1,
+       "successfullyImported": 1,
+       "failedValidation": 0,
+       "successRate": 100,
+       "invalidEvents": []
+     }
    }
 
 
 **Error Responses**:
-- ``400 Bad Request``: Invalid request body or missing required fields
+- ``400 Bad Request``: Invalid request body, missing required fields, or all events failed validation
 - ``500 Internal Server Error``: Database error
 
 
@@ -262,14 +273,12 @@ Update catalogue metadata (currently only name).
 .. code-block:: json
 
    {
-     "id": "550e8400-e29b-41d4-a716-446655440000",
-     "name": "Updated Catalogue Name",
-     "updated_at": "2024-10-24T13:00:00.000Z"
+     "success": true
    }
 
 
 **Error Responses**:
-- ``400 Bad Request``: Invalid request body
+- ``400 Bad Request``: Invalid catalogue name
 - ``404 Not Found``: Catalogue does not exist
 
 
@@ -303,7 +312,7 @@ Delete a catalogue and all its events.
 .. code-block:: json
 
    {
-     "message": "Catalogue deleted successfully"
+     "success": true
    }
 
 
@@ -649,9 +658,8 @@ Import earthquake events from GeoNet FDSN Event Web Service.
    {
      "catalogueId": "550e8400-e29b-41d4-a716-446655440000",
      "catalogueName": "GeoNet - New Zealand",
-     "timeRange": "24h",
-     "customStartDate": null,
-     "customEndDate": null,
+     "startDate": "2024-01-01T00:00:00Z",
+     "endDate": "2024-01-31T23:59:59Z",
      "minMagnitude": 3.0,
      "maxMagnitude": 10.0,
      "minDepth": 0,
@@ -663,16 +671,10 @@ Import earthquake events from GeoNet FDSN Event Web Service.
      "updateExisting": true
    }
 
-
-**Time Range Options**:
-- ``"1h"``: Last 1 hour
-- ``"6h"``: Last 6 hours
-- ``"12h"``: Last 12 hours
-- ``"24h"``: Last 24 hours
-- ``"48h"``: Last 48 hours
-- ``"7d"``: Last 7 days
-- ``"30d"``: Last 30 days
-- ``"custom"``: Use customStartDate and customEndDate
+.. note::
+   For recent events use ``hours`` instead of ``startDate``/``endDate``
+   (e.g. ``"hours": 24`` for the last 24 hours). Omit ``catalogueId`` to
+   create a new catalogue using ``catalogueName``.
 
 **Response**: ``200 OK``
 
@@ -830,38 +832,52 @@ Merge multiple catalogues into a new catalogue.
 
    {
      "name": "Merged Catalogue",
-     "catalogueIds": [
-       "550e8400-e29b-41d4-a716-446655440000",
-       "660e8400-e29b-41d4-a716-446655440001"
+     "sourceCatalogues": [
+       {
+         "id": "550e8400-e29b-41d4-a716-446655440000",
+         "name": "GeoNet 2024",
+         "events": 15432,
+         "source": "geonet"
+       },
+       {
+         "id": "660e8400-e29b-41d4-a716-446655440001",
+         "name": "USGS Southwest Pacific",
+         "events": 3241,
+         "source": "usgs"
+       }
      ],
-     "matchingRules": {
-       "timeWindow": 60,
+     "config": {
+       "timeThreshold": 60,
        "distanceThreshold": 50,
-       "magnitudeDifference": 0.5
-     },
-     "conflictResolution": "prefer_first"
+       "mergeStrategy": "quality",
+       "priority": ""
+     }
    }
 
 
-**Conflict Resolution Options**:
-- ``"prefer_first"``: Use values from first catalogue
-- ``"prefer_last"``: Use values from last catalogue
-- ``"prefer_largest_magnitude"``: Use event with largest magnitude
-- ``"prefer_best_quality"``: Use event with highest quality score
+**Merge Strategy Options** (``config.mergeStrategy``):
+
+- ``"quality"``: Select the event with the highest quality score (station count, azimuthal gap, RMS, magnitude uncertainty, magnitude type, review status). Recommended for scientific use.
+- ``"priority"``: Always keep the event from the source matching ``config.priority``.
+- ``"average"``: Weighted-average location, magnitude hierarchy selection, lowest-uncertainty depth.
+- ``"newest"``: Keep the event with the latest origin time.
+- ``"complete"``: Keep the event with the most populated fields.
 
 **Response**: ``200 OK``
 
 .. code-block:: json
 
    {
-     "id": "770e8400-e29b-41d4-a716-446655440002",
-     "name": "Merged Catalogue",
-     "event_count": 2500,
-     "unique_events": 2000,
-     "merged_events": 500
+     "success": true,
+     "catalogueId": "770e8400-e29b-41d4-a716-446655440002",
+     "eventCount": 2500,
+     "originalEventCount": 27429
    }
 
 
+.. note::
+   ``eventCount`` is the number of unique events in the merged catalogue.
+   ``originalEventCount`` is the total events across all source catalogues before deduplication.
 
 
 .. END MERGE API
@@ -945,15 +961,26 @@ Check if the application is ready to serve requests.
 .. code-block:: json
 
    {
-     "status": "healthy",
+     "status": "ready",
      "timestamp": "2024-10-24T12:00:00.000Z",
      "checks": [
        {
          "name": "database",
          "status": "healthy",
          "responseTime": 5
+       },
+       {
+         "name": "geonet_api",
+         "status": "healthy",
+         "message": "Circuit breaker is CLOSED"
+       },
+       {
+         "name": "memory",
+         "status": "healthy",
+         "message": "Heap: 120MB / 512MB (23%)"
        }
-     ]
+     ],
+     "responseTime": "12ms"
    }
 
 
@@ -962,7 +989,7 @@ Check if the application is ready to serve requests.
 .. code-block:: json
 
    {
-     "status": "unhealthy",
+     "status": "not_ready",
      "timestamp": "2024-10-24T12:00:00.000Z",
      "checks": [
        {
@@ -970,7 +997,8 @@ Check if the application is ready to serve requests.
          "status": "unhealthy",
          "message": "Database connection failed"
        }
-     ]
+     ],
+     "responseTime": "5ms"
    }
 
 

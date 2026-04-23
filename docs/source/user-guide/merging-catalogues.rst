@@ -387,9 +387,10 @@ process to prevent "over-matching" or physical inconsistencies:
 
 * **Group Size Gate**: Prevents merging groups larger than 15 events, which 
   usually indicates a threshold setting that is too loose.
-* **Spatial Spread Analysis**: For groups of 4 or more events, the platform 
-  calculates the spatial spread. If it exceeds 100–200 km (depending on 
-  magnitude), the match is flagged for review.
+* **Spatial Spread Analysis**: For groups of 4 or more events, the platform
+  calculates the spatial spread. If it exceeds the magnitude-scaled threshold
+  (100 km for M < 5, 150 km for M 5–6, 200 km for M ≥ 6), the group is
+  rejected and each event is kept as a separate unique event.
 * **Network Mismatch**: If the same network reports two different events in 
   the same group, the platform identifies these as likely distinct events 
   (e.g., foreshock/aftershock) and prevents them from being merged.

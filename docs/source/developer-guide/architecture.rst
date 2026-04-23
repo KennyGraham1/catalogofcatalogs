@@ -154,7 +154,7 @@ Catalogue merging process:
 2. **Configuration:** Set matching rules and merge strategy
 3. **Loading:** Load all events from source catalogues
 4. **Matching:** Detect duplicates using configurable thresholds
-5. **Resolution:** Apply merge strategy (priority, average, newest, complete)
+5. **Resolution:** Apply merge strategy (quality, priority, average, newest, complete)
 6. **Storage:** Create merged catalogue with source tracking
 7. **Reporting:** Generate merge statistics
 
@@ -196,7 +196,6 @@ Backend API Routes
 * ``GET /api/catalogues/[id]`` - Get catalogue details
 * ``PATCH /api/catalogues/[id]`` - Update catalogue
 * ``DELETE /api/catalogues/[id]`` - Delete catalogue
-* ``GET /api/catalogues/[id]/download`` - Download CSV
 * ``GET /api/catalogues/[id]/events`` - Get events with filtering
 
 **Import API:**
@@ -214,7 +213,7 @@ Backend API Routes
 
 **Export API:**
 
-* ``POST /api/catalogues/[id]/export/quakeml`` - Export QuakeML
+* ``GET /api/catalogues/[id]/export?format={csv|json|geojson|kml|quakeml}`` - Export catalogue
 
 See :doc:`../api-reference/index` for complete API documentation.
 

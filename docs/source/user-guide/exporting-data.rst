@@ -16,6 +16,7 @@ optimized for different use cases:
 * **QuakeML 1.2** - Seismological software and standards compliance
 * **JSON** - Web applications and programming
 * **GeoJSON** - GIS and mapping applications
+* **KML** - Google Earth and KML-compatible GIS software
 
 All exports preserve complete event metadata, quality metrics, and source
 information.
@@ -32,13 +33,16 @@ Format Comparison
      - QuakeML
      - JSON
      - GeoJSON
+     - KML
    * - Human readable
      - Yes
      - Somewhat
      - Yes
      - Yes
+     - Yes
    * - Excel compatible
      - Yes
+     - No
      - No
      - No
      - No
@@ -47,14 +51,17 @@ Format Comparison
      - No
      - No
      - Yes
+     - Yes
    * - Full metadata
      - Partial
      - Yes
      - Yes
      - Partial
+     - Partial
    * - File size
      - Smallest
      - Largest
+     - Medium
      - Medium
      - Medium
    * - Best for
@@ -62,6 +69,7 @@ Format Comparison
      - Exchange
      - APIs
      - Mapping
+     - Google Earth
 
 --------------
 Export Formats
@@ -246,19 +254,21 @@ Via Web Interface
 * QuakeML
 * JSON
 * GeoJSON
+* KML
 
 **Step 5:** Download file
 
 Via API
 =======
 
-Use the API for programmatic exports:
+Use the API for programmatic exports. All formats are available through a single
+``GET`` endpoint with a ``format`` query parameter:
 
 **CSV Export:**
 
 .. code-block:: bash
 
-   curl -X GET "http://localhost:3000/api/catalogues/{id}/download" \
+   curl -X GET "http://localhost:3000/api/catalogues/{id}/export?format=csv" \
      -H "Authorization: Bearer YOUR_TOKEN" \
      -o catalogue.csv
 
@@ -266,10 +276,11 @@ Use the API for programmatic exports:
 
 .. code-block:: bash
 
-   curl -X POST "http://localhost:3000/api/catalogues/{id}/export/quakeml" \
+   curl -X GET "http://localhost:3000/api/catalogues/{id}/export?format=quakeml" \
      -H "Authorization: Bearer YOUR_TOKEN" \
-     -H "Content-Type: application/json" \
      -o catalogue.xml
+
+**Other formats:** Replace ``format=csv`` with ``format=json``, ``format=geojson``, or ``format=kml``.
 
 See :doc:`../api-reference/export` for complete API documentation.
 
