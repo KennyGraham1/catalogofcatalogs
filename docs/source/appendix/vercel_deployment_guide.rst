@@ -55,13 +55,13 @@ You already have a MongoDB Atlas Serverless instance configured:
    * - **Database**
      - ``eq-catalogue``
    * - **Username**
-     - ``kerry_graham``
+     - ``XXX``
 
 
 Your connection string format:
 .. code-block:: text
 
-   mongodb+srv://kerry_graham:<password>@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue?appName=ServerlessInstance0
+   mongodb+srv://XXX XXXX:<password>@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue?appName=ServerlessInstance0
 
 
 Verify Network Access for Vercel
@@ -177,7 +177,7 @@ Required Variables
      - Your Value
    * - ``MONGODB_URI``
      - MongoDB Atlas connection string
-     - ``mongodb+srv://kerry_graham:<password>@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue?appName=ServerlessInstance0``
+     - ``mongodb+srv://XXX XXXX:<password>@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue?appName=ServerlessInstance0``
    * - ``MONGODB_DATABASE``
      - Database name
      - ``eq-catalogue``
@@ -199,7 +199,7 @@ Setting Variables in Vercel
 
 .. code-block:: text
 
-   MONGODB_URI = mongodb+srv://kerry_graham:YOUR_PASSWORD@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue?appName=ServerlessInstance0
+   MONGODB_URI = mongodb+srv://XXX XXXX:YOUR_PASSWORD@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue?appName=ServerlessInstance0
    MONGODB_DATABASE = eq-catalogue
    NEXTAUTH_SECRET = <generate-a-random-32-char-string>
    NEXTAUTH_URL = https://your-app.vercel.app
@@ -255,7 +255,7 @@ Or explicitly set the environment variables:
 .. code-block:: bash
 
    # Set production MongoDB URI
-   export MONGODB_URI="mongodb+srv://kerry_graham:YOUR_PASSWORD@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue?appName=ServerlessInstance0"
+   export MONGODB_URI="mongodb+srv://XXX XXXX:YOUR_PASSWORD@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue?appName=ServerlessInstance0"
    export MONGODB_DATABASE="eq-catalogue"
    
    # Run the initialization script
@@ -267,7 +267,7 @@ Expected output:
 
    🔧 Initializing MongoDB database...
    
-      URI: mongodb+srv://kerry_graham:****@serverlessinstance0.ta8golw.mongodb.net
+      URI: mongodb+srv://XXX XXXX:****@serverlessinstance0.ta8golw.mongodb.net
       Database: eq-catalogue
    
    ✓ Connected to MongoDB

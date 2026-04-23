@@ -18,15 +18,15 @@ essential for:
 * Comparing independent analyses of the same events
 * Creating research-ready datasets from multiple sources
 
-Key Features
-============
-
-* **Automated Duplicate Detection:** Matches events across catalogues using
-  time, location, and magnitude criteria
-* **Multiple Merge Strategies:** Four approaches for resolving conflicts between
-  duplicate events
-* **Complete Provenance:** Tracks the source of every event in the merged result
-* **Configurable Thresholds:** Adjust matching parameters for different data types
+* **🆕 Quality-Based (Recommended):** Automatically selects events with the best quality metrics (station count, azimuthal gap, location error, magnitude uncertainty).
+* **🆕 Enhanced Merge Algorithm:**
+    * **Magnitude Hierarchy:** Uses the ISC standard (Mw > Ms > mb > ML) to prevent saturation errors.
+    * **Date Line Handling:** Correctly matches and averages events across the International Date Line (Pacific region).
+    * **Depth Uncertainty:** Intelligently selects depths with lower uncertainty and better station coverage.
+    * **Validation:** Prevents merging physically inconsistent events (e.g., matching an M4.0 with an M7.0).
+* **Automated Duplicate Detection:** Matches events across catalogues using time, location, and magnitude criteria.
+* **Complete Provenance:** Tracks the source of every event in the merged result.
+* **Configurable Thresholds:** Adjust matching parameters for different data types.
 
 Merge Process Overview
 ======================
@@ -120,10 +120,13 @@ Strategy Decision Guide
 .. mermaid::
 
    flowchart TD
-       Start{"Do you have one<br/>authoritative source?"} -- YES --> Priority["Use Priority-Based<br/>(keeps authoritative data)"]
-       Start -- NO --> Recent{"Is one catalogue<br/>more recent?"}
+       Start{"Do you want the<br/>best scientific result?"} -- YES --> Quality["Use Quality-Based<br/>(Recommended)"]
+       Start -- NO --> Auth{"Do you have one<br/>authoritative source?"}
        
-       Recent -- YES --> Newest["Use Newest Data<br/>(keeps latest revisions)"]
+       Auth -- YES --> Priority["Use Priority-Based"]
+       Auth -- NO --> Recent{"Is one catalogue<br/>more recent?"}
+       
+       Recent -- YES --> Newest["Use Newest Data"]
        Recent -- NO --> Matter{"Which matters more?"}
        
        Matter -- "Metadata completeness" --> Complete["Use Most Complete"]
@@ -164,6 +167,29 @@ Storchak (2011).
 * May discard valid information from secondary sources
 * Assumes primary source is always correct
 
+.. mermaid::
+
+   graph LR
+       subgraph Inputs ["Duplicate Group"]
+           E1["USGS (M4.6)"]
+           E2["GeoNet (M4.5)"]
+           E3["ISC (M4.5)"]
+       end
+       
+       subgraph Logic ["Priority Logic"]
+           P1["1. GeoNet (Primary)"]
+           P2["2. USGS"]
+           P3["3. ISC"]
+       end
+       
+       Result["GeoNet Event Selected"]
+       
+       Inputs --> Logic
+       Logic --> Result
+       
+       style E2 fill:#f9f,stroke:#333,stroke-width:2px
+       style Result fill:#f9f,stroke:#333,stroke-width:2px
+
 Average Values Strategy
 =======================
 
@@ -198,6 +224,31 @@ et al., 2024).
 * Reduces random errors through averaging
 * May blur genuine differences
 * Works best with similar-quality sources
+
+.. note::
+   The Average strategy is actually a **hybrid** approach:
+   * **Location**: Weighted average using inverse-variance (lower uncertainty = higher weight).
+   * **Magnitude**: Uses the **Magnitude Hierarchy** (Mw > Ms > mb > ML) rather than a simple mean to avoid saturation errors.
+   * **Depth**: Selects the depth with the **lowest reported uncertainty**.
+
+.. mermaid::
+
+   graph TD
+       subgraph Sources ["Input Duplicates"]
+           S1["Source A: M4.5, ±2km"]
+           S2["Source B: M4.7, ±10km"]
+       end
+       
+       subgraph Processing ["Hybrid Averaging"]
+           Loc["Location: Weighted Mean<br/>(Source A weighted 5x)"]
+           Mag["Magnitude: Hierarchy<br/>(Prefers Mw over ML)"]
+           Dep["Depth: Best Uncertainty"]
+       end
+       
+       Result["Merged Hybrid Event"]
+       
+       Sources --> Processing
+       Processing --> Result
 
 Newest Data Strategy
 ====================
@@ -259,6 +310,96 @@ Most Complete Strategy
 * More fields doesn't always mean better data
 * May prefer verbose but lower-quality data
 * Good for maximizing available information
+
+Quality Score Strategy
+======================
+
+The platform's most advanced strategy uses a **100-point composite index** 
+to rank events. It evaluates quality across six dimensions:
+
+* **Station Coverage (25 pts)**: Logarithmic scale (30+ stations = max points).
+* **Azimuthal Gap (20 pts)**: Penalizes gaps > 180°; excellent if < 120°.
+* **Location Precision (15 pts)**: Based on Standard Error / RMS residuals.
+* **Magnitude Uncertainty (15 pts)**: Lower uncertainty yields higher scores.
+* **Magnitude Type (15 pts)**: Preferred order Mw > Ms > mb > ML > Md.
+* **Review Status (10 pts)**: "Reviewed" or "Final" status adds points over "Preliminary".
+
+.. mermaid::
+
+   graph TD
+       subgraph Group ["Duplicate Candidates"]
+           C1["Event 1: 15 stations, Gap 210°"]
+           C2["Event 2: 45 stations, Gap 95°"]
+       end
+       
+       subgraph Scoring ["Quality Engine"]
+           S1["Event 1 Score: 45/100"]
+           S2["Event 2 Score: 88/100"]
+       end
+       
+       Winner["Event 2 Selected"]
+       
+       Group --> Scoring
+       Scoring --> Winner
+       
+       style C2 fill:#4CAF50,color:white
+       style Winner fill:#4CAF50,color:white
+
+---------------------------
+How Metadata is Merged
+---------------------------
+
+Beyond the primary fields (time, location, magnitude), the platform performs 
+a **Field-Level Union** to ensure the merged catalogue is as comprehensive 
+as possible. 
+
+1. **Gaps Filling**: If the selected primary record is missing a field 
+   (e.g., azimuthal gap or phase count) but a secondary record has it, 
+   the platform automatically fills that gap from the highest-quality 
+   secondary source.
+2. **Rich Data Preservation**: Complex data types like **Picks**, **Arrivals**, 
+   and **Station Magnitudes** are preserved through a ranked inheritance system.
+3. **Focal Mechanism Selection**: The platform automatically selects the 
+   best focal mechanism across all duplicate sources based on a hierarchy 
+   (GCMT > GeoNet > USGS > ISC) and quality metrics including station 
+   polarity count and misfit values.
+
+---------------------------
+Advanced Quality Control
+---------------------------
+
+The platform performs several advanced validation checks during the merge 
+process to prevent "over-matching" or physical inconsistencies:
+
+* **Group Size Gate**: Prevents merging groups larger than 15 events, which 
+  usually indicates a threshold setting that is too loose.
+* **Spatial Spread Analysis**: For groups of 4 or more events, the platform 
+  calculates the spatial spread. If it exceeds 100–200 km (depending on 
+  magnitude), the match is flagged for review.
+* **Network Mismatch**: If the same network reports two different events in 
+  the same group, the platform identifies these as likely distinct events 
+  (e.g., foreshock/aftershock) and prevents them from being merged.
+
+---------------------------
+Scientific Accuracy Features
+---------------------------
+
+The platform includes several specialized algorithms to ensure seismological 
+rigour:
+
+* **Latitude-Aware Spatial Indexing**: The search grid adjusts its cell 
+  dimensions based on latitude to maintain consistent distance thresholds 
+  near the poles and the equator.
+* **Date Line Normalization**: Merging events near the International Date 
+  Line (±180°) uses Cartesian unit-vector averaging to avoid mathematical 
+  errors that occur with simple arithmetic means.
+* **Uncertainty-Weighted Locations**: When averaging locations, the platform 
+  weights the result by the inverse of the reported horizontal uncertainty 
+  (geometric mean of latitude/longitude errors).
+* **Regional Authority Hierarchy**: The platform recognizes regional 
+  boundaries. For example, it automatically prioritizes GeoNet for events 
+  within New Zealand and JMA for events in Japan, regardless of global 
+  priority settings.
 
 --------------
 Merge Process
@@ -355,10 +496,14 @@ Step 4: Choose Merge Strategy
 
 Select your conflict resolution strategy:
 
-* **Priority-Based** - Select primary catalogue from dropdown
-* **Average Values** - Calculate mean values
-* **Newest Data** - Keep most recent
-* **Most Complete** - Keep most detailed
+* **🆕 Quality-Based (Recommended)** - Automatically selects based on station count, azimuthal gap, and uncertainty metrics.
+* **Priority-Based** - Select primary catalogue from dropdown.
+* **Average Values** - Calculate weighted mean values.
+* **Newest Data** - Keep most recent.
+* **Most Complete** - Keep most detailed.
+
+.. tip::
+   We recommend the **Quality-Based** strategy for most scientific applications, as it uses seismological best practices to select the most reliable origin and magnitude for every event.
 
 .. note::
    During the merge process, different magnitude scales (ML, mb, Ms) are 
