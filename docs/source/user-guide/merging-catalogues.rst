@@ -130,8 +130,8 @@ Strategy Decision Guide
        Start -- NO --> Auth{"Do you have one<br/>authoritative source?"}
        
        Auth -- YES --> Priority["Use Priority-Based"]
-       Auth -- NO --> Recent{"Is one catalogue<br/>more recent?"}
-       
+       Auth -- NO --> Recent{"Do your duplicate events<br/>have different origin times<br/>and newer = more reliable?"}
+
        Recent -- YES --> Newest["Use Newest Data"]
        Recent -- NO --> Matter{"Which matters more?"}
        
@@ -201,9 +201,11 @@ Average Values Strategy
 
 **How it works:**
 
-* Calculate the mean of numeric values from all duplicate events
-* Combine uncertainties using error propagation
-* Preserve metadata from the most complete event
+* Compute a weighted-average location (lower uncertainty = higher weight)
+* Select the best magnitude using the ISC hierarchy (Mw > Ms > mb > ML)
+* Pick the depth with the lowest reported uncertainty
+* Use the earliest origin time across duplicates
+* Preserve metadata from the highest-quality source event
 
 Statistical averaging and uncertainty propagation follow Bayesian 
 principles for combining independent seismic observations (Schorlemmer 
@@ -217,7 +219,7 @@ et al., 2024).
    Catalogue B: M4.6, depth 28 km
    Catalogue C: M4.4, depth 24 km
 
-   Result: M4.5 (average), depth 25.7 km (average)
+   Result: M4.5 (magnitude hierarchy), depth 25 km (lowest uncertainty)
 
 **Best for:**
 
@@ -261,9 +263,9 @@ Newest Data Strategy
 
 **How it works:**
 
-* Compare modification timestamps or origin time precision
-* Keep the most recently updated version
-* Useful for getting revised parameters
+* Compare origin times across duplicate events
+* Keep the event with the latest origin time
+* Useful when later earthquakes in a sequence have better solutions
 
 **Example:**
 
@@ -327,8 +329,7 @@ international standards for network performance and location accuracy
 
 * **Station Coverage (25 pts)**: Logarithmic scale (30+ stations = max points). 
   Quality improvement is non-linear with station count (Bondár, 2004).
-* **Azimuthal Gap (20 pts)**: Penalizes gaps > 180°; excellent if < 120°. 
-  Secondary azimuthal gap is also considered where available.
+* **Azimuthal Gap (20 pts)**: Penalizes gaps > 180°; excellent if < 120°; zero points above 270°.
 * **Location Precision (15 pts)**: Based on Standard Error / RMS residuals 
   (ISC standard: < 0.3s is excellent).
 * **Magnitude Uncertainty (15 pts)**: Lower uncertainty yields higher scores.
@@ -513,11 +514,11 @@ Select your conflict resolution strategy:
 * **Quality-Based (Recommended)** - Scores each duplicate event 0–100 and keeps the highest-scoring one (station count, azimuthal gap, RMS, magnitude uncertainty, magnitude type, review status).
 * **Priority-Based** - Select a primary catalogue; its events always win.
 * **Average Values** - Computes a weighted-average location, applies magnitude hierarchy, and picks the lowest-uncertainty depth.
-* **Newest Data** - Keeps the most recently updated event.
+* **Newest Data** - Keeps the event with the latest origin time.
 * **Most Complete** - Keeps the event with the most populated fields.
 
 .. note::
-   Regardless of the strategy chosen, the platform always applies magnitude hierarchy, date line normalisation, depth uncertainty selection, and validation gates. The strategy only controls *which event's core parameters win* when duplicates are resolved.
+   Regardless of the strategy chosen, the platform always applies date line normalisation and validation gates. Magnitude hierarchy and depth uncertainty selection are specific to the Average strategy. The strategy controls *which event's core parameters win* when duplicates are resolved.
 
 .. tip::
    Use **Quality-Based** for scientific work — it selects the most reliable origin automatically. Use **Priority-Based** when you have a single authoritative source (e.g., always prefer GeoNet for New Zealand events).
@@ -564,8 +565,8 @@ Click **Merge Catalogues** to begin processing.
 **Processing Steps:**
 
 1. Load events from all source catalogues
-2. Index events by time for efficient matching
-3. Find candidate duplicates within time windows
+2. Build spatial grid index for efficient geographic lookups
+3. Find candidate duplicates within time and distance windows
 4. Apply distance and magnitude criteria
 5. Resolve conflicts using selected strategy
 6. Record provenance for all events
