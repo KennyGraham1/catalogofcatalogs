@@ -20,15 +20,17 @@ essential for:
 
 Key platform features include:
 
-* **🆕 Quality-Based (Recommended):** Automatically selects events with the best quality metrics (station count, azimuthal gap, location error, magnitude uncertainty).
-* **🆕 Enhanced Merge Algorithm:**
-    * **Magnitude Hierarchy:** Uses the ISC standard (Mw > Ms > mb > ML) to prevent saturation errors.
-    * **Date Line Handling:** Correctly matches and averages events across the International Date Line (Pacific region).
-    * **Depth Uncertainty:** Intelligently selects depths with lower uncertainty and better station coverage.
-    * **Validation:** Prevents merging physically inconsistent events (e.g., matching an M4.0 with an M7.0).
+* **🆕 Quality-Based Strategy (Recommended):** A new merge strategy that scores every duplicate event on a 0–100 point index (station count, azimuthal gap, location error, magnitude uncertainty, magnitude type, review status) and keeps the highest-scoring event. This is a user-selectable option — see :ref:`merge-strategies` below.
 * **Automated Duplicate Detection:** Matches events across catalogues using time, location, and magnitude criteria.
 * **Complete Provenance:** Tracks the source of every event in the merged result.
 * **Configurable Thresholds:** Adjust matching parameters for different data types.
+
+The platform also applies underlying algorithm improvements. Some run for **every strategy**, others are specific to the Average strategy:
+
+* **Date Line Normalisation** *(all strategies)*: Spatial matching near ±180° uses unit-vector averaging to avoid arithmetic errors in the Pacific region.
+* **Validation Gates** *(all strategies)*: Rejects physically inconsistent duplicate groups before any strategy is applied (e.g., an M4.0 matched against an M7.0, or a group spanning > 200 km).
+* **Magnitude Hierarchy** *(Average strategy)*: Uses the ISC standard (Mw > Ms > mb > ML) when computing averages, preventing saturation errors from mixing incompatible scales. Other strategies keep the winning event's existing magnitude unchanged.
+* **Depth Uncertainty Selection** *(Average strategy)*: Selects the depth with the lowest reported uncertainty rather than a simple mean. Other strategies inherit depth directly from the winning event.
 
 Merge Process Overview
 ======================
@@ -109,6 +111,8 @@ Example Duplicate Detection
    Magnitude diff:     0.1         (< 0.5 threshold) ✓
 
    Result: These are duplicates (same earthquake)
+
+.. _merge-strategies:
 
 ----------------
 Merge Strategies
@@ -506,14 +510,17 @@ Step 4: Choose Merge Strategy
 
 Select your conflict resolution strategy:
 
-* **🆕 Quality-Based (Recommended)** - Automatically selects based on station count, azimuthal gap, and uncertainty metrics.
-* **Priority-Based** - Select primary catalogue from dropdown.
-* **Average Values** - Calculate weighted mean values.
-* **Newest Data** - Keep most recent.
-* **Most Complete** - Keep most detailed.
+* **Quality-Based (Recommended)** - Scores each duplicate event 0–100 and keeps the highest-scoring one (station count, azimuthal gap, RMS, magnitude uncertainty, magnitude type, review status).
+* **Priority-Based** - Select a primary catalogue; its events always win.
+* **Average Values** - Computes a weighted-average location, applies magnitude hierarchy, and picks the lowest-uncertainty depth.
+* **Newest Data** - Keeps the most recently updated event.
+* **Most Complete** - Keeps the event with the most populated fields.
+
+.. note::
+   Regardless of the strategy chosen, the platform always applies magnitude hierarchy, date line normalisation, depth uncertainty selection, and validation gates. The strategy only controls *which event's core parameters win* when duplicates are resolved.
 
 .. tip::
-   We recommend the **Quality-Based** strategy for most scientific applications, as it uses seismological best practices to select the most reliable origin and magnitude for every event.
+   Use **Quality-Based** for scientific work — it selects the most reliable origin automatically. Use **Priority-Based** when you have a single authoritative source (e.g., always prefer GeoNet for New Zealand events).
 
 .. note::
    During the merge process, different magnitude scales (ML, mb, Ms) are 
