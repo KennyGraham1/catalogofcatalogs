@@ -11,8 +11,10 @@ Overview
 
 The platform implements a comprehensive quality assessment system that evaluates
 earthquake locations based on multiple factors. Events are graded from **A+**
-(excellent) to **F** (poor), helping you identify the most reliable data for
-your analysis.
+(excellent) to **F** (poor), based on international standards (Bondár, 2004; 
+Bormann, 2012) and regional quantitative assessments of the GeoNet network 
+performance in New Zealand (Warren-Smith et al., 2025). This grading helps 
+you identify the most reliable data for your analysis.
 
 Quick Reference
 ===============
@@ -114,6 +116,8 @@ Based on azimuthal gap and station distribution:
 * Adequate depth control
 * Sufficient near-source stations
 
+These criteria follow the network geometry recommendations of Bondár (2004).
+
 3. Solution Quality (25%)
 ==========================
 
@@ -140,6 +144,9 @@ Based on phase counts and residuals:
 * Fair: 0.5-1.0 s
 * Poor: > 1.0 s
 
+These thresholds align with the International Seismological Centre (ISC) 
+standards for high-quality locations (Bondár & Storchak, 2011).
+
 4. Magnitude Quality (10%)
 ===========================
 
@@ -158,6 +165,9 @@ Based on station count and uncertainty:
 * Good: 0.1-0.2
 * Fair: 0.2-0.3
 * Poor: > 0.3
+
+Magnitude type preference (Mw > Ms > mb > ML) is based on the ISC-GEM 
+standards for magnitude reliability (Storchak et al., 2013).
 
 -----------------
 Quality Filtering
@@ -311,8 +321,9 @@ Station Count
 **Interpretation:**
 
 * More stations = better coverage
-* Minimum 5 stations for basic location
-* 10+ stations for good quality
+* Minimum 8 stations for reliable location in sparse regions (Warren-Smith et al., 2025)
+* 10+ stations for good quality globally
+* 30+ stations for high-precision studies
 
 **Impact:** Affects network geometry and solution stability.
 
@@ -367,4 +378,17 @@ Next Steps
 * :doc:`visualization` - Visualize quality metrics
 * :doc:`exporting-data` - Export with quality filters
 * :doc:`../data-validation` - Data validation guide
+
+----------
+References
+----------
+
+The quality assessment metrics and scoring system in this platform are based on established seismological literature:
+
+* **Warren-Smith, E., et al. (2025).** *A quantitative assessment of GeoNet earthquake location quality in Aotearoa New Zealand.* New Zealand Journal of Geology and Geophysics. (Specific assessment of regional network performance and station thresholds).
+* **Bondár, I. (2004).** *Epicentre Accuracy Based on Seismic Network Criteria.* Geophysical Journal International. (Network geometry and station count requirements).
+* **Bondár, I., & Storchak, D. A. (2011).** *Improved Location Procedures at the International Seismological Centre.* Geophysical Journal International. (Quality scoring and azimuthal gap/RMS thresholds).
+* **Bormann, P., Ed. (2012).** *IASPEI New Manual of Seismological Observatory Practice (NMSOP-2).* Deutsches GeoForschungsZentrum GFZ. (Standardized quality metrics and reporting).
+* **Storchak, D. A., et al. (2013).** *Public Release of the ISC-GEM Global Instrumental Earthquake Catalogue (1900-2009).* Seismological Research Letters. (Parameter selection and magnitude hierarchy).
+* **Woessner, J., et al. (2016).** *Seismicity Catalogs.* Community Online Resource for Statistical Seismicity Analysis (CORSSA). (Best practices for catalog quality assessment).
 

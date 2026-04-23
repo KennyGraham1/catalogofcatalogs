@@ -315,14 +315,21 @@ Quality Score Strategy
 ======================
 
 The platform's most advanced strategy uses a **100-point composite index** 
-to rank events. It evaluates quality across six dimensions:
+to rank events. It evaluates quality across six dimensions, based on 
+international standards for network performance and location accuracy 
+(Bondár, 2004; Bondár & Storchak, 2011; Bormann, 2012):
 
-* **Station Coverage (25 pts)**: Logarithmic scale (30+ stations = max points).
-* **Azimuthal Gap (20 pts)**: Penalizes gaps > 180°; excellent if < 120°.
-* **Location Precision (15 pts)**: Based on Standard Error / RMS residuals.
+* **Station Coverage (25 pts)**: Logarithmic scale (30+ stations = max points). 
+  Quality improvement is non-linear with station count (Bondár, 2004).
+* **Azimuthal Gap (20 pts)**: Penalizes gaps > 180°; excellent if < 120°. 
+  Secondary azimuthal gap is also considered where available.
+* **Location Precision (15 pts)**: Based on Standard Error / RMS residuals 
+  (ISC standard: < 0.3s is excellent).
 * **Magnitude Uncertainty (15 pts)**: Lower uncertainty yields higher scores.
-* **Magnitude Type (15 pts)**: Preferred order Mw > Ms > mb > ML > Md.
-* **Review Status (10 pts)**: "Reviewed" or "Final" status adds points over "Preliminary".
+* **Magnitude Type (15 pts)**: Preferred order Mw > Ms > mb > ML > Md 
+  (Storchak et al., 2013).
+* **Review Status (10 pts)**: "Reviewed" or "Final" status adds points over 
+  "Preliminary" solutions.
 
 .. mermaid::
 
@@ -398,8 +405,9 @@ rigour:
   (geometric mean of latitude/longitude errors).
 * **Regional Authority Hierarchy**: The platform recognizes regional 
   boundaries. For example, it automatically prioritizes GeoNet for events 
-  within New Zealand and JMA for events in Japan, regardless of global 
-  priority settings.
+  within New Zealand and JMA for events in Japan. This preference is 
+  supported by regional quality assessments that show local network 
+  superiority for inland and near-shore events (Warren-Smith et al., 2025).
 
 --------------
 Merge Process
@@ -840,8 +848,12 @@ References
 
 The merging algorithms and conflict resolution strategies in this platform are based on established seismological literature:
 
+* **Warren-Smith, E., et al. (2025).** *A quantitative assessment of GeoNet earthquake location quality in Aotearoa New Zealand.* New Zealand Journal of Geology and Geophysics. (Regional network performance and station thresholds).
+* **Bondár, I. (2004).** *Epicentre Accuracy Based on Seismic Network Criteria.* Geophysical Journal International. (Network geometry and station count requirements).
+* **Bormann, P., Ed. (2012).** *IASPEI New Manual of Seismological Observatory Practice (NMSOP-2).* Deutsches GeoForschungsZentrum GFZ. (Standardized quality metrics and reporting).
+* **Bondár, I., & Storchak, D. A. (2011).** *Improved Location Procedures at the International Seismological Centre.* Geophysical Journal International. (Quality scoring and azimuthal gap/RMS thresholds).
+* **Storchak, D. A., et al. (2013).** *Public Release of the ISC-GEM Global Instrumental Earthquake Catalogue (1900-2009).* Seismological Research Letters. (Parameter selection and magnitude hierarchy).
 * **Benz, H. M., et al. (2019).** *Improving Automated Earthquake Association with NEIC Hydra.* Bulletin of the Seismological Society of America. (Graph-theoretic event association and group validation).
 * **Tanaka, M., et al. (2022).** *Discrimination of Seismic Catalogue Duplicates During Aftershock Sequences Using the Nearest-Neighbour Method.* Frontiers in Earth Science. (Adaptive thresholds for dense sequences).
-* **Storchak, D. A., et al. (2013).** *Public Release of the ISC-GEM Global Instrumental Earthquake Catalogue (1900-2009).* Seismological Research Letters. (Parameter selection and magnitude hierarchy).
-* **Bondár, I., & Storchak, D. A. (2011).** *Improved Location Procedures at the International Seismological Centre.* Geophysical Journal International. (Quality scoring and azimuthal gap/RMS thresholds).
 * **Schorlemmer, D., et al. (2024).** *A Bayesian Merging of Earthquake Magnitudes from Multiple Networks.* Seismological Research Letters. (Principles of magnitude averaging).
+* **Scordilis, E. M. (2006).** *Empirical Global Relations Converting Ms and mb to Moment Magnitude.* Journal of Seismology. (Magnitude conversion formulas).
