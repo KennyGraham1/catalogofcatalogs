@@ -18,6 +18,8 @@ essential for:
 * Comparing independent analyses of the same events
 * Creating research-ready datasets from multiple sources
 
+Key platform features include:
+
 * **🆕 Quality-Based (Recommended):** Automatically selects events with the best quality metrics (station count, azimuthal gap, location error, magnitude uncertainty).
 * **🆕 Enhanced Merge Algorithm:**
     * **Magnitude Hierarchy:** Uses the ISC standard (Mw > Ms > mb > ML) to prevent saturation errors.
@@ -108,9 +110,9 @@ Example Duplicate Detection
 
    Result: These are duplicates (same earthquake)
 
---------------
+----------------
 Merge Strategies
---------------
+----------------
 
 Choose the strategy that best fits your use case:
 
@@ -387,9 +389,9 @@ process to prevent "over-matching" or physical inconsistencies:
   the same group, the platform identifies these as likely distinct events 
   (e.g., foreshock/aftershock) and prevents them from being merged.
 
----------------------------
+----------------------------
 Scientific Accuracy Features
----------------------------
+----------------------------
 
 The platform includes several specialized algorithms to ensure seismological 
 rigour:
