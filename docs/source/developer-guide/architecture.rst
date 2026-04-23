@@ -224,7 +224,7 @@ Core Libraries
 **Data Parsing:**
 
 * ``lib/parsers.ts`` - Multi-format file parsers (CSV, JSON, QuakeML, GeoJSON)
-* ``lib/delimiter-detector.ts`` - Smart delimiter detection
+* ``lib/delimiter-detector.ts`` - Automated delimiter detection
 * ``lib/date-format-detector.ts`` - Date format detection
 * ``lib/quakeml-parser.ts`` - QuakeML 1.2 parser
 * ``lib/geojson-parser.ts`` - GeoJSON parser

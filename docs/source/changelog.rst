@@ -79,7 +79,7 @@ Version 1.0.0
 **GeoNet Integration**
 
 - Implemented GeoNet FDSN Event Web Service import
-- Added intelligent duplicate detection during imports
+- Added automated duplicate detection during imports
 - Created import history tracking with statistics
 - Added configurable time range and magnitude filters
 - Implemented incremental import with existing event updates
@@ -105,7 +105,7 @@ Version 1.0.0
 
 - Initial release of the Earthquake Catalogue Platform
 - Multi-format file upload (CSV, JSON, GeoJSON, QuakeML)
-- Smart delimiter and date format detection
+- Automated delimiter and date format detection
 - Field mapping with reusable templates
 - Interactive Leaflet-based maps
 - Basic quality metrics display

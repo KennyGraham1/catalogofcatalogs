@@ -12,8 +12,8 @@ A web application for managing, analyzing, and visualizing earthquake catalogue 
 ^^^^^^^^^^^^^^^^^
 
 - **Multi-format Upload**: Support for CSV, TXT, QuakeML (XML), JSON, and GeoJSON formats
-- **Smart Delimiter Detection**: Auto-detects comma, tab, semicolon, pipe, or space delimiters
-- **Intelligent Date Parsing**: Auto-detects US (MM/DD/YYYY) vs International (DD/MM/YYYY) date formats
+- **Automated Delimiter Detection**: Auto-detects comma, tab, semicolon, pipe, or space delimiters
+- **Automated Date Parsing**: Auto-detects US (MM/DD/YYYY) vs International (DD/MM/YYYY) date formats
 - **Schema Normalization**: Automatic field mapping and validation
 - **Catalogue Merging**: Flexible merging with configurable matching rules
 - **QuakeML 1.2 Support**: Full implementation of QuakeML Basic Event Description (BED) specification
@@ -24,7 +24,7 @@ A web application for managing, analyzing, and visualizing earthquake catalogue 
 
 - **Automatic Data Import**: Real-time earthquake data from GeoNet FDSN Event Web Service
 - **Flexible Filtering**: Filter by magnitude, depth, time range, and geographic bounds
-- **Duplicate Detection**: Intelligent handling of duplicate events with update capabilities
+- **Duplicate Detection**: Automated handling of duplicate events with update capabilities
 - **Import History**: Complete tracking of all imports with detailed statistics
 
 📈 Visualization & Analysis
@@ -166,7 +166,7 @@ Events are graded from **A+** (excellent) to **F** (poor) based on weighted scor
 Data Integration
 ^^^^^^^^^^^^^^^^
 
-- **Duplicate Detection**: Intelligent matching of events across catalogues using time, location, and magnitude
+- **Duplicate Detection**: Automated matching of events across catalogues using time, location, and magnitude
 - **Event Updates**: Ability to update existing events with new data from imports
 - **Source Tracking**: Complete provenance tracking for merged events
 - **Field Mapping**: Flexible field mapping system with reusable templates
@@ -325,7 +325,7 @@ Run the test suite:
    │   ├── mongodb.ts                    # MongoDB client (Atlas-optimized)
    │   ├── db.ts                         # Database queries and schema
    │   ├── parsers.ts                    # Multi-format file parsers
-   │   ├── delimiter-detector.ts         # Smart delimiter detection
+   │   ├── delimiter-detector.ts         # Automated delimiter detection
    │   ├── date-format-detector.ts       # US/International date detection
    │   ├── earthquake-utils.ts           # Earthquake calculations
    │   ├── focal-mechanism-utils.ts      # Focal mechanism parsing
@@ -653,8 +653,8 @@ Completed Features ✅
 ^^^^^^^^^^^^^^^^^^^^
 
 - [x] Multi-format data upload (CSV, TXT, QuakeML, JSON, GeoJSON)
-- [x] Smart delimiter auto-detection (comma, tab, semicolon, pipe, space)
-- [x] Intelligent date format detection (US vs International)
+- [x] Automated delimiter auto-detection (comma, tab, semicolon, pipe, space)
+- [x] Automated date format detection (US vs International)
 - [x] Large file support (up to 500MB)
 - [x] GeoNet automatic import with duplicate detection
 - [x] Catalogue merging with configurable rules
@@ -689,7 +689,7 @@ Planned Features 🚀
 
 The application is fully functional with features for earthquake catalogue management, including:
 - ✅ Data upload and parsing (CSV, TXT, JSON, GeoJSON, QuakeML)
-- ✅ Smart format detection (delimiters, date formats)
+- ✅ Automated format detection (delimiters, date formats)
 - ✅ GeoNet automatic import
 - ✅ Catalogue merging
 - ✅ QuakeML 1.2 support

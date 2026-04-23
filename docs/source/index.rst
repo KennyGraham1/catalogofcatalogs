@@ -23,7 +23,7 @@ Features
 
 📊 **Data Management**
    - Multi-format upload (CSV, TXT, QuakeML, JSON, GeoJSON)
-   - Smart delimiter and date format detection
+   - Automated delimiter and date format detection
    - Schema normalization and validation
    - Catalogue merging with configurable rules
    - Large file support (up to 500MB)
@@ -31,7 +31,7 @@ Features
 🌏 **GeoNet Integration**
    - Automatic data import from GeoNet FDSN Event Web Service
    - Flexible filtering by magnitude, depth, time, and location
-   - Intelligent duplicate detection and event updates
+   - Automated duplicate detection and event updates
    - Complete import history tracking
 
 📈 **Visualization & Analysis**

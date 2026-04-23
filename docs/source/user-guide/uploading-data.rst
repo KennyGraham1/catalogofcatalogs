@@ -11,7 +11,7 @@ Overview
 --------
 
 The Earthquake Catalogue Platform supports multiple data formats and provides
-intelligent parsing with automatic format detection. The upload system handles
+parsing with automatic format detection. The upload system handles
 files up to 500MB and processes them through a seven-stage workflow ensuring
 data quality and consistency.
 

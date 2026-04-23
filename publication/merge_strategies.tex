@@ -1,8 +1,23 @@
+\documentclass[12pt]{article}
+\usepackage[a4paper,inner=2cm,top=2.5cm,bottom=2.5cm,outer=4cm,marginparwidth=3cm]{geometry}
+\usepackage[round]{natbib}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{longtable}
+\usepackage{float}
+\usepackage[hidelinks,bookmarksnumbered]{hyperref}
+\usepackage[nameinlink,noabbrev]{cleveref}
+
+% Consistent terminology
+\newcommand{\catalog}{catalog}
+\newcommand{\catalogs}{catalogs}
+\newcommand{\Catalogs}{Catalogs}
+
+\begin{document}
+
 % =============================================================================
 % CATALOGUE MERGING STRATEGIES  —  detailed literature review
-% Self-contained section; include in main.tex with \input{merge_strategies}
-% Requires: natbib (round), booktabs, amsmath, amssymb, longtable, float,
-%           cleveref (nameinlink,noabbrev), hyperref — all loaded in main.tex.
 % =============================================================================
 
 \section{Strategies for Merging Earthquake \Catalogs: A Literature Review}
@@ -1252,3 +1267,8 @@ transitive associations that arise when an intermediate-time event B links two
 events A and C that would not independently satisfy the proximity criterion.
 A Union-Find graph implementation resolves this in $O(n\,\alpha(n))$ time with
 no change to the downstream parameter-selection logic.
+
+\bibliographystyle{apalike}
+\bibliography{catalogBib}
+
+\end{document}

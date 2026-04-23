@@ -83,7 +83,7 @@ A robust import service that handles the entire import workflow:
   - Update existing events option
   - Custom catalogue name
 
-- **Intelligent Processing**:
+- **Automated Processing**:
   - Automatic duplicate detection by event ID
   - Update existing events with revised data
   - Skip unchanged events

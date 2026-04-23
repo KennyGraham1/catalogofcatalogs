@@ -2,14 +2,14 @@
 Merging Catalogues
 ==================
 
-Learn how to merge multiple earthquake catalogues with intelligent duplicate
+Learn how to merge multiple earthquake catalogues with automated duplicate
 detection and configurable conflict resolution strategies.
 
 --------
 Overview
 --------
 
-Catalogue merging is a powerful feature that allows you to combine earthquake
+Catalogue merging allows you to combine earthquake
 data from multiple sources into a unified, comprehensive catalogue. This is
 essential for:
 
@@ -21,7 +21,7 @@ essential for:
 Key Features
 ============
 
-* **Intelligent Duplicate Detection:** Matches events across catalogues using
+* **Automated Duplicate Detection:** Matches events across catalogues using
   time, location, and magnitude criteria
 * **Multiple Merge Strategies:** Four approaches for resolving conflicts between
   duplicate events
@@ -59,7 +59,10 @@ What Makes Events Duplicates?
 =============================
 
 Two events are considered duplicates if they likely represent the same
-earthquake recorded in different catalogues. The platform uses three criteria:
+earthquake recorded in different catalogues. The platform uses three criteria,
+with default thresholds and association logic based on international standards 
+for global and regional earthquake association (Storchak et al., 2013; 
+Benz et al., 2019):
 
 .. list-table::
    :header-rows: 1
@@ -136,6 +139,10 @@ Priority-Based Strategy
 * When duplicates are found, keep the primary catalogue's event
 * Discard the duplicate from other catalogues
 
+This approach follows the principle of network authority, where local 
+networks are prioritized for regional events as recommended by Bondár & 
+Storchak (2011).
+
 **Example:**
 
 .. code-block:: text
@@ -165,6 +172,10 @@ Average Values Strategy
 * Calculate the mean of numeric values from all duplicate events
 * Combine uncertainties using error propagation
 * Preserve metadata from the most complete event
+
+Statistical averaging and uncertainty propagation follow Bayesian 
+principles for combining independent seismic observations (Schorlemmer 
+et al., 2024).
 
 **Example:**
 
@@ -280,7 +291,10 @@ Select two or more catalogues to merge:
 Step 3: Configure Matching Rules
 ================================
 
-Set thresholds for duplicate detection:
+Set thresholds for duplicate detection. These thresholds are adaptively 
+scaled based on event magnitude and depth (Tanaka et al., 2022), as larger 
+earthquakes typically have larger location and timing uncertainties in 
+global reports (Benz et al., 2019):
 
 **Time Window**
 
@@ -345,6 +359,12 @@ Select your conflict resolution strategy:
 * **Average Values** - Calculate mean values
 * **Newest Data** - Keep most recent
 * **Most Complete** - Keep most detailed
+
+.. note::
+   During the merge process, different magnitude scales (ML, mb, Ms) are 
+   automatically converted to a common Moment Magnitude (Mw) scale using 
+   the empirical relationships of Scordilis (2006) to ensure 
+   comparability across catalogues.
 
 Step 5: Configure Priority (if applicable)
 ==========================================
@@ -641,6 +661,18 @@ Unexpected Results
 3. Review source catalogue data quality
 4. Try a different merge strategy
 
+----------------------
+Testing and Validation
+----------------------
+
+The merging algorithms are rigorously tested to ensure data integrity and accurate conflict resolution. The core test suite (located in ``__tests__/lib/merge.test.ts``) covers:
+
+* **Spatial Indexing & Grid Operations**: Validates geographic bounds handling, including complex Date Line crossing scenarios.
+* **Adaptive Threshold Matching**: Ensures distance and time thresholds scale appropriately across magnitude and depth ranges.
+* **Merge Strategies**: Verifies the correct behavior of the quality, priority, average, newest, and complete merge strategies.
+* **Validation of Event Groups**: Ensures anomalous clusters (e.g., highly divergent depths or magnitudes) are correctly flagged and handled.
+* **Magnitude Hierarchy**: Validates that standard magnitude scales are correctly prioritized (e.g., Mw over ML).
+
 ----------
 Next Steps
 ----------
@@ -655,3 +687,16 @@ After merging:
 
    * :doc:`../api-reference/merge` - Merge API documentation
    * :doc:`../developer-guide/implementation-notes/merge-improvements` - Technical details
+   * :doc:`../developer-guide/testing` - Developer testing guide and strategies
+
+----------
+References
+----------
+
+The merging algorithms and conflict resolution strategies in this platform are based on established seismological literature:
+
+* **Benz, H. M., et al. (2019).** *Improving Automated Earthquake Association with NEIC Hydra.* Bulletin of the Seismological Society of America. (Graph-theoretic event association and group validation).
+* **Tanaka, M., et al. (2022).** *Discrimination of Seismic Catalogue Duplicates During Aftershock Sequences Using the Nearest-Neighbour Method.* Frontiers in Earth Science. (Adaptive thresholds for dense sequences).
+* **Storchak, D. A., et al. (2013).** *Public Release of the ISC-GEM Global Instrumental Earthquake Catalogue (1900-2009).* Seismological Research Letters. (Parameter selection and magnitude hierarchy).
+* **Bondár, I., & Storchak, D. A. (2011).** *Improved Location Procedures at the International Seismological Centre.* Geophysical Journal International. (Quality scoring and azimuthal gap/RMS thresholds).
+* **Schorlemmer, D., et al. (2024).** *A Bayesian Merging of Earthquake Magnitudes from Multiple Networks.* Seismological Research Letters. (Principles of magnitude averaging).

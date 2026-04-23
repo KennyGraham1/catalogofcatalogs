@@ -207,7 +207,7 @@ Technical Terms
 
    merge
       The process of combining multiple earthquake catalogues into a single
-      catalogue, with intelligent duplicate detection and conflict resolution.
+      catalogue, with automated duplicate detection and conflict resolution.
 
    MongoDB
       A document-oriented NoSQL database used by the platform to store earthquake

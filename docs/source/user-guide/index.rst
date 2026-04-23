@@ -24,12 +24,12 @@ Key Capabilities
 
    * - **Data Import**
      - Upload earthquake data in CSV, JSON, GeoJSON, or QuakeML formats with
-       automatic format detection and intelligent parsing
+       automatic format detection and parsing
    * - **Live Integration**
      - Import real-time earthquake data from GeoNet's FDSN Event Web Service
        with configurable filters and duplicate detection
    * - **Catalogue Merging**
-     - Combine multiple catalogues with intelligent duplicate detection and
+     - Combine multiple catalogues with automated duplicate detection and
        four different conflict resolution strategies
    * - **Quality Assessment**
      - Automatic quality scoring (A+ to F grades) based on location uncertainty,

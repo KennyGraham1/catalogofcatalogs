@@ -167,14 +167,6 @@ export function eventsToGeoJSON(
         longitudeUncertainty: event.longitude_uncertainty,
         depthUncertainty: event.depth_uncertainty,
         horizontalUncertainty: event.horizontal_uncertainty,     // km
-        // Combined location uncertainty (Euclidean of lat/lon components), kept for
-        // backward compatibility; prefer horizontalUncertainty when available.
-        locationUncertainty: event.latitude_uncertainty != null && event.longitude_uncertainty != null
-          ? Math.sqrt(
-              Math.pow(event.latitude_uncertainty, 2) +
-              Math.pow(event.longitude_uncertainty, 2)
-            )
-          : undefined,
 
         // Origin provenance
         earthModelId: event.earth_model_id,
