@@ -1,19 +1,11 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback, memo } from 'react';
-import L from 'leaflet';
-import { MapContainer, Circle, Popup } from 'react-leaflet';
-import { MapLayerControl } from '@/components/map/MapLayerControl';
+import { useEffect, useState, useCallback, memo } from 'react';
 import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Label } from '@/components/ui/label';
-import { Activity, Calendar, Ruler, MapPin, Filter, Info } from 'lucide-react';
+import { MapPin, Filter } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
-import { getMagnitudeColor, getMagnitudeRadius, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
-import { useMapColors } from '@/hooks/use-map-theme';
-import 'leaflet/dist/leaflet.css';
+import { EarthquakeCircleMap } from '@/components/map/EarthquakeCircleMap';
 
 interface EarthquakeEvent {
   id: string;
@@ -34,7 +26,6 @@ interface Catalogue {
   event_count: number;
 }
 
-// Memoized CatalogueMap component for better performance
 export const CatalogueMap = memo(function CatalogueMap() {
   const [events, setEvents] = useState<EarthquakeEvent[]>([]);
   const [catalogues, setCatalogues] = useState<Catalogue[]>([]);
@@ -43,27 +34,13 @@ export const CatalogueMap = memo(function CatalogueMap() {
   const [error, setError] = useState<string | null>(null);
   const [sampleSize, setSampleSize] = useState<number>(1000);
 
-  // Dark mode support for marker colors
-  const mapColors = useMapColors();
-
-  // Sample events for performance
-  const { sampled: sampledEvents, total, displayCount, isSampled } = useMemo(
-    () => sampleEarthquakeEvents(events, sampleSize),
-    [events, sampleSize]
-  );
-
-  // Fetch catalogues list
   useEffect(() => {
     async function fetchCatalogues() {
       try {
         const response = await fetch('/api/catalogues');
-        if (!response.ok) {
-          throw new Error('Failed to fetch catalogues');
-        }
+        if (!response.ok) throw new Error('Failed to fetch catalogues');
         const data = await response.json();
         setCatalogues(data || []);
-
-        // Auto-select first catalogue if available
         if (data && data.length > 0 && !selectedCatalogue) {
           setSelectedCatalogue(data[0].id);
         }
@@ -71,131 +48,33 @@ export const CatalogueMap = memo(function CatalogueMap() {
         console.error('Error fetching catalogues:', err);
       }
     }
-
     fetchCatalogues();
-    // Only run on mount; selectedCatalogue check is for initial auto-select only
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Memoized fetch function for better performance
   const fetchEvents = useCallback(async () => {
-    if (!selectedCatalogue) {
-      return;
-    }
-
+    if (!selectedCatalogue) return;
     try {
       setLoading(true);
       setError(null);
-
-      // Fetch events from specific catalogue only
       const response = await fetch(`/api/catalogues/${selectedCatalogue}/events`);
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch events');
-      }
-
+      if (!response.ok) throw new Error('Failed to fetch events');
       const data = await response.json();
-
-      // Handle different response formats
-      const eventsList: EarthquakeEvent[] = Array.isArray(data) ? data : (data.data || []);
-
-      setEvents(eventsList);
+      setEvents(Array.isArray(data) ? data : (data.data || []));
     } catch (err) {
-      console.error('Error fetching events:', err);
       setError(err instanceof Error ? err.message : 'Failed to load events');
     } finally {
       setLoading(false);
     }
   }, [selectedCatalogue]);
 
-  // Fetch events based on selected catalogue
-  useEffect(() => {
-    fetchEvents();
-  }, [fetchEvents]);
+  useEffect(() => { fetchEvents(); }, [fetchEvents]);
 
-  // Fix for Leaflet icons in Next.js
-  useEffect(() => {
-    delete (L.Icon.Default.prototype as any)._getIconUrl;
-    L.Icon.Default.mergeOptions({
-      iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-      iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-      shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-    });
-  }, []);
-
-  // Memoize helper functions for better performance
-  // IMPORTANT: Must be before any conditional returns to follow Rules of Hooks
-  const getMagnitudeLabel = useMemo(() => (magnitude: number): string => {
-    if (magnitude >= 6.0) return 'Major';
-    if (magnitude >= 5.0) return 'Moderate';
-    if (magnitude >= 4.0) return 'Light';
-    if (magnitude >= 3.0) return 'Minor';
-    return 'Micro';
-  }, []);
-
-  // Memoize event markers to avoid unnecessary re-renders (use sampled events)
-  // Sort by magnitude (small to large) so larger events render on top
-  const eventMarkers = useMemo(() => {
-    return [...sampledEvents].sort((a, b) => a.magnitude - b.magnitude).map((event) => (
-      <Circle
-        key={event.id}
-        center={[event.latitude, event.longitude]}
-        radius={getMagnitudeRadius(event.magnitude)}
-        pathOptions={{
-          fillColor: getEarthquakeColor(event.depth || 0, mapColors.isDark),
-          fillOpacity: mapColors.markerOpacity,
-          color: getEarthquakeColor(event.depth || 0, mapColors.isDark),
-          weight: 1,
-        }}
-      >
-        <Popup>
-          <div className="p-2 min-w-[200px]">
-            <div className="flex items-center justify-between mb-2">
-              <Badge variant="outline" className="text-xs">
-                {getMagnitudeLabel(event.magnitude)}
-              </Badge>
-              <span className="text-sm font-semibold">M {event.magnitude.toFixed(1)}</span>
-            </div>
-            <div className="space-y-1 text-sm">
-              <div className="flex items-center gap-2">
-                <Calendar className="h-3 w-3 text-muted-foreground" />
-                <span>{new Date(event.time).toLocaleString('en-GB', {
-                  day: '2-digit',
-                  month: '2-digit',
-                  year: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit',
-                })}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <MapPin className="h-3 w-3 text-muted-foreground" />
-                <span>
-                  {event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°
-                </span>
-              </div>
-              {event.depth != null && (
-                <div className="flex items-center gap-2">
-                  <Ruler className="h-3 w-3 text-muted-foreground" />
-                  <span>{event.depth.toFixed(1)} km depth</span>
-                </div>
-              )}
-              {event.magnitude_type && (
-                <div className="flex items-center gap-2">
-                  <Activity className="h-3 w-3 text-muted-foreground" />
-                  <span>Type: {event.magnitude_type}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </Popup>
-      </Circle>
-    ));
-  }, [sampledEvents, getMagnitudeLabel, mapColors]);
+  const emptyHeight = 'h-[600px] w-full relative flex items-center justify-center bg-muted/20';
 
   if (loading) {
     return (
-      <div className="h-[600px] w-full relative flex items-center justify-center bg-muted/20">
+      <div className={emptyHeight}>
         <div className="text-center">
           <Skeleton className="h-12 w-12 rounded-full mx-auto mb-4" />
           <p className="text-muted-foreground">Loading earthquake data...</p>
@@ -206,7 +85,7 @@ export const CatalogueMap = memo(function CatalogueMap() {
 
   if (error) {
     return (
-      <div className="h-[600px] w-full relative flex items-center justify-center bg-muted/20">
+      <div className={emptyHeight}>
         <div className="text-center text-muted-foreground">
           <MapPin className="h-12 w-12 mx-auto mb-2 opacity-50" />
           <p>Failed to load map data</p>
@@ -218,7 +97,7 @@ export const CatalogueMap = memo(function CatalogueMap() {
 
   if (catalogues.length === 0) {
     return (
-      <div className="h-[600px] w-full relative flex items-center justify-center bg-muted/20">
+      <div className={emptyHeight}>
         <div className="text-center text-muted-foreground">
           <MapPin className="h-12 w-12 mx-auto mb-2 opacity-50" />
           <p>No catalogues found</p>
@@ -228,9 +107,9 @@ export const CatalogueMap = memo(function CatalogueMap() {
     );
   }
 
-  if (events.length === 0 && !loading) {
+  if (events.length === 0) {
     return (
-      <div className="h-[600px] w-full relative flex items-center justify-center bg-muted/20">
+      <div className={emptyHeight}>
         <div className="text-center text-muted-foreground">
           <MapPin className="h-12 w-12 mx-auto mb-2 opacity-50" />
           <p>No earthquake events found in this catalogue</p>
@@ -242,7 +121,7 @@ export const CatalogueMap = memo(function CatalogueMap() {
 
   return (
     <div className="h-[600px] w-full relative">
-      {/* Catalogue Filter */}
+      {/* Catalogue selector — overlaid top-left, above the map */}
       <div className="absolute top-4 left-4 z-[2000]">
         <Card className="p-3 bg-background/95 backdrop-blur-sm shadow-lg">
           <div className="flex items-center gap-2">
@@ -252,9 +131,9 @@ export const CatalogueMap = memo(function CatalogueMap() {
                 <SelectValue placeholder="Select catalogue" />
               </SelectTrigger>
               <SelectContent position="popper" className="z-[10000]">
-                {catalogues.map((catalogue) => (
-                  <SelectItem key={catalogue.id} value={catalogue.id}>
-                    {catalogue.name} ({catalogue.event_count} events)
+                {catalogues.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name} ({c.event_count} events)
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -263,174 +142,13 @@ export const CatalogueMap = memo(function CatalogueMap() {
         </Card>
       </div>
 
-      {/* Sampling Info Badge */}
-      {isSampled && (
-        <Card className="absolute top-16 left-4 z-[2000] p-3 bg-background/95 backdrop-blur-sm shadow-lg">
-          <div className="flex items-center gap-2 text-sm">
-            <Info className="h-4 w-4 text-blue-500" />
-            <span>
-              Displaying <strong>{displayCount.toLocaleString()}</strong> of{' '}
-              <strong>{total.toLocaleString()}</strong> events
-            </span>
-          </div>
-        </Card>
-      )}
-
-      <MapContainer
-        key={`catalogue-map-${selectedCatalogue}`}
-        center={[-41.0, 174.0]} // Center on New Zealand
-        zoom={5}
-        className="h-full w-full"
-        minZoom={2}
-        maxZoom={12}
-        preferCanvas={true}
-      >
-        <MapLayerControl position="topright" />
-
-        {/* Earthquake markers - using intelligent sampling for performance */}
-        {eventMarkers}
-      </MapContainer>
-
-      {/* Legend */}
-      <Card className="absolute bottom-4 right-4 z-[2000] max-w-[240px] border-border/60 bg-background/90 px-3 py-2.5 text-[11px] leading-tight backdrop-blur-sm shadow-lg">
-        <div className="flex items-center justify-between gap-2">
-          <h4 className="text-[11px] font-semibold">Depth (Color)</h4>
-          <TechnicalTermTooltip term="depth" />
-        </div>
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#06B6D4' }}></div>
-            <span>&lt;15 km (Shallow)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#14B8A6' }}></div>
-            <span>15-40 km</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#0D9488' }}></div>
-            <span>40-100 km</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#0F766E' }}></div>
-            <span>100-200 km</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#115E59' }}></div>
-            <span>&gt;200 km (Deep)</span>
-          </div>
-        </div>
-        <div className="mt-2 border-t border-border/60 pt-2">
-          <div className="flex items-center justify-between gap-2">
-            <h4 className="text-[11px] font-semibold">Magnitude (Size)</h4>
-            <TechnicalTermTooltip term="magnitude" />
-          </div>
-          <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-            <div className="flex items-center gap-1.5">
-              <div className="h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#0D9488' }}></div>
-              <span>M2</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="h-3 w-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#0D9488' }}></div>
-              <span>M4</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="h-4 w-4 rounded-full flex-shrink-0" style={{ backgroundColor: '#0D9488' }}></div>
-              <span>M6</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="h-5 w-5 rounded-full flex-shrink-0" style={{ backgroundColor: '#0D9488' }}></div>
-              <span>M7+</span>
-            </div>
-          </div>
-        </div>
-        <div className="mt-2 border-t border-border/60 pt-2">
-          <div className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
-            <span>{total.toLocaleString()} total events</span>
-            {selectedCatalogue && (
-              <span>{catalogues.find(c => c.id === selectedCatalogue)?.name}</span>
-            )}
-          </div>
-          <div className="mt-2">
-            <Label htmlFor="sampleSize-map" className="text-[11px] font-medium mb-1 block">
-              Max Events
-            </Label>
-            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(value === 'all' ? Infinity : Number(value))}>
-              <SelectTrigger className="w-full h-7 text-[11px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent position="popper" className="z-[10000]">
-                <SelectItem value="500">500</SelectItem>
-                <SelectItem value="1000">1,000</SelectItem>
-                <SelectItem value="2000">2,000</SelectItem>
-                <SelectItem value="5000">5,000</SelectItem>
-                <SelectItem value="Infinity">All</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </Card>
-    </div>
-  );
-});
-
-// Event popup component (memoized)
-const EventPopup = memo(function EventPopup({ event, getMagnitudeLabel }: { event: EarthquakeEvent; getMagnitudeLabel: (mag: number) => string }) {
-  return (
-    <div className="p-3 min-w-[250px]">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-bold text-base">{event.catalogue_name}</h3>
-        <Badge variant={event.magnitude >= 5.0 ? 'destructive' : 'default'}>
-          {getMagnitudeLabel(event.magnitude)}
-        </Badge>
-      </div>
-
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 text-sm">
-          <Activity className="h-4 w-4 text-primary" />
-          <div className="flex items-center gap-1.5">
-            <span className="font-medium">M {event.magnitude.toFixed(1)}{event.magnitude_type ? ` ${event.magnitude_type}` : ''}</span>
-            <TechnicalTermTooltip term="magnitude" />
-          </div>
-        </div>
-        {event.depth != null && (
-          <div className="flex items-center gap-2 text-sm">
-            <Ruler className="h-4 w-4 text-primary" />
-            <div className="flex items-center gap-1.5">
-              <span>Depth: {event.depth.toFixed(1)} km</span>
-              <TechnicalTermTooltip term="depth" />
-            </div>
-          </div>
-        )}
-        <div className="flex items-center gap-2 text-sm">
-          <Calendar className="h-4 w-4 text-primary" />
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs">{new Date(event.time).toLocaleString('en-GB', {
-              day: '2-digit',
-              month: '2-digit',
-              year: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-            })}</span>
-            <InfoTooltip content="Event origin time in local timezone." />
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-sm">
-          <MapPin className="h-4 w-4 text-primary" />
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs">{event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°</span>
-            <InfoTooltip content="Epicenter coordinates in decimal degrees." />
-          </div>
-        </div>
-        {event.event_type && (
-          <div className="pt-2 border-t">
-            <div className="flex items-center gap-1.5">
-              <Badge variant="outline">{event.event_type}</Badge>
-              <InfoTooltip content="Event classification from the reporting catalogue." />
-            </div>
-          </div>
-        )}
-      </div>
+      <EarthquakeCircleMap
+        events={events}
+        sampleSize={sampleSize}
+        onSampleSizeChange={setSampleSize}
+        mapKey={`catalogue-map-${selectedCatalogue}`}
+        height="600px"
+      />
     </div>
   );
 });

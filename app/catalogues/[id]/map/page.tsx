@@ -1,8 +1,8 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { useState, useEffect, useMemo } from 'react';
-import { EnhancedMapView } from '@/components/advanced-viz/EnhancedMapView';
+import { useState, useMemo } from 'react';
+import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, MapPin, AlertCircle } from 'lucide-react';
@@ -10,35 +10,32 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
 import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 
+// Dynamically import to avoid SSR issues with Leaflet
+const EarthquakeCircleMap = dynamic(
+  () => import('@/components/map/EarthquakeCircleMap').then(mod => ({ default: mod.EarthquakeCircleMap })),
+  { ssr: false }
+);
+
 interface CatalogueEvent {
   id: number | string;
   latitude: number;
   longitude: number;
   magnitude: number;
-  depth: number;
+  depth: number | null;
   time: string;
-  region?: string;
+  region?: string | null;
+  magnitude_type?: string | null;
+  event_type?: string | null;
 
   // Uncertainty fields
   latitude_uncertainty?: number | null;
   longitude_uncertainty?: number | null;
   depth_uncertainty?: number | null;
-  time_uncertainty?: number | null;
 
   // Quality metrics
   azimuthal_gap?: number | null;
   used_station_count?: number | null;
   used_phase_count?: number | null;
-  standard_error?: number | null;
-
-  // Magnitude details
-  magnitude_uncertainty?: number | null;
-  magnitude_station_count?: number | null;
-  magnitude_type?: string | null;
-
-  // Evaluation
-  evaluation_mode?: string | null;
-  evaluation_status?: string | null;
 
   // Complex data
   focal_mechanisms?: string | null;
@@ -57,26 +54,23 @@ interface Catalogue {
 export default function CatalogueMapPage() {
   const params = useParams();
   const catalogueId = params.id as string;
+  const [sampleSize, setSampleSize] = useState<number>(1000);
 
-  // Use cached fetch for catalogues list
-  const { data: catalogues, loading: cataloguesLoading, error: cataloguesError } = useCachedFetch<Catalogue[]>(
+  const { data: catalogues, loading: cataloguesLoading } = useCachedFetch<Catalogue[]>(
     '/api/catalogues',
-    { cacheTime: 5 * 60 * 1000 } // 5 minutes
+    { cacheTime: 5 * 60 * 1000 }
   );
 
-  // Use cached fetch for events
   const { data: eventsData, loading: eventsLoading, error: eventsError } = useCachedFetch<CatalogueEvent[] | { data: CatalogueEvent[] }>(
     catalogueId ? `/api/catalogues/${catalogueId}/events` : null,
-    { cacheTime: 2 * 60 * 1000 } // 2 minutes
+    { cacheTime: 2 * 60 * 1000 }
   );
 
-  // Find current catalogue from the list
   const catalogue = useMemo(() => {
     if (!catalogues || !catalogueId) return null;
     return catalogues.find((c: Catalogue) => c.id === catalogueId) || null;
   }, [catalogues, catalogueId]);
 
-  // Extract events array from response
   const events = useMemo(() => {
     if (!eventsData) return [];
     if (Array.isArray(eventsData)) return eventsData;
@@ -85,14 +79,11 @@ export default function CatalogueMapPage() {
   }, [eventsData]);
 
   const loading = cataloguesLoading || eventsLoading;
-  const error = cataloguesError?.message || eventsError?.message || null;
+  const error = eventsError?.message || null;
 
-  // Calculate statistics
   const stats = {
     total: events.length,
-    withUncertainty: events.filter(e =>
-      e.latitude_uncertainty || e.longitude_uncertainty || e.depth_uncertainty
-    ).length,
+    withUncertainty: events.filter(e => e.latitude_uncertainty || e.longitude_uncertainty || e.depth_uncertainty).length,
     withFocalMechanisms: events.filter(e => e.focal_mechanisms).length,
     withStationData: events.filter(e => e.picks || e.arrivals).length,
   };
@@ -104,7 +95,7 @@ export default function CatalogueMapPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
             <MapPin className="h-8 w-8 text-primary" />
-            Enhanced Map View
+            Interactive Map
           </h1>
           {catalogue && (
             <p className="text-muted-foreground mt-1">
@@ -113,7 +104,6 @@ export default function CatalogueMapPage() {
           )}
         </div>
 
-        {/* Statistics Cards */}
         {!loading && events.length > 0 && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card>
@@ -122,7 +112,7 @@ export default function CatalogueMapPage() {
                   <span>Total Events</span>
                   <InfoTooltip content="Number of events with coordinates loaded for this catalogue." />
                 </div>
-                <CardTitle className="text-2xl">{stats.total}</CardTitle>
+                <CardTitle className="text-2xl">{stats.total.toLocaleString()}</CardTitle>
               </CardHeader>
             </Card>
             <Card>
@@ -131,7 +121,7 @@ export default function CatalogueMapPage() {
                   <span>With Uncertainty</span>
                   <TechnicalTermTooltip term="uncertainty" />
                 </div>
-                <CardTitle className="text-2xl">{stats.withUncertainty}</CardTitle>
+                <CardTitle className="text-2xl">{stats.withUncertainty.toLocaleString()}</CardTitle>
               </CardHeader>
             </Card>
             <Card>
@@ -140,7 +130,7 @@ export default function CatalogueMapPage() {
                   <span>Focal Mechanisms</span>
                   <TechnicalTermTooltip term="focalMechanism" />
                 </div>
-                <CardTitle className="text-2xl">{stats.withFocalMechanisms}</CardTitle>
+                <CardTitle className="text-2xl">{stats.withFocalMechanisms.toLocaleString()}</CardTitle>
               </CardHeader>
             </Card>
             <Card>
@@ -149,7 +139,7 @@ export default function CatalogueMapPage() {
                   <span>Station Data</span>
                   <InfoTooltip content="Events that include picks or arrivals from seismic stations." />
                 </div>
-                <CardTitle className="text-2xl">{stats.withStationData}</CardTitle>
+                <CardTitle className="text-2xl">{stats.withStationData.toLocaleString()}</CardTitle>
               </CardHeader>
             </Card>
           </div>
@@ -162,9 +152,7 @@ export default function CatalogueMapPage() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle>Interactive Map</CardTitle>
-              <CardDescription>
-                Explore earthquake events with advanced visualization features
-              </CardDescription>
+              <CardDescription>Explore earthquake events with advanced visualization features</CardDescription>
             </div>
             {catalogue && (
               <Badge variant={catalogue.status === 'complete' ? 'default' : 'secondary'}>
@@ -202,45 +190,18 @@ export default function CatalogueMapPage() {
           )}
 
           {!loading && !error && events.length > 0 && (
-            <EnhancedMapView
+            <EarthquakeCircleMap
               events={events}
+              sampleSize={sampleSize}
+              onSampleSizeChange={setSampleSize}
               center={[-41.0, 174.0]}
               zoom={6}
+              height="700px"
+              mapKey={`catalogue-map-${catalogueId}`}
             />
           )}
         </CardContent>
       </Card>
-
-      {/* Info Card */}
-      {!loading && events.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Visualization Features</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid md:grid-cols-2 gap-4 text-sm">
-              <div>
-                <h4 className="font-semibold mb-2">Available Controls:</h4>
-                <ul className="space-y-1 text-muted-foreground">
-                  <li>• <strong>Uncertainty Ellipses:</strong> Show location uncertainty</li>
-                  <li>• <strong>Focal Mechanisms:</strong> Display beach ball diagrams</li>
-                  <li>• <strong>Station Coverage:</strong> View seismic station distribution</li>
-                  <li>• <strong>Quality Colors:</strong> Color events by quality score</li>
-                </ul>
-              </div>
-              <div>
-                <h4 className="font-semibold mb-2">Interaction:</h4>
-                <ul className="space-y-1 text-muted-foreground">
-                  <li>• Click on earthquake markers for detailed information</li>
-                  <li>• Use mouse wheel to zoom in/out</li>
-                  <li>• Drag to pan the map</li>
-                  <li>• Toggle visualization options in the control panel</li>
-                </ul>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }
