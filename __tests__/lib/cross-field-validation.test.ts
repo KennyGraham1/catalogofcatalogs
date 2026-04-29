@@ -165,7 +165,7 @@ describe('Cross-Field Validation', () => {
 
     it('should note unusually small RMS residual', () => {
       const event = {
-        standard_error: 0.005,
+        standard_error: 0.0005,
       };
 
       const checks = validateQualityMetricsConsistency(event);

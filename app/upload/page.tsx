@@ -550,16 +550,16 @@ export default function UploadPage() {
       }
 
       // Issue #15: Warn about cross-field validation errors (non-blocking but explicit)
-      if (crossFieldResult.summary.errors > 0) {
+      if (crossFieldResult.summary.failedEvents > 0) {
         toast({
           title: 'Cross-field validation issues',
-          description: `${crossFieldResult.summary.errors} event(s) have cross-field validation errors. Review the validation results before proceeding.`,
+          description: `${crossFieldResult.summary.failedEvents} event(s) have cross-field validation errors. Review the validation results before proceeding.`,
           variant: 'destructive',
         });
       } else if (crossFieldResult.summary.warnings > 0) {
         toast({
           title: 'Cross-field validation warnings',
-          description: `${crossFieldResult.summary.warnings} event(s) have cross-field validation warnings.`,
+          description: `${crossFieldResult.summary.warnings} cross-field warning(s) detected.`,
         });
       }
 

@@ -100,22 +100,23 @@ export function validateUncertaintyRelationships(event: any): DataQualityCheck[]
       });
     }
 
-    if (event.magnitude_uncertainty > Math.abs(event.magnitude)) {
+    if (event.magnitude_uncertainty > Math.abs(event.magnitude) && Math.abs(event.magnitude) >= 1.0) {
       checks.push({
         passed: false,
         severity: 'error',
         message: `Magnitude uncertainty (${event.magnitude_uncertainty}) exceeds magnitude value (${event.magnitude})`,
         field: 'magnitude_uncertainty',
-        suggestion: 'This is physically unreasonable - review the magnitude calculation'
+        suggestion: 'Magnitude is poorly constrained relative to its value - review the magnitude calculation'
       });
     }
   }
 
   // Location uncertainties should be consistent
-  if (event.latitude_uncertainty !== undefined && event.longitude_uncertainty !== undefined) {
-    const ratio = Math.max(event.latitude_uncertainty, event.longitude_uncertainty) / 
+  if (event.latitude_uncertainty != null && event.longitude_uncertainty != null &&
+      event.latitude_uncertainty > 0 && event.longitude_uncertainty > 0) {
+    const ratio = Math.max(event.latitude_uncertainty, event.longitude_uncertainty) /
                   Math.min(event.latitude_uncertainty, event.longitude_uncertainty);
-    
+
     if (ratio > 10) {
       checks.push({
         passed: false,
@@ -187,14 +188,14 @@ export function validateQualityMetricsConsistency(event: any): DataQualityCheck[
       });
     }
 
-    // With few stations, gap will be large
+    // With few stations, a very small gap suggests stations are clustered rather than distributed
     if (event.used_station_count < 6 && event.azimuthal_gap < 90) {
       checks.push({
         passed: false,
         severity: 'info',
-        message: `Small azimuthal gap (${event.azimuthal_gap}°) with only ${event.used_station_count} stations is unusual`,
+        message: `Small azimuthal gap (${event.azimuthal_gap}°) with only ${event.used_station_count} stations suggests station clustering`,
         field: 'azimuthal_gap',
-        suggestion: 'Verify azimuthal gap calculation'
+        suggestion: 'Stations may all be in one direction — verify azimuthal gap calculation and station distribution'
       });
     }
   }
@@ -211,7 +212,7 @@ export function validateQualityMetricsConsistency(event: any): DataQualityCheck[
       });
     }
 
-    if (event.standard_error < 0.01) {
+    if (event.standard_error < 0.001) {
       checks.push({
         passed: false,
         severity: 'info',
