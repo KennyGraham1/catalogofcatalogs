@@ -40,7 +40,7 @@ export function parsedEventToDbFields(event: ParsedEvent): DbEventFields {
     }
     // Unrecognised value — drop silently rather than failing the entire upload
   }
-  if (event.event_type_certainty) fields.event_type_certainty = String(event.event_type_certainty);
+  if (event.event_type_certainty) fields.event_type_certainty = String(event.event_type_certainty).toLowerCase().trim();
 
   // ── Location metadata ─────────────────────────────────────────────────────
   if (event.region)               fields.region        = String(event.region);
@@ -54,7 +54,7 @@ export function parsedEventToDbFields(event: ParsedEvent): DbEventFields {
 
   // ── Origin metadata (from FIELD_ALIASES-mapped CSV/JSON/GeoJSON) ──────────
   if (event.horizontal_uncertainty != null) fields.horizontal_uncertainty = Number(event.horizontal_uncertainty);
-  if (event.depth_type)                     fields.depth_type             = String(event.depth_type);
+  if (event.depth_type)                     fields.depth_type             = String(event.depth_type).toLowerCase().trim();
   if (event.earth_model_id)                 fields.earth_model_id         = String(event.earth_model_id);
   if (event.method_id)                      fields.method_id              = String(event.method_id);
 
@@ -64,8 +64,8 @@ export function parsedEventToDbFields(event: ParsedEvent): DbEventFields {
   if (event.magnitude_uncertainty  != null)  fields.magnitude_uncertainty       = Number(event.magnitude_uncertainty);
   if (event.magnitude_station_count != null) fields.magnitude_station_count     = Number(event.magnitude_station_count);
   if (event.magnitude_method_id)             fields.magnitude_method_id         = String(event.magnitude_method_id);
-  if (event.magnitude_evaluation_mode)       fields.magnitude_evaluation_mode   = String(event.magnitude_evaluation_mode);
-  if (event.magnitude_evaluation_status)     fields.magnitude_evaluation_status = String(event.magnitude_evaluation_status);
+  if (event.magnitude_evaluation_mode)       fields.magnitude_evaluation_mode   = String(event.magnitude_evaluation_mode).toLowerCase().trim();
+  if (event.magnitude_evaluation_status)     fields.magnitude_evaluation_status = String(event.magnitude_evaluation_status).toLowerCase().trim();
 
   // ── Origin quality metrics ────────────────────────────────────────────────
   const azimuthalGap = event.azimuthal_gap ?? event.azimuthalGap;
@@ -85,8 +85,8 @@ export function parsedEventToDbFields(event: ParsedEvent): DbEventFields {
   if (event.depth_phase_count        != null) fields.depth_phase_count        = Number(event.depth_phase_count);
 
   // ── Evaluation ────────────────────────────────────────────────────────────
-  if (event.evaluation_mode)   fields.evaluation_mode   = String(event.evaluation_mode);
-  if (event.evaluation_status) fields.evaluation_status = String(event.evaluation_status);
+  if (event.evaluation_mode)   fields.evaluation_mode   = String(event.evaluation_mode).toLowerCase().trim();
+  if (event.evaluation_status) fields.evaluation_status = String(event.evaluation_status).toLowerCase().trim();
 
   // ── Agency / author ───────────────────────────────────────────────────────
   if (event.agency_id) fields.agency_id = String(event.agency_id);

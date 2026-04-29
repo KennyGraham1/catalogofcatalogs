@@ -12,6 +12,7 @@
 
 import type { QuakeMLEvent } from './types/quakeml';
 import type { MergedEvent } from './db';
+import { ALLOWED_EVENT_TYPE } from './db';
 
 type DbEventFields = Partial<Omit<MergedEvent, 'id' | 'catalogue_id' | 'time' | 'latitude' | 'longitude' | 'magnitude' | 'source_events' | 'created_at'>>;
 
@@ -21,8 +22,11 @@ export function quakemlEventToDbFields(quakeml: QuakeMLEvent): DbEventFields {
   // ── Top-level event metadata ──────────────────────────────────────────────
   fields.event_public_id    = quakeml.publicID;
   if (quakeml.publicID)       fields.source_id            = quakeml.publicID;
-  if (quakeml.type)           fields.event_type           = quakeml.type;
-  if (quakeml.typeCertainty)  fields.event_type_certainty = quakeml.typeCertainty;
+  if (quakeml.type) {
+    const normalized = quakeml.type.toLowerCase().trim();
+    if (ALLOWED_EVENT_TYPE.has(normalized)) fields.event_type = normalized;
+  }
+  if (quakeml.typeCertainty)  fields.event_type_certainty = quakeml.typeCertainty.toLowerCase().trim();
 
   // ── Preferred origin ──────────────────────────────────────────────────────
   const preferredOrigin =
@@ -44,7 +48,7 @@ export function quakemlEventToDbFields(quakeml: QuakeMLEvent): DbEventFields {
     }
 
     // Origin metadata
-    if (preferredOrigin.depthType)    fields.depth_type    = preferredOrigin.depthType;
+    if (preferredOrigin.depthType)    fields.depth_type    = preferredOrigin.depthType.toLowerCase().trim();
     if (preferredOrigin.earthModelID) fields.earth_model_id = preferredOrigin.earthModelID;
     if (preferredOrigin.methodID)     fields.method_id     = preferredOrigin.methodID;
     if (preferredOrigin.region)       fields.region        = preferredOrigin.region;
@@ -69,8 +73,8 @@ export function quakemlEventToDbFields(quakeml: QuakeMLEvent): DbEventFields {
     }
 
     // Evaluation
-    if (preferredOrigin.evaluationMode)   fields.evaluation_mode   = preferredOrigin.evaluationMode;
-    if (preferredOrigin.evaluationStatus) fields.evaluation_status = preferredOrigin.evaluationStatus;
+    if (preferredOrigin.evaluationMode)   fields.evaluation_mode   = preferredOrigin.evaluationMode.toLowerCase().trim();
+    if (preferredOrigin.evaluationStatus) fields.evaluation_status = preferredOrigin.evaluationStatus.toLowerCase().trim();
   }
 
   // ── Preferred magnitude ───────────────────────────────────────────────────
@@ -84,8 +88,8 @@ export function quakemlEventToDbFields(quakeml: QuakeMLEvent): DbEventFields {
     if (preferredMagnitude.mag.uncertainty  != null) fields.magnitude_uncertainty      = preferredMagnitude.mag.uncertainty;
     if (preferredMagnitude.stationCount     != null) fields.magnitude_station_count    = preferredMagnitude.stationCount;
     if (preferredMagnitude.methodID)                 fields.magnitude_method_id        = preferredMagnitude.methodID;
-    if (preferredMagnitude.evaluationMode)           fields.magnitude_evaluation_mode  = preferredMagnitude.evaluationMode;
-    if (preferredMagnitude.evaluationStatus)         fields.magnitude_evaluation_status = preferredMagnitude.evaluationStatus;
+    if (preferredMagnitude.evaluationMode)           fields.magnitude_evaluation_mode   = preferredMagnitude.evaluationMode.toLowerCase().trim();
+    if (preferredMagnitude.evaluationStatus)         fields.magnitude_evaluation_status = preferredMagnitude.evaluationStatus.toLowerCase().trim();
   }
 
   // ── Complex nested arrays stored as JSON strings ──────────────────────────

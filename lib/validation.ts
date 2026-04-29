@@ -23,7 +23,7 @@ export const earthquakeEventSchema = z.object({
   }),
   latitude: z.number().min(-90, 'Latitude must be >= -90').max(90, 'Latitude must be <= 90'),
   longitude: z.number().min(-180, 'Longitude must be >= -180').max(180, 'Longitude must be <= 180'),
-  depth: z.number().min(0, 'Depth must be >= 0 km').max(1000, 'Depth must be <= 1000 km').nullable().optional(),
+  depth: z.number().min(-5, 'Depth must be >= -5 km').max(1000, 'Depth must be <= 1000 km').nullable().optional(),
   magnitude: z.number().min(-3, 'Magnitude must be >= -3').max(10, 'Magnitude must be <= 10'),
   magnitudeType: z.string().max(10).optional(),
   region: z.string().max(255).nullable().optional(),
