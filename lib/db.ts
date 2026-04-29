@@ -373,7 +373,7 @@ export const ALLOWED_EVENT_TYPE = new Set([
   'acoustic noise', 'thunder', 'avalanche', 'snow avalanche',
   'debris avalanche', 'hydroacoustic event', 'ice quake', 'slide',
   'landslide', 'rockslide', 'volcanic eruption', 'tremor',
-  'volcanic tremor', 'tectonic', 'volcanic', 'meteorite',
+  'volcanic tremor', 'volcano-tectonic', 'tectonic', 'volcanic', 'meteorite',
 ]);
 
 export const ALLOWED_EVENT_TYPE_CERTAINTY = new Set(['suspected', 'known']);

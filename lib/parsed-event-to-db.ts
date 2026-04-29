@@ -13,6 +13,7 @@
 
 import type { ParsedEvent } from '@/types/upload';
 import type { MergedEvent } from './db';
+import { ALLOWED_EVENT_TYPE } from './db';
 
 type DbEventFields = Partial<Omit<MergedEvent, 'id' | 'catalogue_id' | 'time' | 'latitude' | 'longitude' | 'magnitude' | 'source_events' | 'created_at'>>;
 
@@ -28,7 +29,17 @@ export function parsedEventToDbFields(event: ParsedEvent): DbEventFields {
 
   // ── Event type ────────────────────────────────────────────────────────────
   const eventType = event.event_type || event.eventType;
-  if (eventType)                  fields.event_type           = String(eventType);
+  if (eventType) {
+    const normalized = String(eventType).toLowerCase().trim();
+    if (ALLOWED_EVENT_TYPE.has(normalized)) {
+      fields.event_type = normalized;
+    } else if (/^m[a-z0-9_]{0,5}$/.test(normalized)) {
+      // Magnitude scale code (ML, Mw, mb, Ms, …) accidentally placed in event_type
+      const existingMagType = event.magnitude_type || event.magnitudeType;
+      if (!existingMagType) fields.magnitude_type = String(eventType).trim();
+    }
+    // Unrecognised value — drop silently rather than failing the entire upload
+  }
   if (event.event_type_certainty) fields.event_type_certainty = String(event.event_type_certainty);
 
   // ── Location metadata ─────────────────────────────────────────────────────
