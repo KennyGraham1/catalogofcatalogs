@@ -333,21 +333,30 @@ consequential statistical biases (Section~\ref{sec:biases}).
 
 \subsection{Technology stack}
 
-CofC is a full-stack web application built with:
+CofC follows a three-tier architecture: a React~18 / Next.js~14
+\citep{nextjs2024} frontend served via the App Router, a serverless backend
+layer of Next.js API routes, and a MongoDB~7 \citep{mongodb2024} persistence
+tier.  All tiers communicate through a versioned REST API; no separate
+application server is required.
+
 \begin{itemize}[leftmargin=*]
-  \item \textbf{Frontend:} Next.js~14 \citep{nextjs2024} (App Router,
-    TypeScript, Tailwind CSS, shadcn/ui components, Recharts for time-series,
-    Leaflet \citep{leaflet2024} for interactive maps).
-  \item \textbf{Backend:} Next.js API routes (serverless functions),
-    MongoDB~7 \citep{mongodb2024} for persistent storage.
+  \item \textbf{Frontend:} React~18, TypeScript, Tailwind CSS, and a
+    component library of 40$+$ shadcn/ui primitives for forms, tables,
+    dialogs, and data-display cards.  Recharts provides interactive
+    time-series panels; Leaflet \citep{leaflet2024} provides the map layer.
+  \item \textbf{Backend:} Next.js API routes deployed as serverless
+    functions, enabling horizontal scaling without managing long-running
+    processes.  MongoDB~7 with a geospatial index on event coordinates
+    supports efficient bounding-box and radius queries.
   \item \textbf{Parsers:} Custom TypeScript parsers for CSV/TXT, GeoJSON
-    \citep{geojson2016}, and QuakeML~1.2 BED \citep{schorlemmer2011}.  FDSN
-    web-service integration for live GeoNet data.
+    \citep{geojson2016}, and QuakeML~1.2 BED \citep{schorlemmer2011}.
+    FDSN web-service integration streams live GeoNet data directly into a
+    new catalogue.
 \end{itemize}
 
 The application is containerised with Docker (Compose recipes for development
-and production) and is designed to deploy to any cloud provider or on-premises
-server.
+and production) and is designed to deploy to any cloud provider or
+on-premises server.
 
 \subsection{Data model}
 
@@ -384,6 +393,42 @@ strategy and threshold parameters applied, and the quality score at the
 time of merging.  This provenance is included in all QuakeML exports
 \citep{schorlemmer2011} and supports the reproducibility goals of
 CSEP-based forecast evaluations \citep{schorlemmer2007}.
+
+\subsection{Visualisation}
+\label{sec:viz}
+
+CofC provides four interactive visualisation views accessible from every
+catalogue page.
+
+\textbf{Interactive map.}  The map view is built on Leaflet
+\citep{leaflet2024} and renders events as depth-coloured circles whose
+radius scales with magnitude (Figure~\ref{fig:map}).  For catalogues
+exceeding 2\,000 events, Leaflet's marker-clustering plugin automatically
+aggregates nearby events into spiderfied cluster markers to maintain browser
+responsiveness.  Two additional overlays are available on demand: (i)
+\emph{uncertainty ellipses}, which draw the horizontal location error as a
+scaled ellipse derived from the latitude and longitude uncertainty fields,
+giving an immediate visual indication of poorly-constrained events; and (ii)
+\emph{focal-mechanism beach balls}, rendered as SVG quadrant diagrams from
+the focal-mechanism fields parsed from QuakeML, allowing rapid inspection of
+faulting style across a catalogue.
+
+\textbf{Station coverage.}  The station-coverage panel visualises per-event
+azimuthal gap as a colour ramp overlaid on the map, complementing the
+aggregate gap histogram (Figure~\ref{fig:gap}).  Events with gap
+$> 180^{\circ}$ are highlighted, enabling spatial identification of regions
+where network geometry is insufficient for reliable location estimates.
+
+\textbf{Frequency-magnitude distribution.}  The FMD panel plots the
+cumulative and non-cumulative event counts by magnitude bin, overlays the
+fitted GR line and $M_c$ estimate, and updates dynamically when the user
+adjusts the magnitude cut-off.
+
+\textbf{Time-series panels.}  Recharts-based panels display: cumulative
+event count over time, magnitude-vs.-time scatter, and cumulative seismic
+moment release.  A configurable binning interval (day, week, month) converts
+the magnitude-time series to a seismicity-rate time series, making step
+changes in network completeness immediately visible as rate anomalies.
 
 \subsection{Supported input formats}
 
@@ -672,6 +717,25 @@ using the Hanks-Kanamori relation \citep{hanks1979,kanamori1977}.  For events
 recorded with non-Mw magnitude types, CofC applies empirical regression
 conversions from \citet{das2011}.  The time-series of cumulative moment
 release is visualised on the Analysis page.
+
+\subsection{Temporal pattern analysis}
+
+Beyond the aggregate GR analysis, CofC provides two temporal diagnostics
+aimed at detecting non-stationarity in the catalogue.
+
+\textbf{Seismicity rate time series.}  Events above the estimated $M_c$ are
+binned at a user-selected interval (day, week, or month) and plotted as a
+rate time series.  Sudden rate changes---which often correspond to network
+upgrades, station outages, or changes in processing procedures---are
+immediately visible and can be used to identify breakpoints for time-varying
+$M_c$ analysis \citep{mignan2012}.
+
+\textbf{Interevent-time distribution.}  The distribution of times between
+successive events above $M_c$ is plotted against the exponential distribution
+expected for a Poissonian process.  Systematic departures---most commonly the
+excess of short interevent times produced by aftershock clusters---provide a
+visual diagnostic of whether the catalogue has been adequately declustered
+before analyses that assume Poissonian seismicity.
 
 \section{Export Formats}
 \label{sec:export}
