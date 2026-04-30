@@ -329,6 +329,40 @@ describe('eventToQuakeML — fallback fires when origins/magnitudes JSON is abse
     expect(xml).toContain('<origin publicID=');
     expect(xml).toContain('<value>-41.2865</value>');
   });
+
+  it('emits station magnitudes before origins and attaches standalone arrivals to JSON origins', () => {
+    const event: MergedEvent = {
+      ...minimalEvent,
+      origins: JSON.stringify([{
+        publicID: 'quakeml:test/origin/json',
+        time: { value: '2024-01-01T00:00:00Z' },
+        latitude: { value: -45.0 },
+        longitude: { value: 170.0 },
+      }]),
+      station_magnitudes: JSON.stringify([{
+        publicID: 'quakeml:test/stmag/1',
+        mag: { value: 4.9, lowerUncertainty: 0.1, upperUncertainty: 0.2 },
+        comment: [{ text: 'station magnitude comment' }],
+      }]),
+      arrivals: JSON.stringify([{
+        pickID: 'quakeml:test/pick/1',
+        phase: 'P',
+        horizontalSlownessWeight: 0.4,
+        backazimuthWeight: 0.5,
+        comment: [{ text: 'arrival comment' }],
+      }]),
+    };
+    const xml = eventToQuakeML(event);
+    expect(xml.indexOf('<stationMagnitude publicID="quakeml:test/stmag/1"')).toBeLessThan(
+      xml.indexOf('<origin publicID="quakeml:test/origin/json"')
+    );
+    expect(xml).toContain('<arrival>');
+    expect(xml).toContain('<horizontalSlownessWeight>0.4</horizontalSlownessWeight>');
+    expect(xml).toContain('<backazimuthWeight>0.5</backazimuthWeight>');
+    expect(xml).toContain('arrival comment');
+    expect(xml).toContain('<lowerUncertainty>0.1</lowerUncertainty>');
+    expect(xml).toContain('<upperUncertainty>0.2</upperUncertainty>');
+  });
 });
 
 // ---------------------------------------------------------------------------

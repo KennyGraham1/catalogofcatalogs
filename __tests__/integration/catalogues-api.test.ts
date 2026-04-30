@@ -543,16 +543,17 @@ describeIfWebAPIs('Catalogue Export API', () => {
 
       // Verify all expected column headers are present
       const expectedColumns = [
-        'Time', 'Latitude', 'Longitude', 'Depth', 'Magnitude', 'MagnitudeType',
+        'ID', 'CatalogueID', 'Time', 'CreatedAt',
+        'Latitude', 'Longitude', 'Depth', 'Magnitude', 'MagnitudeType',
         'EventType', 'EventTypeCertainty', 'Region', 'LocationName',
-        'Source', 'SourceID', 'PublicID',
+        'Source', 'SourceEventsJSON', 'SourceID', 'PublicID',
         'TimeUncertainty', 'LatitudeUncertainty', 'LongitudeUncertainty',
         'DepthUncertainty', 'HorizontalUncertainty', 'MagnitudeUncertainty',
         'DepthType', 'EarthModelID', 'MethodID', 'AgencyID', 'Author',
         'MagnitudeStationCount', 'MagnitudeMethodID', 'MagnitudeEvaluationMode', 'MagnitudeEvaluationStatus',
         'AzimuthalGap', 'UsedStationCount', 'UsedPhaseCount', 'StandardError',
         'MinimumDistance', 'MaximumDistance', 'AssociatedPhaseCount', 'AssociatedStationCount', 'DepthPhaseCount',
-        'EvaluationMode', 'EvaluationStatus',
+        'EvaluationMode', 'EvaluationStatus', 'PreferredOriginID', 'PreferredMagnitudeID',
       ];
       for (const col of expectedColumns) {
         expect(headerLine).toContain(col);
@@ -760,7 +761,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
       const dataLine = text.split('\n').find(l => l.startsWith('2024-01-15'));
       expect(dataLine).toBeDefined();
       const fields = dataLine!.split(',');
-      expect(fields[3]).toBe('0'); // depth column (index 3)
+      expect(fields[6]).toBe('0'); // depth column
     });
 
     it('should set Content-Disposition header with filename', async () => {

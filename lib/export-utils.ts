@@ -7,12 +7,22 @@
  * Removes special characters and replaces spaces with underscores
  */
 export function sanitizeFilename(name: string): string {
-  return name
+  const reservedWindowsNames = new Set([
+    'con', 'prn', 'aux', 'nul',
+    'com1', 'com2', 'com3', 'com4', 'com5', 'com6', 'com7', 'com8', 'com9',
+    'lpt1', 'lpt2', 'lpt3', 'lpt4', 'lpt5', 'lpt6', 'lpt7', 'lpt8', 'lpt9',
+  ]);
+
+  const sanitized = name
     .replace(/[^a-z0-9\s_-]/gi, '') // Remove special characters
     .replace(/\s+/g, '_') // Replace spaces with underscores
     .replace(/_+/g, '_') // Replace multiple underscores with single
     .replace(/^_|_$/g, '') // Remove leading/trailing underscores
     .toLowerCase();
+
+  const safeName = sanitized || 'catalogue';
+  const nonReservedName = reservedWindowsNames.has(safeName) ? `${safeName}_file` : safeName;
+  return nonReservedName.slice(0, 120);
 }
 
 /**
@@ -28,6 +38,13 @@ export function formatDateForFilename(date: Date = new Date()): string {
   const seconds = String(date.getUTCSeconds()).padStart(2, '0');
 
   return `${year}${month}${day}_${hours}${minutes}${seconds}`;
+}
+
+function sanitizeExtension(format: string): string {
+  return format
+    .replace(/^\.+/, '')
+    .replace(/[^a-z0-9]/gi, '')
+    .toLowerCase() || 'txt';
 }
 
 /**
@@ -97,8 +114,9 @@ export function generateExportFilename(
   }
 
   // Join parts and add extension
-  const filename = parts.join('_');
-  const extension = format.startsWith('.') ? format : `.${format}`;
+  const filename = parts.filter(Boolean).join('_').slice(0, 180);
+  const safeFormat = sanitizeExtension(format);
+  const extension = `.${safeFormat}`;
   
   return `${filename}${extension}`;
 }
@@ -118,7 +136,8 @@ export function generateMergedCatalogueFilename(
   
   parts.push(formatDateForFilename());
   
-  const extension = format.startsWith('.') ? format : `.${format}`;
+  const safeFormat = sanitizeExtension(format);
+  const extension = `.${safeFormat}`;
   return `${parts.join('_')}${extension}`;
 }
 
@@ -128,8 +147,9 @@ export function generateMergedCatalogueFilename(
 export function generateContentDisposition(filename: string): string {
   // Encode filename for Content-Disposition header
   // Use both filename and filename* for better browser compatibility
-  const encodedFilename = encodeURIComponent(filename);
-  return `attachment; filename="${filename}"; filename*=UTF-8''${encodedFilename}`;
+  const safeFilename = filename.replace(/[\r\n"]/g, '_');
+  const encodedFilename = encodeURIComponent(safeFilename);
+  return `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodedFilename}`;
 }
 
 /**
@@ -161,4 +181,3 @@ export function createDownloadHeaders(filename: string, format: string): Headers
     'Expires': '0'
   };
 }
-

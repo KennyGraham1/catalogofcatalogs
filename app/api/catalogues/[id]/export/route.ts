@@ -109,6 +109,11 @@ export async function GET(
       } catch { sourceCatalogues = undefined; }
     }
 
+    // Preserve declared catalogue coverage when present; otherwise derive the
+    // covered event range from the exported rows.
+    const timePeriodStart = catalogue.time_period_start || minTime;
+    const timePeriodEnd = catalogue.time_period_end || maxTime;
+
     // Prepare comprehensive metadata — covers all MergedCatalogue scalar fields
     const metadata = {
       catalogueName: catalogue.name,
@@ -116,8 +121,8 @@ export async function GET(
       source: catalogue.data_source || undefined,
       provider: catalogue.provider || undefined,
       region: catalogue.geographic_region || undefined,
-      timePeriodStart: minTime,
-      timePeriodEnd: maxTime,
+      timePeriodStart,
+      timePeriodEnd,
       // Geographic bounds
       boundingBox: (catalogue.min_latitude != null || catalogue.max_latitude != null ||
                     catalogue.min_longitude != null || catalogue.max_longitude != null) ? {
@@ -160,7 +165,7 @@ export async function GET(
     // Generate content based on format
     switch (format) {
       case 'csv':
-        content = generateCSV(events, catalogue);
+        content = generateCSV(events, metadata);
         fileExtension = 'csv';
         break;
 
@@ -216,118 +221,60 @@ export async function GET(
 /**
  * Generate CSV content from events
  */
-function generateCSV(events: any[], catalogue: any): string {
+function generateCSV(events: any[], metadata: any): string {
   const metadataLines: string[] = [];
+  const commentValue = (value: unknown): string => {
+    const str = typeof value === 'string' ? value : JSON.stringify(value);
+    return csvField(str ?? '').replace(/\r?\n|\r/g, ' ');
+  };
+  const addMetadataLine = (label: string, value: unknown) => {
+    if (value === null || value === undefined || value === '') return;
+    if (Array.isArray(value) && value.length === 0) return;
+    metadataLines.push(`# ${label}: ${commentValue(value)}`);
+  };
 
   // Add metadata as comments
-  metadataLines.push(`# Catalogue: ${catalogue.name}`);
-  if (catalogue.description) {
-    metadataLines.push(`# Description: ${catalogue.description}`);
-  }
-  if (catalogue.data_source) {
-    metadataLines.push(`# Source: ${catalogue.data_source}`);
-  }
-  if (catalogue.provider) {
-    metadataLines.push(`# Provider: ${catalogue.provider}`);
-  }
-  if (catalogue.geographic_region) {
-    metadataLines.push(`# Region: ${catalogue.geographic_region}`);
+  addMetadataLine('Catalogue', metadata.catalogueName);
+  addMetadataLine('Description', metadata.description);
+  addMetadataLine('Source', metadata.source);
+  addMetadataLine('Provider', metadata.provider);
+  addMetadataLine('Region', metadata.region);
+  if (metadata.timePeriodStart || metadata.timePeriodEnd) {
+    addMetadataLine('Time Period', `${metadata.timePeriodStart ?? '?'} to ${metadata.timePeriodEnd ?? '?'}`);
   }
   metadataLines.push(`# Event Count: ${events.length}`);
   metadataLines.push(`# Generated: ${new Date().toISOString()}`);
 
-  if (catalogue.license) {
-    metadataLines.push(`# License: ${catalogue.license}`);
+  addMetadataLine('License', metadata.license);
+  addMetadataLine('Citation', metadata.citation);
+  addMetadataLine('DOI', metadata.doi);
+  addMetadataLine('Version', metadata.version);
+  addMetadataLine('Contact Name', metadata.contactName);
+  addMetadataLine('Contact Email', metadata.contactEmail);
+  addMetadataLine('Contact Organization', metadata.contactOrganization);
+  if (metadata.dataQuality) {
+    addMetadataLine('Data Quality', metadata.dataQuality);
   }
-  if (catalogue.citation) {
-    metadataLines.push(`# Citation: ${catalogue.citation}`);
-  }
-  if (catalogue.doi) {
-    metadataLines.push(`# DOI: ${catalogue.doi}`);
-  }
-  if (catalogue.version) {
-    metadataLines.push(`# Version: ${catalogue.version}`);
-  }
-  // Contact information
-  if (catalogue.contact_name) {
-    metadataLines.push(`# Contact Name: ${catalogue.contact_name}`);
-  }
-  if (catalogue.contact_email) {
-    metadataLines.push(`# Contact Email: ${catalogue.contact_email}`);
-  }
-  if (catalogue.contact_organization) {
-    metadataLines.push(`# Contact Organization: ${catalogue.contact_organization}`);
-  }
-  // Data quality
-  if (catalogue.data_quality) {
-    try {
-      const dq = typeof catalogue.data_quality === 'string'
-        ? JSON.parse(catalogue.data_quality)
-        : catalogue.data_quality;
-      if (dq.completeness) metadataLines.push(`# Data Completeness: ${dq.completeness}`);
-      if (dq.accuracy) metadataLines.push(`# Data Accuracy: ${dq.accuracy}`);
-      if (dq.reliability) metadataLines.push(`# Data Reliability: ${dq.reliability}`);
-    } catch { /* ignore parse errors */ }
-  }
-  if (catalogue.quality_notes) {
-    metadataLines.push(`# Quality Notes: ${catalogue.quality_notes}`);
-  }
-  // Keywords
-  if (catalogue.keywords) {
-    try {
-      const kw = typeof catalogue.keywords === 'string'
-        ? JSON.parse(catalogue.keywords)
-        : catalogue.keywords;
-      if (Array.isArray(kw) && kw.length > 0) {
-        metadataLines.push(`# Keywords: ${kw.join(', ')}`);
-      }
-    } catch { /* ignore parse errors */ }
-  }
-  // Reference links
-  if (catalogue.reference_links) {
-    try {
-      const rl = typeof catalogue.reference_links === 'string'
-        ? JSON.parse(catalogue.reference_links)
-        : catalogue.reference_links;
-      if (Array.isArray(rl) && rl.length > 0) {
-        metadataLines.push(`# References: ${rl.join(', ')}`);
-      }
-    } catch { /* ignore parse errors */ }
-  }
-  if (catalogue.usage_terms) {
-    metadataLines.push(`# Usage Terms: ${catalogue.usage_terms}`);
-  }
-  if (catalogue.notes) {
-    metadataLines.push(`# Notes: ${catalogue.notes}`);
-  }
+  addMetadataLine('Quality Notes', metadata.qualityNotes);
+  addMetadataLine('Keywords', metadata.keywords);
+  addMetadataLine('References', metadata.referenceLinks);
+  addMetadataLine('Usage Terms', metadata.usageTerms);
+  addMetadataLine('Notes', metadata.notes);
   // Geographic bounds
-  if (catalogue.min_latitude != null || catalogue.max_latitude != null ||
-      catalogue.min_longitude != null || catalogue.max_longitude != null) {
+  if (metadata.boundingBox) {
+    const bb = metadata.boundingBox;
     metadataLines.push(
-      `# Bounding Box: lat [${catalogue.min_latitude ?? '?'}, ${catalogue.max_latitude ?? '?'}], ` +
-      `lon [${catalogue.min_longitude ?? '?'}, ${catalogue.max_longitude ?? '?'}]`
+      `# Bounding Box: lat [${bb.minLatitude ?? '?'}, ${bb.maxLatitude ?? '?'}], ` +
+      `lon [${bb.minLongitude ?? '?'}, ${bb.maxLongitude ?? '?'}]`
     );
   }
-  // Merge-specific metadata
-  if (catalogue.merge_description) {
-    metadataLines.push(`# Merge Description: ${catalogue.merge_description}`);
-  }
-  if (catalogue.merge_use_case) {
-    metadataLines.push(`# Merge Use Case: ${catalogue.merge_use_case}`);
-  }
-  if (catalogue.merge_methodology) {
-    metadataLines.push(`# Merge Methodology: ${catalogue.merge_methodology}`);
-  }
-  if (catalogue.merge_quality_assessment) {
-    metadataLines.push(`# Merge Quality Assessment: ${catalogue.merge_quality_assessment}`);
-  }
-  // Provenance
-  if (catalogue.created_by) {
-    metadataLines.push(`# Created By: ${catalogue.created_by}`);
-  }
-  if (catalogue.modified_at) {
-    metadataLines.push(`# Modified At: ${catalogue.modified_at}`);
-  }
+  addMetadataLine('Merge Description', metadata.mergeDescription);
+  addMetadataLine('Merge Use Case', metadata.mergeUseCase);
+  addMetadataLine('Merge Methodology', metadata.mergeMethodology);
+  addMetadataLine('Merge Quality Assessment', metadata.mergeQualityAssessment);
+  addMetadataLine('Created By', metadata.createdBy);
+  addMetadataLine('Modified At', metadata.modifiedAt);
+  addMetadataLine('Source Catalogues', metadata.sourceCatalogues);
 
   metadataLines.push('#');
   // Note: complex nested fields (origins, magnitudes, picks, arrivals, focal_mechanisms,
@@ -336,7 +283,10 @@ function generateCSV(events: any[], catalogue: any): string {
 
   // Define CSV headers — all scalar event fields
   const headers = [
+    'ID',
+    'CatalogueID',
     'Time',
+    'CreatedAt',
     'Latitude',
     'Longitude',
     'Depth',
@@ -347,6 +297,7 @@ function generateCSV(events: any[], catalogue: any): string {
     'Region',
     'LocationName',
     'Source',
+    'SourceEventsJSON',
     'SourceID',
     'PublicID',
     // Location uncertainties
@@ -380,6 +331,8 @@ function generateCSV(events: any[], catalogue: any): string {
     // Evaluation metadata
     'EvaluationMode',
     'EvaluationStatus',
+    'PreferredOriginID',
+    'PreferredMagnitudeID',
   ];
 
   // Helper: emit a nullable number/string as empty string when null/undefined
@@ -391,7 +344,10 @@ function generateCSV(events: any[], catalogue: any): string {
     const source = sourceEvents[0]?.source || 'unknown';
 
     return [
+      csvField(event.id),
+      csvField(event.catalogue_id),
       csvField(event.time),
+      csvField(event.created_at),
       csvField(event.latitude),
       csvField(event.longitude),
       csvField(n(event.depth)),
@@ -403,6 +359,7 @@ function generateCSV(events: any[], catalogue: any): string {
       csvField(event.region || event.location_name || ''),
       csvField(event.location_name),
       csvField(source),
+      csvField(event.source_events),
       csvField(event.source_id),
       csvField(event.event_public_id),
       // Location uncertainties
@@ -436,6 +393,8 @@ function generateCSV(events: any[], catalogue: any): string {
       // Evaluation metadata
       csvField(event.evaluation_mode),
       csvField(event.evaluation_status),
+      csvField(event.preferred_origin_id),
+      csvField(event.preferred_magnitude_id),
     ].join(',');
   });
 
@@ -445,4 +404,3 @@ function generateCSV(events: any[], catalogue: any): string {
     ...rows
   ].join('\n');
 }
-

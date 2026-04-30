@@ -28,6 +28,15 @@ describe('sanitizeFilename', () => {
   it('strips leading and trailing underscores', () => {
     expect(sanitizeFilename('  hello  ')).toBe('hello');
   });
+
+  it('falls back when all characters are removed', () => {
+    expect(sanitizeFilename('!!!')).toBe('catalogue');
+  });
+
+  it('avoids Windows reserved device names', () => {
+    expect(sanitizeFilename('CON')).toBe('con_file');
+    expect(sanitizeFilename('LPT1')).toBe('lpt1_file');
+  });
 });
 
 describe('formatDateForFilename', () => {
@@ -108,6 +117,13 @@ describe('generateContentDisposition', () => {
   it('includes UTF-8 encoded filename*', () => {
     const result = generateContentDisposition('café.csv');
     expect(result).toContain("filename*=UTF-8''");
+  });
+
+  it('removes header-breaking characters from filename', () => {
+    const result = generateContentDisposition('bad"name\r\n.csv');
+    expect(result).toContain('bad_name__.csv');
+    expect(result).not.toContain('\r');
+    expect(result).not.toContain('\n');
   });
 });
 

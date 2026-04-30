@@ -324,12 +324,12 @@ describe('eventsToGeoJSON', () => {
     expect(parsed.features).toHaveLength(1);
   });
 
-  it('has a Point geometry with [lon, lat, -depth] coordinates', () => {
+  it('has a Point geometry with [lon, lat, -depth_m] coordinates', () => {
     const geom = parsed.features[0].geometry;
     expect(geom.type).toBe('Point');
     expect(geom.coordinates[0]).toBe(174.7762);   // longitude
     expect(geom.coordinates[1]).toBe(-41.2865);   // latitude
-    expect(geom.coordinates[2]).toBe(-12.5);      // -depth
+    expect(geom.coordinates[2]).toBe(-12500);     // -depth in metres
   });
 
   it('includes all core scalar properties', () => {
@@ -437,10 +437,10 @@ describe('eventsToGeoJSON', () => {
     expect(noBboxDoc.bbox).toBeUndefined();
   });
 
-  it('emits 3D coordinates [lon, lat, -depth] when depth is known', () => {
+  it('emits 3D coordinates [lon, lat, -depth_m] when depth is known', () => {
     const geom = parsed.features[0].geometry;
     expect(geom.coordinates).toHaveLength(3);
-    expect(geom.coordinates[2]).toBe(-12.5);
+    expect(geom.coordinates[2]).toBe(-12500);
   });
 
   it('emits 2D coordinates [lon, lat] when depth is null', () => {

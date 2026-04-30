@@ -20,18 +20,36 @@ import type {
   Axis,
   MomentTensor,
   WaveformStreamID,
-  RealQuantity
+  RealQuantity,
+  IntegerQuantity,
+  CompositeTime,
+  OriginUncertainty
 } from './types/quakeml';
 
 /**
  * Format a number with optional uncertainty
  */
-function formatRealQuantity(value: number | null, uncertainty?: number | null): string {
+function formatRealQuantity(
+  value: number | null,
+  uncertainty?: number | null,
+  lowerUncertainty?: number | null,
+  upperUncertainty?: number | null,
+  confidenceLevel?: number | null
+): string {
   if (value === null) return '';
 
   let xml = `<value>${value}</value>`;
   if (uncertainty !== null && uncertainty !== undefined) {
     xml += `\n      <uncertainty>${uncertainty}</uncertainty>`;
+  }
+  if (lowerUncertainty !== null && lowerUncertainty !== undefined) {
+    xml += `\n      <lowerUncertainty>${lowerUncertainty}</lowerUncertainty>`;
+  }
+  if (upperUncertainty !== null && upperUncertainty !== undefined) {
+    xml += `\n      <upperUncertainty>${upperUncertainty}</upperUncertainty>`;
+  }
+  if (confidenceLevel !== null && confidenceLevel !== undefined) {
+    xml += `\n      <confidenceLevel>${confidenceLevel}</confidenceLevel>`;
   }
   return xml;
 }
@@ -39,10 +57,25 @@ function formatRealQuantity(value: number | null, uncertainty?: number | null): 
 /**
  * Format a time value with optional uncertainty
  */
-function formatTimeQuantity(time: string, uncertainty?: number | null): string {
+function formatTimeQuantity(
+  time: string,
+  uncertainty?: number | null,
+  lowerUncertainty?: number | null,
+  upperUncertainty?: number | null,
+  confidenceLevel?: number | null
+): string {
   let xml = `<value>${time}</value>`;
   if (uncertainty !== null && uncertainty !== undefined) {
     xml += `\n      <uncertainty>${uncertainty}</uncertainty>`;
+  }
+  if (lowerUncertainty !== null && lowerUncertainty !== undefined) {
+    xml += `\n      <lowerUncertainty>${lowerUncertainty}</lowerUncertainty>`;
+  }
+  if (upperUncertainty !== null && upperUncertainty !== undefined) {
+    xml += `\n      <upperUncertainty>${upperUncertainty}</upperUncertainty>`;
+  }
+  if (confidenceLevel !== null && confidenceLevel !== undefined) {
+    xml += `\n      <confidenceLevel>${confidenceLevel}</confidenceLevel>`;
   }
   return xml;
 }
@@ -54,13 +87,90 @@ function formatCreationInfo(info: CreationInfo, indent: string = '    '): string
   const parts: string[] = [];
 
   if (info.agencyID) parts.push(`${indent}<agencyID>${escapeXml(info.agencyID)}</agencyID>`);
+  if (info.agencyURI) parts.push(`${indent}<agencyURI>${escapeXml(info.agencyURI)}</agencyURI>`);
   if (info.author) parts.push(`${indent}<author>${escapeXml(info.author)}</author>`);
+  if (info.authorURI) parts.push(`${indent}<authorURI>${escapeXml(info.authorURI)}</authorURI>`);
   if (info.creationTime) parts.push(`${indent}<creationTime>${info.creationTime}</creationTime>`);
   if (info.version) parts.push(`${indent}<version>${escapeXml(info.version)}</version>`);
 
   if (parts.length === 0) return '';
 
   return `${indent.slice(2)}<creationInfo>\n${parts.join('\n')}\n${indent.slice(2)}</creationInfo>`;
+}
+
+function formatComments(comments: Comment[] | undefined, indent: string = '    '): string {
+  if (!comments || comments.length === 0) return '';
+  return comments.map(comment => formatComment(comment, indent)).join('\n') + '\n';
+}
+
+function formatIntegerQuantityElement(
+  tagName: string,
+  quantity: IntegerQuantity,
+  indent: string = '    '
+): string {
+  let xml = `${indent}<${tagName}>\n`;
+  xml += `${indent}  <value>${quantity.value}</value>\n`;
+  if (quantity.uncertainty !== undefined) {
+    xml += `${indent}  <uncertainty>${quantity.uncertainty}</uncertainty>\n`;
+  }
+  if (quantity.lowerUncertainty !== undefined) {
+    xml += `${indent}  <lowerUncertainty>${quantity.lowerUncertainty}</lowerUncertainty>\n`;
+  }
+  if (quantity.upperUncertainty !== undefined) {
+    xml += `${indent}  <upperUncertainty>${quantity.upperUncertainty}</upperUncertainty>\n`;
+  }
+  if (quantity.confidenceLevel !== undefined) {
+    xml += `${indent}  <confidenceLevel>${quantity.confidenceLevel}</confidenceLevel>\n`;
+  }
+  xml += `${indent}</${tagName}>`;
+  return xml;
+}
+
+function formatCompositeTime(compositeTime: CompositeTime, indent: string = '    '): string {
+  let xml = `${indent}<compositeTime>\n`;
+  if (compositeTime.year) xml += formatIntegerQuantityElement('year', compositeTime.year, indent + '  ') + '\n';
+  if (compositeTime.month) xml += formatIntegerQuantityElement('month', compositeTime.month, indent + '  ') + '\n';
+  if (compositeTime.day) xml += formatIntegerQuantityElement('day', compositeTime.day, indent + '  ') + '\n';
+  if (compositeTime.hour) xml += formatIntegerQuantityElement('hour', compositeTime.hour, indent + '  ') + '\n';
+  if (compositeTime.minute) xml += formatIntegerQuantityElement('minute', compositeTime.minute, indent + '  ') + '\n';
+  if (compositeTime.second) xml += formatRealQuantityElement('second', compositeTime.second, indent + '  ') + '\n';
+  xml += `${indent}</compositeTime>`;
+  return xml;
+}
+
+function formatOriginUncertainty(uncertainty: OriginUncertainty, indent: string = '    '): string {
+  let xml = `${indent}<originUncertainty>\n`;
+  if (uncertainty.horizontalUncertainty !== undefined) {
+    xml += `${indent}  <horizontalUncertainty>${uncertainty.horizontalUncertainty}</horizontalUncertainty>\n`;
+  }
+  if (uncertainty.minHorizontalUncertainty !== undefined) {
+    xml += `${indent}  <minHorizontalUncertainty>${uncertainty.minHorizontalUncertainty}</minHorizontalUncertainty>\n`;
+  }
+  if (uncertainty.maxHorizontalUncertainty !== undefined) {
+    xml += `${indent}  <maxHorizontalUncertainty>${uncertainty.maxHorizontalUncertainty}</maxHorizontalUncertainty>\n`;
+  }
+  if (uncertainty.azimuthMaxHorizontalUncertainty !== undefined) {
+    xml += `${indent}  <azimuthMaxHorizontalUncertainty>${uncertainty.azimuthMaxHorizontalUncertainty}</azimuthMaxHorizontalUncertainty>\n`;
+  }
+  if (uncertainty.confidenceEllipsoid) {
+    const ellipsoid = uncertainty.confidenceEllipsoid;
+    xml += `${indent}  <confidenceEllipsoid>\n`;
+    xml += `${indent}    <semiMajorAxisLength>${ellipsoid.semiMajorAxisLength}</semiMajorAxisLength>\n`;
+    xml += `${indent}    <semiMinorAxisLength>${ellipsoid.semiMinorAxisLength}</semiMinorAxisLength>\n`;
+    xml += `${indent}    <semiIntermediateAxisLength>${ellipsoid.semiIntermediateAxisLength}</semiIntermediateAxisLength>\n`;
+    xml += `${indent}    <majorAxisPlunge>${ellipsoid.majorAxisPlunge}</majorAxisPlunge>\n`;
+    xml += `${indent}    <majorAxisAzimuth>${ellipsoid.majorAxisAzimuth}</majorAxisAzimuth>\n`;
+    xml += `${indent}    <majorAxisRotation>${ellipsoid.majorAxisRotation}</majorAxisRotation>\n`;
+    xml += `${indent}  </confidenceEllipsoid>\n`;
+  }
+  if (uncertainty.preferredDescription) {
+    xml += `${indent}  <preferredDescription>${escapeXml(uncertainty.preferredDescription)}</preferredDescription>\n`;
+  }
+  if (uncertainty.confidenceLevel !== undefined) {
+    xml += `${indent}  <confidenceLevel>${uncertainty.confidenceLevel}</confidenceLevel>\n`;
+  }
+  xml += `${indent}</originUncertainty>`;
+  return xml;
 }
 
 /**
@@ -96,32 +206,83 @@ function formatEventDescription(desc: EventDescription, indent: string = '    ')
 function formatOrigin(origin: Origin, indent: string = '    '): string {
   let xml = `${indent}<origin publicID="${escapeXml(origin.publicID)}">\n`;
 
+  xml += formatComments(origin.comment, indent + '  ');
+
+  if (origin.compositeTime && origin.compositeTime.length > 0) {
+    origin.compositeTime.forEach(compositeTime => {
+      xml += formatCompositeTime(compositeTime, indent + '  ') + '\n';
+    });
+  }
+
   // Time
   if (origin.time) {
     xml += `${indent}  <time>\n`;
-    xml += `${indent}    ${formatTimeQuantity(origin.time.value, origin.time.uncertainty)}\n`;
+    xml += `${indent}    ${formatTimeQuantity(
+      origin.time.value,
+      origin.time.uncertainty,
+      origin.time.lowerUncertainty,
+      origin.time.upperUncertainty,
+      origin.time.confidenceLevel
+    )}\n`;
     xml += `${indent}  </time>\n`;
   }
 
   // Latitude
   if (origin.latitude) {
     xml += `${indent}  <latitude>\n`;
-    xml += `${indent}    ${formatRealQuantity(origin.latitude.value, origin.latitude.uncertainty)}\n`;
+    xml += `${indent}    ${formatRealQuantity(
+      origin.latitude.value,
+      origin.latitude.uncertainty,
+      origin.latitude.lowerUncertainty,
+      origin.latitude.upperUncertainty,
+      origin.latitude.confidenceLevel
+    )}\n`;
     xml += `${indent}  </latitude>\n`;
   }
 
   // Longitude
   if (origin.longitude) {
     xml += `${indent}  <longitude>\n`;
-    xml += `${indent}    ${formatRealQuantity(origin.longitude.value, origin.longitude.uncertainty)}\n`;
+    xml += `${indent}    ${formatRealQuantity(
+      origin.longitude.value,
+      origin.longitude.uncertainty,
+      origin.longitude.lowerUncertainty,
+      origin.longitude.upperUncertainty,
+      origin.longitude.confidenceLevel
+    )}\n`;
     xml += `${indent}  </longitude>\n`;
   }
 
   // Depth
   if (origin.depth) {
     xml += `${indent}  <depth>\n`;
-    xml += `${indent}    ${formatRealQuantity(origin.depth.value, origin.depth.uncertainty)}\n`;
+    xml += `${indent}    ${formatRealQuantity(
+      origin.depth.value,
+      origin.depth.uncertainty,
+      origin.depth.lowerUncertainty,
+      origin.depth.upperUncertainty,
+      origin.depth.confidenceLevel
+    )}\n`;
     xml += `${indent}  </depth>\n`;
+  }
+
+  if (origin.depthType) {
+    xml += `${indent}  <depthType>${escapeXml(origin.depthType)}</depthType>\n`;
+  }
+  if (origin.timeFixed !== undefined) {
+    xml += `${indent}  <timeFixed>${origin.timeFixed}</timeFixed>\n`;
+  }
+  if (origin.epicenterFixed !== undefined) {
+    xml += `${indent}  <epicenterFixed>${origin.epicenterFixed}</epicenterFixed>\n`;
+  }
+  if (origin.referenceSystemID) {
+    xml += `${indent}  <referenceSystemID>${escapeXml(origin.referenceSystemID)}</referenceSystemID>\n`;
+  }
+  if (origin.methodID) {
+    xml += `${indent}  <methodID>${escapeXml(origin.methodID)}</methodID>\n`;
+  }
+  if (origin.earthModelID) {
+    xml += `${indent}  <earthModelID>${escapeXml(origin.earthModelID)}</earthModelID>\n`;
   }
 
   // Quality
@@ -145,10 +306,30 @@ function formatOrigin(origin: Origin, indent: string = '    '): string {
     if (origin.quality.maximumDistance !== undefined) {
       xml += `${indent}    <maximumDistance>${origin.quality.maximumDistance}</maximumDistance>\n`;
     }
+    if (origin.quality.medianDistance !== undefined) {
+      xml += `${indent}    <medianDistance>${origin.quality.medianDistance}</medianDistance>\n`;
+    }
+    if (origin.quality.secondaryAzimuthalGap !== undefined) {
+      xml += `${indent}    <secondaryAzimuthalGap>${origin.quality.secondaryAzimuthalGap}</secondaryAzimuthalGap>\n`;
+    }
+    if (origin.quality.groundTruthLevel !== undefined) {
+      xml += `${indent}    <groundTruthLevel>${escapeXml(origin.quality.groundTruthLevel)}</groundTruthLevel>\n`;
+    }
     if (origin.quality.standardError !== undefined) {
       xml += `${indent}    <standardError>${origin.quality.standardError}</standardError>\n`;
     }
     xml += `${indent}  </quality>\n`;
+  }
+
+  if (origin.uncertainty) {
+    xml += formatOriginUncertainty(origin.uncertainty, indent + '  ') + '\n';
+  }
+
+  if (origin.type) {
+    xml += `${indent}  <type>${escapeXml(origin.type)}</type>\n`;
+  }
+  if (origin.region) {
+    xml += `${indent}  <region>${escapeXml(origin.region)}</region>\n`;
   }
 
   // Evaluation mode and status
@@ -181,10 +362,18 @@ function formatOrigin(origin: Origin, indent: string = '    '): string {
 function formatMagnitude(magnitude: Magnitude, indent: string = '    '): string {
   let xml = `${indent}<magnitude publicID="${escapeXml(magnitude.publicID)}">\n`;
 
+  xml += formatComments(magnitude.comment, indent + '  ');
+
   // Magnitude value
   if (magnitude.mag) {
     xml += `${indent}  <mag>\n`;
-    xml += `${indent}    ${formatRealQuantity(magnitude.mag.value, magnitude.mag.uncertainty)}\n`;
+    xml += `${indent}    ${formatRealQuantity(
+      magnitude.mag.value,
+      magnitude.mag.uncertainty,
+      magnitude.mag.lowerUncertainty,
+      magnitude.mag.upperUncertainty,
+      magnitude.mag.confidenceLevel
+    )}\n`;
     xml += `${indent}  </mag>\n`;
   }
 
@@ -197,10 +386,31 @@ function formatMagnitude(magnitude: Magnitude, indent: string = '    '): string 
   if (magnitude.stationCount !== undefined) {
     xml += `${indent}  <stationCount>${magnitude.stationCount}</stationCount>\n`;
   }
+  if (magnitude.azimuthalGap !== undefined) {
+    xml += `${indent}  <azimuthalGap>${magnitude.azimuthalGap}</azimuthalGap>\n`;
+  }
 
   // Origin ID
   if (magnitude.originID) {
     xml += `${indent}  <originID>${escapeXml(magnitude.originID)}</originID>\n`;
+  }
+
+  if (magnitude.methodID) {
+    xml += `${indent}  <methodID>${escapeXml(magnitude.methodID)}</methodID>\n`;
+  }
+
+  if (magnitude.stationMagnitudeContributions && magnitude.stationMagnitudeContributions.length > 0) {
+    magnitude.stationMagnitudeContributions.forEach(contribution => {
+      xml += `${indent}  <stationMagnitudeContribution>\n`;
+      xml += `${indent}    <stationMagnitudeID>${escapeXml(contribution.stationMagnitudeID)}</stationMagnitudeID>\n`;
+      if (contribution.residual !== undefined) {
+        xml += `${indent}    <residual>${contribution.residual}</residual>\n`;
+      }
+      if (contribution.weight !== undefined) {
+        xml += `${indent}    <weight>${contribution.weight}</weight>\n`;
+      }
+      xml += `${indent}  </stationMagnitudeContribution>\n`;
+    });
   }
 
   // Evaluation mode and status
@@ -273,6 +483,8 @@ function formatRealQuantityElement(
 function formatPick(pick: Pick, indent: string = '    '): string {
   let xml = `${indent}<pick publicID="${escapeXml(pick.publicID)}">\n`;
 
+  xml += formatComments(pick.comment, indent + '  ');
+
   // Time (required)
   if (pick.time) {
     xml += `${indent}  <time>\n`;
@@ -291,6 +503,9 @@ function formatPick(pick: Pick, indent: string = '    '): string {
   }
   if (pick.methodID) {
     xml += `${indent}  <methodID>${escapeXml(pick.methodID)}</methodID>\n`;
+  }
+  if (pick.slownessMethodID) {
+    xml += `${indent}  <slownessMethodID>${escapeXml(pick.slownessMethodID)}</slownessMethodID>\n`;
   }
   if (pick.horizontalSlowness) {
     xml += formatRealQuantityElement('horizontalSlowness', pick.horizontalSlowness, indent + '  ') + '\n';
@@ -331,6 +546,8 @@ function formatArrival(arrival: Arrival, indent: string = '      '): string {
   }
   xml += '>\n';
 
+  xml += formatComments(arrival.comment, indent + '  ');
+
   // PickID (required)
   xml += `${indent}  <pickID>${escapeXml(arrival.pickID)}</pickID>\n`;
 
@@ -362,6 +579,12 @@ function formatArrival(arrival: Arrival, indent: string = '      '): string {
   if (arrival.timeWeight !== undefined) {
     xml += `${indent}  <timeWeight>${arrival.timeWeight}</timeWeight>\n`;
   }
+  if (arrival.horizontalSlownessWeight !== undefined) {
+    xml += `${indent}  <horizontalSlownessWeight>${arrival.horizontalSlownessWeight}</horizontalSlownessWeight>\n`;
+  }
+  if (arrival.backazimuthWeight !== undefined) {
+    xml += `${indent}  <backazimuthWeight>${arrival.backazimuthWeight}</backazimuthWeight>\n`;
+  }
   if (arrival.earthModelID) {
     xml += `${indent}  <earthModelID>${escapeXml(arrival.earthModelID)}</earthModelID>\n`;
   }
@@ -378,6 +601,8 @@ function formatArrival(arrival: Arrival, indent: string = '      '): string {
  */
 function formatAmplitude(amplitude: Amplitude, indent: string = '    '): string {
   let xml = `${indent}<amplitude publicID="${escapeXml(amplitude.publicID)}">\n`;
+
+  xml += formatComments(amplitude.comment, indent + '  ');
 
   // GenericAmplitude (required)
   if (amplitude.genericAmplitude) {
@@ -397,6 +622,9 @@ function formatAmplitude(amplitude: Amplitude, indent: string = '    '): string 
   if (amplitude.methodID) {
     xml += `${indent}  <methodID>${escapeXml(amplitude.methodID)}</methodID>\n`;
   }
+  if (amplitude.filterID) {
+    xml += `${indent}  <filterID>${escapeXml(amplitude.filterID)}</filterID>\n`;
+  }
   if (amplitude.period) {
     xml += formatRealQuantityElement('period', amplitude.period, indent + '  ') + '\n';
   }
@@ -405,7 +633,7 @@ function formatAmplitude(amplitude: Amplitude, indent: string = '    '): string 
   }
   if (amplitude.timeWindow) {
     xml += `${indent}  <timeWindow>\n`;
-    xml += `${indent}    <reference>${amplitude.timeWindow.reference}</reference>\n`;
+    xml += `${indent}    <reference>${escapeXml(amplitude.timeWindow.reference)}</reference>\n`;
     xml += `${indent}    <begin>${amplitude.timeWindow.begin}</begin>\n`;
     xml += `${indent}    <end>${amplitude.timeWindow.end}</end>\n`;
     xml += `${indent}  </timeWindow>\n`;
@@ -444,6 +672,8 @@ function formatAmplitude(amplitude: Amplitude, indent: string = '    '): string 
 function formatStationMagnitude(stationMag: StationMagnitude, indent: string = '    '): string {
   let xml = `${indent}<stationMagnitude publicID="${escapeXml(stationMag.publicID)}">\n`;
 
+  xml += formatComments(stationMag.comment, indent + '  ');
+
   // Origin ID
   if (stationMag.originID) {
     xml += `${indent}  <originID>${escapeXml(stationMag.originID)}</originID>\n`;
@@ -452,7 +682,13 @@ function formatStationMagnitude(stationMag: StationMagnitude, indent: string = '
   // Magnitude value (required)
   if (stationMag.mag) {
     xml += `${indent}  <mag>\n`;
-    xml += `${indent}    ${formatRealQuantity(stationMag.mag.value, stationMag.mag.uncertainty)}\n`;
+    xml += `${indent}    ${formatRealQuantity(
+      stationMag.mag.value,
+      stationMag.mag.uncertainty,
+      stationMag.mag.lowerUncertainty,
+      stationMag.mag.upperUncertainty,
+      stationMag.mag.confidenceLevel
+    )}\n`;
     xml += `${indent}  </mag>\n`;
   }
 
@@ -555,6 +791,43 @@ function formatMomentTensor(mt: MomentTensor, indent: string = '      '): string
   if (mt.iso !== undefined) {
     xml += `${indent}  <iso>${mt.iso}</iso>\n`;
   }
+  if (mt.greensFunctionID) {
+    xml += `${indent}  <greensFunctionID>${escapeXml(mt.greensFunctionID)}</greensFunctionID>\n`;
+  }
+  if (mt.filterID) {
+    xml += `${indent}  <filterID>${escapeXml(mt.filterID)}</filterID>\n`;
+  }
+  if (mt.sourceTimeFunction) {
+    xml += `${indent}  <sourceTimeFunction>\n`;
+    xml += `${indent}    <type>${escapeXml(mt.sourceTimeFunction.type)}</type>\n`;
+    xml += `${indent}    <duration>${mt.sourceTimeFunction.duration}</duration>\n`;
+    if (mt.sourceTimeFunction.riseTime !== undefined) {
+      xml += `${indent}    <riseTime>${mt.sourceTimeFunction.riseTime}</riseTime>\n`;
+    }
+    if (mt.sourceTimeFunction.decayTime !== undefined) {
+      xml += `${indent}    <decayTime>${mt.sourceTimeFunction.decayTime}</decayTime>\n`;
+    }
+    xml += `${indent}  </sourceTimeFunction>\n`;
+  }
+  if (mt.dataUsed && mt.dataUsed.length > 0) {
+    mt.dataUsed.forEach(dataUsed => {
+      xml += `${indent}  <dataUsed>\n`;
+      xml += `${indent}    <waveType>${escapeXml(dataUsed.waveType)}</waveType>\n`;
+      if (dataUsed.stationCount !== undefined) {
+        xml += `${indent}    <stationCount>${dataUsed.stationCount}</stationCount>\n`;
+      }
+      if (dataUsed.componentCount !== undefined) {
+        xml += `${indent}    <componentCount>${dataUsed.componentCount}</componentCount>\n`;
+      }
+      if (dataUsed.shortestPeriod !== undefined) {
+        xml += `${indent}    <shortestPeriod>${dataUsed.shortestPeriod}</shortestPeriod>\n`;
+      }
+      if (dataUsed.longestPeriod !== undefined) {
+        xml += `${indent}    <longestPeriod>${dataUsed.longestPeriod}</longestPeriod>\n`;
+      }
+      xml += `${indent}  </dataUsed>\n`;
+    });
+  }
   if (mt.methodID) {
     xml += `${indent}  <methodID>${escapeXml(mt.methodID)}</methodID>\n`;
   }
@@ -578,8 +851,16 @@ function formatMomentTensor(mt: MomentTensor, indent: string = '      '): string
 function formatFocalMechanism(fm: FocalMechanism, indent: string = '    '): string {
   let xml = `${indent}<focalMechanism publicID="${escapeXml(fm.publicID)}">\n`;
 
+  xml += formatComments(fm.comment, indent + '  ');
+
   if (fm.triggeringOriginID) {
     xml += `${indent}  <triggeringOriginID>${escapeXml(fm.triggeringOriginID)}</triggeringOriginID>\n`;
+  }
+
+  if (fm.waveformID && fm.waveformID.length > 0) {
+    fm.waveformID.forEach(waveformID => {
+      xml += formatWaveformID(waveformID, indent + '  ') + '\n';
+    });
   }
 
   // Nodal planes
@@ -669,19 +950,21 @@ export function eventToQuakeML(event: MergedEvent): string {
   // origin*, pick*, preferredOriginID?, preferredMagnitudeID?, type?, typeCertainty?, creationInfo?
 
   // Descriptions — use stored JSON if available, otherwise synthesise from scalar fields.
+  let descriptionEmitted = false;
   if (event.event_descriptions) {
     try {
       const descriptions: EventDescription[] = JSON.parse(event.event_descriptions);
       descriptions.forEach(desc => {
         xml += formatEventDescription(desc) + '\n';
       });
+      descriptionEmitted = descriptions.length > 0;
     } catch (e) {
       // Ignore parse errors; fall through to scalar fallback below
     }
   }
   // When no structured descriptions exist, emit region / location_name as a
   // "region name" description (QuakeML EventDescriptionType = "region name").
-  if (!event.event_descriptions && (event.region || event.location_name)) {
+  if (!descriptionEmitted && (event.region || event.location_name)) {
     const regionText = event.region || event.location_name || '';
     xml += formatEventDescription({ text: regionText, type: 'region name' }) + '\n';
   }
@@ -779,7 +1062,27 @@ export function eventToQuakeML(event: MergedEvent): string {
     }
   }
 
+  // Station Magnitudes (schema order: 6th group, before origins)
+  if (event.station_magnitudes) {
+    try {
+      const stationMagnitudes: StationMagnitude[] = JSON.parse(event.station_magnitudes);
+      stationMagnitudes.forEach(stationMag => {
+        xml += formatStationMagnitude(stationMag) + '\n';
+      });
+    } catch (e) {
+      // Ignore parse errors
+    }
+  }
+
   // Origins (schema order: 7th group, after magnitudes)
+  let standaloneArrivals: Arrival[] = [];
+  if (event.arrivals) {
+    try {
+      standaloneArrivals = JSON.parse(event.arrivals);
+    } catch {
+      standaloneArrivals = [];
+    }
+  }
   let parsedOrigins: Origin[] | null = null;
   if (event.origins) {
     try {
@@ -789,8 +1092,12 @@ export function eventToQuakeML(event: MergedEvent): string {
     }
   }
   if (parsedOrigins && parsedOrigins.length > 0) {
-    parsedOrigins.forEach(origin => {
-      xml += formatOrigin(origin) + '\n';
+    parsedOrigins.forEach((origin, index) => {
+      const originWithArrivals = (!origin.arrivals || origin.arrivals.length === 0) &&
+        index === 0 && standaloneArrivals.length > 0
+        ? { ...origin, arrivals: standaloneArrivals }
+        : origin;
+      xml += formatOrigin(originWithArrivals) + '\n';
     });
   } else {
     // Fallback: reconstruct Origin from scalar database fields.
@@ -887,8 +1194,7 @@ export function eventToQuakeML(event: MergedEvent): string {
       // Arrivals (child elements of Origin in QuakeML)
       if (event.arrivals) {
         try {
-          const arrivals: Arrival[] = JSON.parse(event.arrivals);
-          arrivals.forEach(arrival => {
+          standaloneArrivals.forEach(arrival => {
             xml += formatArrival(arrival) + '\n';
           });
         } catch {
@@ -897,18 +1203,6 @@ export function eventToQuakeML(event: MergedEvent): string {
       }
 
       xml += `    </origin>\n`;
-    }
-  }
-
-  // Station Magnitudes (schema order: 6th group)
-  if (event.station_magnitudes) {
-    try {
-      const stationMagnitudes: StationMagnitude[] = JSON.parse(event.station_magnitudes);
-      stationMagnitudes.forEach(stationMag => {
-        xml += formatStationMagnitude(stationMag) + '\n';
-      });
-    } catch (e) {
-      // Ignore parse errors
     }
   }
 
@@ -979,7 +1273,7 @@ export function eventsToQuakeMLDocument(
   if (metadata?.timePeriodStart && metadata?.timePeriodEnd) {
     descParts.push(`Time Period: ${metadata.timePeriodStart} to ${metadata.timePeriodEnd}`);
   }
-  if (metadata?.eventCount) descParts.push(`Event Count: ${metadata.eventCount}`);
+  if (metadata?.eventCount != null) descParts.push(`Event Count: ${metadata.eventCount}`);
 
   if (descParts.length > 0) {
     xml += `    <description>\n`;
@@ -1018,6 +1312,9 @@ export function eventsToQuakeMLDocument(
   }
   if (metadata?.qualityNotes) addComment(`Quality Notes: ${metadata.qualityNotes}`);
   if (metadata?.notes) addComment(`Notes: ${metadata.notes}`);
+  if (metadata?.boundingBox) {
+    addComment(`Bounding Box: ${JSON.stringify(metadata.boundingBox)}`);
+  }
   // Merge provenance
   if (metadata?.mergeDescription) addComment(`Merge Description: ${metadata.mergeDescription}`);
   if (metadata?.mergeUseCase) addComment(`Merge Use Case: ${metadata.mergeUseCase}`);
@@ -1025,6 +1322,7 @@ export function eventsToQuakeMLDocument(
   if (metadata?.mergeQualityAssessment) addComment(`Merge Quality Assessment: ${metadata.mergeQualityAssessment}`);
   if (metadata?.createdBy) addComment(`Created By: ${metadata.createdBy}`);
   if (metadata?.modifiedAt) addComment(`Modified At: ${metadata.modifiedAt}`);
+  if (metadata?.sourceCatalogues) addComment(`Source Catalogues: ${JSON.stringify(metadata.sourceCatalogues)}`);
 
   // Creation info with version
   xml += `    <creationInfo>\n`;
@@ -1043,4 +1341,3 @@ export function eventsToQuakeMLDocument(
 
   return xml;
 }
-

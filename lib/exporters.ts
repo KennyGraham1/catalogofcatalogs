@@ -124,12 +124,12 @@ export function eventsToGeoJSON(
       id: event.id,
       geometry: {
         type: 'Point',
-        // GeoJSON coordinates are [longitude, latitude, elevation].
-        // For earthquakes, depth (km below surface) becomes negative elevation.
+        // GeoJSON coordinates are [longitude, latitude, elevation_m].
+        // For earthquakes, depth (km below surface) becomes negative elevation in metres.
         // When depth is unknown (null) we emit a 2D point [lon, lat] rather than
         // implying a surface location with elevation=0 (RFC 7946 §3.1.1).
         coordinates: event.depth != null
-          ? [event.longitude, event.latitude, -event.depth]
+          ? [event.longitude, event.latitude, -event.depth * 1000]
           : [event.longitude, event.latitude],
       },
       properties: {
@@ -167,6 +167,7 @@ export function eventsToGeoJSON(
         longitudeUncertainty: event.longitude_uncertainty,
         depthUncertainty: event.depth_uncertainty,
         horizontalUncertainty: event.horizontal_uncertainty,     // km
+        locationUncertainty: event.horizontal_uncertainty,       // deprecated alias, km
 
         // Origin provenance
         earthModelId: event.earth_model_id,
@@ -251,7 +252,7 @@ export function eventsToKML(
   if (metadata?.timePeriodStart && metadata?.timePeriodEnd) {
     descriptionParts.push(`Time Period: ${metadata.timePeriodStart} to ${metadata.timePeriodEnd}`);
   }
-  if (metadata?.eventCount) descriptionParts.push(`Event Count: ${metadata.eventCount}`);
+  if (metadata?.eventCount != null) descriptionParts.push(`Event Count: ${metadata.eventCount}`);
   if (metadata?.license) descriptionParts.push(`License: ${metadata.license}`);
   if (metadata?.citation) descriptionParts.push(`Citation: ${metadata.citation}`);
   if (metadata?.doi) descriptionParts.push(`DOI: ${metadata.doi}`);
@@ -291,8 +292,14 @@ export function eventsToKML(
     if (parts.length > 0) descriptionParts.push(`Bounding Box: ${parts.join(', ')}`);
   }
   if (metadata?.mergeDescription) descriptionParts.push(`Merge Description: ${metadata.mergeDescription}`);
+  if (metadata?.mergeUseCase) descriptionParts.push(`Merge Use Case: ${metadata.mergeUseCase}`);
   if (metadata?.mergeMethodology) descriptionParts.push(`Merge Methodology: ${metadata.mergeMethodology}`);
+  if (metadata?.mergeQualityAssessment) descriptionParts.push(`Merge Quality Assessment: ${metadata.mergeQualityAssessment}`);
   if (metadata?.createdBy) descriptionParts.push(`Created By: ${metadata.createdBy}`);
+  if (metadata?.modifiedAt) descriptionParts.push(`Modified At: ${metadata.modifiedAt}`);
+  if (metadata?.sourceCatalogues) {
+    descriptionParts.push(`Source Catalogues: ${JSON.stringify(metadata.sourceCatalogues)}`);
+  }
 
   if (descriptionParts.length > 0) {
     kml += `    <description><![CDATA[${descriptionParts.join('\n')}]]></description>\n`;
@@ -617,4 +624,3 @@ export function eventsToJSON(
 
   return JSON.stringify(jsonData, null, 2);
 }
-
