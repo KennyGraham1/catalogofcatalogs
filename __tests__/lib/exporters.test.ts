@@ -156,6 +156,16 @@ describe('eventsToJSON', () => {
     expect(Array.isArray(m.provenance.sourceCatalogues)).toBe(true);
   });
 
+  it('preserves partial time periods when only one bound is present', () => {
+    const parsedWithStartOnly = JSON.parse(eventsToJSON([richEvent], {
+      catalogueName: 'Partial Time',
+      timePeriodStart: '2024-01-01T00:00:00Z',
+    }));
+
+    expect(parsedWithStartOnly.metadata.timePeriod.start).toBe('2024-01-01T00:00:00Z');
+    expect(parsedWithStartOnly.metadata.timePeriod.end).toBeUndefined();
+  });
+
   // --- Core scalar fields ---
   it('exports all core scalar event fields', () => {
     const e = parsed.events[0];
@@ -426,6 +436,16 @@ describe('eventsToGeoJSON', () => {
     });
   });
 
+  it('preserves partial time periods in metadata', () => {
+    const doc = JSON.parse(eventsToGeoJSON([richEvent], {
+      catalogueName: 'Partial Time',
+      timePeriodEnd: '2024-12-31T23:59:59Z',
+    }));
+
+    expect(doc.metadata.timePeriod.start).toBeUndefined();
+    expect(doc.metadata.timePeriod.end).toBe('2024-12-31T23:59:59Z');
+  });
+
   it('emits RFC 7946 bbox member at FeatureCollection root when all bounds are available', () => {
     // bbox order: [west, south, east, north]
     expect(Array.isArray(parsed.bbox)).toBe(true);
@@ -554,6 +574,15 @@ describe('eventsToKML', () => {
 
   it('includes merge description in catalogue description', () => {
     expect(kml).toContain('Merged from two sources');
+  });
+
+  it('splits CDATA terminators in catalogue metadata', () => {
+    const unsafeKml = eventsToKML([richEvent], {
+      catalogueName: 'Unsafe',
+      description: 'contains ]]> terminator',
+    });
+
+    expect(unsafeKml).toContain(']]]]><![CDATA[>');
   });
 
   it('assigns correct styleUrl based on magnitude range (M5.2 → mag_5_6)', () => {

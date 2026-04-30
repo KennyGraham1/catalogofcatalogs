@@ -1105,14 +1105,6 @@ export function eventToQuakeML(event: MergedEvent): string {
       const originID = event.preferred_origin_id || `smi:local/origin/${event.id}`;
       xml += `    <origin publicID="${escapeXml(originID)}">\n`;
 
-      // Origin uncertainty — horizontal (QuakeML OriginUncertainty, schema position: before time)
-      if (event.horizontal_uncertainty != null) {
-        xml += `      <originUncertainty>\n`;
-        // horizontalUncertainty in QuakeML is in meters; DB stores km
-        xml += `        <horizontalUncertainty>${event.horizontal_uncertainty * 1000}</horizontalUncertainty>\n`;
-        xml += `      </originUncertainty>\n`;
-      }
-
       // Time
       xml += `      <time>\n        <value>${event.time}</value>\n`;
       if (event.time_uncertainty != null) {
@@ -1174,6 +1166,13 @@ export function eventToQuakeML(event: MergedEvent): string {
         if (event.maximum_distance != null) xml += `        <maximumDistance>${event.maximum_distance}</maximumDistance>\n`;
         if (event.standard_error != null) xml += `        <standardError>${event.standard_error}</standardError>\n`;
         xml += `      </quality>\n`;
+      }
+
+      if (event.horizontal_uncertainty != null) {
+        xml += `      <originUncertainty>\n`;
+        // horizontalUncertainty in QuakeML is in meters; DB stores km
+        xml += `        <horizontalUncertainty>${event.horizontal_uncertainty * 1000}</horizontalUncertainty>\n`;
+        xml += `      </originUncertainty>\n`;
       }
 
       if (event.evaluation_mode) {
@@ -1270,8 +1269,8 @@ export function eventsToQuakeMLDocument(
   if (metadata?.source) descParts.push(`Source: ${metadata.source}`);
   if (metadata?.provider) descParts.push(`Provider: ${metadata.provider}`);
   if (metadata?.region) descParts.push(`Region: ${metadata.region}`);
-  if (metadata?.timePeriodStart && metadata?.timePeriodEnd) {
-    descParts.push(`Time Period: ${metadata.timePeriodStart} to ${metadata.timePeriodEnd}`);
+  if (metadata?.timePeriodStart || metadata?.timePeriodEnd) {
+    descParts.push(`Time Period: ${metadata.timePeriodStart ?? '?'} to ${metadata.timePeriodEnd ?? '?'}`);
   }
   if (metadata?.eventCount != null) descParts.push(`Event Count: ${metadata.eventCount}`);
 

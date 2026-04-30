@@ -148,6 +148,10 @@ describe('eventToQuakeML — fallback origin (no origins JSON)', () => {
     expect(xml).toContain('<horizontalUncertainty>3500</horizontalUncertainty>');
   });
 
+  it('places fallback originUncertainty after quality metadata', () => {
+    expect(xml.indexOf('<quality>')).toBeLessThan(xml.indexOf('<originUncertainty>'));
+  });
+
   it('emits all quality metrics in <quality>', () => {
     expect(xml).toContain('<azimuthalGap>165</azimuthalGap>');
     expect(xml).toContain('<usedPhaseCount>32</usedPhaseCount>');
@@ -279,6 +283,14 @@ describe('eventsToQuakeMLDocument', () => {
     });
     expect(doc).toContain('CC BY 4.0');
     expect(doc).toContain('10.21420/test');
+  });
+
+  it('includes partial catalogue time periods when one bound is present', () => {
+    const doc = eventsToQuakeMLDocument([minimalEvent], 'Test Cat', {
+      timePeriodStart: '2024-01-01T00:00:00Z',
+    });
+
+    expect(doc).toContain('Time Period: 2024-01-01T00:00:00Z to ?');
   });
 });
 

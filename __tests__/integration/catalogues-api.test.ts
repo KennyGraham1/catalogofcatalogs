@@ -446,9 +446,9 @@ describeIfWebAPIs('Catalogue Events API', () => {
   const mockFind = jest.fn();
   const mockToArray = jest.fn();
   const mockSort = jest.fn();
+  const mockCountDocuments = jest.fn();
   const mockSkip = jest.fn();
   const mockLimit = jest.fn();
-  const mockCountDocuments = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -498,6 +498,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
   const mockFind = jest.fn();
   const mockToArray = jest.fn();
   const mockSort = jest.fn();
+  const mockCountDocuments = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -508,6 +509,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
     (getCollection as jest.Mock).mockResolvedValue({
       findOne: mockFindOne,
       find: mockFind,
+      countDocuments: mockCountDocuments,
     });
   });
 
@@ -585,6 +587,42 @@ describeIfWebAPIs('Catalogue Export API', () => {
       // Assert
       expect(response.status).toBe(200);
       expect(response.headers.get('Content-Type')).toContain('json');
+    });
+
+    it('should fetch paginated events when unpaginated export result is capped', async () => {
+      (getServerSession as jest.Mock).mockResolvedValue({
+        user: { id: 'viewer-123', email: 'viewer@example.com', role: 'viewer' },
+      });
+
+      mockFindOne.mockResolvedValue({
+        id: 'cat-123',
+        name: 'Export Test',
+        event_count: 2,
+      });
+
+      const cappedEvent = { id: 'evt-1', time: '2024-01-15T10:00:00Z', latitude: -41.5, longitude: 174.0, magnitude: 5.0 };
+      const secondEvent = { id: 'evt-2', time: '2024-01-16T10:00:00Z', latitude: -42.5, longitude: 175.0, magnitude: 4.0 };
+      const paginatedToArray = jest.fn().mockResolvedValue([cappedEvent, secondEvent]);
+      const limit = jest.fn().mockReturnValue({ toArray: paginatedToArray });
+      const skip = jest.fn().mockReturnValue({ limit });
+      const paginatedSort = jest.fn().mockReturnValue({ skip });
+
+      mockFind
+        .mockReturnValueOnce({ sort: jest.fn().mockReturnValue({ toArray: jest.fn().mockResolvedValue([cappedEvent]) }) })
+        .mockReturnValueOnce({ sort: paginatedSort });
+      mockCountDocuments.mockResolvedValue(2);
+
+      const { GET } = await import('@/app/api/catalogues/[id]/export/route');
+      const request = new NextRequest(
+        'http://localhost:3000/api/catalogues/cat-123/export?format=json'
+      );
+      const response = await GET(request, { params: { id: 'cat-123' } });
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.events).toHaveLength(2);
+      expect(skip).toHaveBeenCalledWith(0);
+      expect(limit).toHaveBeenCalledWith(5000);
     });
 
     it('should export catalogue as GeoJSON', async () => {

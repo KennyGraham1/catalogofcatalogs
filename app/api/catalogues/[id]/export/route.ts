@@ -56,9 +56,7 @@ export async function GET(
       );
     }
 
-    // Get all events for this catalogue (without pagination)
-    const eventsResult = await dbQueries.getEventsByCatalogueId(catalogueId);
-    const events = Array.isArray(eventsResult) ? eventsResult : eventsResult.data;
+    const events = await getAllEventsForExport(catalogueId, catalogue.event_count);
 
     // An empty catalogue is valid — export an empty file rather than a 404
 
@@ -66,9 +64,13 @@ export async function GET(
     let minTime: string | undefined;
     let maxTime: string | undefined;
     if (events.length > 0) {
-      const times = events.map((e) => new Date(e.time).getTime());
-      minTime = new Date(Math.min(...times)).toISOString();
-      maxTime = new Date(Math.max(...times)).toISOString();
+      const times = events
+        .map((e) => new Date(e.time).getTime())
+        .filter(Number.isFinite);
+      if (times.length > 0) {
+        minTime = new Date(Math.min(...times)).toISOString();
+        maxTime = new Date(Math.max(...times)).toISOString();
+      }
     }
 
     // Parse data quality if stored as JSON
@@ -216,6 +218,38 @@ export async function GET(
       { status: 500 }
     );
   }
+}
+
+async function getAllEventsForExport(catalogueId: string, expectedCount?: number): Promise<any[]> {
+  if (!dbQueries) return [];
+
+  const firstResult = await dbQueries.getEventsByCatalogueId(catalogueId);
+  const firstEvents = Array.isArray(firstResult) ? firstResult : firstResult.data;
+
+  // getEventsByCatalogueId() may be capped by UNPAGINATED_EVENTS_LIMIT. When
+  // catalogue metadata indicates rows are missing, bypass that cap by using the
+  // paginated code path and collecting every page.
+  if (expectedCount == null || firstEvents.length >= expectedCount) {
+    return firstEvents;
+  }
+
+  const pageSize = 5000;
+  const allEvents: any[] = [];
+  let page = 1;
+  let totalPages = 1;
+
+  do {
+    const pageResult = await dbQueries.getEventsByCatalogueId(catalogueId, { page, pageSize });
+    if (Array.isArray(pageResult)) {
+      return pageResult;
+    }
+
+    allEvents.push(...pageResult.data);
+    totalPages = pageResult.pagination.totalPages;
+    page += 1;
+  } while (page <= totalPages);
+
+  return allEvents;
 }
 
 /**

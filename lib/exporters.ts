@@ -81,9 +81,9 @@ export function eventsToGeoJSON(
       source: metadata?.source,
       provider: metadata?.provider,
       region: metadata?.region,
-      timePeriod: metadata?.timePeriodStart && metadata?.timePeriodEnd ? {
-        start: metadata.timePeriodStart,
-        end: metadata.timePeriodEnd,
+      timePeriod: metadata?.timePeriodStart || metadata?.timePeriodEnd ? {
+        start: metadata?.timePeriodStart,
+        end: metadata?.timePeriodEnd,
       } : undefined,
       boundingBox: metadata?.boundingBox,
       license: metadata?.license,
@@ -249,8 +249,8 @@ export function eventsToKML(
   if (metadata?.source) descriptionParts.push(`Source: ${metadata.source}`);
   if (metadata?.provider) descriptionParts.push(`Provider: ${metadata.provider}`);
   if (metadata?.region) descriptionParts.push(`Region: ${metadata.region}`);
-  if (metadata?.timePeriodStart && metadata?.timePeriodEnd) {
-    descriptionParts.push(`Time Period: ${metadata.timePeriodStart} to ${metadata.timePeriodEnd}`);
+  if (metadata?.timePeriodStart || metadata?.timePeriodEnd) {
+    descriptionParts.push(`Time Period: ${metadata.timePeriodStart ?? '?'} to ${metadata.timePeriodEnd ?? '?'}`);
   }
   if (metadata?.eventCount != null) descriptionParts.push(`Event Count: ${metadata.eventCount}`);
   if (metadata?.license) descriptionParts.push(`License: ${metadata.license}`);
@@ -301,8 +301,10 @@ export function eventsToKML(
     descriptionParts.push(`Source Catalogues: ${JSON.stringify(metadata.sourceCatalogues)}`);
   }
 
+  const cdata = (value: string): string => `<![CDATA[${value.replace(/]]>/g, ']]]]><![CDATA[>')}]]>`;
+
   if (descriptionParts.length > 0) {
-    kml += `    <description><![CDATA[${descriptionParts.join('\n')}]]></description>\n`;
+    kml += `    <description>${cdata(descriptionParts.join('\n'))}</description>\n`;
   }
 
   // Define styles for different magnitude ranges.
@@ -487,9 +489,9 @@ export function eventsToJSON(
       source: metadata?.source,
       provider: metadata?.provider,
       region: metadata?.region,
-      timePeriod: metadata?.timePeriodStart && metadata?.timePeriodEnd ? {
-        start: metadata.timePeriodStart,
-        end: metadata.timePeriodEnd
+      timePeriod: metadata?.timePeriodStart || metadata?.timePeriodEnd ? {
+        start: metadata?.timePeriodStart,
+        end: metadata?.timePeriodEnd
       } : undefined,
       boundingBox: metadata?.boundingBox,
       license: metadata?.license,
