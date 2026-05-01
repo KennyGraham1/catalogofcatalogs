@@ -236,6 +236,20 @@ export function EnhancedSchemaMapper({
             minConfidence: threshold
           });
 
+          // Pre-populate auto-handled columns so they count as mapped.
+          // FM_AUTO columns all feed into focal_mechanisms; named-mag columns
+          // feed into magnitude (Mw preferred over ML when both present).
+          const hasMw = sampleFields.some((f: string) => f === 'Mw' || f === 'MW' || f === 'mw');
+          for (const f of sampleFields) {
+            if (FM_AUTO_COLUMNS.has(f) && !detectedMappings[f]) {
+              detectedMappings[f] = 'focal_mechanisms';
+            }
+            if (NAMED_MAG_COLUMNS[f] && !detectedMappings[f]) {
+              // If Mw is present, mark ML as secondary so it still shows as mapped
+              detectedMappings[f] = hasMw && (f === 'ML' || f === 'ml') ? '_magnitude_secondary' : 'magnitude';
+            }
+          }
+
           setFieldMappings(detectedMappings);
         }
       }
@@ -283,9 +297,12 @@ export function EnhancedSchemaMapper({
       onSchemaReady(adjustedMissing.length === 0);
     }
 
-    // Notify parent of mapping changes
+    // Notify parent of mapping changes — strip display-only sentinels before sending upstream
     if (onMappingsChange) {
-      onMappingsChange(fieldMappings);
+      const uploadMappings = Object.fromEntries(
+        Object.entries(fieldMappings).filter(([, v]) => v && v !== 'unmapped' && v !== '_magnitude_secondary')
+      );
+      onMappingsChange(uploadMappings);
     }
   }, [fieldMappings, loading, onMappingsChange, onSchemaReady, validationResults]);
   
@@ -302,9 +319,15 @@ export function EnhancedSchemaMapper({
     return !Object.values(fieldMappings).includes(fieldId);
   };
   
-  // Get mapped source field for a target field
+  // Get mapped source field(s) for a target field.
+  // Returns a display string: single source name, or "N columns (auto-assembled)" for multi-source targets.
   const getMappedSourceField = (targetFieldId: string): string | undefined => {
-    return Object.entries(fieldMappings).find(([_, target]) => target === targetFieldId)?.[0];
+    const sources = Object.entries(fieldMappings)
+      .filter(([_, t]) => t === targetFieldId)
+      .map(([src]) => src);
+    if (sources.length === 0) return undefined;
+    if (sources.length === 1) return sources[0];
+    return `${sources.length} columns (auto-assembled)`;
   };
   
   // Load templates from API
@@ -689,7 +712,7 @@ export function EnhancedSchemaMapper({
                 <InfoTooltip content="Map columns from your file to the QuakeML 1.2 schema fields." />
               </div>
               <Badge variant="secondary">
-                {Object.keys(fieldMappings).length} / {sourceFields.length} mapped
+                {Object.values(fieldMappings).filter(v => v && v !== 'unmapped').length} / {sourceFields.length} mapped
               </Badge>
             </div>
             <div className="p-4 space-y-3 max-h-96 overflow-y-auto">
