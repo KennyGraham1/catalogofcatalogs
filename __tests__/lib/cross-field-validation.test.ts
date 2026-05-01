@@ -96,7 +96,7 @@ describe('Cross-Field Validation', () => {
       };
 
       const checks = validateUncertaintyRelationships(event);
-      expect(checks.some(c => c.severity === 'error' && c.field === 'magnitude_uncertainty')).toBe(true);
+      expect(checks.some(c => c.severity === 'warning' && c.field === 'magnitude_uncertainty')).toBe(true);
     });
 
     it('should warn about asymmetric location uncertainties', () => {
@@ -131,7 +131,7 @@ describe('Cross-Field Validation', () => {
       };
 
       const checks = validateQualityMetricsConsistency(event);
-      expect(checks.some(c => c.severity === 'error' && c.field === 'used_station_count')).toBe(true);
+      expect(checks.some(c => c.severity === 'warning' && c.field === 'used_station_count')).toBe(true);
     });
 
     it('should warn when magnitude stations exceed location stations', () => {

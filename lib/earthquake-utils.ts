@@ -179,7 +179,7 @@ export function validateMagnitude(magnitude: number): boolean {
  */
 export function validateDepth(depth: number | null): boolean {
   if (depth === null) return true;
-  return depth >= 0 && depth <= 1000; // Max depth ~700km typically
+  return depth >= -5 && depth <= 1000; // -5km allows above-sea-level events (volcanic, mining)
 }
 
 /**

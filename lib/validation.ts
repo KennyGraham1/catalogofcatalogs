@@ -64,27 +64,10 @@ export const earthquakeEventSchema = z.object({
   associated_phase_count: z.number().int().min(0).max(10000).optional(),
   associated_station_count: z.number().int().min(0).max(5000).optional(),
   depth_phase_count: z.number().int().min(0).max(1000).optional(),
-}).refine((data) => {
-  // Cross-field validation: if depth is very shallow, check magnitude is reasonable
-  if (data.depth !== null && data.depth !== undefined && data.depth < 5 && data.magnitude > 8) {
-    return false;
-  }
-  return true;
-}, {
-  message: 'Very shallow (<5km) events with magnitude >8 are extremely rare and may be erroneous',
-  path: ['depth']
-}).refine((data) => {
-  // Cross-field validation: uncertainty should not exceed the value itself for depth
-  if (data.depth !== null && data.depth !== undefined && data.depth_uncertainty !== undefined) {
-    if (data.depth_uncertainty > data.depth * 2) {
-      return false;
-    }
-  }
-  return true;
-}, {
-  message: 'Depth uncertainty should not exceed twice the depth value',
-  path: ['depth_uncertainty']
 });
+// NOTE: Cross-field checks (shallow depth+large magnitude, depth uncertainty vs depth)
+// are handled as advisory warnings in lib/cross-field-validation.ts.
+// They were previously .refine() hard-rejections here, which silently dropped valid events.
 
 export type EarthquakeEvent = z.infer<typeof earthquakeEventSchema>;
 
@@ -137,7 +120,7 @@ export type RoleRequestReview = z.infer<typeof roleRequestReviewSchema>;
 export const fileUploadSchema = z.object({
   fileName: z.string().min(1),
   fileSize: z.number().max(500 * 1024 * 1024), // Max 500MB
-  fileType: z.enum(['csv', 'txt', 'json', 'geojson', 'xml', 'qml']),
+  fileType: z.enum(['csv', 'txt', 'dat', 'json', 'geojson', 'xml', 'qml']),
 });
 
 export type FileUpload = z.infer<typeof fileUploadSchema>;
@@ -618,7 +601,7 @@ export function validateEventWithDetails(
         field: 'depth',
         value: event.depth,
         expected: FIELD_EXPECTATIONS.depth,
-        message: 'Depth must be between 0 and 1000 km',
+        message: 'Depth must be between -5 and 1000 km',
         category: 'out_of_range',
         severity: 'error',
       });

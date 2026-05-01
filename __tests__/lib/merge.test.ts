@@ -287,8 +287,8 @@ describe('Event Validation', () => {
 
     it('should return true for consistent events', () => {
       const events = [
-        createMockEvent({ magnitude: 5.0, depth: 25 }),
-        createMockEvent({ magnitude: 5.2, depth: 28 }),
+        createMockEvent({ magnitude: 5.0, depth: 25, source: 'NetworkA' }),
+        createMockEvent({ magnitude: 5.2, depth: 28, source: 'NetworkB' }),
       ];
       expect(validateEventGroup(events)).toBe(true);
     });
@@ -303,8 +303,8 @@ describe('Event Validation', () => {
 
     it('should allow larger magnitude range for large events', () => {
       const events = [
-        createMockEvent({ magnitude: 7.0, depth: 25 }),
-        createMockEvent({ magnitude: 8.0, depth: 28 }), // 1.0 < 1.5 threshold for M>=7
+        createMockEvent({ magnitude: 7.0, depth: 25, source: 'NetworkA' }),
+        createMockEvent({ magnitude: 8.0, depth: 28, source: 'NetworkB' }), // 1.0 < 1.5 threshold for M>=7
       ];
       expect(validateEventGroup(events)).toBe(true);
     });

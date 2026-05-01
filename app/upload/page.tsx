@@ -550,6 +550,27 @@ export default function UploadPage() {
       setValidationResults(results);
       setUploadStatus(hasValidEvents ? 'mapping' : 'error');
 
+      if (!hasValidEvents) {
+        const firstErrors = results
+          .flatMap(result => (result.errors || []).map((error: any) => ({
+            fileName: result.fileName,
+            line: error.line,
+            message: error.message,
+          })))
+          .slice(0, 3);
+        const description = firstErrors.length > 0
+          ? firstErrors
+              .map(error => `${error.fileName}${error.line ? ` line ${error.line}` : ''}: ${error.message}`)
+              .join('; ')
+          : 'No valid events were found in the uploaded file.';
+
+        toast({
+          title: 'Validation failed',
+          description,
+          variant: 'destructive',
+        });
+      }
+
       if (hasErrors && hasValidEvents) {
         toast({
           title: 'Partial import ready',
@@ -557,17 +578,17 @@ export default function UploadPage() {
         });
       }
 
-      // Issue #15: Warn about cross-field validation errors (non-blocking but explicit)
+      // Cross-field checks are advisory quality checks. They should be visible,
+      // but they do not block mapping or catalogue creation.
       if (crossFieldResult.summary.failedEvents > 0) {
         toast({
-          title: 'Cross-field validation issues',
-          description: `${crossFieldResult.summary.failedEvents} event(s) have cross-field validation errors. Review the validation results before proceeding.`,
-          variant: 'destructive',
+          title: 'Cross-field review recommended',
+          description: `${crossFieldResult.summary.failedEvents} event(s) have high-severity consistency checks. You can continue, but review the validation results when possible.`,
         });
       } else if (crossFieldResult.summary.warnings > 0) {
         toast({
-          title: 'Cross-field validation warnings',
-          description: `${crossFieldResult.summary.warnings} cross-field warning(s) detected.`,
+          title: 'Cross-field review recommended',
+          description: `${crossFieldResult.summary.warnings} cross-field warning(s) detected. You can continue.`,
         });
       }
 
@@ -1109,17 +1130,18 @@ export default function UploadPage() {
                       <Card className={`shadow-sm ${crossFieldValidation.summary.errors > 0 ? 'border-red-200 dark:border-red-800' : 'border-amber-200 dark:border-amber-800'}`}>
                         <CardHeader className="pb-3">
                           <CardTitle className={`text-base ${crossFieldValidation.summary.errors > 0 ? 'text-red-800 dark:text-red-300' : 'text-amber-800 dark:text-amber-300'}`}>
-                            Cross-Field Validation Issues
+                            Cross-Field Review
                           </CardTitle>
                           <CardDescription className="text-xs">
                             {crossFieldValidation.summary.failedEvents} event(s) affected —{' '}
                             {crossFieldValidation.summary.errors > 0 && (
-                              <span className="text-red-600 dark:text-red-400 font-medium">{crossFieldValidation.summary.errors} error(s)</span>
+                              <span className="text-red-600 dark:text-red-400 font-medium">{crossFieldValidation.summary.errors} high-severity check(s)</span>
                             )}
                             {crossFieldValidation.summary.errors > 0 && crossFieldValidation.summary.warnings > 0 && ', '}
                             {crossFieldValidation.summary.warnings > 0 && (
                               <span className="text-amber-600 dark:text-amber-400">{crossFieldValidation.summary.warnings} warning(s)</span>
                             )}
+                            {' '}These checks are advisory and do not block import.
                           </CardDescription>
                         </CardHeader>
                         <CardContent>

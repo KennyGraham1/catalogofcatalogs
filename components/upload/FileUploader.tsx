@@ -185,7 +185,7 @@ export function FileUploader({
             onChange={handleFileInputChange}
             style={{ display: 'none' }}
             multiple
-            accept=".csv,.txt,.qml,.json,.geojson,.xml"
+            accept=".csv,.txt,.dat,.qml,.json,.geojson,.xml"
             disabled={uploading || disabled}
             aria-label="File input for catalogue upload"
           />

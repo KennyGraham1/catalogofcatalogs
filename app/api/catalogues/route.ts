@@ -13,6 +13,13 @@ import {
 import { quakemlEventToDbFields } from '@/lib/quakeml-to-db';
 import { parsedEventToDbFields } from '@/lib/parsed-event-to-db';
 import { normalizeTimestamp } from '@/lib/earthquake-utils';
+import {
+  ALLOWED_DEPTH_TYPE,
+  ALLOWED_EVALUATION_MODE,
+  ALLOWED_EVALUATION_STATUS,
+  ALLOWED_EVENT_TYPE,
+  ALLOWED_EVENT_TYPE_CERTAINTY,
+} from '@/lib/db';
 import type { ParsedEvent } from '@/types/upload';
 
 // Force dynamic rendering for this API route
@@ -162,6 +169,73 @@ function safeParseNumber(value: any): number | null {
   return isNaN(num) ? null : num;
 }
 
+function dropInvalidOptionalNumericFields(row: InsertRow): void {
+  const nonNegativeFields = [
+    'magnitude_uncertainty',
+    'time_uncertainty',
+    'latitude_uncertainty',
+    'longitude_uncertainty',
+    'depth_uncertainty',
+    'horizontal_uncertainty',
+    'used_station_count',
+    'used_phase_count',
+    'standard_error',
+    'minimum_distance',
+    'maximum_distance',
+    'associated_phase_count',
+    'associated_station_count',
+    'depth_phase_count',
+    'magnitude_station_count',
+  ];
+
+  for (const field of nonNegativeFields) {
+    const value = safeParseNumber((row as any)[field]);
+    if (value === null || value < 0) {
+      delete (row as any)[field];
+    } else {
+      (row as any)[field] = value;
+    }
+  }
+
+  const azimuthalGap = safeParseNumber((row as any).azimuthal_gap);
+  if (azimuthalGap === null || azimuthalGap < 0 || azimuthalGap > 360) {
+    delete (row as any).azimuthal_gap;
+  } else {
+    (row as any).azimuthal_gap = azimuthalGap;
+  }
+
+  const minDistance = safeParseNumber((row as any).minimum_distance);
+  const maxDistance = safeParseNumber((row as any).maximum_distance);
+  if (minDistance !== null && maxDistance !== null && maxDistance < minDistance) {
+    delete (row as any).minimum_distance;
+    delete (row as any).maximum_distance;
+  }
+}
+
+function dropInvalidOptionalEnumFields(row: InsertRow): void {
+  const enumFields: Array<[string, Set<string>]> = [
+    ['evaluation_status', ALLOWED_EVALUATION_STATUS],
+    ['evaluation_mode', ALLOWED_EVALUATION_MODE],
+    ['magnitude_evaluation_status', ALLOWED_EVALUATION_STATUS],
+    ['magnitude_evaluation_mode', ALLOWED_EVALUATION_MODE],
+    ['depth_type', ALLOWED_DEPTH_TYPE],
+    ['event_type', ALLOWED_EVENT_TYPE],
+    ['event_type_certainty', ALLOWED_EVENT_TYPE_CERTAINTY],
+  ];
+
+  for (const [field, allowed] of enumFields) {
+    const value = (row as any)[field];
+    if (value == null) continue;
+
+    const normalized = String(value).toLowerCase().trim();
+    if (allowed.has(normalized)) {
+      (row as any)[field] = normalized;
+    } else {
+      delete (row as any)[field];
+    }
+  }
+}
+
 function applyFieldMappingsToPendingEvent(
   pendingEvent: ParsedEvent,
   fieldMappings: unknown,
@@ -266,6 +340,9 @@ function buildInsertRow(event: any, pendingEvent: ParsedEvent | undefined, catal
       : event;
     Object.assign(row, parsedEventToDbFields(source as ParsedEvent));
   }
+
+  dropInvalidOptionalNumericFields(row);
+  dropInvalidOptionalEnumFields(row);
 
   return row;
 }

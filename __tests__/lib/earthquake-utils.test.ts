@@ -170,8 +170,14 @@ describe('earthquake-utils', () => {
       expect(validateDepth(null)).toBe(true);
     });
 
+    it('should accept valid negative depths for above-sea-level events', () => {
+      expect(validateDepth(-1)).toBe(true);
+      expect(validateDepth(-4.9)).toBe(true);
+      expect(validateDepth(-5)).toBe(true);
+    });
+
     it('should reject invalid depths', () => {
-      expect(validateDepth(-1)).toBe(false);
+      expect(validateDepth(-6)).toBe(false);
       expect(validateDepth(1001)).toBe(false);
     });
   });

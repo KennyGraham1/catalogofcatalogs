@@ -409,6 +409,7 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
 
       // Map common field names with date format hint
       const mappedEvent = mapCommonFields(event, actualDateFormat, true);
+      normalizeOptionalDepth(mappedEvent as Record<string, unknown>);
       const mappingReport = (mappedEvent as any)._mappingReport as FieldMappingTrace[] | undefined;
       const context: ValidationEventContext = {
         line: lineNumber,
@@ -555,6 +556,7 @@ export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult
     eventArray.forEach((item, index) => {
       try {
         const mappedEvent = mapCommonFields(item, dateFormat, true);
+        normalizeOptionalDepth(mappedEvent as Record<string, unknown>);
         const mappingReport = (mappedEvent as any)._mappingReport as FieldMappingTrace[] | undefined;
         const context: ValidationEventContext = {
           line: index + 1,
@@ -1166,6 +1168,25 @@ function safeParseFloat(value: any): number | null {
   return isNaN(num) ? null : num;
 }
 
+function normalizeOptionalDepth(event: Record<string, unknown>): void {
+  if (event.depth === undefined || event.depth === null || event.depth === '') return;
+
+  const depth = safeParseFloat(event.depth);
+  if (depth === null || depth < -5) {
+    // Null out invalid depths; allow -5 to 0 for above-sea-level events
+    event.depth = null;
+    return;
+  }
+
+  if (depth > 1000) {
+    const depthKm = depth / 1000;
+    event.depth = depthKm <= 1000 ? depthKm : null;
+    return;
+  }
+
+  event.depth = depth;
+}
+
 /**
  * Mapping report entry showing how a field was mapped
  */
@@ -1423,6 +1444,7 @@ export async function parseCSVStream(
 
       // Map common field names
       const mappedEvent = mapCommonFields(event, dateFormat);
+      normalizeOptionalDepth(mappedEvent as Record<string, unknown>);
 
       // Validate the event
       const validation = validateEvent(mappedEvent);
@@ -1519,6 +1541,7 @@ export async function parseJSONStream(
     try {
       const eventData = JSON.parse(line);
       const mappedEvent = mapCommonFields(eventData);
+      normalizeOptionalDepth(mappedEvent as Record<string, unknown>);
 
       // Validate the event
       const validation = validateEvent(mappedEvent);

@@ -103,7 +103,7 @@ export function validateUncertaintyRelationships(event: any): DataQualityCheck[]
     if (event.magnitude_uncertainty > Math.abs(event.magnitude) && Math.abs(event.magnitude) >= 1.0) {
       checks.push({
         passed: false,
-        severity: 'error',
+        severity: 'warning',
         message: `Magnitude uncertainty (${event.magnitude_uncertainty}) exceeds magnitude value (${event.magnitude})`,
         field: 'magnitude_uncertainty',
         suggestion: 'Magnitude is poorly constrained relative to its value - review the magnitude calculation'
@@ -143,10 +143,10 @@ export function validateQualityMetricsConsistency(event: any): DataQualityCheck[
     if (event.used_station_count > event.used_phase_count) {
       checks.push({
         passed: false,
-        severity: 'error',
+        severity: 'warning',
         message: `Station count (${event.used_station_count}) exceeds phase count (${event.used_phase_count})`,
         field: 'used_station_count',
-        suggestion: 'This is impossible - each station contributes at least one phase'
+        suggestion: 'Each station should contribute at least one phase - verify station and phase count fields are not swapped'
       });
     }
 
