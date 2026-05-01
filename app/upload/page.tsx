@@ -221,7 +221,15 @@ export default function UploadPage() {
 
         // For numeric fields, ensure proper type conversion
         if (numericFields.has(targetField)) {
-          mappedEvent[targetField] = safeParseNumber(event[sourceField]);
+          const parsed = safeParseNumber(event[sourceField]);
+          if (parsed !== null) {
+            mappedEvent[targetField] = parsed;
+          }
+        } else if (targetField === 'time') {
+          const value = event[sourceField];
+          if (typeof value === 'string' || typeof value === 'number') {
+            mappedEvent[targetField] = value;
+          }
         } else {
           mappedEvent[targetField] = event[sourceField];
         }
@@ -636,20 +644,20 @@ export default function UploadPage() {
         message: 'Applying field mappings to events...',
       }));
 
-      // When every uploaded file has a server-side pending record, omit the
-      // events array from the catalogue request entirely — it can be hundreds
-      // of MB for large catalogs and would exceed Vercel's 4.5 MB hard limit.
-      // Instead we send only the fieldMappings config (a tiny object); the
-      // server applies them to the stored pendingEvents and reconstructs the
-      // full event list there.
+      // Large uploads omit the events array from the catalogue request because
+      // it can exceed Vercel's 4.5 MB hard limit. Small uploads keep sending
+      // events inline, even when they also have a pendingUploadId, so they stay
+      // on the older catalogue creation path.
       //
       // If any file is missing a pending record (e.g. it was a tiny in-memory
       // upload that never went through the pending store) we fall back to
       // sending the events inline as before.
       const pendingIds = Object.values(pendingUploadIds);
       const allFilesHavePendingId = files.length > 0 && files.every(f => pendingUploadIds[f.name]);
+      const totalSourceBytes = files.reduce((sum, f) => sum + f.size, 0);
+      const usePendingOnlyPayload = allFilesHavePendingId && totalSourceBytes > 3.5 * 1024 * 1024;
 
-      const finalEvents = allFilesHavePendingId ? [] : applyUIMappings(parsedEvents);
+      const finalEvents = usePendingOnlyPayload ? [] : applyUIMappings(parsedEvents);
 
       setProcessingProgress(prev => ({
         ...prev,
@@ -683,15 +691,16 @@ export default function UploadPage() {
         },
         body: JSON.stringify({
           name: catalogueName.trim(),
-          // Omit events when all files are covered by pendingUploadIds — the
-          // server reconstructs them from the pending store to stay under
-          // Vercel's 4.5 MB request body limit.
-          ...(allFilesHavePendingId ? {} : { events: finalEvents }),
+          // Omit events only when the source payload is large enough that the
+          // catalogue request risks Vercel's 4.5 MB body limit. Small uploads
+          // keep using the mature inline-events path even when a pending token
+          // exists.
+          ...(usePendingOnlyPayload ? {} : { events: finalEvents }),
           metadata: metadataPayload,
           pendingUploadIds: pendingIds,
           // Send field mappings config so the server can apply them to
           // pendingEvents when events are not included in the body.
-          ...(allFilesHavePendingId && Object.keys(fieldMappings).length > 0
+          ...(usePendingOnlyPayload && Object.keys(fieldMappings).length > 0
             ? { fieldMappings }
             : {}),
         }),

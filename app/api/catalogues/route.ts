@@ -12,6 +12,7 @@ import {
 } from '@/lib/pending-uploads';
 import { quakemlEventToDbFields } from '@/lib/quakeml-to-db';
 import { parsedEventToDbFields } from '@/lib/parsed-event-to-db';
+import { normalizeTimestamp } from '@/lib/earthquake-utils';
 import type { ParsedEvent } from '@/types/upload';
 
 // Force dynamic rendering for this API route
@@ -173,11 +174,24 @@ function applyFieldMappingsToPendingEvent(
 
   for (const [src, tgt] of Object.entries(mappings)) {
     if (!tgt || pendingEvent[src] === undefined) continue;
-    event[tgt] = NUMERIC_MAPPING_FIELDS.has(tgt)
-      ? (typeof pendingEvent[src] === 'number'
-        ? pendingEvent[src]
-        : parseFloat(String(pendingEvent[src])))
-      : pendingEvent[src];
+
+    if (tgt === 'time') {
+      const normalized = normalizeTimestamp(pendingEvent[src] as string | number);
+      if (normalized) {
+        event.time = normalized;
+      }
+      continue;
+    }
+
+    if (NUMERIC_MAPPING_FIELDS.has(tgt)) {
+      const parsed = safeParseNumber(pendingEvent[src]);
+      if (parsed !== null) {
+        event[tgt] = parsed;
+      }
+      continue;
+    }
+
+    event[tgt] = pendingEvent[src];
   }
 
   return event;
@@ -189,9 +203,11 @@ function validateCatalogueEvent(event: any): string[] {
   if (!event.time || (typeof event.time === 'string' && event.time.trim() === '')) {
     errors.push('time is required');
   } else {
-    const date = new Date(event.time);
-    if (isNaN(date.getTime())) {
+    const normalizedTime = normalizeTimestamp(event.time);
+    if (!normalizedTime) {
       errors.push('time is not a valid timestamp');
+    } else {
+      event.time = normalizedTime;
     }
   }
 
@@ -677,26 +693,7 @@ export async function POST(request: NextRequest) {
       // Build a minimal events array from pendingEvents so the rest of the
       // route (validation, bounds calculation, row construction) works
       // identically regardless of how the client sent the data.
-      const mappings: Record<string, string> =
-        fieldMappings && typeof fieldMappings === 'object' ? fieldMappings : {};
-      const numericFields = new Set([
-        'latitude', 'longitude', 'depth', 'magnitude',
-        'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty',
-        'depth_uncertainty', 'horizontal_uncertainty', 'magnitude_uncertainty',
-        'azimuthal_gap', 'used_phase_count', 'used_station_count', 'standard_error',
-        'minimum_distance', 'maximum_distance', 'associated_phase_count',
-        'associated_station_count', 'depth_phase_count', 'magnitude_station_count',
-      ]);
-      events = pendingEvents.map(pe => {
-        const ev: Record<string, unknown> = { ...pe };
-        for (const [src, tgt] of Object.entries(mappings)) {
-          if (!tgt || pe[src] === undefined) continue;
-          ev[tgt] = numericFields.has(tgt)
-            ? (typeof pe[src] === 'number' ? pe[src] : parseFloat(String(pe[src])))
-            : pe[src];
-        }
-        return ev;
-      });
+      events = pendingEvents.map(pe => applyFieldMappingsToPendingEvent(pe, fieldMappings));
     } else {
       events = bodyEvents;
     }
@@ -714,10 +711,11 @@ export async function POST(request: NextRequest) {
       if (!event.time || (typeof event.time === 'string' && event.time.trim() === '')) {
         errors.push('time is required');
       } else {
-        // Validate timestamp format
-        const date = new Date(event.time);
-        if (isNaN(date.getTime())) {
+        const normalizedTime = normalizeTimestamp(event.time);
+        if (!normalizedTime) {
           errors.push('time is not a valid timestamp');
+        } else {
+          event.time = normalizedTime;
         }
       }
 
@@ -816,45 +814,8 @@ export async function POST(request: NextRequest) {
     // Each valid event's `.index` is its original position in the events array,
     // which is the same order as pendingEvents, so we join by position.
     const eventsToInsert = validEvents.map(({ event, index }) => {
-      // Parse required numeric fields — already validated above
-      const latitude  = safeParseNumber(event.latitude)!;
-      const longitude = safeParseNumber(event.longitude)!;
-      const magnitude = safeParseNumber(event.magnitude)!;
-
-      const row: InsertRow = {
-        id: uuidv4(),
-        catalogue_id: catalogueId,
-        time: event.time,
-        latitude,
-        longitude,
-        magnitude,
-        source_events: JSON.stringify([{ source: 'upload', eventId: event.id || event.eventId }]),
-        depth: safeParseNumber(event.depth) ?? undefined,
-      };
-
       const pendingEvent = pendingEvents?.[index];
-
-      if (pendingEvent?.quakeml) {
-        // QuakeML: extract all DB fields from the rich QuakeMLEvent structure
-        // (preferred origin, preferred magnitude, picks, arrivals, focal
-        // mechanisms, amplitudes, station magnitudes, quality metrics, etc.)
-        Object.assign(row, quakemlEventToDbFields(pendingEvent.quakeml));
-      } else {
-        // CSV / JSON / GeoJSON (or QuakeML fallback when pending record expired):
-        // map every scalar field that ParsedEvent carries to its DB column.
-        //
-        // Use `event` (which includes any user-configured UI field mappings
-        // applied above) merged over the pending event (which carries JSON
-        // blob fields that the browser response may have stripped).  This
-        // ensures parsedEventToDbFields sees both the UI-mapped field names
-        // AND the full server-side data.
-        const source = pendingEvent
-          ? { ...pendingEvent, ...event }
-          : event;
-        Object.assign(row, parsedEventToDbFields(source as ParsedEvent));
-      }
-
-      return row;
+      return buildInsertRow(event, pendingEvent, catalogueId);
     });
 
     // Calculate validation statistics for the response
@@ -902,6 +863,14 @@ export async function POST(request: NextRequest) {
 
       await db.updateCatalogueStatus('complete', catalogueId);
       await db.updateCatalogueEventCount(catalogueId, insertedCount);
+      if (
+        minLat !== undefined &&
+        maxLat !== undefined &&
+        minLon !== undefined &&
+        maxLon !== undefined
+      ) {
+        await db.updateCatalogueGeoBounds(catalogueId, minLat, maxLat, minLon, maxLon);
+      }
     } catch (error) {
       logger.error('Catalogue import failed; cleaning up partially inserted data', {
         catalogueId,
