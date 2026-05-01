@@ -98,21 +98,26 @@ export interface CrossFieldCheck {
  * Result of cross-field validation for a single event
  */
 export interface CrossFieldEventResult {
-  eventIndex: number;
+  eventIndex?: number;
+  passed: boolean;
   checks: CrossFieldCheck[];
 }
 
 /**
- * Summary of cross-field validation
+ * Summary of cross-field validation for a batch of events
  */
 export interface CrossFieldValidationResult {
+  passed: boolean;
+  results: CrossFieldEventResult[];
   summary: {
-    total: number;
+    totalEvents: number;
+    passedEvents: number;
+    failedEvents: number;
+    totalChecks: number;
     errors: number;
     warnings: number;
-    valid: number;
+    info: number;
   };
-  results: CrossFieldEventResult[];
 }
 
 /**

@@ -12,6 +12,7 @@ import type { ParsedEvent } from '@/types/upload';
 
 // Force dynamic rendering for this API route
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 const logger = new Logger('CataloguesAPI');
 

@@ -53,6 +53,7 @@ async function ensureIndexes(): Promise<void> {
 export interface UploadSession {
   session_id: string;
   file_name: string;
+  file_size?: number;
   total_chunks: number;
   delimiter?: string;
   date_format?: string;
@@ -65,6 +66,7 @@ export interface UploadSession {
  */
 export async function createUploadSession(
   fileName: string,
+  fileSize: number,
   totalChunks: number,
   delimiter?: string,
   dateFormat?: string,
@@ -81,6 +83,7 @@ export async function createUploadSession(
     chunk_index:  -1,           // sentinel: session metadata
     total_chunks: totalChunks,
     file_name:    fileName,
+    file_size:    fileSize,
     delimiter,
     date_format:  dateFormat,
     data:         new Binary(Buffer.alloc(0)), // empty — metadata only
@@ -102,6 +105,7 @@ export async function getUploadSession(sessionId: string): Promise<UploadSession
   return {
     session_id:   doc.session_id,
     file_name:    doc.file_name,
+    file_size:    doc.file_size,
     total_chunks: doc.total_chunks,
     delimiter:    doc.delimiter,
     date_format:  doc.date_format,

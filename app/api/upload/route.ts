@@ -5,9 +5,12 @@ import { type DateFormat } from '@/lib/date-format-detector';
 import { requireEditor } from '@/lib/auth/middleware';
 import { Logger } from '@/lib/errors';
 import { storePendingUpload } from '@/lib/pending-uploads';
+import { createUploadTooLargeResponse, getMaxSyncUploadParseBytes } from '@/lib/upload-limits';
 
 const logger = new Logger('UploadAPI');
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
+
+export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
   try {
@@ -34,6 +37,11 @@ export async function POST(request: NextRequest) {
         { error: `File size exceeds maximum of ${MAX_FILE_SIZE / 1024 / 1024}MB` },
         { status: 400 }
       );
+    }
+
+    const maxParseBytes = getMaxSyncUploadParseBytes();
+    if (file.size > maxParseBytes) {
+      return NextResponse.json(createUploadTooLargeResponse(file.size), { status: 413 });
     }
 
     // Validate file type

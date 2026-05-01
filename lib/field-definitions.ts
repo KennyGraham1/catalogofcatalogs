@@ -482,10 +482,12 @@ export const FIELD_ALIASES: Record<string, { exactMatches: string[]; aliases: st
   },
   depth: {
     exactMatches: ['depth', 'Depth', 'DEPTH', 'Depth/km'],
-    aliases: ['dep', 'depths', 'z', 'depthkm', 'depth_km', 'evdp', 'origindepth', 'origin_depth']
+    aliases: ['dep', 'depths', 'z', 'depthkm', 'depth_km', 'evdp', 'origindepth', 'origin_depth',
+              'CD', 'cd', 'centroid_depth', 'centroiddepth']
   },
   magnitude: {
-    exactMatches: ['magnitude', 'Magnitude', 'MAGNITUDE', 'Mag', 'MAG'],
+    // Mw / ML are common named-type columns; schema mapper lets user choose which wins
+    exactMatches: ['magnitude', 'Magnitude', 'MAGNITUDE', 'Mag', 'MAG', 'Mw', 'MW', 'mw', 'ML', 'ml'],
     aliases: ['mag', 'm', 'mpref', 'prefmag', 'pref_magnitude']
   },
 
@@ -546,13 +548,15 @@ export const FIELD_ALIASES: Record<string, { exactMatches: string[]; aliases: st
   },
   method_id: {
     exactMatches: ['method_id', 'methodID'],
-    aliases: ['methodid', 'location_method', 'locmethod', 'loc_method', 'algorithm']
+    aliases: ['methodid', 'location_method', 'locmethod', 'loc_method', 'algorithm',
+              'Method', 'method', 'invmethod', 'inversion_method']
   },
 
   // Agency/Author
   agency_id: {
     exactMatches: ['agency_id', 'agencyID', 'Agency'],
-    aliases: ['agencyid', 'agency', 'source_agency', 'contributor', 'network', 'net']
+    aliases: ['agencyid', 'agency', 'source_agency', 'contributor', 'network', 'net',
+              'locsource', 'loc_source', 'location_source', 'origsource', 'orig_source']
   },
   author: {
     exactMatches: ['author', 'Author', 'AUTHOR'],
@@ -574,7 +578,8 @@ export const FIELD_ALIASES: Record<string, { exactMatches: string[]; aliases: st
   },
   magnitude_method_id: {
     exactMatches: ['magnitude_method_id', 'magnitudeMethodID'],
-    aliases: ['magmethod', 'mag_method', 'magnitude_method', 'magmethodid']
+    aliases: ['magmethod', 'mag_method', 'magnitude_method', 'magmethodid',
+              'magsource', 'mag_source', 'magnitude_source']
   },
   magnitude_evaluation_mode: {
     exactMatches: ['magnitude_evaluation_mode', 'magnitudeEvaluationMode'],
@@ -596,7 +601,8 @@ export const FIELD_ALIASES: Record<string, { exactMatches: string[]; aliases: st
   },
   used_station_count: {
     exactMatches: ['used_station_count', 'usedStationCount'],
-    aliases: ['nst', 'nsta', 'stations_used', 'usedstations', 'numstations', 'stationcount']
+    aliases: ['nst', 'nsta', 'stations_used', 'usedstations', 'numstations', 'stationcount',
+              'NS', 'ns', 'mt_stations', 'nstations']
   },
   standard_error: {
     exactMatches: ['standard_error', 'standardError'],
@@ -631,7 +637,8 @@ export const FIELD_ALIASES: Record<string, { exactMatches: string[]; aliases: st
   evaluation_status: {
     exactMatches: ['evaluation_status', 'evaluationStatus'],
     aliases: ['evalstatus', 'eval_status', 'status', 'reviewstatus', 'review_status']
-  }
+  },
+
 };
 
 /**

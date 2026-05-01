@@ -24,12 +24,14 @@ import {
   getUploadSession,
   assembleChunks,
   deleteUploadSession,
+  CHUNK_SIZE,
 } from '@/lib/upload-chunks';
 import { parseFile } from '@/lib/parsers';
 import { storePendingUpload } from '@/lib/pending-uploads';
+import { createUploadTooLargeResponse, getMaxSyncUploadParseBytes } from '@/lib/upload-limits';
 
 export const dynamic    = 'force-dynamic';
-export const maxDuration = 60; // seconds — Vercel Pro/Enterprise only
+export const maxDuration = 300; // seconds — Vercel Pro/Enterprise
 
 const logger = new Logger('UploadFinalizeAPI');
 
@@ -54,7 +56,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { file_name: fileName, total_chunks: totalChunks, delimiter, date_format: dateFormat } = session;
+    const {
+      file_name: fileName,
+      file_size: fileSize,
+      total_chunks: totalChunks,
+      delimiter,
+      date_format: dateFormat,
+    } = session;
+
+    const maxParseBytes = getMaxSyncUploadParseBytes();
+    const estimatedSize = fileSize ?? totalChunks * CHUNK_SIZE;
+    if (estimatedSize > maxParseBytes) {
+      return NextResponse.json(createUploadTooLargeResponse(estimatedSize), { status: 413 });
+    }
 
     logger.info('Finalising chunked upload', { sessionId, fileName, totalChunks });
 
@@ -95,7 +109,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       fileName,
-      fileSize: content.length,          // byte count of reassembled content
+      fileSize: fileSize ?? content.length,
       format: fileName.split('.').pop()?.toUpperCase() ?? 'UNKNOWN',
       ...parseResult,
       events,

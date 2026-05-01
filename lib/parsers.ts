@@ -739,6 +739,104 @@ export function parseQuakeML(content: string): ParseResult {
 }
 
 /**
+ * Assemble a focal_mechanisms JSON field from flat nodal-plane / moment-tensor columns.
+ *
+ * Recognised column sets:
+ *   Nodal planes : strike1 dip1 rake1 / strike2 dip2 rake2
+ *   Moment tensor: Mxx Mxy Mxz Myy Myz Mzz  (NED Cartesian, Z=up convention)
+ *                  → converted to QuakeML USE spherical (Mrr Mtt Mpp Mrt Mrp Mtp)
+ *   Principal axes: Tva Tpl Taz / Nva Npl Naz / Pva Ppl Paz
+ *   Scalar moment : Mo
+ *   Double couple : DC (percentage, e.g. 87 → 0.87)
+ *   Variance red. : VR
+ *
+ * Returns the assembled FocalMechanism object (to be JSON-stringified), or null
+ * when none of the recognised columns are present.
+ */
+function assembleFocalMechanismFromRow(row: any): object | null {
+  const get = (keys: string[]): number | null => {
+    for (const k of keys) {
+      const v = row[k] ?? row[k.toLowerCase()] ?? row[k.toUpperCase()];
+      if (v !== undefined && v !== null && String(v).trim() !== '') {
+        const n = parseFloat(String(v));
+        if (!isNaN(n)) return n;
+      }
+    }
+    return null;
+  };
+
+  const strike1 = get(['strike1', 'Strike1']);
+  const dip1    = get(['dip1',    'Dip1']);
+  const rake1   = get(['rake1',   'Rake1']);
+  const strike2 = get(['strike2', 'Strike2']);
+  const dip2    = get(['dip2',    'Dip2']);
+  const rake2   = get(['rake2',   'Rake2']);
+
+  const Mxx = get(['Mxx']); const Mxy = get(['Mxy']); const Mxz = get(['Mxz']);
+  const Myy = get(['Myy']); const Myz = get(['Myz']); const Mzz = get(['Mzz']);
+
+  const Tva = get(['Tva']); const Tpl = get(['Tpl']); const Taz = get(['Taz']);
+  const Nva = get(['Nva']); const Npl = get(['Npl']); const Naz = get(['Naz']);
+  const Pva = get(['Pva']); const Ppl = get(['Ppl']); const Paz = get(['Paz']);
+
+  const hasFlatFM = [strike1, dip1, rake1, Mxx, Mxy, Mxz, Myy, Myz, Mzz, Taz, Paz].some(v => v !== null);
+  if (!hasFlatFM) return null;
+
+  const rq = (v: number | null) => v !== null ? { value: v } : undefined;
+
+  const fm: any = { publicID: String(row.PublicID ?? row.publicID ?? row.id ?? '') };
+
+  // Nodal planes
+  if (strike1 !== null || dip1 !== null || rake1 !== null) {
+    fm.nodalPlanes = {
+      nodalPlane1: { strike: rq(strike1), dip: rq(dip1), rake: rq(rake1) },
+      ...(strike2 !== null || dip2 !== null || rake2 !== null
+        ? { nodalPlane2: { strike: rq(strike2), dip: rq(dip2), rake: rq(rake2) } }
+        : {}),
+    };
+  }
+
+  // Principal axes (T, N, P)
+  if (Taz !== null || Tpl !== null || Paz !== null || Ppl !== null) {
+    fm.principalAxes = {
+      tAxis: { azimuth: rq(Taz) ?? { value: 0 }, plunge: rq(Tpl) ?? { value: 0 }, length: rq(Tva) },
+      pAxis: { azimuth: rq(Paz) ?? { value: 0 }, plunge: rq(Ppl) ?? { value: 0 }, length: rq(Pva) },
+      ...(Naz !== null || Npl !== null
+        ? { nAxis: { azimuth: rq(Naz) ?? { value: 0 }, plunge: rq(Npl) ?? { value: 0 }, length: rq(Nva) } }
+        : {}),
+    };
+  }
+
+  // Moment tensor — convert NED Cartesian (Z=up) to QuakeML USE spherical
+  // Convention: r=Up=Z, t=South=-X(North), p=East=Y
+  // Mrr=Mzz, Mtt=Mxx, Mpp=Myy, Mrt=-Mxz, Mrp=Myz, Mtp=-Mxy
+  if (Mxx !== null || Mzz !== null) {
+    const tensor = {
+      ...(Mzz !== null ? { Mrr: { value: Mzz } } : {}),
+      ...(Mxx !== null ? { Mtt: { value: Mxx } } : {}),
+      ...(Myy !== null ? { Mpp: { value: Myy } } : {}),
+      ...(Mxz !== null ? { Mrt: { value: -Mxz } } : {}),
+      ...(Myz !== null ? { Mrp: { value: Myz } } : {}),
+      ...(Mxy !== null ? { Mtp: { value: -Mxy } } : {}),
+    };
+
+    const Mo = get(['Mo', 'MO', 'mo', 'scalar_moment', 'scalarmoment']);
+    const DC = get(['DC', 'dc', 'double_couple', 'doublecouple']);
+    const VR = get(['VR', 'vr', 'variance_reduction', 'variancereduction']);
+
+    fm.momentTensor = {
+      derivedOriginID: '',
+      tensor,
+      ...(Mo !== null ? { scalarMoment: { value: Mo } } : {}),
+      ...(DC !== null ? { doubleCouple: DC / 100 } : {}),
+      ...(VR !== null ? { varianceReduction: VR } : {}),
+    };
+  }
+
+  return fm;
+}
+
+/**
  * Synthesize a timestamp from separate date/time component columns
  * Supports common variations: year/month/day/hour/minute/second, yr/mo/dy/hr/mn/sc, etc.
  * @param event - The event object with potential date/time component fields
@@ -933,6 +1031,17 @@ function mapCommonFields(event: any, dateFormat?: DateFormat, includeMappingRepo
     const normalized = normalizeTimestamp(mapped.time, formatHint);
     if (normalized) {
       mapped.time = normalized;
+    }
+  }
+
+  // Assemble focal mechanism from flat nodal-plane / moment-tensor columns if present
+  if (!mapped.focal_mechanisms) {
+    const fm = assembleFocalMechanismFromRow(event);
+    if (fm) {
+      mapped.focal_mechanisms = JSON.stringify([fm]);
+      if (includeMappingReport) {
+        mappingReport.push({ targetField: 'focal_mechanisms', sourceField: 'strike1/dip1/rake1/Mxx/...', matchType: 'synthesized' });
+      }
     }
   }
 

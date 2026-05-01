@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireEditor } from '@/lib/auth/middleware';
 import { Logger } from '@/lib/errors';
 import { createUploadSession, CHUNK_SIZE } from '@/lib/upload-chunks';
+import { createUploadTooLargeResponse, getMaxSyncUploadParseBytes } from '@/lib/upload-limits';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,9 +34,17 @@ export async function POST(request: NextRequest) {
     if (!Number.isInteger(totalChunks) || totalChunks < 1) {
       return NextResponse.json({ error: 'totalChunks must be a positive integer' }, { status: 400 });
     }
+    if (!Number.isFinite(fileSize) || fileSize <= 0) {
+      return NextResponse.json({ error: 'fileSize must be a positive number' }, { status: 400 });
+    }
+    const maxParseBytes = getMaxSyncUploadParseBytes();
+    if (fileSize > maxParseBytes) {
+      return NextResponse.json(createUploadTooLargeResponse(fileSize), { status: 413 });
+    }
 
     const sessionId = await createUploadSession(
       fileName,
+      fileSize,
       totalChunks,
       delimiter ?? undefined,
       dateFormat ?? undefined,

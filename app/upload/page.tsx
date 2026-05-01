@@ -1096,30 +1096,50 @@ export default function UploadPage() {
                       <DataCompletenessMetrics events={parsedEvents} />
                     )}
 
-                    {crossFieldValidation && crossFieldValidation.summary.errors > 0 && (
-                      <Card className="shadow-sm border-amber-200 dark:border-amber-800">
+                    {crossFieldValidation && (crossFieldValidation.summary.errors > 0 || crossFieldValidation.summary.warnings > 0) && (
+                      <Card className={`shadow-sm ${crossFieldValidation.summary.errors > 0 ? 'border-red-200 dark:border-red-800' : 'border-amber-200 dark:border-amber-800'}`}>
                         <CardHeader className="pb-3">
-                          <CardTitle className="text-base text-amber-800 dark:text-amber-300">
+                          <CardTitle className={`text-base ${crossFieldValidation.summary.errors > 0 ? 'text-red-800 dark:text-red-300' : 'text-amber-800 dark:text-amber-300'}`}>
                             Cross-Field Validation Issues
                           </CardTitle>
                           <CardDescription className="text-xs">
-                            {crossFieldValidation.summary.errors} error(s), {crossFieldValidation.summary.warnings} warning(s) detected
+                            {crossFieldValidation.summary.failedEvents} event(s) affected —{' '}
+                            {crossFieldValidation.summary.errors > 0 && (
+                              <span className="text-red-600 dark:text-red-400 font-medium">{crossFieldValidation.summary.errors} error(s)</span>
+                            )}
+                            {crossFieldValidation.summary.errors > 0 && crossFieldValidation.summary.warnings > 0 && ', '}
+                            {crossFieldValidation.summary.warnings > 0 && (
+                              <span className="text-amber-600 dark:text-amber-400">{crossFieldValidation.summary.warnings} warning(s)</span>
+                            )}
                           </CardDescription>
                         </CardHeader>
                         <CardContent>
-                          <div className="space-y-2">
+                          <div className="space-y-3">
                             {crossFieldValidation.results
-                              .filter((r: any) => r.checks.length > 0)
+                              .filter((r: any) => r.checks && r.checks.some((c: any) => c.severity === 'error' || c.severity === 'warning'))
                               .slice(0, 5)
                               .map((result: any, idx: number) => (
-                                <div key={idx} className="text-xs p-2 bg-muted/50 rounded">
-                                  <span className="font-medium">Event {result.eventIndex + 1}:</span>{' '}
-                                  {result.checks[0].message}
+                                <div key={idx} className="text-xs p-2 bg-muted/50 rounded space-y-1">
+                                  <span className="font-medium">Event {result.eventIndex + 1}:</span>
+                                  {result.checks
+                                    .filter((c: any) => c.severity === 'error' || c.severity === 'warning')
+                                    .map((check: any, cIdx: number) => (
+                                      <div key={cIdx} className="flex items-start gap-1.5 pl-2">
+                                        <span className={`shrink-0 font-semibold ${check.severity === 'error' ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                                          {check.severity === 'error' ? '✕' : '⚠'}
+                                        </span>
+                                        <span className="text-muted-foreground">
+                                          {check.field && <span className="font-medium text-foreground">[{check.field}] </span>}
+                                          {check.message}
+                                          {check.suggestion && <span className="italic"> — {check.suggestion}</span>}
+                                        </span>
+                                      </div>
+                                    ))}
                                 </div>
                               ))}
-                            {crossFieldValidation.results.filter((r: any) => r.checks.length > 0).length > 5 && (
+                            {crossFieldValidation.results.filter((r: any) => r.checks && r.checks.some((c: any) => c.severity === 'error' || c.severity === 'warning')).length > 5 && (
                               <p className="text-xs text-muted-foreground italic">
-                                ...and {crossFieldValidation.results.filter((r: any) => r.checks.length > 0).length - 5} more issues
+                                ...and {crossFieldValidation.results.filter((r: any) => r.checks && r.checks.some((c: any) => c.severity === 'error' || c.severity === 'warning')).length - 5} more event(s) with issues
                               </p>
                             )}
                           </div>
