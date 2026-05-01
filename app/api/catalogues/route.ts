@@ -5,7 +5,11 @@ import { apiCache, generateCacheKey, catalogueCache, invalidateCacheByPrefix } f
 import { applyRateLimit, readRateLimiter, apiRateLimiter } from '@/lib/rate-limiter';
 import { requireEditor } from '@/lib/auth/middleware';
 import { v4 as uuidv4 } from 'uuid';
-import { getPendingUploadEvents, deletePendingUpload } from '@/lib/pending-uploads';
+import {
+  deletePendingUpload,
+  getPendingUploadEvents,
+  iteratePendingUploadEventBatches,
+} from '@/lib/pending-uploads';
 import { quakemlEventToDbFields } from '@/lib/quakeml-to-db';
 import { parsedEventToDbFields } from '@/lib/parsed-event-to-db';
 import type { ParsedEvent } from '@/types/upload';
@@ -70,8 +74,29 @@ export async function GET(request: NextRequest) {
 // Maximum request body size (100MB for events array)
 const MAX_BODY_SIZE = 100 * 1024 * 1024;
 const EVENT_INSERT_BATCH_SIZE = 500;
+const EVENT_INSERT_MAX_BATCH_BYTES = 8 * 1024 * 1024;
+const EVENT_INSERT_MAX_PARALLEL_BATCHES = 2;
 const BATCH_INSERT_MAX_RETRIES = 4;
 const BATCH_INSERT_BASE_DELAY_MS = 250;
+
+const NUMERIC_MAPPING_FIELDS = new Set([
+  'latitude', 'longitude', 'depth', 'magnitude',
+  'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty',
+  'depth_uncertainty', 'horizontal_uncertainty', 'magnitude_uncertainty',
+  'azimuthal_gap', 'used_phase_count', 'used_station_count', 'standard_error',
+  'minimum_distance', 'maximum_distance', 'associated_phase_count',
+  'associated_station_count', 'depth_phase_count', 'magnitude_station_count',
+]);
+
+type InsertRow = Partial<import('@/lib/db').MergedEvent> & {
+  id: string;
+  catalogue_id: string;
+  time: string;
+  latitude: number;
+  longitude: number;
+  magnitude: number;
+  source_events: string;
+};
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -127,6 +152,373 @@ function isRetryableBatchInsertError(error: unknown): boolean {
     message.includes('oldest pinned transaction id') ||
     message.includes('write conflict') ||
     message.includes('temporarily unavailable')
+  );
+}
+
+function safeParseNumber(value: any): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const num = typeof value === 'number' ? value : parseFloat(String(value));
+  return isNaN(num) ? null : num;
+}
+
+function applyFieldMappingsToPendingEvent(
+  pendingEvent: ParsedEvent,
+  fieldMappings: unknown,
+): Record<string, unknown> {
+  const event: Record<string, unknown> = { ...pendingEvent };
+  const mappings: Record<string, string> =
+    fieldMappings && typeof fieldMappings === 'object'
+      ? fieldMappings as Record<string, string>
+      : {};
+
+  for (const [src, tgt] of Object.entries(mappings)) {
+    if (!tgt || pendingEvent[src] === undefined) continue;
+    event[tgt] = NUMERIC_MAPPING_FIELDS.has(tgt)
+      ? (typeof pendingEvent[src] === 'number'
+        ? pendingEvent[src]
+        : parseFloat(String(pendingEvent[src])))
+      : pendingEvent[src];
+  }
+
+  return event;
+}
+
+function validateCatalogueEvent(event: any): string[] {
+  const errors: string[] = [];
+
+  if (!event.time || (typeof event.time === 'string' && event.time.trim() === '')) {
+    errors.push('time is required');
+  } else {
+    const date = new Date(event.time);
+    if (isNaN(date.getTime())) {
+      errors.push('time is not a valid timestamp');
+    }
+  }
+
+  const latitude = safeParseNumber(event.latitude);
+  const longitude = safeParseNumber(event.longitude);
+  const magnitude = safeParseNumber(event.magnitude);
+  const depth = safeParseNumber(event.depth);
+
+  if (latitude === null) {
+    errors.push('latitude is required and must be a number');
+  } else if (latitude < -90 || latitude > 90) {
+    errors.push(`latitude ${latitude} must be between -90 and 90`);
+  }
+
+  if (longitude === null) {
+    errors.push('longitude is required and must be a number');
+  } else if (longitude < -180 || longitude > 180) {
+    errors.push(`longitude ${longitude} must be between -180 and 180`);
+  }
+
+  if (magnitude === null) {
+    errors.push('magnitude is required and must be a number');
+  } else if (magnitude < -3 || magnitude > 10) {
+    errors.push(`magnitude ${magnitude} must be between -3 and 10`);
+  }
+
+  return errors;
+}
+
+function buildInsertRow(event: any, pendingEvent: ParsedEvent | undefined, catalogueId: string): InsertRow {
+  const latitude = safeParseNumber(event.latitude)!;
+  const longitude = safeParseNumber(event.longitude)!;
+  const magnitude = safeParseNumber(event.magnitude)!;
+
+  const row: InsertRow = {
+    id: uuidv4(),
+    catalogue_id: catalogueId,
+    time: event.time,
+    latitude,
+    longitude,
+    magnitude,
+    source_events: JSON.stringify([{ source: 'upload', eventId: event.id || event.eventId }]),
+    depth: (() => {
+      const d = safeParseNumber(event.depth);
+      if (d === null || d < 0) return undefined;
+      if (d > 1000) { const km = d / 1000; return km <= 1000 ? km : undefined; }
+      return d;
+    })(),
+  };
+
+  if (pendingEvent?.quakeml) {
+    Object.assign(row, quakemlEventToDbFields(pendingEvent.quakeml));
+  } else {
+    const source = pendingEvent
+      ? { ...pendingEvent, ...event }
+      : event;
+    Object.assign(row, parsedEventToDbFields(source as ParsedEvent));
+  }
+
+  return row;
+}
+
+function estimateEventInsertBytes(row: InsertRow): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(row), 'utf8') + 256;
+  } catch {
+    return EVENT_INSERT_MAX_BATCH_BYTES;
+  }
+}
+
+function chunkInsertRows(rows: InsertRow[]): InsertRow[][] {
+  const batches: InsertRow[][] = [];
+  let batch: InsertRow[] = [];
+  let batchBytes = 0;
+
+  for (const row of rows) {
+    const rowBytes = estimateEventInsertBytes(row);
+    if (
+      batch.length > 0 &&
+      (batch.length >= EVENT_INSERT_BATCH_SIZE ||
+        batchBytes + rowBytes > EVENT_INSERT_MAX_BATCH_BYTES)
+    ) {
+      batches.push(batch);
+      batch = [];
+      batchBytes = 0;
+    }
+
+    batch.push(row);
+    batchBytes += rowBytes;
+  }
+
+  if (batch.length > 0) batches.push(batch);
+  return batches;
+}
+
+async function insertBatchWithRetry(
+  db: NonNullable<typeof dbQueries>,
+  catalogueId: string,
+  batch: InsertRow[],
+  batchStart: number,
+): Promise<void> {
+  let attempt = 0;
+  while (true) {
+    try {
+      await db.bulkInsertEvents(batch as Parameters<typeof db.bulkInsertEvents>[0]);
+      return;
+    } catch (error) {
+      if (attempt >= BATCH_INSERT_MAX_RETRIES || !isRetryableBatchInsertError(error)) {
+        throw error;
+      }
+
+      const delay = BATCH_INSERT_BASE_DELAY_MS * (2 ** attempt) + Math.floor(Math.random() * 100);
+      logger.warn('Retrying batch event insert after transient MongoDB error', {
+        catalogueId,
+        batchStart,
+        batchSize: batch.length,
+        attempt: attempt + 1,
+        delayMs: delay,
+        error: getErrorMessage(error),
+      });
+      await sleep(delay);
+      attempt += 1;
+    }
+  }
+}
+
+async function bulkInsertEventRows(
+  db: NonNullable<typeof dbQueries>,
+  catalogueId: string,
+  rows: InsertRow[],
+  insertedSoFar = 0,
+): Promise<number> {
+  const batches = chunkInsertRows(rows);
+  let inserted = 0;
+
+  for (let i = 0; i < batches.length; i += EVENT_INSERT_MAX_PARALLEL_BATCHES) {
+    const window = batches.slice(i, i + EVENT_INSERT_MAX_PARALLEL_BATCHES);
+    await Promise.all(window.map((batch, offset) =>
+      insertBatchWithRetry(db, catalogueId, batch, insertedSoFar + inserted + offset * EVENT_INSERT_BATCH_SIZE)
+    ));
+    inserted += window.reduce((sum, batch) => sum + batch.length, 0);
+  }
+
+  return inserted;
+}
+
+async function createCatalogueFromPendingUploads(params: {
+  ids: string[];
+  trimmedName: string;
+  metadata: any;
+  fieldMappings: unknown;
+}) {
+  const { ids, trimmedName, metadata, fieldMappings } = params;
+
+  if (!dbQueries) {
+    return NextResponse.json(
+      { error: 'Database not initialized', code: 'DB_NOT_INITIALIZED' },
+      { status: 500 }
+    );
+  }
+
+  const db = dbQueries;
+  const catalogueId = uuidv4();
+  const startedAt = performance.now();
+
+  await db.insertCatalogue(
+    catalogueId,
+    trimmedName,
+    JSON.stringify([{ source: 'upload', description: 'Uploaded catalogue' }]),
+    JSON.stringify({
+      uploadDate: new Date().toISOString(),
+      pendingUploadIds: ids,
+    }),
+    0,
+    'processing',
+    metadata,
+  );
+
+  let totalSubmitted = 0;
+  let successfullyImported = 0;
+  let failedValidation = 0;
+  let insertedCount = 0;
+  const invalidEvents: { index: number; reason: string }[] = [];
+  let minLat: number | undefined;
+  let maxLat: number | undefined;
+  let minLon: number | undefined;
+  let maxLon: number | undefined;
+
+  try {
+    for (const id of ids) {
+      let foundAny = false;
+
+      for await (const pendingBatch of iteratePendingUploadEventBatches(id, 1000)) {
+        foundAny = true;
+        const rows: InsertRow[] = [];
+
+        for (const pendingEvent of pendingBatch) {
+          const index = totalSubmitted;
+          totalSubmitted += 1;
+
+          const event = applyFieldMappingsToPendingEvent(pendingEvent, fieldMappings);
+          const errors = validateCatalogueEvent(event);
+          if (errors.length > 0) {
+            failedValidation += 1;
+            if (invalidEvents.length < 100) {
+              invalidEvents.push({ index, reason: errors.join('; ') });
+            }
+            continue;
+          }
+
+          const lat = safeParseNumber(event.latitude)!;
+          const lon = safeParseNumber(event.longitude)!;
+          if (minLat === undefined || lat < minLat) minLat = lat;
+          if (maxLat === undefined || lat > maxLat) maxLat = lat;
+          if (minLon === undefined || lon < minLon) minLon = lon;
+          if (maxLon === undefined || lon > maxLon) maxLon = lon;
+
+          rows.push(buildInsertRow(event, pendingEvent, catalogueId));
+          successfullyImported += 1;
+        }
+
+        if (rows.length > 0) {
+          insertedCount += await bulkInsertEventRows(db, catalogueId, rows, insertedCount);
+        }
+      }
+
+      if (!foundAny) {
+        logger.warn('Pending upload not found or expired', { pendingUploadId: id });
+      }
+    }
+
+    if (totalSubmitted === 0) {
+      await db.deleteCatalogue(catalogueId);
+      return NextResponse.json(
+        { error: 'Pending upload not found or expired', code: 'PENDING_UPLOAD_NOT_FOUND' },
+        { status: 404 }
+      );
+    }
+
+    if (successfullyImported === 0) {
+      await db.deleteCatalogue(catalogueId);
+      return NextResponse.json(
+        {
+          error: `All ${failedValidation} event(s) failed validation. No events could be imported.`,
+          code: 'ALL_EVENTS_INVALID',
+          details: invalidEvents,
+          totalInvalid: failedValidation,
+          message: 'All events must have valid time, latitude (-90 to 90), longitude (-180 to 180), and magnitude (-3 to 10)',
+        },
+        { status: 400 }
+      );
+    }
+
+    await db.updateCatalogueStatus('complete', catalogueId);
+    await db.updateCatalogueEventCount(catalogueId, insertedCount);
+    if (
+      minLat !== undefined &&
+      maxLat !== undefined &&
+      minLon !== undefined &&
+      maxLon !== undefined
+    ) {
+      await db.updateCatalogueGeoBounds(catalogueId, minLat, maxLat, minLon, maxLon);
+    }
+  } catch (error) {
+    logger.error('Catalogue import failed; cleaning up partially inserted data', {
+      catalogueId,
+      insertedCount,
+      error: getErrorMessage(error),
+    });
+
+    try {
+      await db.deleteCatalogue(catalogueId);
+    } catch (cleanupError) {
+      logger.error('Failed to clean up partially imported catalogue', {
+        catalogueId,
+        cleanupError: getErrorMessage(cleanupError),
+      });
+      await db.updateCatalogueStatus('error', catalogueId);
+      await db.updateCatalogueEventCount(catalogueId, insertedCount);
+    }
+
+    throw error;
+  }
+
+  for (const id of ids) {
+    deletePendingUpload(id).catch(() => {/* TTL will clean up */});
+  }
+
+  invalidateCacheByPrefix('catalogues');
+
+  const totalDurationMs = Math.round(performance.now() - startedAt);
+  const successRate = totalSubmitted > 0
+    ? Math.round((successfullyImported / totalSubmitted) * 10000) / 100
+    : 0;
+  const isPartialImport = failedValidation > 0;
+
+  logger.info('Catalogue created successfully from pending uploads', {
+    catalogueId,
+    name: trimmedName,
+    eventCount: successfullyImported,
+    totalSubmitted,
+    failedValidation,
+    isPartialImport,
+    durationMs: totalDurationMs,
+  });
+
+  const catalogue = await db.getCatalogueById(catalogueId);
+  const validationReport = {
+    totalSubmitted,
+    successfullyImported,
+    failedValidation,
+    successRate,
+    invalidEvents,
+    hasMoreInvalidEvents: failedValidation > invalidEvents.length,
+  };
+  const importMessage = isPartialImport
+    ? `Imported ${successfullyImported.toLocaleString()} of ${totalSubmitted.toLocaleString()} events. ${failedValidation.toLocaleString()} event${failedValidation === 1 ? '' : 's'} failed validation.`
+    : `Successfully imported all ${successfullyImported.toLocaleString()} events.`;
+
+  return NextResponse.json(
+    {
+      ...catalogue,
+      validationReport,
+      importMessage,
+      partialImport: isPartialImport,
+    },
+    { status: 201 }
   );
 }
 
@@ -237,6 +629,15 @@ export async function POST(request: NextRequest) {
         ? [pendingUploadId]
         : [];
 
+    if ((!bodyEvents || !Array.isArray(bodyEvents) || bodyEvents.length === 0) && ids.length > 0) {
+      return createCatalogueFromPendingUploads({
+        ids,
+        trimmedName,
+        metadata,
+        fieldMappings,
+      });
+    }
+
     if (ids.length > 0) {
       try {
         const batches = await Promise.all(ids.map(id => getPendingUploadEvents(id)));
@@ -323,7 +724,7 @@ export async function POST(request: NextRequest) {
       const latitude = safeParseNumber(event.latitude);
       const longitude = safeParseNumber(event.longitude);
       const magnitude = safeParseNumber(event.magnitude);
-      const depth = safeParseNumber(event.depth);
+      let depth = safeParseNumber(event.depth);
 
       if (latitude === null) {
         errors.push('latitude is required and must be a number');
@@ -343,9 +744,17 @@ export async function POST(request: NextRequest) {
         errors.push(`magnitude ${magnitude} must be between -3 and 10`);
       }
 
-      // Depth is optional but must be valid if present
-      if (depth !== null && (depth < 0 || depth > 1000)) {
-        errors.push(`depth ${depth} must be between 0 and 1000 km`);
+      // Depth is optional. If out of the 0–1000 km range, try interpreting as
+      // metres (divide by 1000). If still invalid, null it out — never reject
+      // the whole event for a bad depth value.
+      if (depth !== null) {
+        if (depth < 0) {
+          depth = null;
+        } else if (depth > 1000) {
+          const depthKm = depth / 1000;
+          depth = depthKm <= 1000 ? depthKm : null;
+        }
+        event.depth = depth;
       }
 
       if (errors.length > 0) {
@@ -412,10 +821,6 @@ export async function POST(request: NextRequest) {
       const longitude = safeParseNumber(event.longitude)!;
       const magnitude = safeParseNumber(event.magnitude)!;
 
-      type InsertRow = Partial<import('@/lib/db').MergedEvent> & {
-        id: string; catalogue_id: string; time: string;
-        latitude: number; longitude: number; magnitude: number; source_events: string;
-      };
       const row: InsertRow = {
         id: uuidv4(),
         catalogue_id: catalogueId,
@@ -493,34 +898,7 @@ export async function POST(request: NextRequest) {
 
     let insertedCount = 0;
     try {
-      for (let i = 0; i < eventsToInsert.length; i += EVENT_INSERT_BATCH_SIZE) {
-        const batch = eventsToInsert.slice(i, i + EVENT_INSERT_BATCH_SIZE);
-
-        let attempt = 0;
-        while (true) {
-          try {
-            await db.bulkInsertEvents(batch as Parameters<typeof db.bulkInsertEvents>[0]);
-            insertedCount += batch.length;
-            break;
-          } catch (error) {
-            if (attempt >= BATCH_INSERT_MAX_RETRIES || !isRetryableBatchInsertError(error)) {
-              throw error;
-            }
-
-            const delay = BATCH_INSERT_BASE_DELAY_MS * (2 ** attempt) + Math.floor(Math.random() * 100);
-            logger.warn('Retrying batch event insert after transient MongoDB error', {
-              catalogueId,
-              batchStart: i,
-              batchSize: batch.length,
-              attempt: attempt + 1,
-              delayMs: delay,
-              error: getErrorMessage(error),
-            });
-            await sleep(delay);
-            attempt += 1;
-          }
-        }
-      }
+      insertedCount = await bulkInsertEventRows(db, catalogueId, eventsToInsert as InsertRow[]);
 
       await db.updateCatalogueStatus('complete', catalogueId);
       await db.updateCatalogueEventCount(catalogueId, insertedCount);

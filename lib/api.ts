@@ -28,8 +28,22 @@ export async function getApiError(response: Response, fallbackMessage: string): 
       ? data.requestId
       : undefined;
 
-  const message = details && baseError
-    ? `${baseError}: ${details}`
+  const detailsStr = (() => {
+    if (!details) return null;
+    if (Array.isArray(details)) {
+      const sample = details.slice(0, 3).map((d: any) =>
+        typeof d === 'object' && d !== null
+          ? (d.reason ? `[event ${d.index}] ${d.reason}` : JSON.stringify(d))
+          : String(d)
+      );
+      const suffix = details.length > 3 ? ` … and ${details.length - 3} more` : '';
+      return sample.join('; ') + suffix;
+    }
+    return typeof details === 'object' ? JSON.stringify(details) : String(details);
+  })();
+
+  const message = detailsStr && baseError
+    ? `${baseError}: ${detailsStr}`
     : baseError || (text && !data ? text : fallbackMessage);
 
   return { message, requestId };

@@ -19,6 +19,12 @@ import { createUploadTooLargeResponse, getMaxSyncUploadParseBytes } from '@/lib/
 export const dynamic = 'force-dynamic';
 
 const logger = new Logger('UploadInitAPI');
+const MAX_FILE_SIZE = 500 * 1024 * 1024;
+
+function isQuakeMLFile(fileName: string): boolean {
+  const extension = fileName.split('.').pop()?.toLowerCase();
+  return extension === 'xml' || extension === 'qml';
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -37,8 +43,14 @@ export async function POST(request: NextRequest) {
     if (!Number.isFinite(fileSize) || fileSize <= 0) {
       return NextResponse.json({ error: 'fileSize must be a positive number' }, { status: 400 });
     }
+    if (fileSize > MAX_FILE_SIZE) {
+      return NextResponse.json(
+        { error: `File size exceeds maximum of ${MAX_FILE_SIZE / 1024 / 1024}MB` },
+        { status: 400 },
+      );
+    }
     const maxParseBytes = getMaxSyncUploadParseBytes();
-    if (fileSize > maxParseBytes) {
+    if (fileSize > maxParseBytes && !isQuakeMLFile(fileName)) {
       return NextResponse.json(createUploadTooLargeResponse(fileSize), { status: 413 });
     }
 

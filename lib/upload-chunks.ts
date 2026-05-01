@@ -15,8 +15,10 @@
  * 4.5 MB limit (headers + boundary add ~1 KB of overhead).
  *
  * Chunks are stored as raw binary documents in MongoDB with a 1-hour TTL.
- * The finalize handler reassembles them in order, runs parseFile(), stores
- * the full parsed events in the pending-upload store, and deletes the chunks.
+ * The finalize handler reassembles them in order. Stream-capable formats are
+ * written to /tmp and parsed from disk; sync-parser formats still assemble into
+ * memory. Parsed events are stored in the pending-upload store, then chunks are
+ * deleted.
  *
  * Collection: upload_chunks
  *   { session_id, chunk_index, total_chunks, file_name, data: Binary,
@@ -26,6 +28,8 @@
 import { Binary } from 'mongodb';
 import { getCollection, COLLECTIONS } from './mongodb';
 import { v4 as uuidv4 } from 'uuid';
+import { createWriteStream } from 'fs';
+import { once } from 'events';
 
 // 3 MB per chunk — well under Vercel's 4.5 MB body limit.
 export const CHUNK_SIZE = 3 * 1024 * 1024;
@@ -174,6 +178,62 @@ export async function assembleChunks(
   });
 
   return Buffer.concat(buffers).toString('utf-8');
+}
+
+/**
+ * Reassemble chunks directly into a file on disk.
+ *
+ * This is the large-file path used by finalize handlers that can parse from a
+ * stream. It avoids loading every chunk into an array, avoids Buffer.concat(),
+ * and avoids materialising a second full UTF-8 string copy of the upload.
+ */
+export async function assembleChunksToFile(
+  sessionId: string,
+  totalChunks: number,
+  outputPath: string,
+): Promise<{ bytesWritten: number }> {
+  const col = await getCollection(COLLECTIONS.UPLOAD_CHUNKS);
+  const cursor = col
+    .find({ session_id: sessionId, chunk_index: { $gte: 0 } })
+    .sort({ chunk_index: 1 });
+
+  const stream = createWriteStream(outputPath, { flags: 'w' });
+  let expectedIndex = 0;
+  let bytesWritten = 0;
+
+  try {
+    for await (const doc of cursor) {
+      if (doc.chunk_index !== expectedIndex) {
+        throw new Error(
+          `Incomplete upload: expected chunk ${expectedIndex}, found ${doc.chunk_index}`
+        );
+      }
+
+      const bin = doc.data as Binary;
+      const buffer = Buffer.isBuffer(bin.buffer) ? bin.buffer : Buffer.from(bin.buffer);
+      bytesWritten += buffer.length;
+
+      if (!stream.write(buffer)) {
+        await once(stream, 'drain');
+      }
+
+      expectedIndex += 1;
+    }
+
+    if (expectedIndex !== totalChunks) {
+      throw new Error(
+        `Incomplete upload: expected ${totalChunks} chunks, found ${expectedIndex}`
+      );
+    }
+  } catch (error) {
+    stream.destroy();
+    throw error;
+  }
+
+  stream.end();
+  await once(stream, 'finish');
+
+  return { bytesWritten };
 }
 
 /**

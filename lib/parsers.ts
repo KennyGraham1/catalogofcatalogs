@@ -18,6 +18,7 @@ import { parseGeoJSON } from './geojson-parser';
 import { detectDateFormat, type DateFormat } from './date-format-detector';
 import { FIELD_ALIASES } from './field-definitions';
 import type { ParsedEvent } from '@/types/upload';
+import type { QuakeMLEvent } from './types/quakeml';
 
 // Re-export ParsedEvent for consumers of this module
 export type { ParsedEvent } from '@/types/upload';
@@ -42,6 +43,7 @@ export interface ParseResult {
 
 const MAX_PARSE_WARNINGS = 200;
 const LARGE_QUAKEML_STREAM_THRESHOLD = 5 * 1024 * 1024;
+const STREAM_PARSE_EVENT_BATCH_SIZE = 500;
 
 function escapeXml(text: string): string {
   return text
@@ -63,6 +65,11 @@ function serializeOpenTag(node: any): string {
 
 function isEventTagName(tagName: string): boolean {
   return tagName === 'event' || tagName.endsWith(':event');
+}
+
+function stripQuakeML(event: ParsedEvent): ParsedEvent {
+  const { quakeml: _quakeml, ...rest } = event;
+  return rest as ParsedEvent;
 }
 
 function extractQuakeMLEventsWithSax(content: string): string[] {
@@ -179,6 +186,104 @@ const appendCrossFieldFailures = (
     );
   });
 };
+
+function parsedEventFromQuakeMLEvent(
+  quakemlEvent: QuakeMLEvent,
+  index: number,
+  detectedFields: Set<string>,
+  validationAccumulator: ValidationAccumulator
+): { event?: ParsedEvent; error?: { line: number; message: string }; warnings: string[] } {
+  const warnings: string[] = [];
+
+  // Use preferred origin or first origin
+  let origin = quakemlEvent.origins?.[0];
+  if (quakemlEvent.preferredOriginID && quakemlEvent.origins) {
+    const preferred = quakemlEvent.origins.find(o => o.publicID === quakemlEvent.preferredOriginID);
+    if (preferred) origin = preferred;
+  }
+
+  // Use preferred magnitude or first magnitude
+  let magnitude = quakemlEvent.magnitudes?.[0];
+  if (quakemlEvent.preferredMagnitudeID && quakemlEvent.magnitudes) {
+    const preferred = quakemlEvent.magnitudes.find(m => m.publicID === quakemlEvent.preferredMagnitudeID);
+    if (preferred) magnitude = preferred;
+  }
+
+  if (!origin || !magnitude) {
+    validationAccumulator.invalidEvents += 1;
+    const message = 'Event missing required origin or magnitude';
+    appendParserFailure(validationAccumulator, { line: index, eventIndex: index - 1 }, message);
+    return { error: { line: index, message }, warnings };
+  }
+
+  const event: ParsedEvent = {
+    time: origin.time.value,
+    latitude: origin.latitude.value,
+    longitude: origin.longitude.value,
+    depth: origin.depth ? origin.depth.value / 1000 : undefined,
+    magnitude: magnitude.mag.value,
+    quakeml: quakemlEvent
+  };
+
+  const flattenedFields = quakemlEventToDbFields(quakemlEvent) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(flattenedFields)) {
+    if (value === undefined || value === null) continue;
+    (event as any)[key] = value;
+  }
+
+  if (magnitude.type) {
+    event.magnitudeType = magnitude.type;
+    detectedFields.add('magnitudeType');
+  }
+
+  if (quakemlEvent.description && quakemlEvent.description.length > 0) {
+    event.region = quakemlEvent.description[0].text;
+    detectedFields.add('region');
+  }
+
+  if (quakemlEvent.publicID) {
+    event.eventId = quakemlEvent.publicID;
+    detectedFields.add('eventId');
+  }
+
+  if ((event as any).magnitude_type && !event.magnitudeType) {
+    event.magnitudeType = String((event as any).magnitude_type);
+  }
+  if ((event as any).event_public_id && !event.eventId) {
+    event.eventId = String((event as any).event_public_id);
+  }
+
+  for (const key of Object.keys(event)) {
+    if (key === 'quakeml') continue;
+    detectedFields.add(key);
+  }
+
+  const context: ValidationEventContext = {
+    line: index,
+    eventIndex: index - 1,
+    eventId: (event.eventId || event.id || null) as string | null,
+    rawEvent: event,
+  };
+  const validation = validateEventWithDetails(event, context);
+  if (!validation.valid) {
+    const errorMessages = validation.failures
+      .filter(failure => failure.severity === 'error')
+      .map(failure => failure.message);
+    const message = errorMessages.join('; ');
+    validationAccumulator.invalidEvents += 1;
+    validationAccumulator.failures.push(...validation.failures);
+    return { error: { line: index, message }, warnings };
+  }
+
+  if (!origin.depth) warnings.push('Event missing depth information');
+  if (!origin.quality) warnings.push('Event missing origin quality metrics');
+
+  validationAccumulator.validEvents += 1;
+  validationAccumulator.failures.push(...validation.failures);
+  appendCrossFieldFailures(validationAccumulator, event, context);
+
+  return { event, warnings };
+}
 
 /**
  * Parse CSV/delimited text format earthquake catalogue
@@ -594,108 +699,20 @@ export function parseQuakeML(content: string): ParseResult {
           continue;
         }
 
-        // Extract basic fields for the ParsedEvent interface
-        // Use preferred origin or first origin
-        let origin = quakemlEvent.origins?.[0];
-        if (quakemlEvent.preferredOriginID && quakemlEvent.origins) {
-          const preferred = quakemlEvent.origins.find(o => o.publicID === quakemlEvent.preferredOriginID);
-          if (preferred) origin = preferred;
-        }
-
-        // Use preferred magnitude or first magnitude
-        let magnitude = quakemlEvent.magnitudes?.[0];
-        if (quakemlEvent.preferredMagnitudeID && quakemlEvent.magnitudes) {
-          const preferred = quakemlEvent.magnitudes.find(m => m.publicID === quakemlEvent.preferredMagnitudeID);
-          if (preferred) magnitude = preferred;
-        }
-
-        if (!origin || !magnitude) {
-          validationAccumulator.invalidEvents += 1;
-          errors.push({
-            line: index,
-            message: 'Event missing required origin or magnitude'
-          });
-          appendParserFailure(validationAccumulator, { line: index, eventIndex: index - 1 }, 'Event missing required origin or magnitude');
+        const parsed = parsedEventFromQuakeMLEvent(
+          quakemlEvent,
+          index,
+          detectedFields,
+          validationAccumulator
+        );
+        if (parsed.error) {
+          errors.push(parsed.error);
           continue;
         }
-
-        // Build basic event
-        const event: ParsedEvent = {
-          time: origin.time.value,
-          latitude: origin.latitude.value,
-          longitude: origin.longitude.value,
-          depth: origin.depth ? origin.depth.value / 1000 : undefined, // Convert m to km
-          magnitude: magnitude.mag.value,
-          quakeml: quakemlEvent // Store full QuakeML data
-        };
-
-        // Flatten all DB-storable QuakeML fields onto ParsedEvent so they
-        // appear as source fields in Stage 4 mapping (same UX parity as CSV).
-        const flattenedFields = quakemlEventToDbFields(quakemlEvent) as Record<string, unknown>;
-        for (const [key, value] of Object.entries(flattenedFields)) {
-          if (value === undefined || value === null) continue;
-          (event as any)[key] = value;
+        for (const warning of parsed.warnings) {
+          addWarning(index, warning);
         }
-
-        // Add optional fields if available
-        if (magnitude.type) {
-          event.magnitudeType = magnitude.type;
-          detectedFields.add('magnitudeType');
-        }
-
-        if (quakemlEvent.description && quakemlEvent.description.length > 0) {
-          event.region = quakemlEvent.description[0].text;
-          detectedFields.add('region');
-        }
-
-        if (quakemlEvent.publicID) {
-          event.eventId = quakemlEvent.publicID;
-          detectedFields.add('eventId');
-        }
-
-        // Keep common aliases in sync for mapping auto-detection.
-        if ((event as any).magnitude_type && !event.magnitudeType) {
-          event.magnitudeType = String((event as any).magnitude_type);
-        }
-        if ((event as any).event_public_id && !event.eventId) {
-          event.eventId = String((event as any).event_public_id);
-        }
-
-        // Add every flattened key as a detectable source field for UI mapping.
-        for (const key of Object.keys(event)) {
-          if (key === 'quakeml') continue;
-          detectedFields.add(key);
-        }
-
-        // Validate basic fields
-        const context: ValidationEventContext = {
-          line: index,
-          eventIndex: index - 1,
-          eventId: (event.eventId || event.id || null) as string | null,
-          rawEvent: event,
-        };
-        const validation = validateEventWithDetails(event, context);
-        if (!validation.valid) {
-          const errorMessages = validation.failures
-            .filter(failure => failure.severity === 'error')
-            .map(failure => failure.message);
-          errors.push({
-            line: index,
-            message: errorMessages.join('; ')
-          });
-          validationAccumulator.invalidEvents += 1;
-          validationAccumulator.failures.push(...validation.failures);
-          continue;
-        }
-
-        // Add warnings for missing optional data
-        if (!origin.depth) addWarning(index, 'Event missing depth information');
-        if (!origin.quality) addWarning(index, 'Event missing origin quality metrics');
-
-        validationAccumulator.validEvents += 1;
-        validationAccumulator.failures.push(...validation.failures);
-        appendCrossFieldFailures(validationAccumulator, event, context);
-        events.push(event);
+        if (parsed.event) events.push(parsed.event);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Parse error';
         errors.push({
@@ -713,6 +730,203 @@ export function parseQuakeML(content: string): ParseResult {
       success: false,
       events: [],
       errors: [{ line: 0, message }],
+      warnings: [],
+      detectedFields: [],
+      validationReport: summarizeValidationFailures(validationAccumulator.failures, {
+        totalEvents: 0,
+        validEvents: 0,
+        invalidEvents: 0,
+      })
+    };
+  }
+
+  return {
+    success: errors.length === 0,
+    events,
+    errors,
+    warnings,
+    detectedFields: Array.from(detectedFields),
+    warningsTruncated: suppressedWarnings > 0,
+    validationReport: summarizeValidationFailures(validationAccumulator.failures, {
+      totalEvents: validationAccumulator.totalEvents,
+      validEvents: validationAccumulator.validEvents,
+      invalidEvents: validationAccumulator.invalidEvents,
+    })
+  };
+}
+
+export interface ParseQuakeMLFileStreamOptions {
+  /**
+   * Called with full ParsedEvent objects, including the quakeml payload, before
+   * they are stripped for the returned browser-facing event list.
+   */
+  onEventBatch?: (events: ParsedEvent[]) => Promise<void> | void;
+  eventBatchSize?: number;
+  stripQuakemlFromReturnedEvents?: boolean;
+}
+
+/**
+ * Parse a QuakeML file from disk using a SAX file stream.
+ *
+ * The returned ParseResult preserves the same shape as parseFile(), but callers
+ * can stream rich event batches to MongoDB while retaining only lightweight
+ * events in memory for the browser response.
+ */
+export async function parseQuakeMLFileStream(
+  filePath: string,
+  options: ParseQuakeMLFileStreamOptions = {}
+): Promise<ParseResult> {
+  const errors: Array<{ line: number; message: string }> = [];
+  const warnings: Array<{ line: number; message: string }> = [];
+  const events: ParsedEvent[] = [];
+  const detectedFields = new Set<string>(['time', 'latitude', 'longitude', 'depth', 'magnitude']);
+  const validationAccumulator = createValidationAccumulator();
+  const eventBatchSize = options.eventBatchSize ?? STREAM_PARSE_EVENT_BATCH_SIZE;
+  const stripReturnedEvents = options.stripQuakemlFromReturnedEvents ?? false;
+  let suppressedWarnings = 0;
+  let index = 0;
+  let pendingBatch: ParsedEvent[] = [];
+  let pendingWrite: Promise<void> = Promise.resolve();
+  let streamError: Error | null = null;
+
+  const addWarning = (line: number, message: string) => {
+    if (warnings.length < MAX_PARSE_WARNINGS) {
+      warnings.push({ line, message });
+      return;
+    }
+    suppressedWarnings += 1;
+  };
+
+  const flushBatch = (fileStream: ReturnType<typeof createReadStream>, force = false) => {
+    if (!options.onEventBatch || pendingBatch.length === 0) return;
+    if (!force && pendingBatch.length < eventBatchSize) return;
+
+    const batch = pendingBatch;
+    pendingBatch = [];
+    fileStream.pause();
+    pendingWrite = pendingWrite
+      .then(async () => {
+        await options.onEventBatch?.(batch);
+      })
+      .catch(error => {
+        streamError = error instanceof Error ? error : new Error(String(error));
+        fileStream.destroy(streamError);
+      })
+      .finally(() => {
+        if (!streamError && !fileStream.destroyed) fileStream.resume();
+      });
+  };
+
+  await new Promise<void>((resolve, reject) => {
+    const parser = sax.createStream(true, { trim: false, normalize: false });
+    const fileStream = createReadStream(filePath, { encoding: 'utf8' });
+
+    let insideEvent = false;
+    let eventDepth = 0;
+    let currentEventXML = '';
+
+    parser.on('opentag', (node: any) => {
+      if (isEventTagName(node.name)) {
+        insideEvent = true;
+        eventDepth = 1;
+        currentEventXML = serializeOpenTag(node);
+        return;
+      }
+
+      if (!insideEvent) return;
+      eventDepth += 1;
+      currentEventXML += serializeOpenTag(node);
+    });
+
+    parser.on('text', (text: string) => {
+      if (insideEvent && text.length > 0) {
+        currentEventXML += escapeXml(text);
+      }
+    });
+
+    parser.on('cdata', (text: string) => {
+      if (insideEvent) {
+        currentEventXML += `<![CDATA[${text}]]>`;
+      }
+    });
+
+    parser.on('closetag', (tagName: string) => {
+      if (!insideEvent) return;
+      currentEventXML += `</${tagName}>`;
+      eventDepth -= 1;
+
+      if (eventDepth !== 0) return;
+
+      insideEvent = false;
+      index += 1;
+      validationAccumulator.totalEvents += 1;
+
+      try {
+        const quakemlEvent = parseQuakeMLEvent(currentEventXML);
+        if (!quakemlEvent) {
+          validationAccumulator.invalidEvents += 1;
+          const message = 'Failed to parse QuakeML event';
+          errors.push({ line: index, message });
+          appendParserFailure(validationAccumulator, { line: index, eventIndex: index - 1 }, message);
+        } else {
+          const parsed = parsedEventFromQuakeMLEvent(
+            quakemlEvent,
+            index,
+            detectedFields,
+            validationAccumulator
+          );
+          if (parsed.error) {
+            errors.push(parsed.error);
+          } else if (parsed.event) {
+            for (const warning of parsed.warnings) {
+              addWarning(index, warning);
+            }
+
+            pendingBatch.push(parsed.event);
+            events.push(stripReturnedEvents ? stripQuakeML(parsed.event) : parsed.event);
+            flushBatch(fileStream);
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Parse error';
+        errors.push({ line: index, message });
+        validationAccumulator.invalidEvents += 1;
+        appendParserFailure(validationAccumulator, { line: index, eventIndex: index - 1 }, message);
+      } finally {
+        currentEventXML = '';
+      }
+    });
+
+    parser.on('error', (error) => {
+      streamError = error;
+      reject(error);
+    });
+
+    fileStream.on('error', (error) => {
+      streamError = error;
+      reject(error);
+    });
+
+    parser.on('end', () => {
+      flushBatch(fileStream, true);
+      pendingWrite.then(() => {
+        if (streamError) {
+          reject(streamError);
+          return;
+        }
+        resolve();
+      }, reject);
+    });
+
+    fileStream.pipe(parser);
+  });
+
+  if (index === 0) {
+    appendParserFailure(validationAccumulator, { line: 0 }, 'No events found in QuakeML file');
+    return {
+      success: false,
+      events: [],
+      errors: [{ line: 0, message: 'No events found in QuakeML file' }],
       warnings: [],
       detectedFields: [],
       validationReport: summarizeValidationFailures(validationAccumulator.failures, {

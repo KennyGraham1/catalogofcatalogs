@@ -30,6 +30,8 @@ import { v4 as uuidv4 } from 'uuid';
 import type { ParsedEvent } from '@/types/upload';
 
 const PENDING_TTL_HOURS = 24;
+const PENDING_INSERT_BATCH_SIZE = 500;
+const PENDING_INSERT_MAX_BATCH_BYTES = 8 * 1024 * 1024;
 
 // Module-level flag so indexes are only created once per process lifetime.
 let indexesEnsured = false;
@@ -55,21 +57,80 @@ async function ensureIndexes(): Promise<void> {
 export async function storePendingUpload(events: ParsedEvent[]): Promise<string> {
   await ensureIndexes();
 
-  const uploadId   = uuidv4();
-  const expiresAt  = new Date(Date.now() + PENDING_TTL_HOURS * 60 * 60 * 1000);
-  const collection = await getCollection(COLLECTIONS.PENDING_UPLOADS);
+  const { uploadId, expiresAt } = await createPendingUpload();
 
   if (events.length > 0) {
-    const docs = events.map((event, seq) => ({
-      upload_id:  uploadId,
-      seq,
-      event,            // The full ParsedEvent, including quakeml: QuakeMLEvent
-      expires_at: expiresAt,
-    }));
-    await collection.insertMany(docs);
+    await appendPendingUploadEvents(uploadId, events, 0, expiresAt);
   }
 
   return uploadId;
+}
+
+export async function createPendingUpload(): Promise<{ uploadId: string; expiresAt: Date }> {
+  await ensureIndexes();
+
+  return {
+    uploadId: uuidv4(),
+    expiresAt: new Date(Date.now() + PENDING_TTL_HOURS * 60 * 60 * 1000),
+  };
+}
+
+function estimatePendingDocBytes(event: ParsedEvent): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(event), 'utf8') + 256;
+  } catch {
+    return PENDING_INSERT_MAX_BATCH_BYTES;
+  }
+}
+
+/**
+ * Append events to an existing pending upload in bounded insertMany batches.
+ * Returns the next sequence number after the appended range.
+ */
+export async function appendPendingUploadEvents(
+  uploadId: string,
+  events: ParsedEvent[],
+  startSeq: number,
+  expiresAt = new Date(Date.now() + PENDING_TTL_HOURS * 60 * 60 * 1000),
+): Promise<number> {
+  await ensureIndexes();
+
+  if (events.length === 0) return startSeq;
+
+  const collection = await getCollection(COLLECTIONS.PENDING_UPLOADS);
+  let batch: Array<{ upload_id: string; seq: number; event: ParsedEvent; expires_at: Date }> = [];
+  let batchBytes = 0;
+  let seq = startSeq;
+
+  const flush = async () => {
+    if (batch.length === 0) return;
+    await collection.insertMany(batch);
+    batch = [];
+    batchBytes = 0;
+  };
+
+  for (const event of events) {
+    const estimatedBytes = estimatePendingDocBytes(event);
+    if (
+      batch.length > 0 &&
+      (batch.length >= PENDING_INSERT_BATCH_SIZE ||
+        batchBytes + estimatedBytes > PENDING_INSERT_MAX_BATCH_BYTES)
+    ) {
+      await flush();
+    }
+
+    batch.push({
+      upload_id: uploadId,
+      seq,
+      event,
+      expires_at: expiresAt,
+    });
+    batchBytes += estimatedBytes;
+    seq += 1;
+  }
+
+  await flush();
+  return seq;
 }
 
 /**
@@ -82,16 +143,38 @@ export async function storePendingUpload(events: ParsedEvent[]): Promise<string>
 export async function getPendingUploadEvents(
   uploadId: string,
 ): Promise<ParsedEvent[] | null> {
+  const events: ParsedEvent[] = [];
+  for await (const batch of iteratePendingUploadEventBatches(uploadId)) {
+    events.push(...batch);
+  }
+
+  return events.length === 0 ? null : events;
+}
+
+export async function* iteratePendingUploadEventBatches(
+  uploadId: string,
+  batchSize = 1000,
+): AsyncGenerator<ParsedEvent[]> {
   await ensureIndexes();
 
   const collection = await getCollection(COLLECTIONS.PENDING_UPLOADS);
-  const docs       = await collection
+  const cursor = collection
     .find({ upload_id: uploadId })
     .sort({ seq: 1 })
-    .toArray();
+    .batchSize(batchSize);
 
-  if (docs.length === 0) return null;
-  return docs.map(doc => doc.event as ParsedEvent);
+  let batch: ParsedEvent[] = [];
+  for await (const doc of cursor) {
+    batch.push(doc.event as ParsedEvent);
+    if (batch.length >= batchSize) {
+      yield batch;
+      batch = [];
+    }
+  }
+
+  if (batch.length > 0) {
+    yield batch;
+  }
 }
 
 /**
