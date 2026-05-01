@@ -54,7 +54,13 @@ export function parsedEventToDbFields(event: ParsedEvent): DbEventFields {
 
   // ── Origin metadata (from FIELD_ALIASES-mapped CSV/JSON/GeoJSON) ──────────
   if (event.horizontal_uncertainty != null) fields.horizontal_uncertainty = Number(event.horizontal_uncertainty);
-  if (event.depth_type)                     fields.depth_type             = String(event.depth_type).toLowerCase().trim();
+  if (event.depth_type != null) {
+    const raw = String(event.depth_type).trim();
+    // Convert 0/1 flag (depthfixed column) to QuakeML depth_type vocabulary
+    fields.depth_type = raw === '1' ? 'operator assigned'
+                      : raw === '0' ? 'from location'
+                      : raw.toLowerCase();
+  }
   if (event.earth_model_id)                 fields.earth_model_id         = String(event.earth_model_id);
   if (event.method_id)                      fields.method_id              = String(event.method_id);
 

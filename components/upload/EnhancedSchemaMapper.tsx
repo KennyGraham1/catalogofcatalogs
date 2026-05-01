@@ -88,6 +88,27 @@ import {
 } from '@/lib/field-definitions';
 import type { DefaultFieldMappingsConfig, FileFormat, FieldMappingEntry } from '@/components/settings/DefaultFieldMappings';
 
+// Named magnitude-type source columns — each encodes both a value and a scale.
+// The parser auto-resolves them (Mw preferred over ML); show an informational badge.
+const NAMED_MAG_COLUMNS: Record<string, string> = {
+  Mw: 'magnitude (Mw — preferred)', MW: 'magnitude (Mw — preferred)', mw: 'magnitude (Mw — preferred)',
+  ML: 'magnitude (ML — used if no Mw)', ml: 'magnitude (ML — used if no Mw)',
+  mb: 'magnitude (mb)', Mb: 'magnitude (mb)',
+  Ms: 'magnitude (Ms)', ms: 'magnitude (Ms)',
+};
+
+// Flat focal-mechanism columns that are auto-assembled into focal_mechanisms JSON
+// by the parser — they don't need individual schema mapping.
+const FM_AUTO_COLUMNS = new Set([
+  'strike1', 'dip1', 'rake1', 'strike2', 'dip2', 'rake2',
+  'Strike1', 'Dip1', 'Rake1', 'Strike2', 'Dip2', 'Rake2',
+  'Mxx', 'Mxy', 'Mxz', 'Myy', 'Myz', 'Mzz',
+  'mxx', 'mxy', 'mxz', 'myy', 'myz', 'mzz',
+  'Tva', 'Tpl', 'Taz', 'Nva', 'Npl', 'Naz', 'Pva', 'Ppl', 'Paz',
+  'tva', 'tpl', 'taz', 'nva', 'npl', 'naz', 'pva', 'ppl', 'paz',
+  'DC', 'dc', 'VR', 'vr', 'Mo', 'mo',
+]);
+
 interface EnhancedSchemaMapperProps {
   validationResults: any;
   isProcessing: boolean;
@@ -678,15 +699,35 @@ export function EnhancedSchemaMapper({
                 </p>
               ) : (
                 sourceFields
-                  .filter((field: string) => 
-                    searchTerm === '' || 
+                  .filter((field: string) =>
+                    searchTerm === '' ||
                     field.toLowerCase().includes(searchTerm.toLowerCase())
                   )
                   .map((sourceField: string) => {
+                    const isFmAuto = FM_AUTO_COLUMNS.has(sourceField);
+                    const magLabel = NAMED_MAG_COLUMNS[sourceField];
                     const targetField = fieldMappings[sourceField];
                     const targetDef = targetField ? getFieldById(targetField) : null;
                     const isUnmapped = !targetField;
-                    
+
+                    if (isFmAuto || magLabel) {
+                      return (
+                        <div key={sourceField} className="grid grid-cols-12 gap-3 items-center opacity-70">
+                          <div className="col-span-5">
+                            <Label className="font-medium text-muted-foreground">{sourceField}</Label>
+                          </div>
+                          <div className="col-span-1 flex items-center justify-center">
+                            <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                          </div>
+                          <div className="col-span-6">
+                            <Badge variant="secondary" className="text-xs font-normal">
+                              {magLabel ?? 'focal_mechanisms (auto-assembled)'}
+                            </Badge>
+                          </div>
+                        </div>
+                      );
+                    }
+
                     return (
                       <div key={sourceField} className="grid grid-cols-12 gap-3 items-start">
                         <div className="col-span-5">

@@ -1034,6 +1034,25 @@ function mapCommonFields(event: any, dateFormat?: DateFormat, includeMappingRepo
     }
   }
 
+  // Named-type magnitude columns: Mw/MW beats ML/ml when both are present;
+  // also auto-set magnitude_type when the column name encodes the scale.
+  {
+    const pick = (keys: string[]) =>
+      keys.map(k => event[k]).find(v => v !== undefined && v !== null && String(v).trim() !== '');
+
+    const mwRaw = pick(['Mw', 'MW', 'mw']);
+    const mlRaw = pick(['ML', 'ml']);
+
+    if (mwRaw !== undefined) {
+      mapped.magnitude = safeParseFloat(mwRaw);
+      if (!mapped.magnitude_type) mapped.magnitude_type = 'mw';
+      if (includeMappingReport) mappingReport.push({ targetField: 'magnitude', sourceField: 'Mw', matchType: 'exact' });
+    } else if (mlRaw !== undefined && !setTargetFields.has('magnitude')) {
+      // ML already won the main loop; just ensure magnitude_type is set
+      if (!mapped.magnitude_type) mapped.magnitude_type = 'ml';
+    }
+  }
+
   // Assemble focal mechanism from flat nodal-plane / moment-tensor columns if present
   if (!mapped.focal_mechanisms) {
     const fm = assembleFocalMechanismFromRow(event);

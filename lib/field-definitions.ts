@@ -540,7 +540,8 @@ export const FIELD_ALIASES: Record<string, { exactMatches: string[]; aliases: st
   // Origin metadata
   depth_type: {
     exactMatches: ['depth_type', 'depthType'],
-    aliases: ['depthtype', 'depth_method', 'depthflag', 'depth_determination']
+    aliases: ['depthtype', 'depth_method', 'depthflag', 'depth_determination',
+              'depthfixed', 'depth_fixed', 'fixeddepth', 'fixed_depth']
   },
   earth_model_id: {
     exactMatches: ['earth_model_id', 'earthModelID'],
