@@ -10,7 +10,7 @@
 
 import { geonetClient, GeoNetEventText } from './geonet-client';
 import { dbQueries, MergedEvent } from './db';
-import { v4 as uuidv4 } from 'uuid';
+import { createId } from './id';
 import { extractBoundsFromMergedEvents } from './geo-bounds-utils';
 import pLimit from 'p-limit';
 import { Builder } from 'xml2js';
@@ -385,7 +385,7 @@ export class GeoNetImportService {
     }
 
     // Create new catalogue
-    const newId = uuidv4();
+    const newId = createId();
     const name = catalogueName || GeoNetImportService.DEFAULT_CATALOGUE_NAME;
 
     await getDbQueries().insertCatalogue(
@@ -629,7 +629,7 @@ export class GeoNetImportService {
     source_events: string;
     source_id: string;
   } {
-    const eventId = uuidv4();
+    const eventId = createId();
     const focalMechanisms = focalMechanismsMap.get(event.EventID) || null;
 
     return {
@@ -655,7 +655,7 @@ export class GeoNetImportService {
    * Insert new event into database
    */
   private async insertEvent(event: GeoNetEventText, catalogueId: string): Promise<void> {
-    const eventId = uuidv4();
+    const eventId = createId();
 
     // Fetch focal mechanism for significant events (M5.0+)
     let focalMechanisms: string | null = null;
@@ -762,7 +762,7 @@ export class GeoNetImportService {
     skippedEvents: number;
     errors: string[];
   }): Promise<void> {
-    const historyId = uuidv4();
+    const historyId = createId();
 
     await getDbQueries().insertImportHistory(
       historyId,
@@ -800,4 +800,3 @@ export class GeoNetImportService {
  * Default import service instance
  */
 export const geonetImportService = new GeoNetImportService();
-

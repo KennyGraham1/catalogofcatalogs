@@ -15,8 +15,9 @@ const logger = new Logger('UserAPI');
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
   const authResult = await requireAdmin(request);
   
   if (authResult instanceof NextResponse) {
@@ -25,7 +26,7 @@ export async function GET(
 
   try {
     const collection = await getCollection(COLLECTIONS.USERS);
-    const user = await collection.findOne({ id: params.id });
+    const user = await collection.findOne({ id: id });
     
     if (!user) {
       return NextResponse.json(
@@ -51,8 +52,9 @@ export async function GET(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
   const authResult = await requireAdmin(request);
   
   if (authResult instanceof NextResponse) {
@@ -90,7 +92,7 @@ export async function PATCH(
     }
     
     const result = await collection.updateOne(
-      { id: params.id },
+      { id: id },
       { $set: updateFields }
     );
     
@@ -101,10 +103,10 @@ export async function PATCH(
       );
     }
     
-    logger.info('User updated', { userId: params.id, updates: updateFields });
+    logger.info('User updated', { userId: id, updates: updateFields });
     
     // Fetch updated user
-    const updatedUser = await collection.findOne({ id: params.id });
+    const updatedUser = await collection.findOne({ id: id });
     const updatedUserData = { ...(updatedUser as Record<string, unknown>) };
     delete updatedUserData._id;
     delete updatedUserData.password_hash;
@@ -122,8 +124,9 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
   const authResult = await requireAdmin(request);
   
   if (authResult instanceof NextResponse) {
@@ -134,14 +137,14 @@ export async function DELETE(
     const collection = await getCollection(COLLECTIONS.USERS);
     
     // Prevent deleting yourself
-    if (authResult.user.id === params.id) {
+    if (authResult.user.id === id) {
       return NextResponse.json(
         { error: 'Cannot delete your own account' },
         { status: 400 }
       );
     }
     
-    const result = await collection.deleteOne({ id: params.id });
+    const result = await collection.deleteOne({ id: id });
     
     if (result.deletedCount === 0) {
       return NextResponse.json(
@@ -150,7 +153,7 @@ export async function DELETE(
       );
     }
     
-    logger.info('User deleted', { userId: params.id });
+    logger.info('User deleted', { userId: id });
     
     return NextResponse.json({ message: 'User deleted successfully' });
   } catch (error) {

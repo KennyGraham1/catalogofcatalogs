@@ -4,7 +4,7 @@ import { Logger, DatabaseError, formatErrorResponse } from '@/lib/errors';
 import { apiCache, generateCacheKey, catalogueCache, invalidateCacheByPrefix } from '@/lib/cache';
 import { applyRateLimit, readRateLimiter, apiRateLimiter } from '@/lib/rate-limiter';
 import { requireEditor } from '@/lib/auth/middleware';
-import { v4 as uuidv4 } from 'uuid';
+import { createId } from '@/lib/id';
 import {
   deletePendingUpload,
   getPendingUploadEvents,
@@ -317,7 +317,7 @@ function buildInsertRow(event: any, pendingEvent: ParsedEvent | undefined, catal
   const magnitude = safeParseNumber(event.magnitude)!;
 
   const row: InsertRow = {
-    id: uuidv4(),
+    id: createId(),
     catalogue_id: catalogueId,
     time: event.time,
     latitude,
@@ -326,7 +326,7 @@ function buildInsertRow(event: any, pendingEvent: ParsedEvent | undefined, catal
     source_events: JSON.stringify([{ source: 'upload', eventId: event.id || event.eventId }]),
     depth: (() => {
       const d = safeParseNumber(event.depth);
-      if (d === null || d < 0) return undefined;
+      if (d === null || d < -5) return undefined;
       if (d > 1000) { const km = d / 1000; return km <= 1000 ? km : undefined; }
       return d;
     })(),
@@ -447,7 +447,7 @@ async function createCatalogueFromPendingUploads(params: {
   }
 
   const db = dbQueries;
-  const catalogueId = uuidv4();
+  const catalogueId = createId();
   const startedAt = performance.now();
 
   await db.insertCatalogue(
@@ -819,11 +819,11 @@ export async function POST(request: NextRequest) {
         errors.push(`magnitude ${magnitude} must be between -3 and 10`);
       }
 
-      // Depth is optional. If out of the 0–1000 km range, try interpreting as
+      // Depth is optional. If out of the -5–1000 km range, try interpreting as
       // metres (divide by 1000). If still invalid, null it out — never reject
       // the whole event for a bad depth value.
       if (depth !== null) {
-        if (depth < 0) {
+        if (depth < -5) {
           depth = null;
         } else if (depth > 1000) {
           const depthKm = depth / 1000;
@@ -862,7 +862,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate catalogue ID
-    const catalogueId = uuidv4();
+    const catalogueId = createId();
 
     // Calculate geographic bounds from VALID events only (more efficient for large datasets)
     let minLat: number | undefined;

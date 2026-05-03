@@ -88,13 +88,13 @@ export function detectAnomalies(event: {
   
   if (event.depth !== null && event.depth !== undefined) {
     // Negative depth
-    if (event.depth < 0) {
+    if (event.depth < -5) {
       flags.push({
         type: 'error',
         category: 'depth',
         field: 'depth',
         value: event.depth,
-        message: `Negative depth: ${event.depth} km. Depth must be >= 0.`,
+        message: `Negative depth: ${event.depth} km. Depth must be >= -5 km.`,
         suggestion: 'Check depth calculation and sign convention.'
       });
     }

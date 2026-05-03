@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { requireEditor } from '@/lib/auth/middleware';
-import { v4 as uuidv4 } from 'uuid';
+import { createId } from '@/lib/id';
 
 /**
  * GET /api/mapping-templates
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const id = uuidv4();
+    const id = createId();
     const mappingsJson = JSON.stringify(mappings);
 
     await dbQueries.insertMappingTemplate(

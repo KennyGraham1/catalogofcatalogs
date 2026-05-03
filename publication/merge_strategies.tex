@@ -35,13 +35,13 @@ specialist national networks with global bulletins to fill spatial coverage gaps
 integration of macroseismic and early-instrumental data
 \citep{Grunthal1998, CPTI15}; and the growth of dense, heterogeneous strong-
 motion and nodal-sensor networks creates new challenges at sub-local scales
-\citep{Cochran2020}.
+\citep{Share2022}.
 
 Despite the ubiquity of the problem, no single standard algorithmic pipeline
 has emerged across the community.  Different groups have developed independent
 solutions—from the rule-based proximity approaches of the
 \citeauthor{NCEDCComCat}~(\citeyear{NCEDCComCat}) and the ISC bulletin
-\citep{Bondár2011}, to the graph-theoretic frameworks of
+\citep{Bondar2011}, to the graph-theoretic frameworks of
 \citet{Benz2019}, to the physics-based nearest-neighbour discriminant of
 \citet{Tanaka2022}—each optimised for different data volumes, network
 configurations, and seismicity regimes.  The goal of this review is to
@@ -85,7 +85,7 @@ seismogram archives, station bulletins, and published macroseismic accounts.
 Cross-network event identification was performed by inspection, using timing
 differences of several minutes and epicentral discrepancies of hundreds of
 kilometres as acceptable tolerances for the analogue recording era
-\citep{Bondár2011}.
+\citep{Bondar2011}.
 
 The International Seismological Summary (ISS, predecessor to the ISC bulletin)
 began assembling global phase data in 1918.  Its practice of retaining all
@@ -147,10 +147,10 @@ network, (ii) location uncertainties arising from network geometry and velocity
 model errors, and (iii) any deliberate choices such as depth fixing.
 
 For digital networks with GPS-synchronised clocks, origin time errors are
-typically well below 1\,s \citep{Bondár2011}.  Location errors depend strongly
+typically well below 1\,s \citep{Bondar2011}.  Location errors depend strongly
 on network geometry: the azimuthal gap (the largest angular gap between
 contributing stations) and the minimum station distance are the dominant
-predictors.  \citet{Bondár2004} showed empirically from the ISC bulletin that
+predictors.  \citet{Bondar2004} showed empirically from the ISC bulletin that
 the 90th percentile of location error is approximately:
 
 \begin{equation}
@@ -167,7 +167,7 @@ matching windows.
 
 Pre-digital era timing errors of several seconds per station translate to origin
 time uncertainties of 1--10\,s for well-recorded events and up to 30--60\,s for
-poorly-recorded events in the pre-1960 period \citep{Bondár2011}.  This is the
+poorly-recorded events in the pre-1960 period \citep{Bondar2011}.  This is the
 physical basis for the wider windows in \cref{tab:windows}.
 
 \subsubsection{Window-based forward-sweep}
@@ -195,7 +195,7 @@ documented threshold choices from major operational systems.
     ANSS Composite \catalog & 16 & 100 & \citet{NCEDCComCat} \\
     Typical global build ($M \geq 4.5$) & 60 & 100 & \citet{Storchak2013} \\
     Local events ($M < 4$) & 30 & 30 & \citet{Woessner2005} \\
-    Pre-digital era (pre-1960) & 300 & 200 & \citet{Bondár2011} \\
+    Pre-digital era (pre-1960) & 300 & 200 & \citet{Bondar2011} \\
     Dead Sea Transform region & 60 & 100 & \citet{DeadSea2022} \\
     Mexico unified \catalog & 60 & $\approx 111$ ($1^\circ$) & \citet{Zuniga2019} \\
     Turkey homogeneous \catalog & 60 & 100 & \citet{Tan2021} \\
@@ -441,7 +441,7 @@ conceptually equivalent to the first stage of \citet{Benz2019}
 \subsubsection{Sources of location uncertainty}
 
 Hypocentre location uncertainty arises from five primary sources
-\citep{Bondár2004, Engdahl1998}:
+\citep{Bondar2004, Engdahl1998}:
 
 \begin{enumerate}
   \item \textbf{Phase picking errors.}  Manual or automated picks of $P$, $S$,
@@ -457,7 +457,7 @@ Hypocentre location uncertainty arises from five primary sources
   \item \textbf{Velocity model errors.}  All location algorithms use an
         approximation to Earth structure; residual travel-time prediction errors
         are correlated among nearby stations, biasing the location estimate.
-        \citet{Bondár2011} introduced a correlated error covariance model to
+        \citet{Bondar2011} introduced a correlated error covariance model to
         account for this.
 
   \item \textbf{Depth-phase absence.}  Without $pP$, $sP$, or $pwP$ phases,
@@ -473,7 +473,7 @@ Hypocentre location uncertainty arises from five primary sources
 
 \subsubsection{Quantifying location quality for merging decisions}
 
-The ISC bulletin quality scoring system \citep{Bondár2011} provides a practical
+The ISC bulletin quality scoring system \citep{Bondar2011} provides a practical
 framework for weighting competing hypocentre solutions within a merged group.
 The primary quality indicators are:
 
@@ -486,10 +486,10 @@ The primary quality indicators are:
   \item Number of defining phases: $\geq 6$ minimum; $\geq 20$ for well-
         constrained depth.
   \item RMS travel-time residual: $< 1.0$\,s for well-located events
-        \citep{Bondár2011}; the ISC bulletin flags events with
+        \citep{Bondar2011}; the ISC bulletin flags events with
         RMS $> 2.0$\,s as poorly located \citep{ISCBulletinRebuild2020}.
   \item Horizontal uncertainty: expressed as the semi-major axis of the 90\,\%
-        confidence ellipse in km \citep{Bondár2004}.
+        confidence ellipse in km \citep{Bondar2004}.
 \end{itemize}
 
 These metrics should be used to rank competing solutions within a merged
@@ -539,7 +539,7 @@ recording, reporting latency, known velocity model biases).
 The ISC automated grouping algorithm compares origin times and epicentre
 coordinates from all contributing agencies and assembles candidate groups using
 a proximity-scoring system that weights azimuthal gap, phase count, distance
-range, and network geometry \citep{Bondár2011}.  Groups that appear to span two
+range, and network geometry \citep{Bondar2011}.  Groups that appear to span two
 distinct earthquakes — identified by anomalously large within-group
 hypocentre scatter or by the same-agency rule — are split by the ISC analyst
 team \citep{ISCBulletinRebuild2020}.
@@ -558,7 +558,7 @@ The two-stage relocation procedure is:
         pre-1990 bulletin by 10--30\,km for subduction-zone events
         \citep{Engdahl1998}.
 
-  \item \textbf{ISC location algorithm} \citep{Bondár2011}: fixes the depth
+  \item \textbf{ISC location algorithm} \citep{Bondar2011}: fixes the depth
         output from EHB and further reduces systematic hypocentre bias by
         modelling the spatial correlation of travel-time prediction errors
         using an empirical covariance function estimated from the bulletin's
@@ -659,7 +659,7 @@ magnitude range and biases $b$-value estimates from the homogenised \catalog\
 The solution is \textbf{Generalised Orthogonal Regression} (GOR), which
 minimises the sum of squared perpendicular distances weighted by the ratio
 $\eta = \sigma_{M_\mathrm{w}}^2 / \sigma_{M_x}^2$
-\citep{Grunthal2016, Akkar2014, Cotton2013}.  The GOR slope is:
+\citep{Grunthal2016, Akkar2014, Cotton2006}.  The GOR slope is:
 
 \begin{equation}
   \hat{\beta}_{\mathrm{GOR}} = \frac{
@@ -965,7 +965,7 @@ magnitude conversion and the inverse-variance-weighted combination of
 \eqref{eq:ivw} for events with both instrumental and macroseismic estimates.
 The catalogue is tied to the INGV ShakeMap intensity model to ensure
 consistency with ground-motion prediction equations used in Italian national
-hazard maps \citep{Stucchi2011}.
+hazard maps \citep{Stucchi2013}.
 
 \subsubsection{Aotearoa New Zealand}
 
@@ -1001,7 +1001,7 @@ merged \catalog.
 The preferred hypocentre is selected from the contributing solutions according
 to the priority order in \cref{tab:hierarchy}, subject to quality thresholds.
 The ISC-GEM criteria for accepting a prime hypocentre
-\citep{ISCGEM2018, Bondár2011} are:
+\citep{ISCGEM2018, Bondar2011} are:
 
 \begin{itemize}
   \item Azimuthal gap $< 180^\circ$,
@@ -1144,7 +1144,7 @@ any merged event back to its source records \citep{GOFAIR}.
 
 Quality flags should be computed for every merged event and stored as first-class
 metadata.  \Cref{tab:qcflags} lists the recommended set, drawing on the ISC
-bulletin quality model \citep{Bondár2011, ISCBulletinRebuild2020} and the ANSS
+bulletin quality model \citep{Bondar2011, ISCBulletinRebuild2020} and the ANSS
 ComCat practice \citep{usgs_comcat}.  Flags are informational unless marked
 as ``Error''; error-severity flags indicate that the group should be dissolved
 and re-evaluated before the event is included in the merged output.
@@ -1165,11 +1165,11 @@ and re-evaluated before the event is included in the merged output.
   \endhead
   \bottomrule
   \endfoot
-  Azimuthal gap & $> 180^\circ$ & W & \citet{Bondár2011} \\
-  Defining phase count & $< 6$ & W & \citet{Bondár2011} \\
+  Azimuthal gap & $> 180^\circ$ & W & \citet{Bondar2011} \\
+  Defining phase count & $< 6$ & W & \citet{Bondar2011} \\
   Depth fixed (not free) & any & I & \citet{Engdahl2020} \\
   RMS travel-time residual & $> 2.0$\,s & W & \citet{ISCBulletinRebuild2020} \\
-  Horizontal uncertainty & $> 50$\,km & W & \citet{Bondár2004} \\
+  Horizontal uncertainty & $> 50$\,km & W & \citet{Bondar2004} \\
   $|\Delta M_\mathrm{w}|$: two authoritative sources & $> 0.3$ & W & \citet{Schorlemmer2024} \\
   $|\Delta M_\mathrm{w}|$: converted vs.\ observed & $> 0.5$ & W & \citet{Grunthal2016} \\
   Magnitude range in group & $> 1.0$ (for $M < 5$) & W & \citet{Tanaka2022} \\

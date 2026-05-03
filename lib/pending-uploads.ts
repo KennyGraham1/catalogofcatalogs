@@ -26,7 +26,7 @@
  */
 
 import { getCollection, COLLECTIONS } from './mongodb';
-import { v4 as uuidv4 } from 'uuid';
+import { createId } from './id';
 import type { ParsedEvent } from '@/types/upload';
 
 const PENDING_TTL_HOURS = 24;
@@ -70,7 +70,7 @@ export async function createPendingUpload(): Promise<{ uploadId: string; expires
   await ensureIndexes();
 
   return {
-    uploadId: uuidv4(),
+    uploadId: createId(),
     expiresAt: new Date(Date.now() + PENDING_TTL_HOURS * 60 * 60 * 1000),
   };
 }

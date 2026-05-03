@@ -10,7 +10,7 @@
 
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
-import { v4 as uuidv4 } from 'uuid';
+import { createId } from '../lib/id';
 import { getDb, COLLECTIONS } from '../lib/mongodb';
 
 // Network metadata structure
@@ -261,7 +261,7 @@ async function importTemporaryNetworks() {
     const endTime = new Date(Math.max(...times.map(t => t.getTime())));
 
     // Create catalogue document
-    const catalogueId = uuidv4();
+    const catalogueId = createId();
     const catalogueName = `${metadata.fullName} (${networkCode})`;
 
     const catalogueDoc = {
@@ -344,7 +344,7 @@ async function importTemporaryNetworks() {
 
     // Prepare events for bulk insert
     const eventDocs = events.map(event => ({
-      id: uuidv4(),
+      id: createId(),
       catalogue_id: catalogueId,
       source_id: event.eventId,
       time: new Date(event.time).toISOString(),

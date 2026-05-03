@@ -27,7 +27,7 @@
 
 import { Binary } from 'mongodb';
 import { getCollection, COLLECTIONS } from './mongodb';
-import { v4 as uuidv4 } from 'uuid';
+import { createId } from './id';
 import { createWriteStream } from 'fs';
 import { once } from 'events';
 
@@ -77,7 +77,7 @@ export async function createUploadSession(
 ): Promise<string> {
   await ensureIndexes();
 
-  const sessionId  = uuidv4();
+  const sessionId  = createId();
   const expiresAt  = new Date(Date.now() + CHUNK_TTL_HOURS * 60 * 60 * 1000);
   const col        = await getCollection(COLLECTIONS.UPLOAD_CHUNKS);
 

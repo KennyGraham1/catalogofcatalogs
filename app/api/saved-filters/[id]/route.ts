@@ -11,14 +11,16 @@ const logger = new Logger('SavedFilterAPI');
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
+
   try {
     if (!dbQueries) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
-    const filter = await dbQueries.getSavedFilterById(params.id);
+    const filter = await dbQueries.getSavedFilterById(id);
 
     if (!filter) {
       return NextResponse.json(
@@ -51,8 +53,10 @@ export async function GET(
  */
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
+
   try {
     const authResult = await requireViewer(request);
     if (authResult instanceof NextResponse) {
@@ -75,11 +79,11 @@ export async function PUT(
 
     const filterConfigString = JSON.stringify(filterConfig);
 
-    await dbQueries.updateSavedFilter(params.id, name, description || null, filterConfigString);
+    await dbQueries.updateSavedFilter(id, name, description || null, filterConfigString);
 
-    logger.info('Saved filter updated', { id: params.id, name });
+    logger.info('Saved filter updated', { id: id, name });
 
-    return NextResponse.json({ id: params.id, name, description, filterConfig });
+    return NextResponse.json({ id: id, name, description, filterConfig });
   } catch (error) {
     logger.error('Failed to update saved filter', error);
     const errorResponse = formatErrorResponse(error);
@@ -97,8 +101,10 @@ export async function PUT(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
+
   try {
     const authResult = await requireViewer(request);
     if (authResult instanceof NextResponse) {
@@ -109,9 +115,9 @@ export async function DELETE(
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
-    await dbQueries.deleteSavedFilter(params.id);
+    await dbQueries.deleteSavedFilter(id);
 
-    logger.info('Saved filter deleted', { id: params.id });
+    logger.info('Saved filter deleted', { id: id });
 
     return NextResponse.json({ success: true });
   } catch (error) {

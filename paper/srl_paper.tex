@@ -123,7 +123,7 @@ framework for short-term earthquake forecasting, requires a complete,
 Poissonian background catalogue that is free from both incompleteness and
 aftershock contamination.
 
-Regional monitoring agencies---GeoNet (New Zealand; \citealt{geonet2017}),
+Regional monitoring agencies---GeoNet (New Zealand; \citealt{petersen2011}),
 the Northern California Earthquake Data Center \citep{ncedc2014}, the
 International Seismological Centre (ISC; \citealt{storchak2013}), the
 Engdahl-van der Hilst-Buland relocated global catalogue
@@ -159,7 +159,7 @@ appears in both, reported with slightly different origin times, hypocentres,
 and magnitudes.  These differences arise from genuine physical causes:
 different station sets lead to different travel-time residuals; regional
 versus global velocity models bias depth systematically; automatic picks
-differ from manually reviewed ones.  \citet{bondarbullettine2004} showed
+differ from manually reviewed ones.  \citet{bondar2004} showed
 that even for well-recorded teleseismic events, agency-to-agency location
 scatter can reach 10--20~km in horizontal position and 30~km in depth.
 Na{\"i}vely concatenating catalogues without duplicate removal inflates
@@ -195,7 +195,7 @@ a different value---$M_L$ above $\sim 6.5$, $m_b$ above $\sim 6.0$
 \citep{bormann2015}---and the inter-scale regressions carry substantial
 scatter \citep{das2011}.  Mixing scales inflates the apparent variance of the
 FMD, artificially shifts $M_c$, and can change the estimated $b$ by up to
-$\pm 0.2$ \citep{marzocchi2014}.  \citet{tinti1987} showed that even with a
+$\pm 0.2$ \citep{marzocchi2003}.  \citet{tinti1987} showed that even with a
 single scale, binning width and sample size both affect the precision of $\hat{b}$
 in ways that are routinely underappreciated.
 
@@ -219,7 +219,7 @@ large location uncertainties and poorly constrained depths.  If such events
 are systematically concentrated at one magnitude or depth range---as is
 typical for offshore events recorded by onshore networks---they introduce
 spatial bias into $b$-value mapping and Gutenberg-Richter fits.
-\citet{bondarbullettine2004} demonstrated that azimuthal gap is the primary
+\citet{bondar2004} demonstrated that azimuthal gap is the primary
 predictor of horizontal location error: gaps exceeding $180^{\circ}$ are
 typically associated with errors of tens of kilometres.
 
@@ -244,7 +244,7 @@ The Community Online Resource for Statistical Seismicity Analysis
 \citep[CORSSA;][]{naylor2010,mignan2012,vanstiphout2012,woessner2016}
 provides peer-reviewed tutorials on these methods but no software platform.
 
-At the institutional level, major agencies---GeoNet \citep{geonet2017},
+At the institutional level, major agencies---GeoNet \citep{petersen2011},
 the USGS Comprehensive Catalogue \citep[ComCat;][]{storchak2013},
 the Swiss Seismological Service, the ISC \citep{storchak2013}, and
 the EMSC---each publish their own catalogues with FDSN-compliant web
@@ -493,7 +493,7 @@ changes.  The five dimension scores $Q_d \in [0,100]$ are:
     proportionally to the number and severity of failures.
   \item[$Q_{\text{rel}}$ — Reliability (15\%)]  Instrumental solution
     quality: azimuthal gap (the primary determinant of horizontal location
-    error; \citealt{bondarbullettine2004}; \citealt{warrensmith2025}),
+    error; \citealt{bondar2004}; \citealt{warrensmith2025}),
     used-station count, and evaluation status.  A gap $\leq 90^{\circ}$
     and $\geq 10$ stations earns full points; a gap $\geq 180^{\circ}$
     or automatic solution with $\leq 3$ stations earns 0.  The location
@@ -676,7 +676,7 @@ the Goodness-of-Fit Test (GFT) or Entire Magnitude Range (EMR) method of
 \citet{woessner2005} should be applied as external post-processing.
 
 CofC displays a warning when the number of events above $M_c$ falls below
-$N = 200$, the empirical minimum identified by \citet{marzocchi2014} for a
+$N = 200$, the empirical minimum identified by \citet{marzocchi2003} for a
 reliable $b$-value estimate.  Below this threshold, $\sigma_b$ exceeds 0.07,
 which is comparable to the biases discussed in Section~\ref{sec:biases}, and
 the confidence interval on $b$ becomes too wide for quantitative hazard use.
@@ -758,14 +758,14 @@ in Section~\ref{sec:biases}, we construct a \emph{synthetic} catalogue pair
 representative of two agencies monitoring New Zealand seismicity.  All event
 parameters (location, depth, magnitude, azimuthal gap) are drawn from
 statistical distributions calibrated to GeoNet observations
-\citep{geonet2017, warrensmith2025} but do not represent any specific real
+\citep{petersen2011, warrensmith2025} but do not represent any specific real
 dataset.  This controlled synthetic setting allows us to demonstrate bias
 magnitudes in a transparent, reproducible way; we note where results are
 expected to generalise and where real-data validation is needed.  The two
 synthetic catalogues (GeoNet-like and Agency~B) span January
 2020--December 2024 and contain $\sim$120\,000 and $\sim$98\,000 events
 respectively, matching the scale of the real GeoNet catalogue over that period
-\citep{geonet2017}.
+\citep{petersen2011}.
 
 \subsection{Step 1: Import}
 
@@ -987,7 +987,7 @@ that preserves provenance at every step.
 The quality-scoring system (equation~\ref{eq:quality}) is designed to be
 interpretable: each sub-score corresponds to a well-understood determinant of
 solution quality, grounded in the seismological literature.  Azimuthal gap is
-the primary predictor of horizontal location error \citep{bondarbullettine2004};
+the primary predictor of horizontal location error \citep{bondar2004};
 used-station count is the primary predictor of the constraint on focal depth;
 location and magnitude uncertainties are direct quantitative measures of
 solution precision.  By making these criteria explicit and combining them into
@@ -1050,7 +1050,7 @@ pagination layer, will be extended to support these workflows.
 \textbf{Magnitude homogenisation.}  CofC displays the magnitude type of
 each event and warns when a catalogue contains mixed scales, but it does not
 yet apply empirical inter-scale conversion automatically.  Given the magnitude
-bias this can introduce \citep{marzocchi2014, tinti1987}, automated
+bias this can introduce \citep{marzocchi2003, tinti1987}, automated
 conversion to a unified scale (ideally $M_w$) using regressions such as those
 of \citet{das2011} is a high-priority addition.
 

@@ -306,7 +306,7 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
       // Act
       const { GET } = await import('@/app/api/catalogues/[id]/route');
       const request = new NextRequest('http://localhost:3000/api/catalogues/cat-123');
-      const response = await GET(request, { params: { id: 'cat-123' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'cat-123' }) });
       const body = await response.json();
 
       // Assert
@@ -322,7 +322,7 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
       // Act
       const { GET } = await import('@/app/api/catalogues/[id]/route');
       const request = new NextRequest('http://localhost:3000/api/catalogues/non-existent');
-      const response = await GET(request, { params: { id: 'non-existent' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'non-existent' }) });
 
       // Assert
       expect(response.status).toBe(404);
@@ -363,7 +363,7 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
         method: 'PATCH',
         body: JSON.stringify(requestBody),
       });
-      const response = await PATCH(request, { params: { id: 'cat-123' } });
+      const response = await PATCH(request, { params: Promise.resolve({ id: 'cat-123' }) });
 
       // Assert
       expect(response.status).toBe(200);
@@ -380,7 +380,7 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
         method: 'PATCH',
         body: JSON.stringify({ name: 'New Name' }),
       });
-      const response = await PATCH(request, { params: { id: 'cat-123' } });
+      const response = await PATCH(request, { params: Promise.resolve({ id: 'cat-123' }) });
 
       // Assert
       expect(response.status).toBe(401);
@@ -415,7 +415,7 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
       const request = new NextRequest('http://localhost:3000/api/catalogues/cat-123', {
         method: 'DELETE',
       });
-      const response = await DELETE(request, { params: { id: 'cat-123' } });
+      const response = await DELETE(request, { params: Promise.resolve({ id: 'cat-123' }) });
 
       // Assert
       expect(response.status).toBe(200);
@@ -434,7 +434,7 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
       const request = new NextRequest('http://localhost:3000/api/catalogues/non-existent', {
         method: 'DELETE',
       });
-      const response = await DELETE(request, { params: { id: 'non-existent' } });
+      const response = await DELETE(request, { params: Promise.resolve({ id: 'non-existent' }) });
 
       // Assert
       expect(response.status).toBe(404);
@@ -483,7 +483,7 @@ describeIfWebAPIs('Catalogue Events API', () => {
       const request = new NextRequest(
         'http://localhost:3000/api/catalogues/cat-123/events?page=1&limit=10'
       );
-      const response = await GET(request, { params: { id: 'cat-123' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'cat-123' }) });
       const body = await response.json();
 
       // Assert
@@ -535,7 +535,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
       const request = new NextRequest(
         'http://localhost:3000/api/catalogues/cat-123/export?format=csv'
       );
-      const response = await GET(request, { params: { id: 'cat-123' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'cat-123' }) });
       const text = await response.text();
       const headerLine = text.split('\n').find(l => l.startsWith('Time,'));
 
@@ -582,7 +582,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
       const request = new NextRequest(
         'http://localhost:3000/api/catalogues/cat-123/export?format=json'
       );
-      const response = await GET(request, { params: { id: 'cat-123' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'cat-123' }) });
 
       // Assert
       expect(response.status).toBe(200);
@@ -616,7 +616,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
       const request = new NextRequest(
         'http://localhost:3000/api/catalogues/cat-123/export?format=json'
       );
-      const response = await GET(request, { params: { id: 'cat-123' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'cat-123' }) });
       const body = await response.json();
 
       expect(response.status).toBe(200);
@@ -638,7 +638,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
       const request = new NextRequest(
         'http://localhost:3000/api/catalogues/cat-123/export?format=geojson'
       );
-      const response = await GET(request, { params: { id: 'cat-123' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'cat-123' }) });
 
       expect(response.status).toBe(200);
       expect(response.headers.get('Content-Type')).toContain('geo+json');
@@ -662,7 +662,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
       const request = new NextRequest(
         'http://localhost:3000/api/catalogues/cat-123/export?format=kml'
       );
-      const response = await GET(request, { params: { id: 'cat-123' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'cat-123' }) });
 
       expect(response.status).toBe(200);
       expect(response.headers.get('Content-Type')).toContain('kml');
@@ -685,7 +685,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
       const request = new NextRequest(
         'http://localhost:3000/api/catalogues/cat-123/export?format=quakeml'
       );
-      const response = await GET(request, { params: { id: 'cat-123' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'cat-123' }) });
 
       expect(response.status).toBe(200);
       expect(response.headers.get('Content-Type')).toContain('xml');
@@ -703,7 +703,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
       const request = new NextRequest(
         'http://localhost:3000/api/catalogues/cat-123/export?format=xlsx'
       );
-      const response = await GET(request, { params: { id: 'cat-123' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'cat-123' }) });
 
       expect(response.status).toBe(400);
     });
@@ -718,7 +718,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
       const request = new NextRequest(
         'http://localhost:3000/api/catalogues/nonexistent/export?format=csv'
       );
-      const response = await GET(request, { params: { id: 'nonexistent' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'nonexistent' }) });
 
       expect(response.status).toBe(404);
     });
@@ -734,7 +734,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
       const request = new NextRequest(
         'http://localhost:3000/api/catalogues/cat-123/export?format=csv'
       );
-      const response = await GET(request, { params: { id: 'cat-123' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'cat-123' }) });
 
       expect(response.status).toBe(200);
       const text = await response.text();
@@ -764,7 +764,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
       const request = new NextRequest(
         'http://localhost:3000/api/catalogues/cat-123/export?format=csv'
       );
-      const response = await GET(request, { params: { id: 'cat-123' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'cat-123' }) });
 
       expect(response.status).toBe(200);
       const text = await response.text();
@@ -792,7 +792,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
       const request = new NextRequest(
         'http://localhost:3000/api/catalogues/cat-123/export?format=csv'
       );
-      const response = await GET(request, { params: { id: 'cat-123' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'cat-123' }) });
 
       expect(response.status).toBe(200);
       const text = await response.text();
@@ -815,7 +815,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
       const request = new NextRequest(
         'http://localhost:3000/api/catalogues/cat-123/export?format=csv'
       );
-      const response = await GET(request, { params: { id: 'cat-123' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'cat-123' }) });
 
       const disposition = response.headers.get('Content-Disposition');
       expect(disposition).toContain('attachment');
@@ -829,7 +829,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
       const request = new NextRequest(
         'http://localhost:3000/api/catalogues/cat-123/export?format=csv'
       );
-      const response = await GET(request, { params: { id: 'cat-123' } });
+      const response = await GET(request, { params: Promise.resolve({ id: 'cat-123' }) });
 
       expect(response.status).toBe(401);
     });

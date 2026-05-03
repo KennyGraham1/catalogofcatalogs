@@ -18,8 +18,10 @@ type ExportFormat = 'csv' | 'json' | 'geojson' | 'kml' | 'quakeml';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
+
   try {
     // Require Viewer role or higher
     const authResult = await requireViewer(request);
@@ -27,7 +29,7 @@ export async function GET(
       return authResult;
     }
 
-    const catalogueId = params.id;
+    const catalogueId = id;
     const searchParams = request.nextUrl.searchParams;
     const format = (searchParams.get('format') || 'csv').toLowerCase() as ExportFormat;
 

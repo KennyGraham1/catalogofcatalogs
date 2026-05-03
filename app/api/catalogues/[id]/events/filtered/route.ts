@@ -12,8 +12,10 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
+
   try {
     const authResult = await requireViewer(request);
     if (authResult instanceof NextResponse) {
@@ -27,7 +29,7 @@ export async function GET(
       );
     }
 
-    const catalogueId = params.id;
+    const catalogueId = id;
     const { searchParams } = new URL(request.url);
 
     // Build filters from query parameters

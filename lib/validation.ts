@@ -330,7 +330,7 @@ const FIELD_EXPECTATIONS: Record<string, string> = {
   latitude: 'Number between -90 and 90',
   longitude: 'Number between -180 and 180',
   magnitude: 'Number between -3 and 10',
-  depth: 'Number between 0 and 1000 (km)',
+  depth: 'Number between -5 and 1000 (km)',
 };
 
 /**

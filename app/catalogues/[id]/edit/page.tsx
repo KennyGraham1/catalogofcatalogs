@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -53,7 +53,9 @@ interface Catalogue {
   notes?: string;
 }
 
-export default function EditCataloguePage({ params }: { params: { id: string } }) {
+export default function EditCataloguePage() {
+  const params = useParams();
+  const catalogueId = params.id as string;
   const router = useRouter();
   const { user, isLoading: authLoading } = useAuth();
   const canEdit = user?.role === UserRole.EDITOR || user?.role === UserRole.ADMIN;
@@ -72,14 +74,14 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
       return;
     }
     fetchCatalogue();
-    // fetchCatalogue uses params.id which is already in deps
+    // fetchCatalogue uses catalogueId which is already in deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.id, canEdit]);
+  }, [catalogueId, canEdit]);
 
   const fetchCatalogue = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/catalogues/${params.id}`);
+      const response = await fetch(`/api/catalogues/${catalogueId}`);
       if (!response.ok) throw new Error('Failed to fetch catalogue');
       const data = await response.json();
       setCatalogue(data);
@@ -166,7 +168,7 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
 
     try {
       setSaving(true);
-      const response = await fetch(`/api/catalogues/${params.id}`, {
+      const response = await fetch(`/api/catalogues/${catalogueId}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -219,7 +221,7 @@ export default function EditCataloguePage({ params }: { params: { id: string } }
         }
         secondaryAction={
           user
-            ? { label: 'View Catalogue', href: `/catalogues/${params.id}` }
+            ? { label: 'View Catalogue', href: `/catalogues/${catalogueId}` }
             : { label: 'Back to Home', href: '/' }
         }
       />

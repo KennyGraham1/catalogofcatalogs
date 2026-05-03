@@ -7,8 +7,7 @@ import { Compass, Layers, TrendingDown } from 'lucide-react';
 import { TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import { 
   FocalMechanism, 
-  generateBeachBallSVG, 
-  formatFocalMechanism,
+  generateBeachBallDiagram,
   getFaultType 
 } from '@/lib/focal-mechanism-utils';
 
@@ -28,9 +27,8 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
     );
   }
 
-  const formatted = formatFocalMechanism(mechanism);
   const faultType = getFaultType(mechanism.nodalPlane1.rake);
-  const beachBallSVG = generateBeachBallSVG(mechanism, 200);
+  const beachBallDiagram = generateBeachBallDiagram(mechanism, 200);
 
   return (
     <Card>
@@ -44,7 +42,36 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
       <CardContent className="space-y-4">
         {/* Beach Ball Diagram */}
         <div className="flex justify-center p-4 bg-muted rounded-lg">
-          <div dangerouslySetInnerHTML={{ __html: beachBallSVG }} />
+          {beachBallDiagram && (
+            <svg
+              width={beachBallDiagram.size}
+              height={beachBallDiagram.size}
+              viewBox={`0 0 ${beachBallDiagram.size} ${beachBallDiagram.size}`}
+              xmlns="http://www.w3.org/2000/svg"
+              aria-label="Focal mechanism beach ball diagram"
+              role="img"
+            >
+              <circle
+                cx={beachBallDiagram.center}
+                cy={beachBallDiagram.center}
+                r={beachBallDiagram.radius * 0.95}
+                fill="white"
+                stroke="black"
+                strokeWidth="2"
+              />
+              {beachBallDiagram.compressionalPaths.map((path, index) => (
+                <path key={index} d={path} fill="black" />
+              ))}
+              <circle
+                cx={beachBallDiagram.center}
+                cy={beachBallDiagram.center}
+                r={beachBallDiagram.radius * 0.95}
+                fill="none"
+                stroke="black"
+                strokeWidth="2"
+              />
+            </svg>
+          )}
         </div>
 
         {/* Nodal Planes */}

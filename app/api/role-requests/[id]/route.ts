@@ -15,8 +15,9 @@ const logger = new Logger('RoleRequestReviewAPI');
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
   const authResult = await requireAdmin(request);
   if (authResult instanceof NextResponse) {
     return authResult;
@@ -50,7 +51,7 @@ export async function PATCH(
 
     const { status, adminNotes } = validation.data;
     const collection = await getCollection<RoleChangeRequest>(COLLECTIONS.ROLE_REQUESTS);
-    const existing = await collection.findOne({ id: params.id });
+    const existing = await collection.findOne({ id: id });
 
     if (!existing) {
       return NextResponse.json(
@@ -80,7 +81,7 @@ export async function PATCH(
     };
 
     const updateResult = await collection.updateOne(
-      { id: params.id, status: 'pending' },
+      { id: id, status: 'pending' },
       { $set: updateFields }
     );
 
@@ -100,7 +101,7 @@ export async function PATCH(
 
       if (userUpdate.matchedCount === 0) {
         await collection.updateOne(
-          { id: params.id },
+          { id: id },
           {
             $set: {
               status: 'pending',
@@ -150,7 +151,7 @@ export async function PATCH(
       });
     }
 
-    const updated = await collection.findOne({ id: params.id });
+    const updated = await collection.findOne({ id: id });
     const sanitized = updated ? (({ _id, ...rest }) => rest)(updated as RoleChangeRequest & { _id?: unknown }) : null;
 
     return NextResponse.json({ request: sanitized });

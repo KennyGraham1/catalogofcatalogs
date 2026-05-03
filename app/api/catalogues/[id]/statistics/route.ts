@@ -42,8 +42,10 @@ export interface CatalogueStatistics {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
+
   try {
     if (!dbQueries) {
       return NextResponse.json(
@@ -52,7 +54,7 @@ export async function GET(
       );
     }
 
-    const catalogueId = params.id;
+    const catalogueId = id;
     logger.info('Fetching catalogue statistics', { catalogueId });
 
     // Get catalogue info

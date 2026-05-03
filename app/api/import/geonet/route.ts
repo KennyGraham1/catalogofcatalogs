@@ -93,16 +93,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate depth range
-    if (minDepth !== undefined && (typeof minDepth !== 'number' || minDepth < 0)) {
+    if (minDepth !== undefined && (typeof minDepth !== 'number' || minDepth < -5)) {
       return NextResponse.json(
-        { error: 'Minimum depth must be a non-negative number' },
+        { error: 'Minimum depth must be >= -5 km' },
         { status: 400 }
       );
     }
 
-    if (maxDepth !== undefined && (typeof maxDepth !== 'number' || maxDepth < 0)) {
+    if (maxDepth !== undefined && (typeof maxDepth !== 'number' || maxDepth < -5)) {
       return NextResponse.json(
-        { error: 'Maximum depth must be a non-negative number' },
+        { error: 'Maximum depth must be >= -5 km' },
         { status: 400 }
       );
     }

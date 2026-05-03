@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { Logger, formatErrorResponse } from '@/lib/errors';
 import { requireViewer } from '@/lib/auth/middleware';
-import { v4 as uuidv4 } from 'uuid';
+import { createId } from '@/lib/id';
 
 const logger = new Logger('SavedFiltersAPI');
 
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
-    const id = uuidv4();
+    const id = createId();
     const filterConfigString = JSON.stringify(filterConfig);
 
     await dbQueries.insertSavedFilter(id, name, description || null, filterConfigString);

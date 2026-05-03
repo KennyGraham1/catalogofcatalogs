@@ -280,11 +280,11 @@ function validateOrigin(origin: Origin, path: string): QuakeMLValidationError[] 
       path: `${path}.depth`,
       message: 'Origin depth is missing (recommended)'
     });
-  } else if (origin.depth.value < 0) {
+  } else if (origin.depth.value < -5000) {
     errors.push({
       type: 'error',
       path: `${path}.depth.value`,
-      message: 'Depth must be >= 0 meters',
+      message: 'Depth must be >= -5000 meters',
       value: origin.depth.value
     });
   }

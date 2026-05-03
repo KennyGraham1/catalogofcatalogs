@@ -8,8 +8,10 @@ import { requireEditor } from '@/lib/auth/middleware';
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
+
   try {
     const authResult = await requireEditor(request);
     if (authResult instanceof NextResponse) {
@@ -23,7 +25,7 @@ export async function GET(
       );
     }
 
-    const template = await dbQueries.getMappingTemplateById(params.id);
+    const template = await dbQueries.getMappingTemplateById(id);
 
     if (!template) {
       return NextResponse.json(
@@ -51,8 +53,10 @@ export async function GET(
  */
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
+
   try {
     const authResult = await requireEditor(request);
     if (authResult instanceof NextResponse) {
@@ -86,7 +90,7 @@ export async function PUT(
     }
 
     // Check if template exists
-    const existing = await dbQueries.getMappingTemplateById(params.id);
+    const existing = await dbQueries.getMappingTemplateById(id);
     if (!existing) {
       return NextResponse.json(
         { error: 'Template not found' },
@@ -97,14 +101,14 @@ export async function PUT(
     const mappingsJson = JSON.stringify(mappings);
 
     await dbQueries.updateMappingTemplate(
-      params.id,
+      id,
       name,
       description || null,
       mappingsJson
     );
 
     // Fetch the updated template
-    const template = await dbQueries.getMappingTemplateById(params.id);
+    const template = await dbQueries.getMappingTemplateById(id);
     
     if (!template) {
       return NextResponse.json(
@@ -132,8 +136,10 @@ export async function PUT(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
+
   try {
     const authResult = await requireEditor(request);
     if (authResult instanceof NextResponse) {
@@ -148,7 +154,7 @@ export async function DELETE(
     }
 
     // Check if template exists
-    const existing = await dbQueries.getMappingTemplateById(params.id);
+    const existing = await dbQueries.getMappingTemplateById(id);
     if (!existing) {
       return NextResponse.json(
         { error: 'Template not found' },
@@ -156,7 +162,7 @@ export async function DELETE(
       );
     }
 
-    await dbQueries.deleteMappingTemplate(params.id);
+    await dbQueries.deleteMappingTemplate(id);
 
     return NextResponse.json({ success: true });
   } catch (error) {

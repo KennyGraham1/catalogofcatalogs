@@ -21,6 +21,21 @@ export interface BeachBallPoint {
   isCompressional: boolean;
 }
 
+export interface BeachBallDiagram {
+  size: number;
+  center: number;
+  radius: number;
+  compressionalPaths: string[];
+}
+
+function finiteNumber(value: unknown, fallback: number = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizePreferredPlane(value: unknown): 1 | 2 {
+  return value === 2 ? 2 : 1;
+}
+
 /**
  * Parse focal mechanism data from JSON string
  * Supports both QuakeML format and simplified format
@@ -38,16 +53,16 @@ export function parseFocalMechanism(focalMechanismsJson: string | null | undefin
     if (fm.nodalPlane1 && typeof fm.nodalPlane1.strike === 'number') {
       return {
         nodalPlane1: {
-          strike: fm.nodalPlane1.strike,
-          dip: fm.nodalPlane1.dip,
-          rake: fm.nodalPlane1.rake,
+          strike: finiteNumber(fm.nodalPlane1.strike),
+          dip: finiteNumber(fm.nodalPlane1.dip),
+          rake: finiteNumber(fm.nodalPlane1.rake),
         },
         nodalPlane2: fm.nodalPlane2 ? {
-          strike: fm.nodalPlane2.strike,
-          dip: fm.nodalPlane2.dip,
-          rake: fm.nodalPlane2.rake,
+          strike: finiteNumber(fm.nodalPlane2.strike),
+          dip: finiteNumber(fm.nodalPlane2.dip),
+          rake: finiteNumber(fm.nodalPlane2.rake),
         } : undefined,
-        preferredPlane: fm.preferredPlane || 1,
+        preferredPlane: normalizePreferredPlane(fm.preferredPlane),
       };
     }
 
@@ -56,16 +71,16 @@ export function parseFocalMechanism(focalMechanismsJson: string | null | undefin
 
     return {
       nodalPlane1: fm.nodalPlanes.nodalPlane1 ? {
-        strike: fm.nodalPlanes.nodalPlane1.strike?.value || 0,
-        dip: fm.nodalPlanes.nodalPlane1.dip?.value || 0,
-        rake: fm.nodalPlanes.nodalPlane1.rake?.value || 0,
+        strike: finiteNumber(fm.nodalPlanes.nodalPlane1.strike?.value),
+        dip: finiteNumber(fm.nodalPlanes.nodalPlane1.dip?.value),
+        rake: finiteNumber(fm.nodalPlanes.nodalPlane1.rake?.value),
       } : undefined,
       nodalPlane2: fm.nodalPlanes.nodalPlane2 ? {
-        strike: fm.nodalPlanes.nodalPlane2.strike?.value || 0,
-        dip: fm.nodalPlanes.nodalPlane2.dip?.value || 0,
-        rake: fm.nodalPlanes.nodalPlane2.rake?.value || 0,
+        strike: finiteNumber(fm.nodalPlanes.nodalPlane2.strike?.value),
+        dip: finiteNumber(fm.nodalPlanes.nodalPlane2.dip?.value),
+        rake: finiteNumber(fm.nodalPlanes.nodalPlane2.rake?.value),
       } : undefined,
-      preferredPlane: fm.nodalPlanes.preferredPlane || 1,
+      preferredPlane: normalizePreferredPlane(fm.nodalPlanes.preferredPlane),
     };
   } catch (error) {
     console.error('Error parsing focal mechanism:', error);
@@ -81,10 +96,25 @@ export function generateBeachBallSVG(
   mechanism: FocalMechanism,
   size: number = 100
 ): string {
-  if (!mechanism.nodalPlane1) return '';
+  const diagram = generateBeachBallDiagram(mechanism, size);
+  if (!diagram) return '';
+
+  const { center, radius, compressionalPaths } = diagram;
+  const pathElements = compressionalPaths.map(path => `<path d="${path}" fill="black"/>`).join('');
+  return `<svg width="${diagram.size}" height="${diagram.size}" viewBox="0 0 ${diagram.size} ${diagram.size}" xmlns="http://www.w3.org/2000/svg"><circle cx="${center}" cy="${center}" r="${radius * 0.95}" fill="white" stroke="black" stroke-width="2"/>${pathElements}<circle cx="${center}" cy="${center}" r="${radius * 0.95}" fill="none" stroke="black" stroke-width="2"/></svg>`;
+}
+
+export function generateBeachBallDiagram(
+  mechanism: FocalMechanism,
+  size: number = 100
+): BeachBallDiagram | null {
+  if (!mechanism.nodalPlane1) return null;
   
-  const { strike, dip, rake } = mechanism.nodalPlane1;
-  const radius = size / 2;
+  const strike = finiteNumber(mechanism.nodalPlane1.strike);
+  const dip = finiteNumber(mechanism.nodalPlane1.dip);
+  const rake = finiteNumber(mechanism.nodalPlane1.rake);
+  const normalizedSize = Math.max(1, finiteNumber(size, 100));
+  const radius = normalizedSize / 2;
   const center = radius;
   
   // Convert to radians
@@ -141,11 +171,12 @@ export function generateBeachBallSVG(
     compressionalPaths.push(pointsToPath(currentPath, center, radius));
   }
   
-  // Build SVG (compact format for better data URL encoding)
-  const pathElements = compressionalPaths.map(path => `<path d="${path}" fill="black"/>`).join('');
-  const svg = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg"><circle cx="${center}" cy="${center}" r="${radius * 0.95}" fill="white" stroke="black" stroke-width="2"/>${pathElements}<circle cx="${center}" cy="${center}" r="${radius * 0.95}" fill="none" stroke="black" stroke-width="2"/></svg>`;
-
-  return svg;
+  return {
+    size: normalizedSize,
+    center,
+    radius,
+    compressionalPaths,
+  };
 }
 
 /**
@@ -270,4 +301,3 @@ export function generateBeachBallDataURL(mechanism: FocalMechanism, size: number
   const encoded = encodeURIComponent(svg);
   return `data:image/svg+xml,${encoded}`;
 }
-

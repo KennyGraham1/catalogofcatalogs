@@ -540,7 +540,7 @@ export function validateEvent(event: Partial<EarthquakeEvent>): {
   }
 
   if (event.depth !== undefined && event.depth !== null && !validateDepth(event.depth)) {
-    errors.push('Invalid depth: must be between 0 and 1000 km');
+    errors.push('Invalid depth: must be between -5 and 1000 km');
   }
 
   if (!event.time) {

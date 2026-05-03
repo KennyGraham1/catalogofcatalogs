@@ -8,8 +8,10 @@ const logger = new Logger('CatalogueAPI');
 
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
+
   try {
     if (!dbQueries) {
       return NextResponse.json(
@@ -18,9 +20,9 @@ export async function GET(
       );
     }
 
-    logger.info('Fetching catalogue', { id: params.id });
+    logger.info('Fetching catalogue', { id: id });
 
-    const catalogue = await dbQueries.getCatalogueById(params.id);
+    const catalogue = await dbQueries.getCatalogueById(id);
 
     if (!catalogue) {
       throw new NotFoundError('Catalogue');
@@ -28,7 +30,7 @@ export async function GET(
 
     return NextResponse.json(catalogue);
   } catch (error) {
-    logger.error('Failed to fetch catalogue', error, { id: params.id });
+    logger.error('Failed to fetch catalogue', error, { id: id });
     const errorResponse = formatErrorResponse(error);
 
     return NextResponse.json(
@@ -40,8 +42,10 @@ export async function GET(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
+
   try {
     // Require Editor role or higher
     const authResult = await requireEditor(request);
@@ -49,7 +53,7 @@ export async function PATCH(
       return authResult;
     }
 
-    logger.info('Updating catalogue', { id: params.id });
+    logger.info('Updating catalogue', { id: id });
 
     const body = await request.json();
     const { name, ...metadata } = body;
@@ -71,23 +75,23 @@ export async function PATCH(
 
     // Update name if provided
     if (name && name.trim()) {
-      await dbQueries.updateCatalogueName(name, params.id);
+      await dbQueries.updateCatalogueName(name, id);
     }
 
     // Update metadata if any metadata fields are provided
     const metadataKeys = Object.keys(metadata);
     if (metadataKeys.length > 0) {
-      await dbQueries.updateCatalogueMetadata(params.id, metadata);
+      await dbQueries.updateCatalogueMetadata(id, metadata);
     }
 
-    logger.info('Catalogue updated successfully', { id: params.id });
+    logger.info('Catalogue updated successfully', { id: id });
 
     // Clear cache since catalogue was updated
     apiCache.clearAll();
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    logger.error('Failed to update catalogue', error, { id: params.id });
+    logger.error('Failed to update catalogue', error, { id: id });
     const errorResponse = formatErrorResponse(error);
 
     return NextResponse.json(
@@ -99,8 +103,10 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
+
   try {
     // Require Editor role or higher
     const authResult = await requireEditor(request);
@@ -108,7 +114,7 @@ export async function DELETE(
       return authResult;
     }
 
-    logger.info('Deleting catalogue', { id: params.id });
+    logger.info('Deleting catalogue', { id: id });
 
     if (!dbQueries) {
       return NextResponse.json(
@@ -117,16 +123,16 @@ export async function DELETE(
       );
     }
 
-    await dbQueries.deleteCatalogue(params.id);
+    await dbQueries.deleteCatalogue(id);
 
-    logger.info('Catalogue deleted successfully', { id: params.id });
+    logger.info('Catalogue deleted successfully', { id: id });
 
     // Clear cache since catalogue was deleted
     apiCache.clearAll();
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    logger.error('Failed to delete catalogue', error, { id: params.id });
+    logger.error('Failed to delete catalogue', error, { id: id });
     const errorResponse = formatErrorResponse(error);
 
     return NextResponse.json(

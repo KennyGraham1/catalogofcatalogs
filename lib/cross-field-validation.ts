@@ -67,7 +67,7 @@ export function validateUncertaintyRelationships(event: any): DataQualityCheck[]
 
   // Depth uncertainty should not exceed depth value significantly
   if (event.depth !== null && event.depth !== undefined && event.depth_uncertainty !== undefined) {
-    if (event.depth_uncertainty > event.depth * 2) {
+    if (event.depth > 0 && event.depth_uncertainty > event.depth * 2) {
       checks.push({
         passed: false,
         severity: 'warning',

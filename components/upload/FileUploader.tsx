@@ -163,7 +163,7 @@ export function FileUploader({
             <h3 className="font-semibold text-lg mb-1">Upload Earthquake Catalogues</h3>
             <p className="text-muted-foreground max-w-md mx-auto">
               Drag and drop your catalogue files here, or click to browse.
-              Supported formats: CSV, TXT, QML, JSON, GeoJSON, XML.
+              Supported formats: CSV, TXT, DAT, QML, JSON, GeoJSON, XML.
             </p>
           </div>
 

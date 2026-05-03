@@ -1,6 +1,6 @@
 import { dbQueries, MergedEvent } from './db';
 import type { ClientSession } from './mongodb';
-import { v4 as uuidv4 } from 'uuid';
+import { createId } from './id';
 import { calculateDistance, calculateTimeDifference } from './earthquake-utils';
 import type { SourceCatalogue, MergeConfig } from './validation';
 import type { QuakeMLEvent } from './types/quakeml';
@@ -95,7 +95,7 @@ class MergeConflictLog {
     if (!this.enabled) return;
 
     const conflict: MergeConflict = {
-      id: uuidv4(),
+      id: createId(),
       type,
       severity,
       message,
@@ -200,7 +200,7 @@ export async function mergeCatalogues(
     throw new Error('Database not initialized');
   }
 
-  const catalogueId = uuidv4();
+  const catalogueId = createId();
 
   // If export-only mode, don't use transactions
   if (exportOnly) {
@@ -454,7 +454,7 @@ async function executeMergeOperation(
         eventCount: mergedEvents.length,
         originalEventCount: allEvents.length,
         events: mergedEvents.map(e => ({
-          id: e.id || uuidv4(),
+          id: e.id || createId(),
           ...buildMergedEventFields(e, OPTIONAL_DB_FIELDS),
         })),
       };
@@ -476,7 +476,7 @@ async function executeMergeOperation(
 
     for (const event of mergedEvents) {
       dbEvents.push({
-        id: uuidv4(),
+        id: createId(),
         catalogue_id: catalogueId,
         ...buildMergedEventFields(event, OPTIONAL_DB_FIELDS),
       } as any);
