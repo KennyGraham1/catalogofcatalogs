@@ -49,7 +49,7 @@ If you're already logged in, you can see your email in the user menu (top right 
 Or list all users:
 .. code-block:: bash
 
-   mongosh eq-catalogue --eval "db.users.find({}, {email:1, name:1, role:1}).pretty()"
+   mongosh earthquake_catalogue --eval "db.users.find({}, {email:1, name:1, role:1}).pretty()"
 
 
 Step 2: Run the Promotion Script
@@ -119,7 +119,7 @@ Step 1: Connect to MongoDB
 Or if using local MongoDB:
 .. code-block:: bash
 
-   mongosh eq-catalogue
+   mongosh earthquake_catalogue
 
 
 Step 2: Update the User Role
@@ -191,7 +191,7 @@ Step 2: Navigate to Users Collection
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
-1. Select the ``eq-catalogue`` database
+1. Select the ``earthquake_catalogue`` database, or the value of ``MONGODB_DATABASE`` if you changed it
 2. Click on the ``users`` collection
 
 Step 3: Find and Edit Your User
@@ -289,7 +289,7 @@ Troubleshooting
 If the script says user not found, list all users:
 .. code-block:: bash
 
-   mongosh eq-catalogue --eval "db.users.find({}, {email:1, name:1, role:1}).pretty()"
+   mongosh earthquake_catalogue --eval "db.users.find({}, {email:1, name:1, role:1}).pretty()"
 
 
 Make sure you're using the exact email address from the database.
@@ -340,7 +340,7 @@ Promote User to Admin (Quick Command)
    npx tsx scripts/promote-to-admin.ts your@email.com
    
    # Using MongoDB shell
-   mongosh eq-catalogue --eval 'db.users.updateOne({email:"your@email.com"},{$set:{role:"admin",updated_at:new Date().toISOString()}})'
+   mongosh earthquake_catalogue --eval 'db.users.updateOne({email:"your@email.com"},{$set:{role:"admin",updated_at:new Date().toISOString()}})'
 
 
 List All Users
@@ -349,7 +349,7 @@ List All Users
 
 .. code-block:: bash
 
-   mongosh eq-catalogue --eval "db.users.find({}, {email:1, name:1, role:1}).pretty()"
+   mongosh earthquake_catalogue --eval "db.users.find({}, {email:1, name:1, role:1}).pretty()"
 
 
 Check Your Current Role
@@ -358,7 +358,7 @@ Check Your Current Role
 
 .. code-block:: bash
 
-   mongosh eq-catalogue --eval 'db.users.findOne({email:"your@email.com"}, {name:1, email:1, role:1})'
+   mongosh earthquake_catalogue --eval 'db.users.findOne({email:"your@email.com"}, {name:1, email:1, role:1})'
 
 
 
@@ -371,7 +371,7 @@ Security Notes
 - **Use strong passwords** - Especially for admin accounts
 - **Limit admin users** - Only promote trusted users to admin
 - **Audit admin actions** - Monitor what admins do in the system
-- **First admin must be created manually** - Use Method 1 or 2 to create the first admin
+- **First admin must be bootstrapped intentionally** - Use ``CREATE_ADMIN_USER=true`` with a strong temporary password, or promote an existing user with the script or MongoDB shell
 
 
 
@@ -388,5 +388,5 @@ After becoming an admin:
 5. **Set Up Production** - Change default passwords and secure your admin accounts
 
 For more information, see:
-- ``docs/AUTHENTICATION.md`` - Complete authentication documentation
-- ``docs/GETTING_STARTED_AUTH.md`` - Authentication quick start guide
+- ``docs/source/appendix/authentication.rst`` - Complete authentication documentation
+- ``docs/source/appendix/getting_started_auth.rst`` - Authentication quick start guide

@@ -30,6 +30,8 @@ Create or update your ``.env`` file:
    ADMIN_PASSWORD=<generate-strong-temporary-password>
    ADMIN_NAME=System Administrator
 
+``ADMIN_PASSWORD`` must be at least 12 characters when ``CREATE_ADMIN_USER=true``.
+
 
 **Generate a secure secret:**
 .. code-block:: bash
@@ -72,7 +74,7 @@ This will:
 2. **Login with admin:**
    - Navigate to http://localhost:3000/login
    - Use the admin credentials from your ``.env`` file
-   - Default: ``admin@example.com`` / ``admin123``
+   - Use the ``ADMIN_EMAIL`` and ``ADMIN_PASSWORD`` values you configured before running ``npm run migrate:auth``
 
 3. **View your profile:**
    - Navigate to http://localhost:3000/profile
@@ -83,6 +85,16 @@ This will:
    - View all users
    - Change user roles
    - Activate/deactivate users
+
+5. **Request a role upgrade:**
+   - Navigate to http://localhost:3000/profile
+   - Submit a request for Editor or Admin access
+   - Admins review requests at http://localhost:3000/admin/role-requests
+
+6. **Test password reset:**
+   - Navigate to http://localhost:3000/forgot-password
+   - Reset links expire after 1 hour
+   - Configure ``EMAIL_WEBHOOK_URL`` to send email; without it, delivery is logged
 
 Testing API Protection
 ----------------------
@@ -121,6 +133,7 @@ Test with Frontend
    - Full access to everything
    - Can manage users at ``/admin/users``
    - Can change user roles
+   - Can review role requests at ``/admin/role-requests``
 
 User Roles Summary
 ------------------

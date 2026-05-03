@@ -90,7 +90,7 @@ I've successfully implemented a comprehensive password change feature for the Ea
    - Show/hide password toggles
    - Success/error handling
 
-3. **``docs/CHANGE_PASSWORD.md``**
+3. **``docs/source/appendix/change_password.rst``**
    - Complete user documentation
    - Step-by-step instructions
    - Troubleshooting guide
@@ -367,9 +367,9 @@ For Future Enhancements (Optional)
 
 
 Complete documentation available at:
-- **``docs/CHANGE_PASSWORD.md``** - User guide with step-by-step instructions
-- **``docs/AUTHENTICATION.md``** - Complete authentication documentation
-- **``docs/HOW_TO_BECOME_ADMIN.md``** - Admin promotion guide
+- **``docs/source/appendix/change_password.rst``** - User guide with step-by-step instructions
+- **``docs/source/appendix/authentication.rst``** - Complete authentication documentation
+- **``docs/source/appendix/how_to_become_admin.rst``** - Admin promotion guide
 
 
 

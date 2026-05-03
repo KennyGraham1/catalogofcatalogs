@@ -157,7 +157,7 @@ Try accessing admin features:
 **To test as Admin:**
 1. Update your role in MongoDB:
    ```bash
-   mongosh eq-catalogue
+   mongosh earthquake_catalogue
    db.users.updateOne(
      { email: "test@example.com" },
      { $set: { role: "admin" } }
@@ -186,7 +186,7 @@ To access admin features, you need an admin account:
 .. code-block:: bash
 
    # Option 1: Update existing user
-   mongosh eq-catalogue
+   mongosh earthquake_catalogue
    db.users.updateOne(
      { email: "test@example.com" },
      { $set: { role: "admin" } }
@@ -290,12 +290,12 @@ Documentation
 -------------
 
 
-- ``docs/AUTHENTICATION.md`` - Complete authentication guide
-- ``docs/GETTING_STARTED_AUTH.md`` - Quick start guide
-- ``docs/TROUBLESHOOTING_REGISTRATION.md`` - Troubleshooting
-- ``docs/REGISTRATION_DEBUG_GUIDE.md`` - Debug steps
-- ``docs/DEBUG_TOOLS.md`` - Developer tools
-- ``REGISTRATION_FIXED.md`` - Issue resolution
+- ``docs/source/appendix/authentication.rst`` - Complete authentication guide
+- ``docs/source/appendix/getting_started_auth.rst`` - Quick start guide
+- ``docs/source/appendix/troubleshooting_registration.rst`` - Troubleshooting
+- ``docs/source/appendix/registration_debug_guide.rst`` - Debug steps
+- ``docs/source/appendix/debug_tools.rst`` - Developer tools
+- ``docs/source/appendix/registration_fixed.rst`` - Issue resolution
 - ``AUTHENTICATION_SUCCESS.md`` - This file
 
 Support

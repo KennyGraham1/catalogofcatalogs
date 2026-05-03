@@ -153,7 +153,7 @@ async function testRegistration() {
     console.log('   1. Make sure MongoDB is running');
     console.log('   2. Check your .env file has correct MONGODB_URI');
     console.log('   3. Run: npm run migrate:auth');
-    console.log('   4. Check docs/TROUBLESHOOTING_REGISTRATION.md');
+    console.log('   4. Check docs/source/appendix/troubleshooting_registration.rst');
   } finally {
     if (client) {
       await client.close();
@@ -163,4 +163,3 @@ async function testRegistration() {
 
 // Run the test
 testRegistration().catch(console.error);
-

@@ -383,7 +383,7 @@ Use the test page:
 Check detailed troubleshooting:
 .. code-block:: text
 
-   docs/TROUBLESHOOTING_REGISTRATION.md
+   docs/source/appendix/troubleshooting_registration.rst
 
 
 Emergency Reset

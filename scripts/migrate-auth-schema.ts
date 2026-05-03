@@ -111,8 +111,15 @@ async function migrateAuthSchema() {
       console.log('\n👤 Creating default admin user...');
       
       const adminEmail = process.env.ADMIN_EMAIL || 'admin@example.com';
-      const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+      const adminPassword = process.env.ADMIN_PASSWORD;
       const adminName = process.env.ADMIN_NAME || 'System Administrator';
+
+      if (!adminPassword || adminPassword.length < 12) {
+        throw new Error(
+          'ADMIN_PASSWORD must be set to a strong temporary password of at least 12 characters ' +
+          'when CREATE_ADMIN_USER=true.'
+        );
+      }
 
       const existingAdmin = await usersCollection.findOne({ email: adminEmail });
       
@@ -134,8 +141,7 @@ async function migrateAuthSchema() {
         });
         
         console.log(`  ✓ Created admin user: ${adminEmail}`);
-        console.log(`  ⚠ Default password: ${adminPassword}`);
-        console.log(`  ⚠ IMPORTANT: Change this password immediately after first login!`);
+        console.log('  IMPORTANT: Change the temporary admin password immediately after first login.');
       }
     }
 
@@ -151,4 +157,3 @@ async function migrateAuthSchema() {
 
 // Run migration
 migrateAuthSchema();
-

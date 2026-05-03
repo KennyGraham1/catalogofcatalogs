@@ -8,7 +8,7 @@ Overview
 --------
 
 
-The platform uses **NextAuth.js v4** for authentication with a custom credentials provider and MongoDB for session storage. The system implements role-based access control with four distinct user roles.
+The platform uses **NextAuth.js v4** with a custom credentials provider, JWT sessions, and MongoDB-backed user records. The system implements role-based access control with four distinct user roles.
 
 User Roles
 ----------
@@ -70,6 +70,8 @@ Add the following to your ``.env`` file:
    ADMIN_PASSWORD=<generate-strong-temporary-password>
    ADMIN_NAME=System Administrator
 
+``ADMIN_PASSWORD`` is required and must be at least 12 characters when ``CREATE_ADMIN_USER=true``.
+
 
 2. Run Database Migration
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -91,7 +93,22 @@ This will:
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
-**IMPORTANT**: If you created a default admin user, change the password immediately after first login!
+**IMPORTANT**: If you created a temporary admin user, change the password immediately after first login.
+
+Current Auth Workflows
+----------------------
+
+
+The current codebase includes these authentication workflows:
+
+- Registration at ``/register`` creates active users with the ``viewer`` role.
+- Login uses NextAuth credentials at ``/login``.
+- Authenticated users can change their password at ``/change-password``.
+- Password resets use ``/forgot-password`` and ``/reset-password``. Reset tokens expire after 1 hour and are stored hashed in ``password_reset_tokens``.
+- Users can request promotion to ``editor`` or ``admin`` from ``/profile``.
+- Admins review role requests at ``/admin/role-requests`` and manage users at ``/admin/users``.
+
+Password reset and role-request email notifications use ``EMAIL_WEBHOOK_URL`` when configured. If no webhook is configured, email delivery is logged rather than sent.
 
 API Protection
 --------------
@@ -111,6 +128,7 @@ Editor+ Required (Editor or Admin)
 - ``DELETE /api/catalogues/[id]`` - Delete catalogue
 - ``POST /api/import/geonet`` - Import from GeoNet
 - ``POST /api/merge`` - Merge catalogues
+- ``POST /api/upload`` - Upload catalogue files
 
 Viewer+ Required (Viewer, Editor, or Admin)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -124,6 +142,8 @@ Admin Only
 - ``GET /api/users/[id]`` - Get user details
 - ``PATCH /api/users/[id]`` - Update user (role, status, etc.)
 - ``DELETE /api/users/[id]`` - Delete user
+- ``GET /api/role-requests`` - List role requests
+- ``PATCH /api/role-requests/[id]`` - Approve or reject role requests
 
 Public Endpoints
 ^^^^^^^^^^^^^^^^
@@ -131,6 +151,8 @@ Public Endpoints
 - ``GET /api/catalogues`` - List catalogues
 - ``GET /api/catalogues/[id]`` - Get catalogue details
 - ``POST /api/auth/register`` - User registration
+- ``POST /api/auth/forgot-password`` - Request password reset
+- ``POST /api/auth/reset-password`` - Complete password reset
 - ``POST /api/auth/[...nextauth]`` - NextAuth endpoints
 
 Frontend Usage

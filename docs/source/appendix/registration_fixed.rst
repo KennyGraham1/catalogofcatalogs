@@ -117,7 +117,7 @@ Next Steps
 4. **Create an admin user** (optional):
    ```bash
    # Register a user first, then manually update in MongoDB:
-   mongosh eq-catalogue
+   mongosh earthquake_catalogue
    db.users.updateOne(
      { email: "your@email.com" },
      { $set: { role: "admin" } }
@@ -163,7 +163,7 @@ Support
 
 
 For more help, see:
-- ``docs/REGISTRATION_DEBUG_GUIDE.md`` - Quick debugging steps
-- ``docs/TROUBLESHOOTING_REGISTRATION.md`` - Detailed troubleshooting
-- ``docs/DEBUG_TOOLS.md`` - Browser debugging tools
-- ``docs/AUTHENTICATION.md`` - Complete authentication documentation
+- ``docs/source/appendix/registration_debug_guide.rst`` - Quick debugging steps
+- ``docs/source/appendix/troubleshooting_registration.rst`` - Detailed troubleshooting
+- ``docs/source/appendix/debug_tools.rst`` - Browser debugging tools
+- ``docs/source/appendix/authentication.rst`` - Complete authentication documentation

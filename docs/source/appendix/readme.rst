@@ -389,18 +389,18 @@ Testing
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
-- **``API Reference <docs/API_REFERENCE.md>``_** - Complete API documentation
-- **``Architecture <docs/ARCHITECTURE.md>``_** - System architecture diagrams
-- **``Data Validation Guide <docs/DATA_VALIDATION_GUIDE.md>``_** - Data quality and validation
+- **``API Reference <docs/source/appendix/api_reference.rst>``_** - Complete API documentation
+- **``Architecture <docs/source/appendix/architecture.rst>``_** - System architecture diagrams
+- **``Data Validation Guide <docs/source/appendix/data_validation_guide.rst>``_** - Data quality and validation
 
 📋 Feature-Specific Documentation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
-- **``GeoNet Baseline Setup <docs/GEONET_BASELINE_SETUP.md>``_** - Setting up baseline GeoNet data
-- **``GeoNet Implementation Summary <docs/GEONET_IMPORT_IMPLEMENTATION_SUMMARY.md>``_** - Technical implementation details
-- **``QuakeML Schema Design <docs/QUAKEML_SCHEMA_DESIGN.md>``_** - Database schema for QuakeML 1.2 support
-- **``Quick Test Guide <docs/QUICK_TEST_GUIDE.md>``_** - Quick reference for testing features
+- **``GeoNet Baseline Setup <docs/source/appendix/geonet_baseline_setup.rst>``_** - Setting up baseline GeoNet data
+- **``GeoNet Implementation Summary <docs/source/appendix/geonet_import_implementation_summary.rst>``_** - Technical implementation details
+- **``QuakeML Schema Design <docs/source/appendix/quakeml_schema_design.rst>``_** - Database schema for QuakeML 1.2 support
+- **``Quick Test Guide <docs/source/appendix/quick_test_guide.rst>``_** - Quick reference for testing features
 
 🔌 API Endpoints
 ---------------

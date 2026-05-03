@@ -20,7 +20,7 @@ import { resolve } from 'path';
 config({ path: resolve(__dirname, '../.env') });
 
 const MONGODB_URI = process.env.MONGODB_URI || '';
-const MONGODB_DATABASE = process.env.MONGODB_DATABASE || 'eq-catalogue';
+const MONGODB_DATABASE = process.env.MONGODB_DATABASE || 'earthquake_catalogue';
 
 async function checkUserRole(email: string) {
   if (!MONGODB_URI) {
@@ -140,4 +140,3 @@ async function checkUserRole(email: string) {
 // Get email from command line arguments
 const email = process.argv[2];
 checkUserRole(email);
-

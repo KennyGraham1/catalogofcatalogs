@@ -220,7 +220,7 @@ Creating Strong Passwords
 - ``password`` (too common)
 - ``12345678`` (too simple)
 - ``qwerty`` (keyboard pattern)
-- ``admin123`` (predictable)
+- short admin-themed passwords (predictable)
 
 **Tips:**
 - Use a password manager to generate and store strong passwords
@@ -248,7 +248,7 @@ Admins cannot see user passwords (they're hashed), but they can help users who f
    npx tsx -e "import bcrypt from 'bcryptjs'; bcrypt.hash('newpassword123', 10).then(console.log)"
    
    # Update in MongoDB
-   mongosh eq-catalogue --eval 'db.users.updateOne({email:"user@email.com"},{$set:{password_hash:"<hash>"}})'
+   mongosh earthquake_catalogue --eval 'db.users.updateOne({email:"user@email.com"},{$set:{password_hash:"<hash>"}})'
 
 
 **Option 2: Create a Password Reset Script**
@@ -338,10 +338,9 @@ Related Documentation
 ---------------------
 
 
-- **Authentication Guide** - ``docs/AUTHENTICATION.md``
-- **User Profile** - ``docs/USER_PROFILE.md``
-- **How to Become Admin** - ``docs/HOW_TO_BECOME_ADMIN.md``
-- **Getting Started** - ``docs/GETTING_STARTED_AUTH.md``
+- **Authentication Guide** - ``docs/source/appendix/authentication.rst``
+- **How to Become Admin** - ``docs/source/appendix/how_to_become_admin.rst``
+- **Getting Started** - ``docs/source/appendix/getting_started_auth.rst``
 
 
 
