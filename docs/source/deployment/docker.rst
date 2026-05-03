@@ -80,20 +80,20 @@ Required Variables
 
    # MongoDB Connection
    # For containerized MongoDB:
-   MONGODB_URI=mongodb://admin:secure_password@mongodb:27017/earthquake_catalogue?authSource=admin
+   MONGODB_URI=mongodb://<mongo-root-user>:<mongo-root-password>@mongodb:27017/earthquake_catalogue?authSource=admin
 
    # For MongoDB Atlas (recommended for production):
-   # MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/earthquake_catalogue
+   # MONGODB_URI=mongodb+srv://<atlas-username>:<atlas-password>@<atlas-cluster-host>/earthquake_catalogue
 
    MONGODB_DATABASE=earthquake_catalogue
 
    # Authentication (REQUIRED - generate with: openssl rand -base64 32)
-   NEXTAUTH_SECRET=your-secure-secret-here
+   NEXTAUTH_SECRET=<generate-with-openssl-rand-base64-32>
    NEXTAUTH_URL=https://your-domain.com
 
    # MongoDB root credentials (if using containerized MongoDB)
    MONGO_ROOT_USER=admin
-   MONGO_ROOT_PASSWORD=secure_password_here
+   MONGO_ROOT_PASSWORD=<generate-strong-password>
 
 Optional Variables
 ==================

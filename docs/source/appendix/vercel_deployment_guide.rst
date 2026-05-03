@@ -49,31 +49,31 @@ You already have a MongoDB Atlas Serverless instance configured:
    * - Setting
      - Value
    * - **Cluster**
-     - ``ServerlessInstance0``
+     - ``<atlas-cluster-name>``
    * - **Host**
-     - ``serverlessinstance0.ta8golw.mongodb.net``
+     - ``<atlas-cluster-host>``
    * - **Database**
-     - ``eq-catalogue``
+     - ``<database-name>``
    * - **Username**
-     - ``XXX``
+     - ``<atlas-username>``
 
 
 Your connection string format:
 .. code-block:: text
 
-   mongodb+srv://XXX XXXX:<password>@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue?appName=ServerlessInstance0
+   mongodb+srv://<atlas-username>:<atlas-password>@<atlas-cluster-host>/<database-name>?appName=<atlas-app-name>
 
 
 Verify Network Access for Vercel
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
-Since Vercel uses dynamic IP addresses for serverless functions, ensure your Atlas cluster allows connections from anywhere:
+Since Vercel uses dynamic IP addresses for serverless functions, configure Atlas Network Access deliberately:
 
 1. Go to ``MongoDB Atlas <https://cloud.mongodb.com/>``_ and sign in
 2. Navigate to **Network Access** in the left sidebar
-3. Verify that ``0.0.0.0/0`` (Allow from Anywhere) is in the IP Access List
-4. If not, click **"Add IP Address"** → **"Allow Access from Anywhere"** → **"Confirm"**
+3. Prefer the narrowest allowed network access supported by your hosting plan
+4. If you must temporarily allow access from anywhere, use a least-privilege database user, a strong password, and application-level authentication
 
 
    **Note**: Your Serverless Instance may have different network settings. Check the Atlas dashboard for your specific configuration.
@@ -177,10 +177,10 @@ Required Variables
      - Your Value
    * - ``MONGODB_URI``
      - MongoDB Atlas connection string
-     - ``mongodb+srv://XXX XXXX:<password>@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue?appName=ServerlessInstance0``
+     - ``mongodb+srv://<atlas-username>:<atlas-password>@<atlas-cluster-host>/<database-name>?appName=<atlas-app-name>``
    * - ``MONGODB_DATABASE``
      - Database name
-     - ``eq-catalogue``
+     - ``<database-name>``
    * - ``NEXTAUTH_SECRET``
      - Random secret for session encryption
      - Generate with ``openssl rand -base64 32``
@@ -199,14 +199,14 @@ Setting Variables in Vercel
 
 .. code-block:: text
 
-   MONGODB_URI = mongodb+srv://XXX XXXX:YOUR_PASSWORD@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue?appName=ServerlessInstance0
-   MONGODB_DATABASE = eq-catalogue
+   MONGODB_URI = mongodb+srv://<atlas-username>:<atlas-password>@<atlas-cluster-host>/<database-name>?appName=<atlas-app-name>
+   MONGODB_DATABASE = <database-name>
    NEXTAUTH_SECRET = <generate-a-random-32-char-string>
    NEXTAUTH_URL = https://your-app.vercel.app
 
 
 
-   **Important**: Replace ``YOUR_PASSWORD`` with your actual MongoDB Atlas password. Do not commit passwords to version control.
+   **Important**: Replace the placeholder values with your actual MongoDB Atlas details. Do not commit passwords or live connection strings to version control.
 
 
 4. Set the **Environment** for each variable:
@@ -255,8 +255,8 @@ Or explicitly set the environment variables:
 .. code-block:: bash
 
    # Set production MongoDB URI
-   export MONGODB_URI="mongodb+srv://XXX XXXX:YOUR_PASSWORD@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue?appName=ServerlessInstance0"
-   export MONGODB_DATABASE="eq-catalogue"
+   export MONGODB_URI="mongodb+srv://<atlas-username>:<atlas-password>@<atlas-cluster-host>/<database-name>?appName=<atlas-app-name>"
+   export MONGODB_DATABASE="<database-name>"
    
    # Run the initialization script
    npx tsx scripts/init-database.ts
@@ -267,8 +267,8 @@ Expected output:
 
    🔧 Initializing MongoDB database...
    
-      URI: mongodb+srv://XXX XXXX:****@serverlessinstance0.ta8golw.mongodb.net
-      Database: eq-catalogue
+      URI: mongodb+srv://<atlas-username>:****@<atlas-cluster-host>
+      Database: <database-name>
    
    ✓ Connected to MongoDB
    
@@ -457,7 +457,7 @@ Common Issues
 **Cause**: MongoDB Atlas can't be reached from Vercel.
 
 **Solutions**:
-- Verify IP whitelist includes ``0.0.0.0/0`` in Atlas Network Access
+- Verify Atlas Network Access matches your hosting setup; avoid broad public access unless your hosting constraints require it
 - Check the connection string format
 - Ensure the cluster is running (not paused)
 

@@ -57,7 +57,7 @@ Add the following to your ``.env`` file:
 .. code-block:: bash
 
    # NextAuth Configuration
-   NEXTAUTH_SECRET=your-secret-key-here  # Generate with: openssl rand -base64 32
+   NEXTAUTH_SECRET=<generate-with-openssl-rand-base64-32>
    NEXTAUTH_URL=http://localhost:3000
    
    # MongoDB Connection
@@ -67,7 +67,7 @@ Add the following to your ``.env`` file:
    # Optional: Create default admin user during migration
    CREATE_ADMIN_USER=true
    ADMIN_EMAIL=admin@example.com
-   ADMIN_PASSWORD=changeme123
+   ADMIN_PASSWORD=<generate-strong-temporary-password>
    ADMIN_NAME=System Administrator
 
 

@@ -17,7 +17,7 @@ Create or update your ``.env`` file:
 .. code-block:: bash
 
    # NextAuth Configuration
-   NEXTAUTH_SECRET=your-secret-key-here
+   NEXTAUTH_SECRET=<generate-with-openssl-rand-base64-32>
    NEXTAUTH_URL=http://localhost:3000
    
    # MongoDB Connection
@@ -27,7 +27,7 @@ Create or update your ``.env`` file:
    # Create default admin user
    CREATE_ADMIN_USER=true
    ADMIN_EMAIL=admin@example.com
-   ADMIN_PASSWORD=admin123
+   ADMIN_PASSWORD=<generate-strong-temporary-password>
    ADMIN_NAME=System Administrator
 
 

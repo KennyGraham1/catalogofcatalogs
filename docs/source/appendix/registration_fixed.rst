@@ -23,8 +23,10 @@ Solution Applied
 
 .. code-block:: bash
 
-   NEXTAUTH_SECRET=wjXOpIaB30iGP3QokGdOmrzDJa1eEiLdU52TyUGZYfU=
+   NEXTAUTH_SECRET=<generate-with-openssl-rand-base64-32>
    NEXTAUTH_URL=http://localhost:3000
+
+If a real ``NEXTAUTH_SECRET`` value was ever committed or published, rotate it in every environment before reusing the application.
 
 
 2. Ran Database Migration

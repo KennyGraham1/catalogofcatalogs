@@ -113,7 +113,7 @@ Step 1: Connect to MongoDB
 
 .. code-block:: bash
 
-   mongosh "mongodb+srv://XXX XXXX:<YOUR_PASSWORD>@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue"
+   mongosh "mongodb+srv://<atlas-username>:<atlas-password>@<atlas-cluster-host>/<database-name>"
 
 
 Or if using local MongoDB:
@@ -184,7 +184,7 @@ Step 1: Connect to MongoDB
 1. Open MongoDB Compass
 2. Connect using your connection string:
    ```
-   mongodb+srv://XXX XXXX:<YOUR_PASSWORD>@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue
+   mongodb+srv://<atlas-username>:<atlas-password>@<atlas-cluster-host>/<database-name>
    ```
 
 Step 2: Navigate to Users Collection
@@ -314,8 +314,8 @@ Can't Connect to MongoDB
 Make sure your ``.env`` file has the correct MongoDB connection string:
 .. code-block:: bash
 
-   MONGODB_URI=mongodb+srv://XXX XXXX:<YOUR_PASSWORD>@serverlessinstance0.ta8golw.mongodb.net/eq-catalogue
-   MONGODB_DATABASE=eq-catalogue
+   MONGODB_URI=mongodb+srv://<atlas-username>:<atlas-password>@<atlas-cluster-host>/<database-name>
+   MONGODB_DATABASE=<database-name>
 
 
 Script Errors

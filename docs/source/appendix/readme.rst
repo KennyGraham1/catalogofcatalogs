@@ -125,7 +125,7 @@ Create a ``.env`` file in the project root (this file is gitignored and will not
    
    # NextAuth (required for authentication)
    # Generate secret with: openssl rand -base64 32
-   NEXTAUTH_SECRET=your-generated-secret-here
+   NEXTAUTH_SECRET=<generate-with-openssl-rand-base64-32>
    NEXTAUTH_URL=http://localhost:3000
 
 

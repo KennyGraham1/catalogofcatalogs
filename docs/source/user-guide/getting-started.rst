@@ -136,7 +136,7 @@ Edit ``.env`` with your preferred text editor:
    # ==============================================
 
    # Generate with: openssl rand -base64 32
-   NEXTAUTH_SECRET=your-secure-random-secret-here
+   NEXTAUTH_SECRET=<generate-with-openssl-rand-base64-32>
 
    # Application URL
    NEXTAUTH_URL=http://localhost:3000
