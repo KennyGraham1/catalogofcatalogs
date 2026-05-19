@@ -7,10 +7,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createUser } from '@/lib/auth/utils';
 import { UserRole } from '@/lib/auth/types';
 import { Logger } from '@/lib/errors';
+import { applyRateLimit, authRateLimiter } from '@/lib/rate-limiter';
 
 const logger = new Logger('RegisterAPI');
 
 export async function POST(request: NextRequest) {
+  const rateLimitResult = applyRateLimit(request, authRateLimiter, 10);
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please try again later.' },
+      { status: 429, headers: rateLimitResult.headers }
+    );
+  }
+
   try {
     const body = await request.json();
     const { email, password, name } = body;

@@ -80,39 +80,59 @@ export class FileUploadError extends AppError {
 }
 
 /**
- * Logger utility for structured logging
+ * Logger utility for structured JSON logging.
+ * Pass a requestId at construction time so every log line from a single
+ * request can be correlated in log aggregation tools.
  */
 export class Logger {
   private context: string;
+  private requestId?: string;
 
-  constructor(context: string) {
+  constructor(context: string, requestId?: string) {
     this.context = context;
+    this.requestId = requestId;
   }
 
-  private formatMessage(level: string, message: string, meta?: LogMetadata): string {
-    const timestamp = new Date().toISOString();
-    const metaStr = meta ? ` ${JSON.stringify(meta)}` : '';
-    return `[${timestamp}] [${level}] [${this.context}] ${message}${metaStr}`;
+  /** Return a child logger scoped to a specific request ID. */
+  withRequestId(requestId: string): Logger {
+    return new Logger(this.context, requestId);
+  }
+
+  private emit(level: string, message: string, meta?: LogMetadata): void {
+    const entry: Record<string, unknown> = {
+      ts: new Date().toISOString(),
+      level,
+      ctx: this.context,
+      msg: message,
+    };
+    if (this.requestId) entry.requestId = this.requestId;
+    if (meta && Object.keys(meta).length > 0) entry.meta = meta;
+
+    const line = JSON.stringify(entry);
+    if (level === 'ERROR') console.error(line);
+    else if (level === 'WARN') console.warn(line);
+    else if (level === 'DEBUG') console.debug(line);
+    else console.log(line);
   }
 
   info(message: string, meta?: LogMetadata): void {
-    console.log(this.formatMessage('INFO', message, meta));
+    this.emit('INFO', message, meta);
   }
 
   warn(message: string, meta?: LogMetadata): void {
-    console.warn(this.formatMessage('WARN', message, meta));
+    this.emit('WARN', message, meta);
   }
 
   error(message: string, error?: Error | unknown, meta?: LogMetadata): void {
     const errorMeta: LogMetadata = error instanceof Error
-      ? { message: error.message, stack: error.stack, ...meta }
+      ? { errorMessage: error.message, stack: error.stack, ...meta }
       : { error, ...meta };
-    console.error(this.formatMessage('ERROR', message, errorMeta));
+    this.emit('ERROR', message, errorMeta);
   }
 
   debug(message: string, meta?: LogMetadata): void {
     if (process.env.NODE_ENV === 'development') {
-      console.debug(this.formatMessage('DEBUG', message, meta));
+      this.emit('DEBUG', message, meta);
     }
   }
 }

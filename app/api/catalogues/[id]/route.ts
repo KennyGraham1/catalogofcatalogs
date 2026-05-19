@@ -3,6 +3,7 @@ import { dbQueries } from '@/lib/db';
 import { Logger, NotFoundError, DatabaseError, formatErrorResponse } from '@/lib/errors';
 import { apiCache } from '@/lib/cache';
 import { requireEditor } from '@/lib/auth/middleware';
+import { writeAuditLog } from '@/lib/audit';
 
 const logger = new Logger('CatalogueAPI');
 
@@ -126,6 +127,13 @@ export async function DELETE(
     await dbQueries.deleteCatalogue(id);
 
     logger.info('Catalogue deleted successfully', { id: id });
+    await writeAuditLog({
+      action: 'catalogue.delete',
+      actor_id: authResult.user.id,
+      actor_email: authResult.user.email,
+      target_id: id,
+      target_type: 'catalogue',
+    });
 
     // Clear cache since catalogue was deleted
     apiCache.clearAll();

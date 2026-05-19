@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries, MergedEvent } from '@/lib/db';
 import { Logger, NotFoundError, formatErrorResponse } from '@/lib/errors';
+import { requireViewer } from '@/lib/auth/middleware';
 
 const logger = new Logger('CatalogueStatisticsAPI');
 
@@ -45,6 +46,9 @@ export async function GET(
   context: { params: Promise<{ id: string }> }
 ) {
   const { id } = await context.params;
+
+  const authResult = await requireViewer(request);
+  if (authResult instanceof NextResponse) return authResult;
 
   try {
     if (!dbQueries) {

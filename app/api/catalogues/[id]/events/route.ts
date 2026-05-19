@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { Logger, formatErrorResponse } from '@/lib/errors';
 import { eventCache, generateCacheKey } from '@/lib/cache';
+import { requireViewer } from '@/lib/auth/middleware';
 
 // Force dynamic rendering for this API route
 export const dynamic = 'force-dynamic';
 
 const logger = new Logger('CatalogueEventsAPI');
 const MAX_EVENTS_REQUEST_LIMIT = Number.parseInt(process.env.MAX_EVENTS_REQUEST_LIMIT || '0', 10);
+const HARD_LIMIT = 10000;
 
 function exceedsConfiguredLimit(value: number): boolean {
   return Number.isFinite(MAX_EVENTS_REQUEST_LIMIT) && MAX_EVENTS_REQUEST_LIMIT > 0 && value > MAX_EVENTS_REQUEST_LIMIT;
@@ -18,6 +20,9 @@ export async function GET(
   context: { params: Promise<{ id: string }> }
 ) {
   const { id } = await context.params;
+
+  const authResult = await requireViewer(request);
+  if (authResult instanceof NextResponse) return authResult;
 
   try {
     if (!dbQueries) {
@@ -57,15 +62,18 @@ export async function GET(
     // Performance Optimization: Prefer cursor-based pagination for better performance
     if (cursor !== null || (limit && !page && !pageSize && !offset)) {
       // Cursor-based pagination (most efficient for large datasets)
-      const limitNum = limit ? parseInt(limit, 10) : 100;
+      const rawLimit = limit ? parseInt(limit, 10) : 100;
+      const limitNum = Math.min(rawLimit, HARD_LIMIT);
 
-      if (isNaN(limitNum) || limitNum < 1 || exceedsConfiguredLimit(limitNum)) {
+      if (isNaN(rawLimit) || rawLimit < 1) {
         return NextResponse.json(
-          {
-            error: MAX_EVENTS_REQUEST_LIMIT > 0
-              ? `Invalid limit. Must be between 1 and ${MAX_EVENTS_REQUEST_LIMIT}`
-              : 'Invalid limit. Must be >= 1'
-          },
+          { error: 'Invalid limit. Must be >= 1' },
+          { status: 400 }
+        );
+      }
+      if (exceedsConfiguredLimit(limitNum)) {
+        return NextResponse.json(
+          { error: `Invalid limit. Must be between 1 and ${MAX_EVENTS_REQUEST_LIMIT}` },
           { status: 400 }
         );
       }
@@ -94,7 +102,8 @@ export async function GET(
     } else if (page && pageSize) {
       // Page-based pagination
       const pageNum = parseInt(page, 10);
-      const pageSizeNum = parseInt(pageSize, 10);
+      const rawPageSize = parseInt(pageSize, 10);
+      const pageSizeNum = Math.min(rawPageSize, HARD_LIMIT);
 
       if (isNaN(pageNum) || pageNum < 1) {
         return NextResponse.json(
@@ -103,13 +112,16 @@ export async function GET(
         );
       }
 
-      if (isNaN(pageSizeNum) || pageSizeNum < 1 || exceedsConfiguredLimit(pageSizeNum)) {
+      if (isNaN(rawPageSize) || rawPageSize < 1) {
         return NextResponse.json(
-          {
-            error: MAX_EVENTS_REQUEST_LIMIT > 0
-              ? `Invalid page size. Must be between 1 and ${MAX_EVENTS_REQUEST_LIMIT}`
-              : 'Invalid page size. Must be >= 1'
-          },
+          { error: 'Invalid page size. Must be >= 1' },
+          { status: 400 }
+        );
+      }
+
+      if (exceedsConfiguredLimit(pageSizeNum)) {
+        return NextResponse.json(
+          { error: `Invalid page size. Must be between 1 and ${MAX_EVENTS_REQUEST_LIMIT}` },
           { status: 400 }
         );
       }

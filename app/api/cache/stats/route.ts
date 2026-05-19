@@ -4,10 +4,15 @@ import { requireAdmin } from '@/lib/auth/middleware';
 
 /**
  * GET /api/cache/stats
- * Returns cache statistics for monitoring and debugging
+ * Returns cache statistics for monitoring and debugging (admin only)
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const authResult = await requireAdmin(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     const stats = getAllCacheStats();
 
     return NextResponse.json({

@@ -8,10 +8,15 @@
 import { MongoClient, Db, Collection, MongoClientOptions, ClientSession } from 'mongodb';
 import type { Document } from 'mongodb';
 
-// MongoDB connection URI from environment variable
-// Supports both local MongoDB and Atlas connection strings:
-//   - mongodb://localhost:27017
-//   - mongodb+srv://user:pass@cluster.mongodb.net/dbname
+// MongoDB connection URI from environment variable.
+// In production this must be set explicitly — silently falling back to localhost
+// would connect to a non-existent database and surface as confusing query errors.
+if (typeof window === 'undefined' && process.env.NODE_ENV === 'production' && !process.env.MONGODB_URI) {
+  throw new Error(
+    'MONGODB_URI environment variable is required in production. ' +
+    'Set it to a MongoDB connection string (mongodb:// or mongodb+srv://).'
+  );
+}
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 
 // Detect if using Atlas (mongodb+srv://)

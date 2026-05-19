@@ -9,6 +9,7 @@ import { getCollection, COLLECTIONS } from '@/lib/mongodb';
 import { Logger } from '@/lib/errors';
 import { validateRoleRequestReview, formatZodErrors } from '@/lib/validation';
 import { createUserNotification, sendEmailNotification } from '@/lib/notifications';
+import { writeAuditLog } from '@/lib/audit';
 import type { RoleChangeRequest } from '@/lib/auth/types';
 
 const logger = new Logger('RoleRequestReviewAPI');
@@ -150,6 +151,19 @@ export async function PATCH(
         error: error instanceof Error ? error.message : error,
       });
     }
+
+    await writeAuditLog({
+      action: 'user.role_change',
+      actor_id: authResult.user.id,
+      actor_email: authResult.user.email,
+      target_id: existing.user_id,
+      metadata: {
+        requestId: existing.id,
+        status,
+        fromRole: existing.current_role,
+        toRole: existing.requested_role,
+      },
+    });
 
     const updated = await collection.findOne({ id: id });
     const sanitized = updated ? (({ _id, ...rest }) => rest)(updated as RoleChangeRequest & { _id?: unknown }) : null;

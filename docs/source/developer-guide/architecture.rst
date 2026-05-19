@@ -415,8 +415,8 @@ Authentication
 
 * **NextAuth.js v4** for authentication
 * **Credentials provider** with bcrypt password hashing
-* **Session-based** authentication with MongoDB session store
-* **JWT tokens** for API authentication
+* **JWT-based sessions** managed by NextAuth.js
+* **MongoDB-backed user records** for credentials and role data
 
 Authorization
 =============
@@ -433,7 +433,7 @@ API Protection
 
 * **Rate limiting:** 120 req/min (read), 60 req/min (write)
 * **Input validation:** Zod schemas for all inputs
-* **SQL injection prevention:** MongoDB parameterized queries
+* **MongoDB query-safety:** validated request bodies and literal query filters to avoid query selector injection
 * **XSS prevention:** React automatic escaping
 * **CSRF protection:** NextAuth CSRF tokens
 
@@ -500,4 +500,3 @@ Next Steps
 * :doc:`database-schema` - Detailed database schema
 * :doc:`api-development` - API development guide
 * :doc:`testing` - Testing guide
-

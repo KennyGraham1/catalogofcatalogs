@@ -1,9 +1,4 @@
 /** @type {import('next').NextConfig} */
-const isProd = process.env.NODE_ENV === 'production';
-const scriptSrc = isProd
-  ? "script-src 'self' 'unsafe-inline'"
-  : "script-src 'self' 'unsafe-eval' 'unsafe-inline'";
-
 const nextConfig = {
   eslint: {
     // Enable ESLint during builds to catch issues early
@@ -46,23 +41,9 @@ const nextConfig = {
             key: 'Permissions-Policy',
             value: 'camera=(), microphone=(), geolocation=()'
           },
-          {
-            // Content Security Policy
-            // Allows: self, inline styles (for Tailwind), data URIs for images,
-            // external tile servers for maps, GeoNet API for imports
-            key: 'Content-Security-Policy',
-            value: [
-              "default-src 'self'",
-              scriptSrc,
-              "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data: blob: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com",
-              "font-src 'self'",
-              "connect-src 'self' https://api.geonet.org.nz https://*.tile.openstreetmap.org",
-              "frame-ancestors 'self'",
-              "form-action 'self'",
-              "base-uri 'self'"
-            ].join('; ')
-          }
+          // Content-Security-Policy is set dynamically (with a per-request nonce)
+          // in middleware.ts. It is intentionally omitted from the static header
+          // list here so the middleware value takes precedence.
         ]
       }
     ];

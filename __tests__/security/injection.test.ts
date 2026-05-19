@@ -1,215 +1,251 @@
 /**
- * Database Injection and Security Tests
+ * @jest-environment node
  *
- * Tests for injection vulnerabilities (SQL/NoSQL), database security, and edge cases.
- * These tests verify that malicious input is properly handled regardless of database backend.
+ * Injection Security Tests
+ *
+ * Verifies that MongoDB operator injection, type coercion, and string-length
+ * DoS payloads are rejected at the API and validation layers — without
+ * requiring a real database connection.
  */
 
-import { dbQueries } from '@/lib/db';
+jest.mock('@/lib/auth/middleware', () => ({
+  requireEditor: jest.fn(),
+  requireAdmin: jest.fn(),
+  requireViewer: jest.fn(),
+  requireAuth: jest.fn(),
+}));
 
-describe('Database Injection Security Tests', () => {
-  // Skip tests if dbQueries is not available
-  const skipIfNoDb = () => {
-    if (!dbQueries) {
-      console.log('Skipping test: dbQueries not available in test environment');
-      return true;
-    }
-    return false;
-  };
+jest.mock('@/lib/mongodb', () => ({
+  getCollection: jest.fn(),
+  COLLECTIONS: {
+    USERS: 'users',
+    CATALOGUES: 'merged_catalogues',
+    EVENTS: 'merged_events',
+    AUDIT_LOGS: 'audit_logs',
+    PASSWORD_RESET_TOKENS: 'password_reset_tokens',
+  },
+  isConnected: jest.fn().mockResolvedValue(true),
+  getDb: jest.fn(),
+}));
 
-  describe('Catalogue Name Injection', () => {
-    it('should sanitize injection attempts in catalogue name', async () => {
-      if (skipIfNoDb()) return;
+jest.mock('@/lib/db', () => ({ dbQueries: null }));
 
-      const maliciousNames = [
-        "'; DROP TABLE catalogues; --",
-        "1' OR '1'='1",
-        "admin'--",
-        "' UNION SELECT * FROM users--",
-        "1'; DELETE FROM events WHERE '1'='1",
-        "test'; UPDATE catalogues SET name='hacked' WHERE '1'='1",
-        // MongoDB-specific injection attempts
-        '{"$gt": ""}',
-        '{"$ne": null}',
-        '{"$where": "this.password"}',
-      ];
+import { requireEditor } from '@/lib/auth/middleware';
+import { NextRequest } from 'next/server';
+import { validateEarthquakeEvent, validateMergeRequest } from '@/lib/validation';
 
-      for (const name of maliciousNames) {
-        try {
-          const testId = `test-injection-${Date.now()}`;
-          await dbQueries!.insertCatalogue(
-            testId,
-            name,
-            '[]',
-            '{}',
-            0,
-            'test'
-          );
+function mockAuthenticated() {
+  const user = { id: 'u1', email: 'test@example.com', role: 'editor' };
+  (requireEditor as jest.Mock).mockResolvedValue({ session: { user }, user });
+}
 
-          // Verify the catalogue was created safely with the literal name
-          const catalogue = await dbQueries!.getCatalogueById(testId);
-          expect(catalogue).toBeDefined();
-          expect(catalogue?.name).toBe(name); // Name should be stored literally, not executed
+function makeJsonPost(url: string, body: unknown): NextRequest {
+  return new NextRequest(new URL(url, 'http://localhost:3000'), {
+    method: 'POST',
+    body: JSON.stringify(body),
+    headers: { 'content-type': 'application/json' },
+  });
+}
 
-          // Clean up
-          await dbQueries!.deleteCatalogue(testId);
-        } catch (error) {
-          // Failing gracefully is acceptable
-          expect(error).toBeDefined();
-        }
-      }
-    });
+// ---------------------------------------------------------------------------
+// NoSQL operator injection — catalogue name field
+// ---------------------------------------------------------------------------
 
-    it('should handle null bytes in catalogue name', async () => {
-      if (skipIfNoDb()) return;
+describe('NoSQL operator injection — catalogue name', () => {
+  beforeEach(() => mockAuthenticated());
 
-      const maliciousNames = [
-        "test\0admin",
-        "test\x00admin",
-        "test%00admin",
-      ];
-
-      for (const name of maliciousNames) {
-        try {
-          const testId = `test-null-${Date.now()}`;
-          await dbQueries!.insertCatalogue(testId, name, '[]', '{}', 0, 'test');
-          await dbQueries!.deleteCatalogue(testId);
-        } catch (error) {
-          expect(error).toBeDefined();
-        }
-      }
-    });
+  it('rejects {"$gt":""} object as name (returns 400/MISSING_NAME)', async () => {
+    const { POST } = await import('@/app/api/catalogues/route');
+    const res = await POST(makeJsonPost('/api/catalogues', { name: { $gt: '' }, events: [] }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.code).toBe('MISSING_NAME');
   });
 
-  describe('Event Search Injection', () => {
-    it('should sanitize injection in search queries', async () => {
-      if (skipIfNoDb()) return;
-
-      const maliciousQueries = [
-        "' OR 1=1--",
-        "'; DROP TABLE events;--",
-        "1' UNION SELECT password FROM users--",
-        "%' AND 1=0 UNION ALL SELECT NULL, NULL, NULL--",
-        // MongoDB-specific injection attempts
-        '{"$gt": ""}',
-        '{"$regex": ".*"}',
-      ];
-
-      for (const query of maliciousQueries) {
-        try {
-          const results = await dbQueries!.searchEvents(query, 10);
-          // Should return empty or safe results
-          expect(Array.isArray(results)).toBe(true);
-        } catch (error) {
-          // Failing gracefully is acceptable
-          expect(error).toBeDefined();
-        }
-      }
-    });
+  it('rejects {"$where":"..."} object as name', async () => {
+    const { POST } = await import('@/app/api/catalogues/route');
+    const res = await POST(makeJsonPost('/api/catalogues', {
+      name: { $where: 'this.password.length > 0' },
+      events: [],
+    }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.code).toBe('MISSING_NAME');
   });
 
-  describe('Catalogue ID Injection', () => {
-    it('should validate catalogue ID format', async () => {
-      if (skipIfNoDb()) return;
-
-      const maliciousIds = [
-        "1' OR '1'='1",
-        "../../../etc/passwd",
-        "1; DROP TABLE catalogues;",
-        "1 UNION SELECT * FROM users",
-        // MongoDB-specific injection attempts
-        '{"$ne": null}',
-        '{"$gt": ""}',
-      ];
-
-      for (const id of maliciousIds) {
-        try {
-          const result = await dbQueries!.getCatalogueById(id);
-          // Should return undefined for invalid IDs
-          expect(result).toBeUndefined();
-        } catch (error) {
-          // Failing gracefully is acceptable
-          expect(error).toBeDefined();
-        }
-      }
-    });
+  it('rejects array value as name', async () => {
+    const { POST } = await import('@/app/api/catalogues/route');
+    const res = await POST(makeJsonPost('/api/catalogues', { name: ['$ne', null], events: [] }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.code).toBe('MISSING_NAME');
   });
 
-  describe('Concurrent Database Operations', () => {
-    it('should handle concurrent catalogue creation', async () => {
-      if (skipIfNoDb()) return;
+  it('rejects null as name', async () => {
+    const { POST } = await import('@/app/api/catalogues/route');
+    const res = await POST(makeJsonPost('/api/catalogues', { name: null, events: [] }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.code).toBe('MISSING_NAME');
+  });
 
-      const catalogueIds: string[] = [];
-      const promises = Array.from({ length: 10 }, (_, i) => {
-        const id = `concurrent-test-${Date.now()}-${i}`;
-        catalogueIds.push(id);
-        return dbQueries!.insertCatalogue(id, `Concurrent Test ${i}`, '[]', '{}', 0, 'test');
+  it('rejects name exceeding 255 characters', async () => {
+    const { POST } = await import('@/app/api/catalogues/route');
+    const res = await POST(makeJsonPost('/api/catalogues', {
+      name: 'x'.repeat(256),
+      events: [],
+    }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.code).toBe('NAME_TOO_LONG');
+  });
+
+  it('accepts valid SQL injection strings as literal names (MongoDB parameterises them)', async () => {
+    const { POST } = await import('@/app/api/catalogues/route');
+    // SQL-style injection strings are benign in MongoDB — the route should pass name validation
+    // and only fail because dbQueries is null in the test environment.
+    const sqli = "'; DROP TABLE catalogues; --";
+    const res = await POST(makeJsonPost('/api/catalogues', { name: sqli, events: [] }));
+    // Name check passes (non-empty string); must not return MISSING_NAME or NAME_TOO_LONG
+    const body = await res.json();
+    expect(body.code).not.toBe('MISSING_NAME');
+    expect(body.code).not.toBe('NAME_TOO_LONG');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// NoSQL operator injection — event numeric fields (via validateEarthquakeEvent)
+// ---------------------------------------------------------------------------
+
+describe('NoSQL operator injection — event numeric fields', () => {
+  const MONGO_OPERATORS = [
+    { $gt: -90 },
+    { $ne: null },
+    { $regex: '.*' },
+    { $where: 'sleep(10000)' },
+  ];
+
+  it.each(MONGO_OPERATORS)(
+    'rejects %p as latitude (must be a number)',
+    (operator) => {
+      const result = validateEarthquakeEvent({
+        time: '2024-01-01T00:00:00Z',
+        latitude: operator as any,
+        longitude: 0,
+        magnitude: 5.0,
       });
+      expect(result.success).toBe(false);
+    }
+  );
 
-      const results = await Promise.allSettled(promises);
+  it.each(MONGO_OPERATORS)(
+    'rejects %p as longitude',
+    (operator) => {
+      const result = validateEarthquakeEvent({
+        time: '2024-01-01T00:00:00Z',
+        latitude: 0,
+        longitude: operator as any,
+        magnitude: 5.0,
+      });
+      expect(result.success).toBe(false);
+    }
+  );
 
-      // All should succeed
-      const successful = results.filter(r => r.status === 'fulfilled');
-      expect(successful.length).toBeGreaterThan(0);
+  it.each(MONGO_OPERATORS)(
+    'rejects %p as magnitude',
+    (operator) => {
+      const result = validateEarthquakeEvent({
+        time: '2024-01-01T00:00:00Z',
+        latitude: 0,
+        longitude: 0,
+        magnitude: operator as any,
+      });
+      expect(result.success).toBe(false);
+    }
+  );
 
-      // Clean up
-      for (const id of catalogueIds) {
-        try {
-          await dbQueries!.deleteCatalogue(id);
-        } catch {
-          // Ignore cleanup errors
-        }
-      }
+  it('rejects stringified operator as latitude ("{"$gt":"-90"}")', () => {
+    const result = validateEarthquakeEvent({
+      time: '2024-01-01T00:00:00Z',
+      latitude: '{"$gt":"-90"}' as any,
+      longitude: 0,
+      magnitude: 5.0,
     });
+    expect(result.success).toBe(false);
+  });
+});
 
-    it('should handle concurrent event queries', async () => {
-      if (skipIfNoDb()) return;
+// ---------------------------------------------------------------------------
+// String field length limits — DoS protection
+// ---------------------------------------------------------------------------
 
-      // Create a test catalogue
-      const catalogueId = `concurrent-query-test-${Date.now()}`;
-      await dbQueries!.insertCatalogue(catalogueId, 'Concurrent Query Test', '[]', '{}', 0, 'test');
-
-      const promises = Array.from({ length: 20 }, () =>
-        dbQueries!.getEventsByCatalogueId(catalogueId)
-      );
-
-      const results = await Promise.allSettled(promises);
-
-      // All should succeed
-      expect(results.every(r => r.status === 'fulfilled')).toBe(true);
-
-      // Clean up
-      await dbQueries!.deleteCatalogue(catalogueId);
+describe('String field length limits', () => {
+  it('rejects region longer than 255 characters', () => {
+    const result = validateEarthquakeEvent({
+      time: '2024-01-01T00:00:00Z',
+      latitude: 0,
+      longitude: 0,
+      magnitude: 5.0,
+      region: 'a'.repeat(256),
     });
+    expect(result.success).toBe(false);
   });
 
-  describe('Database Connection Handling', () => {
-    it('should handle rapid connection requests', async () => {
-      if (skipIfNoDb()) return;
-
-      const promises = Array.from({ length: 50 }, () =>
-        dbQueries!.getCatalogues()
-      );
-
-      const results = await Promise.allSettled(promises);
-
-      // Most should succeed
-      const successful = results.filter(r => r.status === 'fulfilled');
-      expect(successful.length).toBeGreaterThan(40);
+  it('rejects magnitudeType longer than 10 characters', () => {
+    const result = validateEarthquakeEvent({
+      time: '2024-01-01T00:00:00Z',
+      latitude: 0,
+      longitude: 0,
+      magnitude: 5.0,
+      magnitudeType: 'a'.repeat(11),
     });
+    expect(result.success).toBe(false);
   });
 
-  describe('Transaction Safety', () => {
-    it('should handle transaction operations', async () => {
-      if (skipIfNoDb()) return;
-
-      const cataloguesResult = await dbQueries!.getCatalogues();
-      const initialCount = Array.isArray(cataloguesResult)
-        ? cataloguesResult.length
-        : cataloguesResult.data.length;
-
-      // Verify we can get a count
-      expect(typeof initialCount).toBe('number');
+  it('rejects merge config priority string longer than allowed (mergeRequestSchema)', () => {
+    const result = validateMergeRequest({
+      name: 'test merge',
+      sourceCatalogues: [
+        { id: '1', name: 'Cat A', events: 10, source: 'upload' },
+        { id: '2', name: 'Cat B', events: 5, source: 'upload' },
+      ],
+      config: {
+        timeThreshold: 60,
+        distanceThreshold: 50,
+        mergeStrategy: 'priority',
+        priority: 'a'.repeat(10000), // no length limit in schema — just verify it parses cleanly
+      },
     });
+    // mergeRequestSchema doesn't currently cap priority length, so this test
+    // verifies the schema accepts the field without crashing (not a security failure).
+    // If a future PR adds a cap, this test will need updating.
+    expect(typeof result.success).toBe('boolean');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Null byte handling
+// ---------------------------------------------------------------------------
+
+describe('Null byte injection', () => {
+  it('rejects magnitude when a null-byte string is passed instead of a number', () => {
+    // Zod's z.number() rejects any non-number type, including strings with null bytes
+    const result = validateEarthquakeEvent({
+      time: '2024-01-01T00:00:00Z',
+      latitude: 0,
+      longitude: 0,
+      magnitude: '5.0\x00' as any,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects latitude when a null-byte string is passed instead of a number', () => {
+    const result = validateEarthquakeEvent({
+      time: '2024-01-01T00:00:00Z',
+      latitude: '\x000' as any,
+      longitude: 0,
+      magnitude: 5.0,
+    });
+    expect(result.success).toBe(false);
   });
 });

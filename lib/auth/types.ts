@@ -101,6 +101,8 @@ export interface User {
   created_at: string;
   updated_at: string;
   last_login?: string | null;
+  /** Incremented on password change/reset to invalidate existing JWTs. */
+  jwt_version?: number;
 }
 
 /**

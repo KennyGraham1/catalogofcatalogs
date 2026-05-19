@@ -44,13 +44,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(createUploadTooLargeResponse(file.size), { status: 413 });
     }
 
-    // Validate file type
+    // Validate file type by extension and MIME type
     const allowedExtensions = ['csv', 'txt', 'dat', 'json', 'geojson', 'xml', 'qml'];
     const extension = file.name.split('.').pop()?.toLowerCase();
 
     if (!extension || !allowedExtensions.includes(extension)) {
       return NextResponse.json(
         { error: 'Invalid file type. Allowed: CSV, TXT, JSON, GeoJSON, XML, QML' },
+        { status: 400 }
+      );
+    }
+
+    // Secondary MIME type check — browsers set this from the OS file-type registry.
+    // We accept a broad set to avoid false rejections from misconfigured systems,
+    // but block clearly wrong types (images, executables, etc.).
+    const allowedMimeTypes = new Set([
+      'text/csv', 'text/plain', 'text/tab-separated-values',
+      'application/csv', 'application/json', 'application/geo+json',
+      'application/xml', 'text/xml', 'application/vnd.quakeml+xml',
+      'application/octet-stream', // many systems use this as a generic fallback
+      '', // some clients omit the MIME type entirely
+    ]);
+    const mimeBase = (file.type || '').split(';')[0].trim().toLowerCase();
+    if (mimeBase && !allowedMimeTypes.has(mimeBase)) {
+      return NextResponse.json(
+        { error: `File MIME type '${mimeBase}' is not permitted.` },
         { status: 400 }
       );
     }

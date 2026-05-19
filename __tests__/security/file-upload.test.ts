@@ -1,197 +1,236 @@
 /**
+ * @jest-environment node
+ *
  * File Upload Security Tests
- * 
- * Tests for file upload vulnerabilities including:
- * - Oversized files
- * - Malicious file types
- * - XML bombs
- * - Path traversal
- * - Malformed content
+ *
+ * Tests that the upload API enforces authentication, file type restrictions,
+ * and size limits via real calls into the route handler.
  */
 
-import { parseCSV, parseJSON, parseQuakeML } from '@/lib/parsers';
+jest.mock('@/lib/auth/middleware', () => ({
+  requireEditor: jest.fn(),
+  requireAdmin: jest.fn(),
+  requireViewer: jest.fn(),
+  requireAuth: jest.fn(),
+}));
 
-describe('File Upload Security Tests', () => {
-  describe('File Size Limits', () => {
-    it('should reject extremely large CSV files', () => {
-      // Generate a very large CSV (simulated)
-      const header = 'time,latitude,longitude,depth,magnitude\n';
-      const row = '2024-01-01T00:00:00Z,0,0,10,5.0\n';
-      const largeContent = header + row.repeat(1000000); // 1M rows
+jest.mock('@/lib/mongodb', () => ({
+  getCollection: jest.fn(),
+  COLLECTIONS: {
+    USERS: 'users',
+    CATALOGUES: 'merged_catalogues',
+    EVENTS: 'merged_events',
+    AUDIT_LOGS: 'audit_logs',
+    PASSWORD_RESET_TOKENS: 'password_reset_tokens',
+  },
+  isConnected: jest.fn().mockResolvedValue(true),
+  getDb: jest.fn(),
+}));
 
-      // This should either handle gracefully or reject
-      const result = parseCSV(largeContent);
-      expect(result).toBeDefined();
-    });
+jest.mock('@/lib/db', () => ({ dbQueries: null }));
 
-    it('should handle empty files', () => {
-      const result = parseCSV('');
-      expect(result.success).toBe(false);
-      expect(result.errors.length).toBeGreaterThan(0);
-    });
+jest.mock('@/lib/parsers', () => ({
+  parseFile: jest.fn().mockReturnValue({
+    success: true,
+    events: [],
+    errors: [],
+    warnings: [],
+    detectedFields: [],
+  }),
+}));
 
-    it('should handle files with only whitespace', () => {
-      const result = parseCSV('   \n\n   \n');
-      expect(result.success).toBe(false);
-    });
+jest.mock('@/lib/pending-uploads', () => ({
+  storePendingUpload: jest.fn().mockResolvedValue('pending-id-123'),
+  getPendingUploadEvents: jest.fn().mockResolvedValue(null),
+  deletePendingUpload: jest.fn().mockResolvedValue(undefined),
+  iteratePendingUploadEventBatches: jest.fn(),
+}));
+
+jest.mock('@/lib/cache', () => ({
+  apiCache: { get: jest.fn(), set: jest.fn() },
+  catalogueCache: { get: jest.fn(), set: jest.fn() },
+  generateCacheKey: jest.fn().mockReturnValue('key'),
+  invalidateCacheByPrefix: jest.fn(),
+}));
+
+jest.mock('@/lib/id', () => ({ createId: jest.fn().mockReturnValue('test-id') }));
+
+import { requireEditor } from '@/lib/auth/middleware';
+import { NextRequest, NextResponse } from 'next/server';
+
+function mockUnauthenticated() {
+  (requireEditor as jest.Mock).mockResolvedValue(
+    NextResponse.json({ error: 'Authentication required' }, { status: 401 })
+  );
+}
+
+function mockAuthenticated() {
+  const user = { id: 'u1', email: 'test@example.com', role: 'editor' };
+  (requireEditor as jest.Mock).mockResolvedValue({ session: { user }, user });
+}
+
+function makeUploadRequest(file: File): NextRequest {
+  const formData = new FormData();
+  formData.append('file', file);
+  return new NextRequest('http://localhost:3000/api/upload', {
+    method: 'POST',
+    body: formData,
   });
+}
 
-  describe('XML Bomb Protection', () => {
-    it('should reject billion laughs attack', () => {
-      const billionLaughs = `<?xml version="1.0"?>
-<!DOCTYPE lolz [
-  <!ENTITY lol "lol">
-  <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
-  <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">
-  <!ENTITY lol4 "&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;">
-]>
-<quakeml>&lol4;</quakeml>`;
+// ---------------------------------------------------------------------------
+// Authentication gate
+// ---------------------------------------------------------------------------
 
-      const result = parseQuakeML(billionLaughs);
-      // Should either reject or handle safely
-      expect(result).toBeDefined();
-    });
-
-    it('should reject external entity injection', () => {
-      const xxe = `<?xml version="1.0"?>
-<!DOCTYPE foo [
-  <!ENTITY xxe SYSTEM "file:///etc/passwd">
-]>
-<quakeml>&xxe;</quakeml>`;
-
-      const result = parseQuakeML(xxe);
-      expect(result).toBeDefined();
-    });
-
-    it('should handle deeply nested XML', () => {
-      let deepXml = '<root>';
-      for (let i = 0; i < 10000; i++) {
-        deepXml += '<nested>';
-      }
-      deepXml += 'content';
-      for (let i = 0; i < 10000; i++) {
-        deepXml += '</nested>';
-      }
-      deepXml += '</root>';
-
-      const result = parseQuakeML(deepXml);
-      expect(result).toBeDefined();
-    });
-  });
-
-  describe('Malformed Content', () => {
-    it('should handle CSV with mismatched columns', () => {
-      const malformed = `time,latitude,longitude,depth,magnitude
-2024-01-01T00:00:00Z,0,0,10
-2024-01-01T00:00:00Z,0,0,10,5.0,extra,columns`;
-
-      const result = parseCSV(malformed);
-      expect(result.errors.length).toBeGreaterThan(0);
-    });
-
-    it('should handle CSV with special characters', () => {
-      const specialChars = `time,latitude,longitude,depth,magnitude
-2024-01-01T00:00:00Z,0,0,10,5.0
-"2024-01-01T00:00:00Z","0","0","10","5.0"
-2024-01-01T00:00:00Z,0\x00,0,10,5.0`;
-
-      const result = parseCSV(specialChars);
-      expect(result).toBeDefined();
-    });
-
-    it('should handle JSON with circular references', () => {
-      const circular = '{"a": {"b": {"c": "..."}}}';
-      const result = parseJSON(circular);
-      expect(result).toBeDefined();
-    });
-
-    it('should handle malformed JSON', () => {
-      const malformed = [
-        '{invalid json}',
-        '{"unclosed": ',
-        '{"key": undefined}',
-        '{key: "value"}', // Missing quotes
-        "{'key': 'value'}", // Single quotes
-      ];
-
-      for (const json of malformed) {
-        const result = parseJSON(json);
-        expect(result.success).toBe(false);
-      }
-    });
-  });
-
-  describe('Path Traversal Protection', () => {
-    it('should reject path traversal in filenames', () => {
-      const maliciousNames = [
-        '../../../etc/passwd',
-        '..\\..\\..\\windows\\system32\\config\\sam',
-        '/etc/passwd',
-        'C:\\Windows\\System32\\config\\sam',
-        '....//....//....//etc/passwd',
-      ];
-
-      // These should be rejected at the API level
-      // Test that we can detect path traversal patterns
-      for (const name of maliciousNames) {
-        const hasPathTraversal = name.includes('..') ||
-                                  name.startsWith('/') ||
-                                  /^[A-Za-z]:\\/.test(name);
-        expect(hasPathTraversal).toBe(true);
-      }
-    });
-  });
-
-  describe('Invalid Data Types', () => {
-    it('should handle non-numeric coordinates', () => {
-      const invalid = `time,latitude,longitude,depth,magnitude
-2024-01-01T00:00:00Z,abc,def,10,5.0
-2024-01-01T00:00:00Z,NaN,Infinity,10,5.0
-2024-01-01T00:00:00Z,null,undefined,10,5.0`;
-
-      const result = parseCSV(invalid);
-      expect(result.errors.length).toBeGreaterThan(0);
-    });
-
-    it('should handle extreme coordinate values', () => {
-      const extreme = `time,latitude,longitude,depth,magnitude
-2024-01-01T00:00:00Z,999,999,10,5.0
-2024-01-01T00:00:00Z,-999,-999,10,5.0
-2024-01-01T00:00:00Z,1e308,1e308,10,5.0`;
-
-      const result = parseCSV(extreme);
-      expect(result.errors.length).toBeGreaterThan(0);
-    });
-
-    it('should handle invalid date formats', () => {
-      const invalid = `time,latitude,longitude,depth,magnitude
-not-a-date,0,0,10,5.0
-2024-13-45T99:99:99Z,0,0,10,5.0
-9999-99-99T99:99:99Z,0,0,10,5.0`;
-
-      const result = parseCSV(invalid);
-      expect(result.errors.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('Unicode and Encoding', () => {
-    it('should handle various Unicode characters', () => {
-      const unicode = `time,latitude,longitude,depth,magnitude,region
-2024-01-01T00:00:00Z,0,0,10,5.0,日本
-2024-01-01T00:00:00Z,0,0,10,5.0,Москва
-2024-01-01T00:00:00Z,0,0,10,5.0,🌍`;
-
-      const result = parseCSV(unicode);
-      expect(result).toBeDefined();
-    });
-
-    it('should handle null bytes', () => {
-      const nullBytes = `time,latitude,longitude,depth,magnitude
-2024-01-01T00:00:00Z\x00,0,0,10,5.0`;
-
-      const result = parseCSV(nullBytes);
-      expect(result).toBeDefined();
-    });
+describe('POST /api/upload — authentication gate', () => {
+  it('returns 401 when unauthenticated', async () => {
+    mockUnauthenticated();
+    const { POST } = await import('@/app/api/upload/route');
+    const file = new File(['content'], 'test.csv', { type: 'text/csv' });
+    const res = await POST(makeUploadRequest(file));
+    expect(res.status).toBe(401);
   });
 });
 
+// ---------------------------------------------------------------------------
+// Extension filtering
+// ---------------------------------------------------------------------------
+
+describe('POST /api/upload — extension filtering', () => {
+  beforeEach(() => mockAuthenticated());
+
+  const disallowedFiles: [string, string][] = [
+    ['malware.exe', 'application/octet-stream'],
+    ['shell.php', 'text/plain'],
+    ['script.js', 'application/javascript'],
+    ['payload.sh', 'text/plain'],
+    ['archive.zip', 'application/zip'],
+    ['document.pdf', 'application/pdf'],
+    ['image.jpg', 'image/jpeg'],
+  ];
+
+  it.each(disallowedFiles)(
+    'returns 400 for disallowed file "%s"',
+    async (filename, mimeType) => {
+      const { POST } = await import('@/app/api/upload/route');
+      const file = new File(['content'], filename, { type: mimeType });
+      const res = await POST(makeUploadRequest(file));
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toMatch(/invalid file type/i);
+    }
+  );
+
+  const allowedFiles: [string, string][] = [
+    ['data.csv', 'text/csv'],
+    ['data.txt', 'text/plain'],
+    ['data.json', 'application/json'],
+    ['data.geojson', 'application/geo+json'],
+    ['data.xml', 'text/xml'],
+    ['data.qml', 'application/vnd.quakeml+xml'],
+  ];
+
+  it.each(allowedFiles)(
+    'passes extension check for "%s"',
+    async (filename, mimeType) => {
+      const { POST } = await import('@/app/api/upload/route');
+      const file = new File(['content'], filename, { type: mimeType });
+      const res = await POST(makeUploadRequest(file));
+      // Should not be rejected for file type
+      const body = await res.json();
+      expect(body.error ?? '').not.toMatch(/invalid file type/i);
+    }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// MIME type filtering (secondary check — extension is valid, MIME is wrong)
+// ---------------------------------------------------------------------------
+
+describe('POST /api/upload — MIME type filtering', () => {
+  beforeEach(() => mockAuthenticated());
+
+  const forbiddenMimeTypes: string[] = [
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'application/javascript',
+    'text/javascript',
+    'application/x-executable',
+    'application/x-msdownload',
+    'application/x-sh',
+  ];
+
+  it.each(forbiddenMimeTypes)(
+    'returns 400 when MIME type is "%s" even though extension is valid',
+    async (mimeType) => {
+      const { POST } = await import('@/app/api/upload/route');
+      // Use a valid extension (.csv) but attach a forbidden MIME type
+      const file = new File(['content'], 'data.csv', { type: mimeType });
+      const res = await POST(makeUploadRequest(file));
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toMatch(/mime type/i);
+    }
+  );
+
+  it('accepts empty MIME type (some clients omit it)', async () => {
+    const { POST } = await import('@/app/api/upload/route');
+    const file = new File(['content'], 'data.csv', { type: '' });
+    const res = await POST(makeUploadRequest(file));
+    const body = await res.json();
+    expect(body.error ?? '').not.toMatch(/mime type/i);
+  });
+
+  it('accepts application/octet-stream (generic binary fallback)', async () => {
+    const { POST } = await import('@/app/api/upload/route');
+    const file = new File(['content'], 'data.csv', { type: 'application/octet-stream' });
+    const res = await POST(makeUploadRequest(file));
+    const body = await res.json();
+    expect(body.error ?? '').not.toMatch(/mime type/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// File size limits
+// ---------------------------------------------------------------------------
+
+describe('POST /api/upload — size limits', () => {
+  it('returns 413 with UPLOAD_PARSE_LIMIT_EXCEEDED when file exceeds sync-parse limit', async () => {
+    mockAuthenticated();
+    // Set sync-parse limit to 1 byte so a tiny file triggers the 413
+    const saved = process.env.UPLOAD_MAX_SYNC_PARSE_MB;
+    process.env.UPLOAD_MAX_SYNC_PARSE_MB = '0.000001';
+    try {
+      const { POST } = await import('@/app/api/upload/route');
+      const file = new File(['a'.repeat(200)], 'data.csv', { type: 'text/csv' });
+      const res = await POST(makeUploadRequest(file));
+      expect(res.status).toBe(413);
+      const body = await res.json();
+      expect(body.code).toBe('UPLOAD_PARSE_LIMIT_EXCEEDED');
+      expect(body.fileSize).toBeGreaterThan(0);
+      expect(body.limit).toBeGreaterThan(0);
+    } finally {
+      if (saved === undefined) {
+        delete process.env.UPLOAD_MAX_SYNC_PARSE_MB;
+      } else {
+        process.env.UPLOAD_MAX_SYNC_PARSE_MB = saved;
+      }
+    }
+  });
+
+  it('returns 400 for missing file in formdata', async () => {
+    mockAuthenticated();
+    const { POST } = await import('@/app/api/upload/route');
+    const formData = new FormData();
+    // No file appended — formData is empty
+    const req = new NextRequest('http://localhost:3000/api/upload', {
+      method: 'POST',
+      body: formData,
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/no file/i);
+  });
+});

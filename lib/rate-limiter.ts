@@ -161,29 +161,41 @@ export const readRateLimiter = rateLimit({
 });
 
 /**
- * Extract IP address from request headers
- * Checks multiple headers in order of preference:
- * 1. x-forwarded-for (proxy/load balancer)
- * 2. x-real-ip (nginx)
- * 3. fallback to 'unknown'
+ * Strict rate limiter for authentication endpoints (register, login, password reset).
+ * 10 requests per 15 minutes per IP to limit brute-force and email-flood attacks.
+ */
+export const authRateLimiter = rateLimit({
+  interval: 15 * 60 * 1000, // 15 minutes
+  uniqueTokenPerInterval: 500,
+});
+
+/**
+ * Extract the real client IP from request headers.
  *
- * @param request - Next.js request object
- * @returns IP address or 'unknown'
+ * x-forwarded-for is a comma-separated list of IPs appended left-to-right by
+ * each proxy. A client can prepend arbitrary values to the leftmost position,
+ * so taking [0] is spoofable. The rightmost IP is appended by the nearest
+ * trusted proxy and cannot be forged by the client.
+ *
+ * Set TRUSTED_PROXY_HOPS=N (default 1) to control how many proxy hops to
+ * strip from the right. For Vercel / a single nginx in front of the app,
+ * the default of 1 is correct.
  */
 export function getClientIp(request: Request): string {
-  // Check x-forwarded-for header (may contain multiple IPs, take the first)
+  const trustedHops = Math.max(1, parseInt(process.env.TRUSTED_PROXY_HOPS || '1', 10));
+
   const forwardedFor = request.headers.get('x-forwarded-for');
   if (forwardedFor) {
-    return forwardedFor.split(',')[0].trim();
+    const ips = forwardedFor.split(',').map(ip => ip.trim()).filter(Boolean);
+    // The client-supplied IP is at index 0; the first proxy adds at index 1, etc.
+    // We trust the entry added by our own proxy: ips[ips.length - trustedHops].
+    const idx = Math.max(0, ips.length - trustedHops);
+    if (ips[idx]) return ips[idx];
   }
 
-  // Check x-real-ip header
   const realIp = request.headers.get('x-real-ip');
-  if (realIp) {
-    return realIp;
-  }
+  if (realIp) return realIp.trim();
 
-  // Fallback to unknown (should rarely happen in production)
   return 'unknown';
 }
 

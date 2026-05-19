@@ -37,6 +37,16 @@ export async function POST(request: NextRequest) {
     if (!fileName || typeof fileName !== 'string') {
       return NextResponse.json({ error: 'fileName is required' }, { status: 400 });
     }
+
+    const allowedExtensions = ['csv', 'txt', 'dat', 'json', 'geojson', 'xml', 'qml'];
+    const extension = fileName.split('.').pop()?.toLowerCase();
+    if (!extension || !allowedExtensions.includes(extension)) {
+      return NextResponse.json(
+        { error: 'Invalid file type. Allowed: CSV, TXT, JSON, GeoJSON, XML, QML' },
+        { status: 400 },
+      );
+    }
+
     if (!Number.isInteger(totalChunks) || totalChunks < 1) {
       return NextResponse.json({ error: 'totalChunks must be a positive integer' }, { status: 400 });
     }

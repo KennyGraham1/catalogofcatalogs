@@ -117,6 +117,36 @@ export async function updateLastLogin(userId: string): Promise<void> {
 }
 
 /**
+ * Increment the user's jwt_version to invalidate all existing JWT sessions.
+ * Call this after a password change or reset.
+ */
+export async function bumpJwtVersion(userId: string): Promise<number> {
+  const collection = await getCollection(COLLECTIONS.USERS);
+  const result = await collection.findOneAndUpdate(
+    { id: userId },
+    {
+      $inc: { jwt_version: 1 } as any,
+      $set: { updated_at: new Date().toISOString() },
+    },
+    { returnDocument: 'after' },
+  );
+  const doc = result as unknown as (User & { jwt_version?: number }) | null;
+  return doc?.jwt_version ?? 1;
+}
+
+/**
+ * Check if a JWT's embedded version matches the stored version.
+ * Returns false if the version is stale (token should be rejected).
+ */
+export async function isJwtVersionValid(userId: string, tokenVersion: number): Promise<boolean> {
+  const collection = await getCollection(COLLECTIONS.USERS);
+  const user = await collection.findOne({ id: userId }, { projection: { jwt_version: 1 } });
+  if (!user) return false;
+  const storedVersion = (user as any).jwt_version ?? 0;
+  return tokenVersion >= storedVersion;
+}
+
+/**
  * Check if user has a specific permission
  */
 export function hasPermission(role: UserRole, permission: Permission): boolean {

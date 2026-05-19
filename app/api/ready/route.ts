@@ -33,7 +33,7 @@ export async function GET() {
   try {
     const dbStartTime = Date.now();
 
-    if (!isConnected()) {
+    if (!(await isConnected())) {
       // Try to connect
       await getDb();
     }

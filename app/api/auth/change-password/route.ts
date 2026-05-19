@@ -1,16 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth/config';
-import { getUserById, hashPassword, verifyPassword } from '@/lib/auth/utils';
+import { getUserById, hashPassword, verifyPassword, bumpJwtVersion } from '@/lib/auth/utils';
 import { getCollection, COLLECTIONS } from '@/lib/mongodb';
-// User type import removed - using untyped collection
 import { AppError } from '@/lib/errors';
+import { applyRateLimit, authRateLimiter } from '@/lib/rate-limiter';
 
 /**
  * POST /api/auth/change-password
  * Change the current user's password
  */
 export async function POST(request: NextRequest) {
+  const rateLimitResult = applyRateLimit(request, authRateLimiter, 10);
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please try again later.' },
+      { status: 429, headers: rateLimitResult.headers }
+    );
+  }
+
   try {
     // Check authentication
     const session = await getServerSession(authOptions);
@@ -76,6 +84,9 @@ export async function POST(request: NextRequest) {
     if (result.modifiedCount === 0) {
       throw new AppError('Failed to update password', 500);
     }
+
+    // Invalidate all existing JWTs for this user.
+    await bumpJwtVersion(user.id);
 
     return NextResponse.json({
       message: 'Password changed successfully',

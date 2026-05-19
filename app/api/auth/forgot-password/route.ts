@@ -4,12 +4,21 @@ import { getCollection, COLLECTIONS } from '@/lib/mongodb';
 import { getUserByEmail } from '@/lib/auth/utils';
 import { Logger } from '@/lib/errors';
 import { sendEmailNotification } from '@/lib/notifications';
+import { applyRateLimit, authRateLimiter } from '@/lib/rate-limiter';
 import type { PasswordResetToken } from '@/lib/auth/types';
 
 const logger = new Logger('ForgotPasswordAPI');
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 export async function POST(request: NextRequest) {
+  const rateLimitResult = applyRateLimit(request, authRateLimiter, 10);
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please try again later.' },
+      { status: 429, headers: rateLimitResult.headers }
+    );
+  }
+
   try {
     const body = await request.json();
     const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
@@ -30,11 +39,8 @@ export async function POST(request: NextRequest) {
     }
 
     const user = await getUserByEmail(email);
-    logger.info('Password reset requested', {
-      requestedEmail: email,
-      userFound: !!user,
-      foundUserEmail: user?.email || null,
-    });
+    // Do not log whether a user was found — that would enable log-level user enumeration.
+    logger.info('Password reset requested');
 
     if (!user || !user.is_active) {
       return NextResponse.json({

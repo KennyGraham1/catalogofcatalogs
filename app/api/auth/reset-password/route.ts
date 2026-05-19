@@ -1,13 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'crypto';
 import { getCollection, COLLECTIONS } from '@/lib/mongodb';
-import { getUserById, hashPassword } from '@/lib/auth/utils';
+import { getUserById, hashPassword, bumpJwtVersion } from '@/lib/auth/utils';
 import { Logger } from '@/lib/errors';
+import { applyRateLimit, authRateLimiter } from '@/lib/rate-limiter';
 import type { PasswordResetToken } from '@/lib/auth/types';
 
 const logger = new Logger('ResetPasswordAPI');
 
 export async function POST(request: NextRequest) {
+  const rateLimitResult = applyRateLimit(request, authRateLimiter, 10);
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please try again later.' },
+      { status: 429, headers: rateLimitResult.headers }
+    );
+  }
+
   try {
     const body = await request.json();
     const token = typeof body?.token === 'string' ? body.token.trim() : '';
@@ -78,6 +87,9 @@ export async function POST(request: NextRequest) {
       { user_id: user.id, used_at: null },
       { $set: { used_at: now } }
     );
+
+    // Invalidate all existing JWTs for this user.
+    await bumpJwtVersion(user.id);
 
     return NextResponse.json({ message: 'Password reset successfully' });
   } catch (error) {

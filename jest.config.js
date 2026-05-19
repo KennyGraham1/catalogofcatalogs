@@ -27,23 +27,23 @@ const customJestConfig = {
   // Coverage thresholds to maintain code quality
   coverageThreshold: {
     global: {
-      branches: 50,
-      functions: 50,
-      lines: 50,
-      statements: 50,
+      branches: 70,
+      functions: 70,
+      lines: 70,
+      statements: 70,
     },
     // Stricter thresholds for critical modules
     './lib/validation.ts': {
-      branches: 70,
-      functions: 80,
-      lines: 80,
-      statements: 80,
+      branches: 80,
+      functions: 85,
+      lines: 85,
+      statements: 85,
     },
     './lib/auth/*.ts': {
-      branches: 60,
-      functions: 60,
-      lines: 60,
-      statements: 60,
+      branches: 70,
+      functions: 75,
+      lines: 75,
+      statements: 75,
     },
   },
   maxWorkers: 1, // Workaround for Node version compatibility
