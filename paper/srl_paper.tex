@@ -188,11 +188,11 @@ catalogue), the combined FMD will be incomplete between the two thresholds
 unless the analyst enforces the higher cut-off.
 
 \textbf{Magnitude scale heterogeneity.}  Different agencies routinely use
-different magnitude scales: local magnitude ($M_L$; \citealt{gutenberg1944}),
+different magnitude scales: local magnitude ($M_L$; \citealt{richter1935}),
 body-wave magnitude ($m_b$), surface-wave magnitude ($M_s$), and moment
 magnitude ($M_w$; \citealt{hanks1979,kanamori1977}).  Each scale saturates at
 a different value---$M_L$ above $\sim 6.5$, $m_b$ above $\sim 6.0$
-\citep{bormann2015}---and the inter-scale regressions carry substantial
+\citep{bormann2009}---and the inter-scale regressions carry substantial
 scatter \citep{das2011}.  Mixing scales inflates the apparent variance of the
 FMD, artificially shifts $M_c$, and can change the estimated $b$ by up to
 $\pm 0.2$ \citep{marzocchi2003}.  \citet{tinti1987} showed that even with a
@@ -201,16 +201,22 @@ in ways that are routinely underappreciated.
 
 \textbf{Aftershock clustering.}  Aftershock sequences violate the Poissonian
 independence assumption underpinning the GR relation and ETAS background
-estimation.  Failing to decluster inflates event counts at magnitudes just
-above $M_c$ (where aftershocks are most numerous) and biases $\hat{b}$
-downward \citep{gardner1974}.  Multiple declustering algorithms exist---the
-window method of \citet{gardner1974} with \citet{uhrhammer1986} parameters,
-the link-based method of \citet{reasenberg1985}, and the ETAS-based
-stochastic method of \citet{zhuang2002}---with different sensitivities to
-swarm-type seismicity and to the aftershocks of aftershocks
-\citep{vanstiphout2012}.  \citet{helmstetter2005} demonstrated that ignoring
-small-magnitude aftershocks---often the majority of any sequence---underestimates
-cascading stress transfer and therefore the effective rate of background seismicity.
+estimation.  Aftershocks are most numerous at the small magnitudes just above
+$M_c$, where they inflate event counts; because clustered aftershock
+populations typically carry a higher $b$-value than the background, failing to
+decluster biases the apparent $\hat{b}$ of the raw catalogue \emph{upward}
+relative to the declustered (Poissonian) catalogue, although the sign and size
+of the shift depend on the relative size distributions of the clustered and
+background populations \citep{gardner1974,marsan2008}.  We illustrate this
+shift directly in Section~\ref{sec:example}.  Multiple declustering algorithms
+exist---the window method of \citet{gardner1974} with \citet{uhrhammer1986}
+parameters and the aftershock-zone scaling of \citet{kagan2002}, the link-based
+method of \citet{reasenberg1985}, and the ETAS-based stochastic method of
+\citet{zhuang2002}---with different sensitivities to swarm-type seismicity and
+to the aftershocks of aftershocks \citep{vanstiphout2012}.
+\citet{helmstetter2005} demonstrated that ignoring small-magnitude
+aftershocks---often the majority of any sequence---underestimates cascading
+stress transfer and therefore the effective rate of background seismicity.
 The choice of declustering method and parameters is a significant source of
 uncertainty that is rarely propagated through to final hazard estimates.
 
@@ -241,8 +247,43 @@ preprocessing itself.  Neither ZMAP, ObsPy, nor OpenQuake offers a guided
 workflow for avoiding the biases described above, nor a persistent
 web-accessible database for storing and sharing processed catalogues.
 The Community Online Resource for Statistical Seismicity Analysis
-\citep[CORSSA;][]{naylor2010,mignan2012,vanstiphout2012,woessner2016}
+\citep[CORSSA;][]{naylor2010,mignan2012,vanstiphout2012,woessner2010}
 provides peer-reviewed tutorials on these methods but no software platform.
+
+The need for such integration is intensifying.  Template-matching and
+machine-learning phase-detection workflows now routinely yield catalogues with
+up to an order of magnitude more events than traditional analyst-reviewed
+bulletins \citep{chamberlain2018,illsley2025}, while every regional network
+continues to publish its own authoritative product.  A single study area may
+therefore be covered by several catalogues that differ in completeness,
+magnitude scale, and location quality and must be reconciled before analysis.
+The constituent operations---format conversion, duplicate association,
+completeness estimation, declustering---are individually well understood and,
+in isolation, available in one tool or another; what is missing is an open
+platform that chains them into a single reproducible, provenance-preserving
+workflow.  Table~\ref{tab:comparison} contrasts the capabilities of
+representative existing tools with those of CofC.
+
+\begin{table}[ht]
+\centering
+\caption{Capability comparison of representative catalogue-analysis tools.
+\checkmark: native support; ($\checkmark$): partial support or requires user
+scripting; --: not supported.}
+\label{tab:comparison}
+\small
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+            & Multi-format & Duplicate    & Quality      & GR/$M_c$/    & Web, no      & Provenance/  \\
+Tool        & ingest       & merge        & scoring      & decluster    & install      & FAIR export  \\
+\midrule
+ZMAP \citep{wiemer2001}      & ($\checkmark$) & --             & --           & \checkmark     & --           & --             \\
+ObsPy \citep{obspy2010}      & \checkmark     & ($\checkmark$) & --           & ($\checkmark$) & --           & ($\checkmark$) \\
+OpenQuake \citep{pagani2014} & ($\checkmark$) & --             & --           & ($\checkmark$) & --           & --             \\
+Agency FDSN services         & --             & --             & --           & --             & \checkmark   & ($\checkmark$) \\
+\textbf{CofC} (this work)    & \checkmark     & \checkmark     & \checkmark   & \checkmark     & \checkmark   & \checkmark     \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 At the institutional level, major agencies---GeoNet \citep{petersen2011},
 the USGS Comprehensive Catalogue \citep[ComCat;][]{storchak2013},
@@ -253,7 +294,7 @@ access across European networks.  However, these services expose
 individual agency products rather than providing tools for users to
 merge, quality-score, and analyse combinations of catalogs from multiple
 sources.  Automated multi-agency event association has been studied in the
-context of global catalogues \citep{benz2019} and Bayesian magnitude
+context of global catalogues \citep{yeck2019} and Bayesian magnitude
 merging across networks \citep{Si2024}, but these methods are not
 available as general-purpose tools for regional researchers.  In New
 Zealand specifically, \citet{warrensmith2025} conducted the first
@@ -277,7 +318,13 @@ are undocumented, format conversions are ad hoc, and processed datasets are
 not versioned or persistently identified.  The FAIR principles have since been
 adopted as the basis for data infrastructure by the European Plate Observing
 System (EPOS), which coordinates seismological data services across 24
-European nations.
+European nations.  For the Aotearoa New Zealand context in particular, FAIR is
+applied alongside the CARE Principles for Indigenous Data Governance
+\citep{carroll2020}---Collective benefit, Authority to control,
+Responsibility, and Ethics---which recognise M\=aori data-sovereignty
+interests in nationally significant datasets; the governance and
+access-control implications are developed in the companion white paper
+\citep{graham2026fair}.
 
 CofC operationalises the FAIR principles specifically for earthquake
 catalogue data:
@@ -328,6 +375,50 @@ The remainder of this paper describes the platform architecture
 (Section~\ref{sec:example}), and detailed guidance on avoiding the most
 consequential statistical biases (Section~\ref{sec:biases}).
 
+\subsection{Novelty and contributions}
+\label{sec:contributions}
+
+The individual algorithms CofC employs are deliberately standard---maximum-likelihood
+$b$-value estimation \citep{aki1965}, MAXC completeness estimation
+\citep{wiemer2000}, and Gardner-Knopoff \citep{gardner1974} and Reasenberg
+\citep{reasenberg1985} declustering.  The novelty of this work is therefore not
+a new estimator but the \emph{integration} of the complete multi-catalogue
+workflow into a single open, web-native, provenance-preserving platform,
+together with an objective event-level quality index.  Specifically, the
+contributions are:
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{An integrated, browser-based workflow} spanning
+    heterogeneous-format ingest, configurable duplicate detection, quality
+    scoring, conflict-resolution merging, and standard seismicity analysis,
+    requiring no local installation or licensed software
+    (Table~\ref{tab:comparison}).  To our knowledge no existing open tool
+    covers this full chain.
+  \item \textbf{An objective, reproducible event-level quality index}
+    (equation~\ref{eq:quality}): a transparent five-dimension 0--100 score with
+    letter grades, grounded in the established determinants of solution quality
+    \citep{bondar2004,woessner2005,warrensmith2025} and re-exposed as
+    user-configurable weights through the API.  We are not aware of a prior
+    production tool that assigns a comparable per-event quality score.
+  \item \textbf{Configurable, automated duplicate detection and conflict
+    resolution} for arbitrary catalogue pairs, with five interchangeable merge
+    strategies and physical-validity gates, generalising the expert-driven
+    association procedures developed for global catalogues
+    \citep{storchak2013,engdahl1998,yeck2019} into a tool regional researchers
+    can apply themselves.
+  \item \textbf{FAIR-by-design provenance}: every merged catalogue records its
+    full lineage (source-catalogue IDs per event, merge strategy and
+    thresholds, quality score) and re-exports it losslessly in QuakeML
+    \citep{schorlemmer2011}, operationalising the FAIR principles
+    \citep{wilkinson2016} for routine catalogue work.
+  \item \textbf{A bias-aware, guided analysis path} that surfaces the
+    underlying statistical assumptions---completeness, magnitude-scale
+    homogeneity, declustering, and quality filtering---at the point of use,
+    consolidating guidance previously dispersed across the CORSSA tutorials
+    \citep{naylor2010,mignan2012,vanstiphout2012} into an executable workflow
+    (Section~\ref{sec:biases}).
+\end{enumerate}
+
 \section{Platform Architecture}
 \label{sec:architecture}
 
@@ -376,7 +467,8 @@ with QuakeML~1.2 BED, ensuring cross-catalogue comparability.
 \subsection{Versioning and provenance}
 
 CofC implements a three-tier versioning scheme (\textsc{major.minor.patch})
-inspired by DataCite best practice \citep{wilkinson2016}:
+following semantic-versioning conventions and DataCite data-versioning
+best practice \citep{datacite2021}:
 \begin{itemize}[leftmargin=*]
   \item \textbf{Major} increments when event parameters of existing events
     change (e.g., full reprocessing with a new velocity model or magnitude
@@ -466,7 +558,7 @@ a weighted sum over five dimensions:
 with weights $w_{\text{comp}} = 0.40$, $w_{\text{acc}} = 0.20$,
 $w_{\text{rel}} = 0.15$, $w_{\text{con}} = 0.15$, $w_{\text{trc}} = 0.10$.
 The weights reflect the relative frequency with which each dimension limits
-scientific reusability in practice \citep{woessner2016}: missing required
+scientific reusability in practice \citep{woessner2010}: missing required
 fields (completeness) is the most common reason a catalogue cannot be
 ingested by downstream tools; physical inconsistencies (accuracy) often
 indicate transcription errors that propagate silently; instrumental reliability
@@ -518,14 +610,15 @@ at catalogue level.
 
 \begin{table}[ht]
 \centering
-\caption{Quality grade thresholds. The A$^+$--F scale mirrors the framework
-of \citet{wilkinson2016} adapted for event-level seismological quality.}
+\caption{Quality grade thresholds. The A$^+$--F scale provides an at-a-glance,
+ordinal event-level quality indicator derived from the continuous score $Q$ of
+equation~\eqref{eq:quality}.}
 \label{tab:grades}
 \begin{tabular}{@{}ccp{7.5cm}@{}}
 \toprule
 \textbf{Grade} & \textbf{Score} & \textbf{Recommended use} \\
 \midrule
-A$^+$ & 95--100 & Publication-ready; suitable for PSHA and all quantitative analyses \citep{horspool2024}. \\
+A$^+$ & 95--100 & Publication-ready; suitable for PSHA and all quantitative analyses \citep{gerstenberger2024}. \\
 A     & 85--94  & Good; suitable for most research and engineering applications. \\
 B$^+$ & 75--84  & Acceptable; document limitations in methods. \\
 B     & 65--74  & Fair; notable gaps in uncertainty or provenance. \\
@@ -694,8 +787,9 @@ parameters.  For each event the space-time interaction zone is:
 \end{align}
 Events falling within $L(M)$ and $T(M)$ of a larger mainshock are flagged
 as aftershocks.  The Reasenberg \citeyearpar{reasenberg1985} algorithm, which
-uses an interaction zone based on the Omori \citeyearpar{omori1894} law and
-adapts to the local seismicity rate, is available as an alternative.
+uses an interaction zone based on the Omori--Utsu law
+\citep{omori1894,utsu1961} and adapts to the local seismicity rate, is
+available as an alternative.
 
 The declustered catalogue is exported as a separate catalogue within the
 platform, with each event tagged as \texttt{mainshock} or
@@ -710,10 +804,12 @@ and therefore not reproducible in real-time analysis \citep{vanstiphout2012}.
 
 Cumulative seismic moment is computed as
 \begin{equation}
-  M_0 = 10^{1.5(M_w + 10.7)}\;\text{N\,m}
+  M_0 = 10^{1.5 M_w + 9.1}\;\text{N\,m}
   \label{eq:M0}
 \end{equation}
-using the Hanks-Kanamori relation \citep{hanks1979,kanamori1977}.  For events
+using the Hanks-Kanamori relation \citep{hanks1979,kanamori1977} in SI units
+(equivalently $M_w = \tfrac{2}{3}\log_{10} M_0 - 6.07$ for $M_0$ in
+\si{\newton\metre}).  For events
 recorded with non-Mw magnitude types, CofC applies empirical regression
 conversions from \citet{das2011}.  The time-series of cumulative moment
 release is visualised on the Analysis page.
@@ -787,17 +883,20 @@ for offshore events.
 \subsection{Step 3: Merge}
 
 Applying the Quality-based strategy with default thresholds
-(equations~\ref{eq:dt}--\ref{eq:dm}) identifies 61\,340 duplicate pairs
-(50\% of Agency~B events have a GeoNet counterpart).  The merged catalogue
-contains 158\,660 unique events.  Provenance is retained: 96\,000 events are
-from GeoNet only, 1\,320 from Agency~B only (events below GeoNet's minimum
-reporting threshold), and 61\,340 from the Quality-based selection.
+(equations~\ref{eq:dt}--\ref{eq:dm}) identifies 49\,000 duplicate pairs
+(50\% of Agency~B events have a GeoNet counterpart).  Concatenating the
+$120\,000 + 98\,000 = 218\,000$ raw records and removing one member of each
+duplicate pair yields a merged catalogue of 169\,000 unique events.
+Provenance is retained: 71\,000 events are from GeoNet only, 49\,000 from
+Agency~B only (events outside GeoNet's detection footprint or below its
+reporting threshold), and 49\,000 from the Quality-based resolution of
+duplicate pairs.
 
 \subsection{Step 4: Quality filtering and statistical analysis}
 
 Applying a quality threshold of $Q \geq 70$ (grade~B or above) to the merged
-catalogue retains 134\,820 events (85\% of the 158\,660 unique events).
-The 23\,840 removed events are predominantly offshore Agency~B sources with
+catalogue retains 143\,650 events (85\% of the 169\,000 unique events).
+The 25\,350 removed events are predominantly offshore Agency~B sources with
 azimuthal gap $> 180^{\circ}$ and $\sigma_{\text{loc}} > 10$~km---exactly
 the population visible in the tail of Figure~\ref{fig:gap}.  Removing these
 events does not significantly change the total event rate above $M_c = 2.0$
@@ -817,8 +916,9 @@ source catalogue ID(s), the quality score, and the merge strategy applied.
 As an additional preprocessing step, applying Gardner-Knopoff declustering
 (Section~\ref{sec:decluster}) reduces the catalogue by a further 23\%,
 removing aftershock sequences from $M > 5$ events and lowering $\hat{b}$
-slightly to $0.94 \pm 0.03$---illustrating the sensitivity of $b$-value
-estimates to preprocessing choices (Section~\ref{sec:biases}).
+slightly to $0.94 \pm 0.03$ (Figure~\ref{fig:fmd})---illustrating the
+sensitivity of $b$-value estimates to preprocessing choices
+(Section~\ref{sec:biases}).
 
 \section{Guidance on Avoiding Statistical Biases}
 \label{sec:biases}
@@ -849,7 +949,7 @@ magnitudes.
 \textbf{Problem.}  Mixing magnitude scales (e.g., ML from one agency, Mw from
 another) artificially broadens the FMD and can shift the apparent $b$-value.
 Local magnitude ML saturates above $M \approx 6.5$; body-wave magnitude mb
-saturates above $M \approx 6.0$ \citep{bormann2015}.
+saturates above $M \approx 6.0$ \citep{bormann2009}.
 
 \textbf{Guidance.}
 \begin{enumerate}[leftmargin=*]
@@ -882,7 +982,9 @@ distributions.
 
 \textbf{Problem.}  GR analysis assumes independent, Poissonian arrivals.
 Aftershock sequences cluster in space, time, and magnitude, violating this
-assumption and biasing $b$ downward (as shown in Section~\ref{sec:example}).
+assumption and shifting the estimated $b$---in the synthetic example of
+Section~\ref{sec:example} the raw catalogue gives $\hat{b} = 1.02$ versus
+$0.94$ after declustering, an upward bias of the raw value.
 
 \textbf{Guidance.}
 \begin{enumerate}[leftmargin=*]
@@ -1038,7 +1140,8 @@ value) $b$-value estimates.  Spatial mapping of $b$ \citep{wiemer2000,
 schorlemmer2005}, $M_c$, and seismicity rates on a grid or along a fault
 structure requires server-side spatial indexing and is targeted for a future
 release.  Similarly, ETAS parameter fitting \citep{ogata1988} and
-forecast evaluation using the CSEP framework \citep{schorlemmer2007} are
+forecast evaluation using the CSEP framework and its consistency tests
+\citep{schorlemmer2007,zechar2010} are
 not yet implemented.
 
 \textbf{Scale.}  Catalogues larger than $\sim 10^6$ events require
@@ -1095,7 +1198,25 @@ and documentation URLs are given in Section~\ref{sec:software}.
 \bibliography{references}
 
 % --- Figures ---------------------------------------------------
+% Floats are ordered to match first in-text citation (map, gap, FMD);
+% on-disk file names retain their original generator-assigned labels.
 \clearpage
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.82\linewidth]{figures/fig3_map.pdf}
+  \caption{%
+    Synthetic New Zealand seismicity map illustrating the CofC map view.
+    Circle colour encodes focal depth (cyan: $<15$~km; dark teal:
+    $>200$~km), matching the depth palette used in the web application.
+    Circle radius scales with magnitude.  The Hikurangi subduction margin
+    (offshore North Island, northeast) shows predominantly shallow seismicity;
+    the central North Island cluster captures deep slab events
+    ($\sim 100$~km); the South Island cluster represents Alpine Fault
+    seismicity.  Data are synthetic and for illustration only.
+  }
+  \label{fig:map}
+\end{figure}
+
 \begin{figure}[ht]
   \centering
   \includegraphics[width=\linewidth]{figures/fig1_azimuthal_gap.pdf}
@@ -1120,28 +1241,13 @@ and documentation URLs are given in Section~\ref{sec:software}.
     declustering.  \textit{Left:} cumulative FMD with maximum-likelihood GR
     fits (dashed line: before; solid line: after) above $M_c = 2.0$ (blue
     dotted line).  \textit{Right:} non-cumulative FMD showing the excess of
-    small events contributed by aftershock sequences.  Declustering shifts
-    $\hat{b}$ from $0.94 \pm 0.03$ to $1.02 \pm 0.03$ and removes 23\% of
+    small events contributed by aftershock sequences.  Declustering removes
+    these clustered small events, shifting $\hat{b}$ from $1.02 \pm 0.03$
+    (raw) to $0.94 \pm 0.03$ (declustered) and removing 23\% of
     events.  Data are synthetic and for illustration only (see
     Section~\ref{sec:example}).
   }
   \label{fig:fmd}
-\end{figure}
-
-\begin{figure}[ht]
-  \centering
-  \includegraphics[width=0.82\linewidth]{figures/fig3_map.pdf}
-  \caption{%
-    Synthetic New Zealand seismicity map illustrating the CofC map view.
-    Circle colour encodes focal depth (cyan: $<15$~km; dark teal:
-    $>200$~km), matching the depth palette used in the web application.
-    Circle radius scales with magnitude.  The Hikurangi subduction margin
-    (offshore North Island, northeast) shows predominantly shallow seismicity;
-    the central North Island cluster captures deep slab events
-    ($\sim 100$~km); the South Island cluster represents Alpine Fault
-    seismicity.  Data are synthetic and for illustration only.
-  }
-  \label{fig:map}
 \end{figure}
 
 \end{document}
