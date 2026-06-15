@@ -127,19 +127,22 @@ export function meetsMinimumQuality(result: QualityCheckResult): boolean {
  * Get quality grade based on score
  */
 export function getQualityGrade(score: number): {
-  grade: 'A+' | 'A' | 'B' | 'C' | 'D' | 'F';
+  grade: 'A+' | 'A' | 'B+' | 'B' | 'C' | 'D' | 'F';
   label: string;
   color: string;
 } {
+  // Table 2 thresholds (see lib/quality-scoring.ts scoreToGrade)
   if (score >= 95) {
     return { grade: 'A+', label: 'Excellent', color: 'green' };
-  } else if (score >= 90) {
+  } else if (score >= 85) {
     return { grade: 'A', label: 'Excellent', color: 'green' };
-  } else if (score >= 80) {
+  } else if (score >= 75) {
+    return { grade: 'B+', label: 'Good', color: 'blue' };
+  } else if (score >= 65) {
     return { grade: 'B', label: 'Good', color: 'blue' };
-  } else if (score >= 70) {
+  } else if (score >= 45) {
     return { grade: 'C', label: 'Fair', color: 'yellow' };
-  } else if (score >= 60) {
+  } else if (score >= 35) {
     return { grade: 'D', label: 'Poor', color: 'orange' };
   } else {
     return { grade: 'F', label: 'Failing', color: 'red' };

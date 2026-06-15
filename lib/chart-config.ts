@@ -64,6 +64,7 @@ export const SEISMIC_COLORS = {
   grades: {
     'A+': '#059669',
     'A': '#10b981',
+    'B+': '#22c55e',
     'B': '#3b82f6',
     'C': '#f59e0b',
     'D': '#f97316',

@@ -309,26 +309,31 @@ export function calculateGutenbergRichter(
     }
   }
 
-  // Linear regression on log10(N) vs M
-  // log10(N) = a - b*M
   const n = cumulativeCounts.length;
   if (n < 3) {
     throw new Error('Insufficient magnitude bins for regression');
   }
 
-  const sumX = cumulativeCounts.reduce((sum, p) => sum + p.magnitude, 0);
-  const sumY = cumulativeCounts.reduce((sum, p) => sum + p.logCount, 0);
-  const sumXY = cumulativeCounts.reduce((sum, p) => sum + p.magnitude * p.logCount, 0);
-  const sumX2 = cumulativeCounts.reduce((sum, p) => sum + p.magnitude * p.magnitude, 0);
+  // Maximum-likelihood b-value (Aki, 1965) with the Utsu binning correction:
+  //   b = log10(e) / (meanMag - (Mc - binWidth/2))
+  // Mc is the lower magnitude cut-off (the supplied minMagnitude, else the
+  // smallest binned magnitude). This is the estimator documented in the paper
+  // (Eq. 9); ordinary least-squares on the cumulative FMD is biased and is not
+  // used.
+  const mc = minMagnitude ?? minMag;
+  const magsAboveMc = filteredEvents
+    .map(e => e.magnitude)
+    .filter(m => m >= mc);
+  const meanMag = magsAboveMc.reduce((sum, m) => sum + m, 0) / magsAboveMc.length;
+  const bValue = Math.LOG10E / (meanMag - (mc - binWidth / 2));
+  // a-value fixes the GR line through (Mc, N >= Mc): log10 N(M) = a - b*M.
+  const aValue = Math.log10(magsAboveMc.length) + bValue * mc;
 
-  const bValue = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-  const aValue = (sumY - bValue * sumX) / n;
-
-  // Calculate R-squared
-  const meanY = sumY / n;
+  // R-squared of the MLE line against the observed cumulative FMD (diagnostic).
+  const meanY = cumulativeCounts.reduce((sum, p) => sum + p.logCount, 0) / n;
   const ssTotal = cumulativeCounts.reduce((sum, p) => sum + Math.pow(p.logCount - meanY, 2), 0);
   const ssResidual = cumulativeCounts.reduce((sum, p) => {
-    const predicted = aValue + bValue * p.magnitude;
+    const predicted = aValue - bValue * p.magnitude;
     return sum + Math.pow(p.logCount - predicted, 2);
   }, 0);
   const rSquared = 1 - (ssResidual / ssTotal);
@@ -336,13 +341,13 @@ export function calculateGutenbergRichter(
   // Generate fitted line
   const fittedLine = cumulativeCounts.map(p => ({
     magnitude: p.magnitude,
-    logCount: aValue + bValue * p.magnitude
+    logCount: aValue - bValue * p.magnitude
   }));
 
-  // Estimate completeness magnitude (where data deviates from linear fit)
-  let completeness = minMag;
+  // Estimate completeness magnitude (where data deviates from the GR fit)
+  let completeness = mc;
   for (let i = 0; i < cumulativeCounts.length - 1; i++) {
-    const predicted = aValue + bValue * cumulativeCounts[i].magnitude;
+    const predicted = aValue - bValue * cumulativeCounts[i].magnitude;
     const residual = Math.abs(cumulativeCounts[i].logCount - predicted);
     if (residual < 0.2) {
       completeness = cumulativeCounts[i].magnitude;
@@ -351,7 +356,7 @@ export function calculateGutenbergRichter(
   }
 
   return {
-    bValue: Math.abs(bValue),
+    bValue,
     aValue,
     completeness,
     rSquared,
@@ -366,7 +371,8 @@ export function calculateGutenbergRichter(
  */
 export function estimateCompletenessMagnitude(
   events: EarthquakeEvent[],
-  binWidth: number = 0.1
+  binWidth: number = 0.1,
+  correction: number = 0.2  // MAXC under-estimates Mc by ~0.1-0.2 (Woessner & Wiemer, 2005)
 ): CompletenessResult {
   if (events.length < 50) {
     throw new Error('Insufficient data for completeness estimation (need at least 50 events)');
@@ -402,6 +408,10 @@ export function estimateCompletenessMagnitude(
     }
   });
 
+  // Apply the standard MAXC correction (default +0.2; configurable) so that
+  // the returned Mc matches the value documented in the paper.
+  mc = mc + correction;
+
   // Calculate confidence based on data quality
   const totalEvents = events.length;
   const eventsAboveMc = events.filter(e => e.magnitude >= mc).length;
@@ -419,13 +429,12 @@ export function estimateCompletenessMagnitude(
  * Gardner-Knopoff (1974) space-time window parameters
  * These are the standard parameters used for earthquake declustering
  *
- * Time window (days): T = 10^(0.5386*M - 0.547)  (Uhrhammer, 1986 revision)
+ * Time window (days): T = 10^(0.5409*M - 0.547)  (Gardner & Knopoff, 1974)
  * Distance window (km): L = 10^(0.1238*M + 0.983)  (Gardner & Knopoff, 1974)
+ * (matches Eq. 16-17 in the paper and Table 1 of van Stiphout et al., 2012)
  */
 function getGardnerKnopoffWindow(magnitude: number): { timeWindowDays: number; distanceWindowKm: number } {
-  // Uhrhammer (1986) revision for California - more commonly used
-  const timeWindowDays = Math.pow(10, 0.5386 * magnitude - 0.547);
-  // Gardner & Knopoff (1974) original distance relation
+  const timeWindowDays = Math.pow(10, 0.5409 * magnitude - 0.547);
   const distanceWindowKm = Math.pow(10, 0.1238 * magnitude + 0.983);
 
   return { timeWindowDays, distanceWindowKm };

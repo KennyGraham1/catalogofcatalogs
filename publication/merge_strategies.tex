@@ -12,6 +12,7 @@
 % Consistent terminology
 \newcommand{\catalog}{catalog}
 \newcommand{\catalogs}{catalogs}
+\newcommand{\Catalog}{Catalog}
 \newcommand{\Catalogs}{Catalogs}
 
 \begin{document}
@@ -735,7 +736,7 @@ authority from \cref{tab:hierarchy} acts as a tie-breaker.
 
 Simple priority selection discards valid information when multiple authoritative
 $M_\mathrm{w}$ estimates exist for the same event.
-\citet{Schorlemmer2024} proposed a Bayesian framework in which each network $i$'s
+\citet{Si2024} proposed a Bayesian framework in which each network $i$'s
 observed magnitude is modelled as a linear function of the unknown true magnitude
 $M_\mathrm{true}$:
 
@@ -764,7 +765,7 @@ where $\sigma_\mathrm{post}^2 = (\sum_i b_i^2/\sigma_i^2)^{-1}$ is the
 posterior variance.  When two authoritative solutions agree within
 $0.1\,M_\mathrm{w}$ units, the posterior is insensitive to the choice of $b$;
 when they disagree by $> 0.3\,M_\mathrm{w}$ units, a data quality flag should
-be raised regardless of which method is used \citep{Schorlemmer2024}.
+be raised regardless of which method is used \citep{Si2024}.
 
 \paragraph{Uncertainty propagation for converted magnitudes.}
 When $M_\mathrm{w}$ is estimated via conversion from $M_x$, the total
@@ -1038,7 +1039,7 @@ with explicit documentation of the fixing convention used.
 Apply the priority hierarchy of \cref{sec:maghierarchy}.  When multiple
 estimates exist at the same priority tier and formal uncertainties are
 available, the Bayesian posterior mean \eqref{eq:bayesposterior} is the
-optimal estimator \citep{Schorlemmer2024}.  The alpha-trimmed median
+optimal estimator \citep{Si2024}.  The alpha-trimmed median
 \citep{ISCGEM2018} is an acceptable substitute when the Bayesian framework
 cannot be calibrated (e.g.\ for sparse regional \catalogs\ without sufficient
 overlap for network intercept estimation).  When neither is applicable,
@@ -1170,7 +1171,7 @@ and re-evaluated before the event is included in the merged output.
   Depth fixed (not free) & any & I & \citet{Engdahl2020} \\
   RMS travel-time residual & $> 2.0$\,s & W & \citet{ISCBulletinRebuild2020} \\
   Horizontal uncertainty & $> 50$\,km & W & \citet{Bondar2004} \\
-  $|\Delta M_\mathrm{w}|$: two authoritative sources & $> 0.3$ & W & \citet{Schorlemmer2024} \\
+  $|\Delta M_\mathrm{w}|$: two authoritative sources & $> 0.3$ & W & \citet{Si2024} \\
   $|\Delta M_\mathrm{w}|$: converted vs.\ observed & $> 0.5$ & W & \citet{Grunthal2016} \\
   Magnitude range in group & $> 1.0$ (for $M < 5$) & W & \citet{Tanaka2022} \\
   Group size (events from different networks) & $> 10$ & E & \citet{Benz2019} \\
@@ -1242,7 +1243,7 @@ implementation status.
   Event association & Graph DSU \citep{Benz2019} & Greedy forward-sweep & Medium \\
   Dense sequences & Nearest-neighbour $\eta$ \citep{Tanaka2022} & Adaptive windows & Low \\
   Magnitude conversion & GOR / non-linear \citep{Grunthal2016, ISCGEM2018} & Linear OLS \citep{Scordilis2006} & \textbf{High} \\
-  Multi-estimate averaging & $\alpha$-trimmed median \citep{ISCGEM2018} or Bayesian \citep{Schorlemmer2024} & Priority selection & Medium \\
+  Multi-estimate averaging & $\alpha$-trimmed median \citep{ISCGEM2018} or Bayesian \citep{Si2024} & Priority selection & Medium \\
   Source provenance & All solutions retained (ISC model) & JSON in \texttt{source\_events} & Low \\
   Depth selection & Uncertainty-weighted \citep{Engdahl2020} & Implemented & Done \\
   Focal mechanism & GCMT $>$ regional CMT & Implemented & Done \\

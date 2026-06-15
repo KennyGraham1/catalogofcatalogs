@@ -465,12 +465,14 @@ const EventPopupWithFaults = memo(function EventPopupWithFaults({ event, quality
     return 'Micro';
   };
 
+  // Table 2 thresholds (see lib/quality-scoring.ts scoreToGrade)
   const getQualityGrade = (score: number): string => {
-    if (score >= 90) return 'A+';
+    if (score >= 95) return 'A+';
     if (score >= 85) return 'A';
-    if (score >= 80) return 'B';
-    if (score >= 70) return 'C';
-    if (score >= 60) return 'D';
+    if (score >= 75) return 'B+';
+    if (score >= 65) return 'B';
+    if (score >= 45) return 'C';
+    if (score >= 35) return 'D';
     return 'F';
   };
 

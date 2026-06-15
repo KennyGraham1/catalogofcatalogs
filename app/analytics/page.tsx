@@ -2031,7 +2031,7 @@ export default function AnalyticsPage() {
               {statistics && (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                    {(['A+', 'A', 'B', 'C', 'D', 'F'] as const).map(grade => (
+                    {(['A+', 'A', 'B+', 'B', 'C', 'D', 'F'] as const).map(grade => (
                       <div key={grade} className="text-center p-4 border rounded-lg">
                         <div className="text-3xl font-bold">{(statistics.gradeDistribution[grade] || 0).toLocaleString()}</div>
                         <div className="text-sm text-muted-foreground">Grade {grade}</div>

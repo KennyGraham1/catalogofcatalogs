@@ -26,9 +26,11 @@ export interface QualityMetrics {
   evaluationStatus?: string | null;
 }
 
+export type QualityGrade = 'A+' | 'A' | 'B+' | 'B' | 'C' | 'D' | 'F';
+
 export interface QualityScore {
   overall: number; // 0-100
-  grade: 'A+' | 'A' | 'B' | 'C' | 'D' | 'F';
+  grade: QualityGrade;
   components: {
     location: { score: number; weight: number };
     network: { score: number; weight: number };
@@ -44,32 +46,66 @@ export interface QualityScore {
 }
 
 /**
- * Calculate comprehensive quality score for an earthquake event
+ * Configurable dimension weights for the quality score. Defaults match the
+ * values documented in the paper (Eq. 1): location 0.35, network 0.25,
+ * solution 0.15, magnitude 0.15, evaluation 0.10.
  */
-export function calculateQualityScore(metrics: QualityMetrics): QualityScore {
+export interface QualityWeights {
+  location?: number;
+  network?: number;
+  solution?: number;
+  magnitude?: number;
+  evaluation?: number;
+}
+
+export const DEFAULT_QUALITY_WEIGHTS: Required<QualityWeights> = {
+  location: 0.35,
+  network: 0.25,
+  solution: 0.15,
+  magnitude: 0.15,
+  evaluation: 0.10,
+};
+
+/**
+ * Map a 0-100 score to a letter grade (Table 2 thresholds).
+ */
+export function scoreToGrade(overall: number): QualityGrade {
+  if (overall >= 95) return 'A+';
+  if (overall >= 85) return 'A';
+  if (overall >= 75) return 'B+';
+  if (overall >= 65) return 'B';
+  if (overall >= 45) return 'C';
+  if (overall >= 35) return 'D';
+  return 'F';
+}
+
+/**
+ * Calculate comprehensive quality score for an earthquake event.
+ * Dimension weights may be overridden (e.g. by a community with different
+ * priorities); omitted weights fall back to DEFAULT_QUALITY_WEIGHTS.
+ */
+export function calculateQualityScore(
+  metrics: QualityMetrics,
+  weights: QualityWeights = {}
+): QualityScore {
+  const w = { ...DEFAULT_QUALITY_WEIGHTS, ...weights };
   const components = {
-    location: calculateLocationScore(metrics),
-    network: calculateNetworkScore(metrics),
-    solution: calculateSolutionScore(metrics),
-    magnitude: calculateMagnitudeScore(metrics),
-    evaluation: calculateEvaluationScore(metrics),
+    location: { ...calculateLocationScore(metrics), weight: w.location },
+    network: { ...calculateNetworkScore(metrics), weight: w.network },
+    solution: { ...calculateSolutionScore(metrics), weight: w.solution },
+    magnitude: { ...calculateMagnitudeScore(metrics), weight: w.magnitude },
+    evaluation: { ...calculateEvaluationScore(metrics), weight: w.evaluation },
   };
-  
+
   // Calculate weighted overall score
   const totalWeight = Object.values(components).reduce((sum, c) => sum + c.weight, 0);
   const overall = Object.values(components).reduce(
     (sum, c) => sum + (c.score * c.weight),
     0
   ) / totalWeight;
-  
-  // Determine grade
-  let grade: 'A+' | 'A' | 'B' | 'C' | 'D' | 'F';
-  if (overall >= 95) grade = 'A+';
-  else if (overall >= 90) grade = 'A';
-  else if (overall >= 80) grade = 'B';
-  else if (overall >= 70) grade = 'C';
-  else if (overall >= 60) grade = 'D';
-  else grade = 'F';
+
+  // Determine grade (Table 2 thresholds)
+  const grade = scoreToGrade(overall);
   
   // Generate details
   const details = generateQualityDetails(metrics, components, overall);
@@ -339,7 +375,7 @@ export function getQualityColor(score: number): string {
  */
 export function getQualityBadgeVariant(grade: QualityScore['grade']): 'default' | 'secondary' | 'destructive' | 'outline' {
   if (grade === 'A+' || grade === 'A') return 'default';
-  if (grade === 'B') return 'secondary';
+  if (grade === 'B+' || grade === 'B') return 'secondary';
   if (grade === 'C' || grade === 'D') return 'outline';
   return 'destructive';
 }

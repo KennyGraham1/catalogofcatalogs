@@ -98,18 +98,17 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
   const n = cumulativeCounts.length;
   if (n < 3) return { error: 'Insufficient magnitude bins' };
 
-  const sumX = cumulativeCounts.reduce((sum, p) => sum + p.magnitude, 0);
-  const sumY = cumulativeCounts.reduce((sum, p) => sum + p.logCount, 0);
-  const sumXY = cumulativeCounts.reduce((sum, p) => sum + p.magnitude * p.logCount, 0);
-  const sumX2 = cumulativeCounts.reduce((sum, p) => sum + p.magnitude * p.magnitude, 0);
+  // Maximum-likelihood b-value (Aki, 1965) with the Utsu binning correction;
+  // see the paper (Eq. 9). OLS on the cumulative FMD is biased and not used.
+  const mc = minMagnitude ?? minMag;
+  const meanMag = magnitudes.reduce((sum, m) => sum + m, 0) / magnitudes.length;
+  const bValue = Math.LOG10E / (meanMag - (mc - binWidth / 2));
+  const aValue = Math.log10(magnitudes.length) + bValue * mc;
 
-  const bValue = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-  const aValue = (sumY - bValue * sumX) / n;
-
-  const meanY = sumY / n;
+  const meanY = cumulativeCounts.reduce((sum, p) => sum + p.logCount, 0) / n;
   const ssTotal = cumulativeCounts.reduce((sum, p) => sum + Math.pow(p.logCount - meanY, 2), 0);
   const ssResidual = cumulativeCounts.reduce((sum, p) => {
-    const predicted = aValue + bValue * p.magnitude;
+    const predicted = aValue - bValue * p.magnitude;
     return sum + Math.pow(p.logCount - predicted, 2);
   }, 0);
   const rSquared = ssTotal > 0 ? 1 - (ssResidual / ssTotal) : 0;
@@ -126,11 +125,11 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
 
   const fittedLine = cumulativeCounts.map(p => ({
     magnitude: p.magnitude,
-    logCount: aValue + bValue * p.magnitude
+    logCount: aValue - bValue * p.magnitude
   }));
 
   return {
-    bValue: -bValue, // Convention: b-value is positive
+    bValue, // positive by construction (MLE)
     aValue,
     completeness: completeness + binWidth * 0.5,
     rSquared,
