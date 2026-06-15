@@ -239,23 +239,27 @@ Overall Quality Grade
      - A+
      - Excellent
      - Publication-quality data
-   * - 90-94
+   * - 85-94
      - A
      - Excellent
      - High-quality, reliable data
-   * - 80-89
-     - B
+   * - 75-84
+     - B+
      - Good
      - Good quality, suitable for most analyses
-   * - 70-79
+   * - 65-74
+     - B
+     - Good
+     - Good quality with moderate uncertainties
+   * - 45-64
      - C
      - Fair
      - Acceptable quality, some limitations
-   * - 60-69
+   * - 35-44
      - D
      - Poor
      - Marginal quality, use with caution
-   * - <60
+   * - <35
      - F
      - Failing
      - Insufficient quality, not recommended
@@ -495,7 +499,7 @@ For data to be accepted:
 Recommended for high-quality analysis:
 
 - **Completeness**: >= 90%
-- **Overall Score**: >= 80/100 (Grade B or better)
+- **Overall Score**: >= 75/100 (Grade B+ or better)
 - **Uncertainties**: Present for >= 50% of events
 - **Quality Metrics**: Present for >= 50% of events
 

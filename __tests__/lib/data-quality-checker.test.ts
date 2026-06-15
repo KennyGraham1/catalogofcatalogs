@@ -199,26 +199,32 @@ describe('Data Quality Checker', () => {
       expect(grade.label).toBe('Excellent');
     });
 
+    it('should return B+ for good scores', () => {
+      const grade = getQualityGrade(80);
+      expect(grade.grade).toBe('B+');
+      expect(grade.label).toBe('Good');
+    });
+
     it('should return B for good scores', () => {
-      const grade = getQualityGrade(85);
+      const grade = getQualityGrade(70);
       expect(grade.grade).toBe('B');
       expect(grade.label).toBe('Good');
     });
 
     it('should return C for fair scores', () => {
-      const grade = getQualityGrade(75);
+      const grade = getQualityGrade(55);
       expect(grade.grade).toBe('C');
       expect(grade.label).toBe('Fair');
     });
 
     it('should return D for poor scores', () => {
-      const grade = getQualityGrade(65);
+      const grade = getQualityGrade(40);
       expect(grade.grade).toBe('D');
       expect(grade.label).toBe('Poor');
     });
 
     it('should return F for failing scores', () => {
-      const grade = getQualityGrade(45);
+      const grade = getQualityGrade(25);
       expect(grade.grade).toBe('F');
       expect(grade.label).toBe('Failing');
     });
@@ -422,7 +428,7 @@ describe('Data Quality Checker', () => {
       };
 
       const formatted = formatQualityCheckResults(result);
-      expect(formatted.summary).toContain('Good');
+      expect(formatted.summary).toContain('Excellent');
       expect(formatted.summary).toContain('85');
       expect(formatted.details.length).toBeGreaterThan(0);
       expect(formatted.warnings).toHaveLength(0);

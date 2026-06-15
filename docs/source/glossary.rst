@@ -256,21 +256,25 @@ Quality Grades
       metadata, small uncertainties, and excellent station coverage.
 
    A grade
-      Excellent quality (90-94 score). High-quality, reliable data suitable for
+      Excellent quality (85-94 score). High-quality, reliable data suitable for
       most research applications.
 
+   B+ grade
+      Good quality (75-84 score). Suitable for most research and engineering
+      applications.
+
    B grade
-      Good quality (80-89 score). Suitable for general analysis with minor
+      Good quality (65-74 score). Suitable for general analysis with minor
       limitations in some parameters.
 
    C grade
-      Fair quality (70-79 score). Acceptable for preliminary analysis but may
+      Fair quality (45-64 score). Acceptable for preliminary analysis but may
       have significant uncertainties or missing metadata.
 
    D grade
-      Poor quality (60-69 score). Use with caution; significant data quality
+      Poor quality (35-44 score). Use with caution; significant data quality
       issues may affect analysis results.
 
    F grade
-      Failing quality (< 60 score). Insufficient quality for reliable analysis;
+      Failing quality (< 35 score). Insufficient quality for reliable analysis;
       data should be reviewed and improved before use.

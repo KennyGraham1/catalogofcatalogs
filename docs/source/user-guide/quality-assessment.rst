@@ -55,22 +55,22 @@ Grade Definitions
      - 95-100
      - Excellent quality with minimal uncertainties
    * - A
-     - 90-94
+     - 85-94
      - Very good quality, reliable parameters
    * - B+
-     - 85-89
+     - 75-84
      - Good quality, suitable for most analyses
    * - B
-     - 80-84
+     - 65-74
      - Good quality with moderate uncertainties
    * - C
-     - 70-79
+     - 45-64
      - Fair quality, use with caution
    * - D
-     - 60-69
+     - 35-44
      - Poor quality, significant uncertainties
    * - F
-     - 0-59
+     - 0-34
      - Very poor quality, unreliable parameters
 
 -----------------
