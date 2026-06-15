@@ -105,11 +105,15 @@ class MergeConflictLog {
 
     this.conflicts.push(conflict);
 
-    // Also log to console based on severity
-    if (severity === 'error') {
-      console.error(`[MergeConflict] ${type}: ${message}`, details);
-    } else if (severity === 'warning') {
-      console.warn(`[MergeConflict] ${type}: ${message}`);
+    // Also log to console based on severity. Conflicts are always retained in
+    // this.conflicts (and returned in the merge result), so console output is
+    // supplementary and is suppressed during tests to keep the output clean.
+    if (process.env.NODE_ENV !== 'test') {
+      if (severity === 'error') {
+        console.error(`[MergeConflict] ${type}: ${message}`, details);
+      } else if (severity === 'warning') {
+        console.warn(`[MergeConflict] ${type}: ${message}`);
+      }
     }
   }
 
