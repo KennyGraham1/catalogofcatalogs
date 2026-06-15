@@ -19,22 +19,53 @@ Upload Workflow
 ===============
 
 .. mermaid::
+   :align: center
 
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"15px","lineColor":"#3A4753","primaryColor":"#D6E4F5","primaryBorderColor":"#1B5FA8","primaryTextColor":"#0B2B4A","secondaryColor":"#CFEAE6","tertiaryColor":"#FBEAD2","mainBkg":"#D6E4F5","nodeBorder":"#1B5FA8","clusterBkg":"#F7F9FC","clusterBorder":"#AEBED2","titleColor":"#0F3D6B","edgeLabelBackground":"#FFFFFF"}}}%%
    flowchart LR
-       Upload["UPLOAD"] --> Parse["PARSE"]
-       Parse --> Validate["VALIDATE"]
-       Validate --> Map["MAP"]
-       Map --> Meta["METADATA"]
-       Meta --> Store["STORE"]
-       Store --> Result["RESULT"]
-       
-       Upload -.-> File["File Selection"]
-       Parse -.-> Format["Format Detection"]
-       Validate -.-> Check["Data Constraint Check"]
-       Map -.-> Field["Field Mapping"]
-       Meta -.-> Name["Catalogue Name"]
-       Store -.-> DB["Database Insert"]
-       Result -.-> Report["Analysis Report"]
+       Start(["Start"]):::terminal
+
+       subgraph Pipeline["Seven-Stage Upload Workflow"]
+           direction LR
+           Upload("1. Upload"):::userAction
+           Parse[/"2. Parse"/]:::process
+           Validate{"3. Validate"}:::decision
+           Map[/"4. Map"/]:::process
+           Meta[/"5. Metadata"/]:::process
+           Store[("6. Store")]:::datastore
+       end
+
+       Result(["7. Result"]):::success
+
+       Start --> Upload
+       Upload --> Parse
+       Parse --> Validate
+       Validate --> Map
+       Map --> Meta
+       Meta --> Store
+       Store --> Result
+
+       Upload -. "file selection" .-> File["File Selection"]:::frontend
+       Parse -. "format detection" .-> Format[/"Format Detection"/]:::process
+       Validate -. "constraint check" .-> Check[/"Data Constraint Check"/]:::process
+       Map -. "field mapping" .-> Field[/"Field Mapping"/]:::process
+       Meta -. "catalogue name" .-> Name["Catalogue Name"]:::frontend
+       Store -. "database insert" .-> DB[/"Database Insert"/]:::process
+       Result -. "analysis report" .-> Report("Analysis Report"):::success
+
+       style Pipeline fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+
+       classDef userAction fill:#E8EEF6,stroke:#0F3D6B,stroke-width:1.5px,color:#0B2B4A
+       classDef frontend fill:#D6E4F5,stroke:#1B5FA8,stroke-width:1.5px,color:#0B2B4A
+       classDef backend fill:#CFEAE6,stroke:#0E7C72,stroke-width:1.5px,color:#08423D
+       classDef library fill:#FBEAD2,stroke:#9C6A12,stroke-width:1.5px,color:#5A3D06
+       classDef datastore fill:#E3E7EB,stroke:#3A4753,stroke-width:1.5px,color:#1E2731
+       classDef external fill:#EFDDEC,stroke:#8E3A82,stroke-width:1.5px,color:#4A1C43,stroke-dasharray:4 3
+       classDef process fill:#FCEAD0,stroke:#D38B1E,stroke-width:1.5px,color:#5A3D06
+       classDef decision fill:#FFF3CC,stroke:#B8860B,stroke-width:1.5px,color:#5A4500
+       classDef success fill:#D5EFE0,stroke:#1B8A5A,stroke-width:1.5px,color:#0B3D27
+       classDef warning fill:#FBE0DA,stroke:#C24A2B,stroke-width:1.5px,color:#5E1C0C
+       classDef terminal fill:#1F2D3D,stroke:#0B1622,stroke-width:1.5px,color:#FFFFFF
 
 
 **Seven Stages:**

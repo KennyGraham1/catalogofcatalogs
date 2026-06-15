@@ -36,23 +36,44 @@ Merge Process Overview
 ======================
 
 .. mermaid::
+   :align: center
 
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"15px","lineColor":"#3A4753","primaryColor":"#D6E4F5","primaryBorderColor":"#1B5FA8","primaryTextColor":"#0B2B4A","secondaryColor":"#CFEAE6","tertiaryColor":"#FBEAD2","mainBkg":"#D6E4F5","nodeBorder":"#1B5FA8","clusterBkg":"#F7F9FC","clusterBorder":"#AEBED2","titleColor":"#0F3D6B","edgeLabelBackground":"#FFFFFF"}}}%%
    flowchart TD
        subgraph Inputs ["Input Catalogues"]
-           A["Catalogue A"]
-           B["Catalogue B"]
-           C["Catalogue C"]
+           A[("Catalogue A")]
+           B[("Catalogue B")]
+           C[("Catalogue C")]
        end
-       
-       Combine["COMBINE ALL EVENTS"]
-       Detect["DETECT DUPLICATES<br/>(time + location + magnitude)"]
-       Resolve["RESOLVE CONFLICTS<br/>(apply selected merge strategy)"]
-       Result["MERGED CATALOGUE<br/>(unique events with provenance)"]
-       
+
+       Combine[/"Combine all events"/]
+       Detect{"Duplicate?<br/>time + location + magnitude"}
+       Resolve[/"Resolve conflicts<br/>(apply selected merge strategy)"/]
+       Result[("Merged catalogue<br/>unique events with provenance")]
+
        A & B & C --> Combine
        Combine --> Detect
-       Detect --> Resolve
+       Detect -->|"yes"| Resolve
+       Detect -->|"no, keep as unique"| Result
        Resolve --> Result
+
+       style Inputs fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+
+       class A,B,C,Result datastore
+       class Combine,Resolve process
+       class Detect decision
+
+       classDef userAction fill:#E8EEF6,stroke:#0F3D6B,stroke-width:1.5px,color:#0B2B4A
+       classDef frontend fill:#D6E4F5,stroke:#1B5FA8,stroke-width:1.5px,color:#0B2B4A
+       classDef backend fill:#CFEAE6,stroke:#0E7C72,stroke-width:1.5px,color:#08423D
+       classDef library fill:#FBEAD2,stroke:#9C6A12,stroke-width:1.5px,color:#5A3D06
+       classDef datastore fill:#E3E7EB,stroke:#3A4753,stroke-width:1.5px,color:#1E2731
+       classDef external fill:#EFDDEC,stroke:#8E3A82,stroke-width:1.5px,color:#4A1C43,stroke-dasharray:4 3
+       classDef process fill:#FCEAD0,stroke:#D38B1E,stroke-width:1.5px,color:#5A3D06
+       classDef decision fill:#FFF3CC,stroke:#B8860B,stroke-width:1.5px,color:#5A4500
+       classDef success fill:#D5EFE0,stroke:#1B8A5A,stroke-width:1.5px,color:#0B3D27
+       classDef warning fill:#FBE0DA,stroke:#C24A2B,stroke-width:1.5px,color:#5E1C0C
+       classDef terminal fill:#1F2D3D,stroke:#0B1622,stroke-width:1.5px,color:#FFFFFF
 
 
 --------------------------
@@ -124,19 +145,45 @@ Strategy Decision Guide
 =======================
 
 .. mermaid::
+   :align: center
 
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"15px","lineColor":"#3A4753","primaryColor":"#D6E4F5","primaryBorderColor":"#1B5FA8","primaryTextColor":"#0B2B4A","secondaryColor":"#CFEAE6","tertiaryColor":"#FBEAD2","mainBkg":"#D6E4F5","nodeBorder":"#1B5FA8","clusterBkg":"#F7F9FC","clusterBorder":"#AEBED2","titleColor":"#0F3D6B","edgeLabelBackground":"#FFFFFF"}}}%%
    flowchart TD
-       Start{"Do you want the<br/>best scientific result?"} -- YES --> Quality["Use Quality-Based<br/>(Recommended)"]
-       Start -- NO --> Auth{"Do you have one<br/>authoritative source?"}
-       
-       Auth -- YES --> Priority["Use Priority-Based"]
-       Auth -- NO --> Recent{"Do your duplicate events<br/>have different origin times<br/>and newer = more reliable?"}
+       Start{"Do you want the<br/>best scientific result?"}
+       Auth{"Do you have one<br/>authoritative source?"}
+       Recent{"Different origin times,<br/>newer = more reliable?"}
+       Matter{"Which matters more?"}
 
-       Recent -- YES --> Newest["Use Newest Data"]
-       Recent -- NO --> Matter{"Which matters more?"}
-       
-       Matter -- "Metadata completeness" --> Complete["Use Most Complete"]
-       Matter -- "Statistical accuracy" --> Average["Use Average Values"]
+       Quality("Use Quality-Based<br/>(Recommended)")
+       Priority("Use Priority-Based")
+       Newest("Use Newest Data")
+       Complete("Use Most Complete")
+       Average("Use Average Values")
+
+       Start -->|"yes"| Quality
+       Start -->|"no"| Auth
+       Auth -->|"yes"| Priority
+       Auth -->|"no"| Recent
+       Recent -->|"yes"| Newest
+       Recent -->|"no"| Matter
+       Matter -->|"metadata completeness"| Complete
+       Matter -->|"statistical accuracy"| Average
+
+       class Start,Auth,Recent,Matter decision
+       class Quality success
+       class Priority,Newest,Complete,Average frontend
+
+       classDef userAction fill:#E8EEF6,stroke:#0F3D6B,stroke-width:1.5px,color:#0B2B4A
+       classDef frontend fill:#D6E4F5,stroke:#1B5FA8,stroke-width:1.5px,color:#0B2B4A
+       classDef backend fill:#CFEAE6,stroke:#0E7C72,stroke-width:1.5px,color:#08423D
+       classDef library fill:#FBEAD2,stroke:#9C6A12,stroke-width:1.5px,color:#5A3D06
+       classDef datastore fill:#E3E7EB,stroke:#3A4753,stroke-width:1.5px,color:#1E2731
+       classDef external fill:#EFDDEC,stroke:#8E3A82,stroke-width:1.5px,color:#4A1C43,stroke-dasharray:4 3
+       classDef process fill:#FCEAD0,stroke:#D38B1E,stroke-width:1.5px,color:#5A3D06
+       classDef decision fill:#FFF3CC,stroke:#B8860B,stroke-width:1.5px,color:#5A4500
+       classDef success fill:#D5EFE0,stroke:#1B8A5A,stroke-width:1.5px,color:#0B3D27
+       classDef warning fill:#FBE0DA,stroke:#C24A2B,stroke-width:1.5px,color:#5E1C0C
+       classDef terminal fill:#1F2D3D,stroke:#0B1622,stroke-width:1.5px,color:#FFFFFF
 
 
 Priority-Based Strategy
@@ -174,27 +221,46 @@ Storchak (2011).
 * Assumes primary source is always correct
 
 .. mermaid::
+   :align: center
 
-   graph LR
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"15px","lineColor":"#3A4753","primaryColor":"#D6E4F5","primaryBorderColor":"#1B5FA8","primaryTextColor":"#0B2B4A","secondaryColor":"#CFEAE6","tertiaryColor":"#FBEAD2","mainBkg":"#D6E4F5","nodeBorder":"#1B5FA8","clusterBkg":"#F7F9FC","clusterBorder":"#AEBED2","titleColor":"#0F3D6B","edgeLabelBackground":"#FFFFFF"}}}%%
+   flowchart LR
        subgraph Inputs ["Duplicate Group"]
-           E1["USGS (M4.6)"]
-           E2["GeoNet (M4.5)"]
-           E3["ISC (M4.5)"]
+           E1[("USGS (M4.6)")]
+           E2[("GeoNet (M4.5)")]
+           E3[("ISC (M4.5)")]
        end
-       
+
        subgraph Logic ["Priority Logic"]
-           P1["1. GeoNet (Primary)"]
-           P2["2. USGS"]
-           P3["3. ISC"]
+           P1[/"1. GeoNet (Primary)"/]
+           P2[/"2. USGS"/]
+           P3[/"3. ISC"/]
        end
-       
-       Result["GeoNet Event Selected"]
-       
-       Inputs --> Logic
-       Logic --> Result
-       
-       style E2 fill:#f9f,stroke:#333,stroke-width:2px
-       style Result fill:#f9f,stroke:#333,stroke-width:2px
+
+       Result("GeoNet event selected")
+
+       E1 & E2 & E3 --> P1
+       P1 --> P2 --> P3
+       P1 -->|"highest priority wins"| Result
+
+       style Inputs fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Logic fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+
+       class E1,E2,E3 datastore
+       class P1,P2,P3 process
+       class Result success
+
+       classDef userAction fill:#E8EEF6,stroke:#0F3D6B,stroke-width:1.5px,color:#0B2B4A
+       classDef frontend fill:#D6E4F5,stroke:#1B5FA8,stroke-width:1.5px,color:#0B2B4A
+       classDef backend fill:#CFEAE6,stroke:#0E7C72,stroke-width:1.5px,color:#08423D
+       classDef library fill:#FBEAD2,stroke:#9C6A12,stroke-width:1.5px,color:#5A3D06
+       classDef datastore fill:#E3E7EB,stroke:#3A4753,stroke-width:1.5px,color:#1E2731
+       classDef external fill:#EFDDEC,stroke:#8E3A82,stroke-width:1.5px,color:#4A1C43,stroke-dasharray:4 3
+       classDef process fill:#FCEAD0,stroke:#D38B1E,stroke-width:1.5px,color:#5A3D06
+       classDef decision fill:#FFF3CC,stroke:#B8860B,stroke-width:1.5px,color:#5A4500
+       classDef success fill:#D5EFE0,stroke:#1B8A5A,stroke-width:1.5px,color:#0B3D27
+       classDef warning fill:#FBE0DA,stroke:#C24A2B,stroke-width:1.5px,color:#5E1C0C
+       classDef terminal fill:#1F2D3D,stroke:#0B1622,stroke-width:1.5px,color:#FFFFFF
 
 Average Values Strategy
 =======================
@@ -240,23 +306,44 @@ et al., 2024).
    * **Depth**: Selects the depth with the **lowest reported uncertainty**.
 
 .. mermaid::
+   :align: center
 
-   graph TD
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"15px","lineColor":"#3A4753","primaryColor":"#D6E4F5","primaryBorderColor":"#1B5FA8","primaryTextColor":"#0B2B4A","secondaryColor":"#CFEAE6","tertiaryColor":"#FBEAD2","mainBkg":"#D6E4F5","nodeBorder":"#1B5FA8","clusterBkg":"#F7F9FC","clusterBorder":"#AEBED2","titleColor":"#0F3D6B","edgeLabelBackground":"#FFFFFF"}}}%%
+   flowchart TD
        subgraph Sources ["Input Duplicates"]
-           S1["Source A: M4.5, ±2km"]
-           S2["Source B: M4.7, ±10km"]
+           S1[("Source A: M4.5, ±2km")]
+           S2[("Source B: M4.7, ±10km")]
        end
-       
+
        subgraph Processing ["Hybrid Averaging"]
-           Loc["Location: Weighted Mean<br/>(Source A weighted 5x)"]
-           Mag["Magnitude: Hierarchy<br/>(Prefers Mw over ML)"]
-           Dep["Depth: Best Uncertainty"]
+           Loc[/"Location: weighted mean<br/>(Source A weighted 5x)"/]
+           Mag[/"Magnitude: hierarchy<br/>(prefers Mw over ML)"/]
+           Dep[/"Depth: best uncertainty"/]
        end
-       
-       Result["Merged Hybrid Event"]
-       
-       Sources --> Processing
-       Processing --> Result
+
+       Result("Merged hybrid event")
+
+       S1 & S2 --> Loc & Mag & Dep
+       Loc & Mag & Dep --> Result
+
+       style Sources fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Processing fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+
+       class S1,S2 datastore
+       class Loc,Mag,Dep process
+       class Result success
+
+       classDef userAction fill:#E8EEF6,stroke:#0F3D6B,stroke-width:1.5px,color:#0B2B4A
+       classDef frontend fill:#D6E4F5,stroke:#1B5FA8,stroke-width:1.5px,color:#0B2B4A
+       classDef backend fill:#CFEAE6,stroke:#0E7C72,stroke-width:1.5px,color:#08423D
+       classDef library fill:#FBEAD2,stroke:#9C6A12,stroke-width:1.5px,color:#5A3D06
+       classDef datastore fill:#E3E7EB,stroke:#3A4753,stroke-width:1.5px,color:#1E2731
+       classDef external fill:#EFDDEC,stroke:#8E3A82,stroke-width:1.5px,color:#4A1C43,stroke-dasharray:4 3
+       classDef process fill:#FCEAD0,stroke:#D38B1E,stroke-width:1.5px,color:#5A3D06
+       classDef decision fill:#FFF3CC,stroke:#B8860B,stroke-width:1.5px,color:#5A4500
+       classDef success fill:#D5EFE0,stroke:#1B8A5A,stroke-width:1.5px,color:#0B3D27
+       classDef warning fill:#FBE0DA,stroke:#C24A2B,stroke-width:1.5px,color:#5E1C0C
+       classDef terminal fill:#1F2D3D,stroke:#0B1622,stroke-width:1.5px,color:#FFFFFF
 
 Newest Data Strategy
 ====================
@@ -339,25 +426,45 @@ international standards for network performance and location accuracy
   "Preliminary" solutions.
 
 .. mermaid::
+   :align: center
 
-   graph TD
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"15px","lineColor":"#3A4753","primaryColor":"#D6E4F5","primaryBorderColor":"#1B5FA8","primaryTextColor":"#0B2B4A","secondaryColor":"#CFEAE6","tertiaryColor":"#FBEAD2","mainBkg":"#D6E4F5","nodeBorder":"#1B5FA8","clusterBkg":"#F7F9FC","clusterBorder":"#AEBED2","titleColor":"#0F3D6B","edgeLabelBackground":"#FFFFFF"}}}%%
+   flowchart TD
        subgraph Group ["Duplicate Candidates"]
-           C1["Event 1: 15 stations, Gap 210°"]
-           C2["Event 2: 45 stations, Gap 95°"]
+           C1[("Event 1: 15 stations, Gap 210°")]
+           C2[("Event 2: 45 stations, Gap 95°")]
        end
-       
-       subgraph Scoring ["Quality Engine"]
-           S1["Event 1 Score: 45/100"]
-           S2["Event 2 Score: 88/100"]
-       end
-       
-       Winner["Event 2 Selected"]
-       
-       Group --> Scoring
-       Scoring --> Winner
-       
-       style C2 fill:#4CAF50,color:white
-       style Winner fill:#4CAF50,color:white
+
+       Engine[["lib/quality-scoring.ts"]]
+       S1[/"Event 1 score: 45/100"/]
+       S2[/"Event 2 score: 88/100"/]
+       Pick{"Highest score?"}
+       Winner("Event 2 selected")
+
+       C1 & C2 --> Engine
+       Engine --> S1 & S2
+       S1 & S2 --> Pick
+       Pick -->|"88 > 45"| Winner
+
+       style Group fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+
+       class C1,C2 datastore
+       class Engine library
+       class S1,S2 process
+       class Pick decision
+       class Winner success
+
+       classDef userAction fill:#E8EEF6,stroke:#0F3D6B,stroke-width:1.5px,color:#0B2B4A
+       classDef frontend fill:#D6E4F5,stroke:#1B5FA8,stroke-width:1.5px,color:#0B2B4A
+       classDef backend fill:#CFEAE6,stroke:#0E7C72,stroke-width:1.5px,color:#08423D
+       classDef library fill:#FBEAD2,stroke:#9C6A12,stroke-width:1.5px,color:#5A3D06
+       classDef datastore fill:#E3E7EB,stroke:#3A4753,stroke-width:1.5px,color:#1E2731
+       classDef external fill:#EFDDEC,stroke:#8E3A82,stroke-width:1.5px,color:#4A1C43,stroke-dasharray:4 3
+       classDef process fill:#FCEAD0,stroke:#D38B1E,stroke-width:1.5px,color:#5A3D06
+       classDef decision fill:#FFF3CC,stroke:#B8860B,stroke-width:1.5px,color:#5A4500
+       classDef success fill:#D5EFE0,stroke:#1B8A5A,stroke-width:1.5px,color:#0B3D27
+       classDef warning fill:#FBE0DA,stroke:#C24A2B,stroke-width:1.5px,color:#5E1C0C
+       classDef terminal fill:#1F2D3D,stroke:#0B1622,stroke-width:1.5px,color:#FFFFFF
 
 ---------------------------
 How Metadata is Merged

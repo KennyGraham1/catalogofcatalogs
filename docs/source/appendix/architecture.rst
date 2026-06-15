@@ -30,62 +30,90 @@ This diagram shows the complete application structure including the frontend (Re
 - **Database**: MongoDB with connection pooling for scalable read/write performance
 - **External Services**: GeoNet API for importing New Zealand earthquake data
 
-.. code-block:: mermaid
+.. mermaid::
+   :align: center
 
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"15px","lineColor":"#3A4753","primaryColor":"#D6E4F5","primaryBorderColor":"#1B5FA8","primaryTextColor":"#0B2B4A","secondaryColor":"#CFEAE6","tertiaryColor":"#FBEAD2","mainBkg":"#D6E4F5","nodeBorder":"#1B5FA8","clusterBkg":"#F7F9FC","clusterBorder":"#AEBED2","titleColor":"#0F3D6B","edgeLabelBackground":"#FFFFFF"}}}%%
    flowchart TB
-       subgraph Client["🖥️ Client Browser"]
+       subgraph Client["Client Browser"]
            UI["React UI Components"]
            State["React State Management"]
            Maps["Leaflet Map Visualizations"]
        end
-       
-       subgraph NextJS["⚡ Next.js 13+ Application"]
-           subgraph Frontend["Frontend (App Router)"]
-               Pages["Pages & Layouts"]
+
+       subgraph NextJS["Next.js 13+ Application"]
+           subgraph FrontendGrp["Frontend (App Router)"]
+               Pages["Pages &amp; Layouts"]
                Components["React Components"]
                Hooks["Custom Hooks"]
            end
-           
-           subgraph Backend["Backend (API Routes)"]
-               UploadAPI["/api/upload"]
-               CataloguesAPI["/api/catalogues"]
-               EventsAPI["/api/events"]
-               MergeAPI["/api/merge"]
-               ImportAPI["/api/import"]
+
+           subgraph BackendGrp["Backend (API Routes)"]
+               UploadAPI[["/api/upload"]]
+               CataloguesAPI[["/api/catalogues"]]
+               EventsAPI[["/api/events"]]
+               MergeAPI[["/api/merge"]]
+               ImportAPI[["/api/import"]]
            end
-           
+
            subgraph Libraries["Core Libraries"]
-               Parsers["lib/parsers.ts<br/>CSV, JSON, QuakeML"]
-               EqUtils["lib/earthquake-utils.ts<br/>Validation & Normalization"]
-               QualityCheck["lib/data-quality-checker.ts"]
-               CrossField["lib/cross-field-validation.ts"]
-               QuakeML["lib/quakeml-parser.ts"]
+               Parsers[["lib/parsers.ts (CSV, JSON, QuakeML)"]]
+               EqUtils[["lib/earthquake-utils.ts (validate &amp; normalize)"]]
+               QualityCheck[["lib/data-quality-checker.ts"]]
+               CrossField[["lib/cross-field-validation.ts"]]
+               QuakeMLLib[["lib/quakeml-parser.ts"]]
            end
        end
-       
-       subgraph Database["💾 MongoDB Database"]
-           DB[(earthquake_catalogue)]
+
+       subgraph DatabaseGrp["MongoDB Database"]
+           DB[("earthquake_catalogue")]
            Collections[("Collections")]
            Indexes[("Indexes")]
        end
-       
-       subgraph External["🌐 External Services"]
-           GeoNet["GeoNet API<br/>(NZ Earthquakes)"]
+
+       subgraph External["External Services"]
+           GeoNet{{"GeoNet API (NZ Earthquakes)"}}
        end
-       
+
        UI --> Pages
        State --> Components
        Maps --> Components
-       
-       Pages --> Backend
+
+       Pages --> BackendGrp
        Components --> Hooks
-       
-       Backend --> Libraries
+
+       BackendGrp --> Libraries
        Libraries --> DB
        DB --> Collections
        Collections --> Indexes
-       
-       ImportAPI --> External
+
+       ImportAPI -. "fetch NZ events" .-> GeoNet
+
+       class UI,State,Maps,Pages,Components,Hooks frontend
+       class UploadAPI,CataloguesAPI,EventsAPI,MergeAPI,ImportAPI backend
+       class Parsers,EqUtils,QualityCheck,CrossField,QuakeMLLib library
+       class DB,Collections,Indexes datastore
+       class GeoNet external
+
+       style Client fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style NextJS fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style FrontendGrp fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style BackendGrp fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Libraries fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style DatabaseGrp fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style External fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+
+       classDef userAction fill:#E8EEF6,stroke:#0F3D6B,stroke-width:1.5px,color:#0B2B4A
+       classDef frontend fill:#D6E4F5,stroke:#1B5FA8,stroke-width:1.5px,color:#0B2B4A
+       classDef backend fill:#CFEAE6,stroke:#0E7C72,stroke-width:1.5px,color:#08423D
+       classDef library fill:#FBEAD2,stroke:#9C6A12,stroke-width:1.5px,color:#5A3D06
+       classDef datastore fill:#E3E7EB,stroke:#3A4753,stroke-width:1.5px,color:#1E2731
+       classDef external fill:#EFDDEC,stroke:#8E3A82,stroke-width:1.5px,color:#4A1C43,stroke-dasharray:4 3
+       classDef process fill:#FCEAD0,stroke:#D38B1E,stroke-width:1.5px,color:#5A3D06
+       classDef decision fill:#FFF3CC,stroke:#B8860B,stroke-width:1.5px,color:#5A4500
+       classDef success fill:#D5EFE0,stroke:#1B8A5A,stroke-width:1.5px,color:#0B3D27
+       classDef warning fill:#FBE0DA,stroke:#C24A2B,stroke-width:1.5px,color:#5E1C0C
+       classDef terminal fill:#1F2D3D,stroke:#0B1622,stroke-width:1.5px,color:#FFFFFF
 
 
 
@@ -105,99 +133,130 @@ This diagram illustrates the complete 7-stage upload process from file selection
 6. **Storage**: Batch insert to MongoDB database with index updates
 7. **Results**: Display processing report with auto-navigation to Results tab
 
-.. code-block:: mermaid
+.. mermaid::
+   :align: center
 
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"15px","lineColor":"#3A4753","primaryColor":"#D6E4F5","primaryBorderColor":"#1B5FA8","primaryTextColor":"#0B2B4A","secondaryColor":"#CFEAE6","tertiaryColor":"#FBEAD2","mainBkg":"#D6E4F5","nodeBorder":"#1B5FA8","clusterBkg":"#F7F9FC","clusterBorder":"#AEBED2","titleColor":"#0F3D6B","edgeLabelBackground":"#FFFFFF"}}}%%
    flowchart TD
-       subgraph User["👤 User Actions"]
-           Upload["Select File(s)<br/>Drag & Drop"]
+       subgraph UserGrp["User Actions"]
+           Upload("Select File(s) — Drag &amp; Drop")
        end
-       
-       subgraph Stage1["📤 Stage 1: Upload"]
+
+       subgraph Stage1["Stage 1: Upload"]
            FileUploader["FileUploader Component"]
-           Progress["Progress Tracking<br/>• Bytes uploaded<br/>• ETA calculation<br/>• Stage indicators"]
-           FormData["FormData Construction"]
+           Progress[/"Progress Tracking: bytes, ETA, stage"/]
+           FormData[/"FormData Construction"/]
        end
-       
-       subgraph Stage2["🔍 Stage 2: Parsing"]
-           API["/api/upload"]
-           Detect{"Format<br/>Detection"}
-           CSV["parseCSV()"]
-           JSON["parseJSON()"]
-           XML["parseQuakeML()"]
-           Normalize["Timestamp<br/>Normalization<br/>15+ formats"]
+
+       subgraph Stage2["Stage 2: Parsing"]
+           API[["/api/upload"]]
+           Detect{"Format Detection?"}
+           CSV[/"parseCSV()"/]
+           JSONp[/"parseJSON()"/]
+           XML[/"parseQuakeML()"/]
+           Normalize[/"Timestamp Normalization (15+ formats)"/]
        end
-       
-       subgraph Stage3["✅ Stage 3: Validation"]
-           Validate["validateEvent()"]
-           QualityCheck["performQualityCheck()"]
-           CrossField["validateEventsCrossFields()"]
-           Results["ValidationResults<br/>Component"]
+
+       subgraph Stage3["Stage 3: Validation"]
+           Validate[/"validateEvent()"/]
+           QualityCheck[/"performQualityCheck()"/]
+           CrossField[/"validateEventsCrossFields()"/]
+           Results{"Valid?"}
        end
-       
-       subgraph Stage4["🗺️ Stage 4: Schema Mapping"]
+
+       subgraph Stage4["Stage 4: Schema Mapping"]
            SchemaMapper["EnhancedSchemaMapper"]
-           FieldMap["Map source fields<br/>to target schema"]
-           Templates["Mapping Templates<br/>(saved/loaded)"]
+           FieldMap[/"Map source fields to target schema"/]
+           Templates[("Mapping Templates (saved/loaded)")]
        end
-       
-       subgraph Stage5["📝 Stage 5: Metadata"]
+
+       subgraph Stage5["Stage 5: Metadata"]
            MetaForm["CatalogueMetadataForm"]
            CatName["Catalogue Name"]
            Description["Description"]
            Source["Source Info"]
        end
-       
-       subgraph Stage6["💾 Stage 6: Storage"]
-           PostAPI["POST /api/catalogues"]
-           InsertCat["INSERT merged_catalogues"]
-           InsertEvents["INSERT merged_events<br/>(batch)"]
-           Indexes["Update Indexes"]
+
+       subgraph Stage6["Stage 6: Storage"]
+           PostAPI[["POST /api/catalogues"]]
+           InsertCat[("INSERT merged_catalogues")]
+           InsertEvents[("INSERT merged_events (batch)")]
+           IndexUpd[/"Update Indexes"/]
        end
-       
-       subgraph Stage7["📊 Stage 7: Results"]
+
+       subgraph Stage7["Stage 7: Results"]
            Report["Processing Report"]
            Stats["Event Statistics"]
            QualityReport["Data Quality Report"]
-           Navigate["Auto-navigate<br/>to Results Tab"]
+           Navigate("Auto-navigate to Results Tab")
        end
-       
+
        Upload --> FileUploader
        FileUploader --> Progress
        Progress --> FormData
        FormData --> API
-       
+
        API --> Detect
-       Detect -->|.csv, .txt| CSV
-       Detect -->|.json| JSON
-       Detect -->|.xml, .quakeml| XML
-       
+       Detect -->|".csv, .txt"| CSV
+       Detect -->|".json"| JSONp
+       Detect -->|".xml, .quakeml"| XML
+
        CSV --> Normalize
-       JSON --> Normalize
+       JSONp --> Normalize
        XML --> Normalize
-       
+
        Normalize --> Validate
        Validate --> QualityCheck
        QualityCheck --> CrossField
        CrossField --> Results
-       
-       Results -->|Valid| SchemaMapper
+
+       Results -->|"valid"| SchemaMapper
        SchemaMapper --> FieldMap
        FieldMap --> Templates
-       
+
        Templates --> MetaForm
        MetaForm --> CatName
        CatName --> Description
        Description --> Source
-       
+
        Source --> PostAPI
        PostAPI --> InsertCat
        InsertCat --> InsertEvents
-       InsertEvents --> Indexes
-       
-       Indexes --> Report
+       InsertEvents --> IndexUpd
+
+       IndexUpd --> Report
        Report --> Stats
        Stats --> QualityReport
        QualityReport --> Navigate
+
+       class Upload userAction
+       class FileUploader,Results,SchemaMapper,MetaForm,CatName,Description,Source,Report,Stats,QualityReport frontend
+       class API,PostAPI backend
+       class Progress,FormData,CSV,JSONp,XML,Normalize,Validate,QualityCheck,CrossField,FieldMap,IndexUpd process
+       class Detect decision
+       class Templates,InsertCat,InsertEvents datastore
+       class Navigate success
+
+       style UserGrp fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Stage1 fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Stage2 fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Stage3 fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Stage4 fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Stage5 fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Stage6 fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Stage7 fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+
+       classDef userAction fill:#E8EEF6,stroke:#0F3D6B,stroke-width:1.5px,color:#0B2B4A
+       classDef frontend fill:#D6E4F5,stroke:#1B5FA8,stroke-width:1.5px,color:#0B2B4A
+       classDef backend fill:#CFEAE6,stroke:#0E7C72,stroke-width:1.5px,color:#08423D
+       classDef library fill:#FBEAD2,stroke:#9C6A12,stroke-width:1.5px,color:#5A3D06
+       classDef datastore fill:#E3E7EB,stroke:#3A4753,stroke-width:1.5px,color:#1E2731
+       classDef external fill:#EFDDEC,stroke:#8E3A82,stroke-width:1.5px,color:#4A1C43,stroke-dasharray:4 3
+       classDef process fill:#FCEAD0,stroke:#D38B1E,stroke-width:1.5px,color:#5A3D06
+       classDef decision fill:#FFF3CC,stroke:#B8860B,stroke-width:1.5px,color:#5A4500
+       classDef success fill:#D5EFE0,stroke:#1B8A5A,stroke-width:1.5px,color:#0B3D27
+       classDef warning fill:#FBE0DA,stroke:#C24A2B,stroke-width:1.5px,color:#5E1C0C
+       classDef terminal fill:#1F2D3D,stroke:#0B1622,stroke-width:1.5px,color:#FFFFFF
 
 
 
@@ -215,51 +274,53 @@ This diagram shows the React component tree structure, including the root layout
 - **Map Components**: Event circles (sized by magnitude), station triangles, beach ball markers
 - **UI Library**: shadcn/ui components (Card, Button, Progress, Dialog, etc.)
 
-.. code-block:: mermaid
+.. mermaid::
+   :align: center
 
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"15px","lineColor":"#3A4753","primaryColor":"#D6E4F5","primaryBorderColor":"#1B5FA8","primaryTextColor":"#0B2B4A","secondaryColor":"#CFEAE6","tertiaryColor":"#FBEAD2","mainBkg":"#D6E4F5","nodeBorder":"#1B5FA8","clusterBkg":"#F7F9FC","clusterBorder":"#AEBED2","titleColor":"#0F3D6B","edgeLabelBackground":"#FFFFFF"}}}%%
    flowchart TD
        subgraph RootLayout["app/layout.tsx"]
            Layout["Layout Component"]
-   
+
            subgraph Providers["Providers"]
                Session["SessionProvider"]
                Theme["ThemeProvider"]
                Toast["ToastProvider"]
            end
        end
-   
+
        subgraph UploadPage["app/upload/page.tsx"]
            UploadRoot["UploadPage"]
-   
-           subgraph Tabs["Tabs Component (shadcn/ui)"]
+
+           subgraph TabsGrp["Tabs Component (shadcn/ui)"]
                TabsList["TabsList"]
                Tab1["Upload Tab"]
                Tab2["Schema Tab"]
                Tab3["Metadata Tab"]
                Tab4["Results Tab"]
            end
-   
+
            subgraph UploadTab["Upload Tab Content"]
                FileUploader["FileUploader"]
-               DragDrop["Drag & Drop Zone"]
+               DragDrop["Drag &amp; Drop Zone"]
                FileList["File List"]
                ProgressBar["Progress Indicator"]
-               StageIndicators["Stage Dots<br/>Upload→Parse→Validate→Save"]
+               StageIndicators["Stage Dots: Upload, Parse, Validate, Save"]
            end
-   
+
            subgraph SchemaTab["Schema Tab Content"]
                EnhancedSchemaMapper["EnhancedSchemaMapper"]
                FieldMapping["Field Mapping Table"]
                TemplateSelector["Template Selector"]
            end
-   
+
            subgraph MetadataTab["Metadata Tab Content"]
                CatalogueMetadataForm["CatalogueMetadataForm"]
                NameInput["Name Input"]
                DescInput["Description Input"]
                SourceInput["Source Fields"]
            end
-   
+
            subgraph ResultsTab["Results Tab Content"]
                ValidationResults["ValidationResults"]
                DataQualityReport["DataQualityReport"]
@@ -267,65 +328,92 @@ This diagram shows the React component tree structure, including the root layout
                ProcessingReport["Processing Summary"]
            end
        end
-   
+
        subgraph MapComponents["Map Visualization Components"]
            CatalogueMap["CatalogueMap"]
            MapView["MapView"]
            UnifiedMap["UnifiedEarthquakeMap"]
            EnhancedMap["EnhancedMapView"]
-   
+
            subgraph MapMarkers["Map Markers"]
-               EventMarker["Event Circles<br/>(size = magnitude)"]
+               EventMarker["Event Circles (size = magnitude)"]
                StationMarker["Station Triangles"]
                BeachBall["Beach Ball Markers"]
                Uncertainty["Uncertainty Ellipses"]
            end
        end
-   
+
        subgraph UIComponents["UI Components (shadcn/ui)"]
            Card["Card"]
            Button["Button"]
-           Input["Input"]
-           Select["Select"]
-           Progress["Progress"]
+           InputCmp["Input"]
+           SelectCmp["Select"]
+           ProgressCmp["Progress"]
            Badge["Badge"]
            Dialog["Dialog"]
        end
-   
+
        Layout --> Providers
        Providers --> UploadRoot
-   
-       UploadRoot --> Tabs
+
+       UploadRoot --> TabsGrp
        TabsList --> Tab1
        TabsList --> Tab2
        TabsList --> Tab3
        TabsList --> Tab4
-   
+
        Tab1 --> FileUploader
        FileUploader --> DragDrop
        FileUploader --> FileList
        FileUploader --> ProgressBar
        ProgressBar --> StageIndicators
-   
+
        Tab2 --> EnhancedSchemaMapper
        EnhancedSchemaMapper --> FieldMapping
        EnhancedSchemaMapper --> TemplateSelector
-   
+
        Tab3 --> CatalogueMetadataForm
        CatalogueMetadataForm --> NameInput
        CatalogueMetadataForm --> DescInput
        CatalogueMetadataForm --> SourceInput
-   
+
        Tab4 --> ValidationResults
        Tab4 --> DataQualityReport
        Tab4 --> DataCompletenessMetrics
        Tab4 --> ProcessingReport
-   
+
        CatalogueMap --> MapView
        MapView --> EventMarker
        UnifiedMap --> StationMarker
        EnhancedMap --> BeachBall
        EnhancedMap --> Uncertainty
+
+       class Layout,Session,Theme,Toast,UploadRoot,TabsList,Tab1,Tab2,Tab3,Tab4,FileUploader,DragDrop,FileList,ProgressBar,StageIndicators,EnhancedSchemaMapper,FieldMapping,TemplateSelector,CatalogueMetadataForm,NameInput,DescInput,SourceInput,ValidationResults,DataQualityReport,DataCompletenessMetrics,ProcessingReport,CatalogueMap,MapView,UnifiedMap,EnhancedMap,EventMarker,StationMarker,BeachBall,Uncertainty frontend
+       class Card,Button,InputCmp,SelectCmp,ProgressCmp,Badge,Dialog library
+
+       style RootLayout fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Providers fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style UploadPage fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style TabsGrp fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style UploadTab fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style SchemaTab fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style MetadataTab fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style ResultsTab fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style MapComponents fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style MapMarkers fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style UIComponents fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+
+       classDef userAction fill:#E8EEF6,stroke:#0F3D6B,stroke-width:1.5px,color:#0B2B4A
+       classDef frontend fill:#D6E4F5,stroke:#1B5FA8,stroke-width:1.5px,color:#0B2B4A
+       classDef backend fill:#CFEAE6,stroke:#0E7C72,stroke-width:1.5px,color:#08423D
+       classDef library fill:#FBEAD2,stroke:#9C6A12,stroke-width:1.5px,color:#5A3D06
+       classDef datastore fill:#E3E7EB,stroke:#3A4753,stroke-width:1.5px,color:#1E2731
+       classDef external fill:#EFDDEC,stroke:#8E3A82,stroke-width:1.5px,color:#4A1C43,stroke-dasharray:4 3
+       classDef process fill:#FCEAD0,stroke:#D38B1E,stroke-width:1.5px,color:#5A3D06
+       classDef decision fill:#FFF3CC,stroke:#B8860B,stroke-width:1.5px,color:#5A4500
+       classDef success fill:#D5EFE0,stroke:#1B8A5A,stroke-width:1.5px,color:#0B3D27
+       classDef warning fill:#FBE0DA,stroke:#C24A2B,stroke-width:1.5px,color:#5E1C0C
+       classDef terminal fill:#1F2D3D,stroke:#0B1622,stroke-width:1.5px,color:#FFFFFF
 
 
 
@@ -343,8 +431,10 @@ This Entity Relationship Diagram shows all 5 database tables, their fields, data
 - **import_history**: Tracks API imports from external services
 - **saved_filters**: User-defined filter presets
 
-.. code-block:: mermaid
+.. mermaid::
+   :align: center
 
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"14px","primaryColor":"#E3E7EB","primaryBorderColor":"#3A4753","primaryTextColor":"#1E2731","lineColor":"#3A4753","tertiaryColor":"#F7F9FC","attributeBackgroundColorOdd":"#FFFFFF","attributeBackgroundColorEven":"#F2F4F7"}}}%%
    erDiagram
        merged_catalogues {
            TEXT id PK "UUID"
@@ -450,99 +540,101 @@ This diagram details the complete file parsing flow from input through format de
 - **Timestamp Normalization**: 15+ formats including ISO 8601, DD/MM/YYYY, Julian day, Unix
 - **Validation**: Coordinates (-90/90, -180/180), magnitude (-2 to 10), depth (0-1000km)
 
-.. code-block:: mermaid
+.. mermaid::
+   :align: center
 
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"15px","lineColor":"#3A4753","primaryColor":"#D6E4F5","primaryBorderColor":"#1B5FA8","primaryTextColor":"#0B2B4A","secondaryColor":"#CFEAE6","tertiaryColor":"#FBEAD2","mainBkg":"#D6E4F5","nodeBorder":"#1B5FA8","clusterBkg":"#F7F9FC","clusterBorder":"#AEBED2","titleColor":"#0F3D6B","edgeLabelBackground":"#FFFFFF"}}}%%
    flowchart TD
-       subgraph Input["📁 Input File"]
-           File["Uploaded File"]
+       subgraph Input["Input File"]
+           File("Uploaded File")
        end
-   
-       subgraph Detection["🔍 Format Detection"]
-           ExtCheck{"Check File<br/>Extension"}
-           ContentCheck{"Check Content<br/>Structure"}
+
+       subgraph Detection["Format Detection"]
+           ExtCheck{"Check File Extension?"}
+           ContentCheck{"Check Content Structure?"}
        end
-   
-       subgraph Parsers["📄 Format-Specific Parsers"]
+
+       subgraph Parsers["Format-Specific Parsers"]
            subgraph CSVParser["CSV Parser"]
-               CSVHead["Parse Header Row"]
-               CSVRows["Parse Data Rows"]
-               CSVField["Field Name Mapping<br/>time→time, lat→latitude<br/>lon→longitude, mag→magnitude"]
+               CSVHead[/"Parse Header Row"/]
+               CSVRows[/"Parse Data Rows"/]
+               CSVField[/"Field Name Mapping (time, lat, lon, mag)"/]
            end
-   
+
            subgraph JSONParser["JSON Parser"]
-               JSONStruct{"Detect<br/>Structure"}
-               JSONArray["Plain Array<br/>[...]"]
-               JSONEvents["events property<br/>{events: [...]}"]
-               JSONData["data property<br/>{data: [...]}"]
-               JSONGeo["GeoJSON<br/>{features: [...]}"]
-               JSONAuto["Auto-detect<br/>single array property"]
+               JSONStruct{"Detect Structure?"}
+               JSONArray[/"Plain Array [...]"/]
+               JSONEvents[/"events property {events: [...]}"/]
+               JSONData[/"data property {data: [...]}"/]
+               JSONGeo[/"GeoJSON {features: [...]}"/]
+               JSONAuto[/"Auto-detect single array property"/]
            end
-   
-           subgraph XMLParser["QuakeML/XML Parser"]
-               XMLParse["Parse XML DOM"]
-               XMLEvents["Extract event nodes"]
-               QuakeML["parseQuakeMLEvent()"]
-               Origin["Extract Origin<br/>time, lat, lon, depth"]
-               Magnitude["Extract Magnitude<br/>mag, type, uncertainty"]
-               Quality["Extract Quality<br/>gap, phases, stations"]
+
+           subgraph XMLParser["QuakeML / XML Parser"]
+               XMLParse[/"Parse XML DOM"/]
+               XMLEvents[/"Extract event nodes"/]
+               QuakeMLp[/"parseQuakeMLEvent()"/]
+               Origin[/"Extract Origin (time, lat, lon, depth)"/]
+               Magnitude[/"Extract Magnitude (mag, type, uncertainty)"/]
+               Quality[/"Extract Quality (gap, phases, stations)"/]
            end
        end
-   
-       subgraph Timestamp["⏰ Timestamp Normalization"]
-           TSInput["Input Timestamp"]
-           TSFormats{"Detect Format"}
-           ISO["ISO 8601<br/>2024-01-15T10:30:00Z"]
-           SpaceISO["Space-separated<br/>2024-01-15 10:30:00"]
-           DDMMYYYY["DD/MM/YYYY<br/>01/12/2025 19:56:32"]
-           EuropeDot["DD.MM.YYYY<br/>01.12.2025 19:56:32"]
-           Compact["YYYYMMDDHHMMSS<br/>20241215103045"]
-           Julian["Julian Day<br/>2024 015 10:30:00"]
-           Unix["Unix Timestamp<br/>1705318200"]
-           TSOutput["ISO 8601 Output<br/>2024-01-15T10:30:00.000Z"]
+
+       subgraph Timestamp["Timestamp Normalization"]
+           TSInput("Input Timestamp")
+           TSFormats{"Detect Format?"}
+           ISO[/"ISO 8601: 2024-01-15T10:30:00Z"/]
+           SpaceISO[/"Space-separated: 2024-01-15 10:30:00"/]
+           DDMMYYYY[/"DD/MM/YYYY: 01/12/2025 19:56:32"/]
+           EuropeDot[/"DD.MM.YYYY: 01.12.2025 19:56:32"/]
+           Compact[/"YYYYMMDDHHMMSS: 20241215103045"/]
+           Julian[/"Julian Day: 2024 015 10:30:00"/]
+           Unix[/"Unix Timestamp: 1705318200"/]
+           TSOutput("ISO 8601 Output: 2024-01-15T10:30:00.000Z")
        end
-   
-       subgraph Validation["✅ Event Validation"]
-           ValCoords["Validate Coordinates<br/>lat: -90 to 90<br/>lon: -180 to 180"]
-           ValMag["Validate Magnitude<br/>-2 to 10"]
-           ValDepth["Validate Depth<br/>0 to 1000 km"]
-           ValTime["Validate Timestamp<br/>is valid Date"]
+
+       subgraph Validation["Event Validation"]
+           ValCoords[/"Validate Coordinates (lat -90..90, lon -180..180)"/]
+           ValMag[/"Validate Magnitude (-2 to 10)"/]
+           ValDepth[/"Validate Depth (0 to 1000 km)"/]
+           ValTime[/"Validate Timestamp (is valid Date)"/]
            ValResult{"Valid?"}
-           ValError["Add to Errors"]
-           ValSuccess["Add to Events"]
+           ValError("Add to Errors")
+           ValSuccess("Add to Events")
        end
-   
-       subgraph Output["📤 Output"]
-           ParseResult["ParseResult"]
+
+       subgraph Output["Output"]
+           ParseResult[("ParseResult")]
            Events["events: ParsedEvent[]"]
            Errors["errors: {line, message}[]"]
            Warnings["warnings: {line, message}[]"]
            Fields["detectedFields: string[]"]
        end
-   
+
        File --> ExtCheck
-       ExtCheck -->|.csv, .txt| CSVHead
-       ExtCheck -->|.json| JSONStruct
-       ExtCheck -->|.xml, .quakeml| XMLParse
-       ExtCheck -->|unknown| ContentCheck
-       ContentCheck -->|CSV-like| CSVHead
-       ContentCheck -->|JSON-like| JSONStruct
-       ContentCheck -->|XML-like| XMLParse
-   
+       ExtCheck -->|".csv, .txt"| CSVHead
+       ExtCheck -->|".json"| JSONStruct
+       ExtCheck -->|".xml, .quakeml"| XMLParse
+       ExtCheck -->|"unknown"| ContentCheck
+       ContentCheck -->|"CSV-like"| CSVHead
+       ContentCheck -->|"JSON-like"| JSONStruct
+       ContentCheck -->|"XML-like"| XMLParse
+
        CSVHead --> CSVRows
        CSVRows --> CSVField
-   
+
        JSONStruct --> JSONArray
        JSONStruct --> JSONEvents
        JSONStruct --> JSONData
        JSONStruct --> JSONGeo
        JSONStruct --> JSONAuto
-   
+
        XMLParse --> XMLEvents
-       XMLEvents --> QuakeML
-       QuakeML --> Origin
-       QuakeML --> Magnitude
-       QuakeML --> Quality
-   
+       XMLEvents --> QuakeMLp
+       QuakeMLp --> Origin
+       QuakeMLp --> Magnitude
+       QuakeMLp --> Quality
+
        CSVField --> TSInput
        JSONArray --> TSInput
        JSONEvents --> TSInput
@@ -550,7 +642,7 @@ This diagram details the complete file parsing flow from input through format de
        JSONGeo --> TSInput
        JSONAuto --> TSInput
        Origin --> TSInput
-   
+
        TSInput --> TSFormats
        TSFormats --> ISO
        TSFormats --> SpaceISO
@@ -559,7 +651,7 @@ This diagram details the complete file parsing flow from input through format de
        TSFormats --> Compact
        TSFormats --> Julian
        TSFormats --> Unix
-   
+
        ISO --> TSOutput
        SpaceISO --> TSOutput
        DDMMYYYY --> TSOutput
@@ -567,23 +659,54 @@ This diagram details the complete file parsing flow from input through format de
        Compact --> TSOutput
        Julian --> TSOutput
        Unix --> TSOutput
-   
+
        TSOutput --> ValCoords
        ValCoords --> ValMag
        ValMag --> ValDepth
        ValDepth --> ValTime
        ValTime --> ValResult
-   
-       ValResult -->|No| ValError
-       ValResult -->|Yes| ValSuccess
-   
+
+       ValResult -->|"no"| ValError
+       ValResult -->|"yes"| ValSuccess
+
        ValError --> Errors
        ValSuccess --> Events
-   
+
        Events --> ParseResult
        Errors --> ParseResult
        Warnings --> ParseResult
        Fields --> ParseResult
+
+       class File userAction
+       class ExtCheck,ContentCheck,JSONStruct,TSFormats,ValResult decision
+       class CSVHead,CSVRows,CSVField,JSONArray,JSONEvents,JSONData,JSONGeo,JSONAuto,XMLParse,XMLEvents,QuakeMLp,Origin,Magnitude,Quality,ISO,SpaceISO,DDMMYYYY,EuropeDot,Compact,Julian,Unix,ValCoords,ValMag,ValDepth,ValTime process
+       class TSInput,TSOutput frontend
+       class ValSuccess success
+       class ValError warning
+       class ParseResult datastore
+       class Events,Errors,Warnings,Fields frontend
+
+       style Input fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Detection fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Parsers fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style CSVParser fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style JSONParser fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style XMLParser fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Timestamp fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Validation fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Output fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+
+       classDef userAction fill:#E8EEF6,stroke:#0F3D6B,stroke-width:1.5px,color:#0B2B4A
+       classDef frontend fill:#D6E4F5,stroke:#1B5FA8,stroke-width:1.5px,color:#0B2B4A
+       classDef backend fill:#CFEAE6,stroke:#0E7C72,stroke-width:1.5px,color:#08423D
+       classDef library fill:#FBEAD2,stroke:#9C6A12,stroke-width:1.5px,color:#5A3D06
+       classDef datastore fill:#E3E7EB,stroke:#3A4753,stroke-width:1.5px,color:#1E2731
+       classDef external fill:#EFDDEC,stroke:#8E3A82,stroke-width:1.5px,color:#4A1C43,stroke-dasharray:4 3
+       classDef process fill:#FCEAD0,stroke:#D38B1E,stroke-width:1.5px,color:#5A3D06
+       classDef decision fill:#FFF3CC,stroke:#B8860B,stroke-width:1.5px,color:#5A4500
+       classDef success fill:#D5EFE0,stroke:#1B8A5A,stroke-width:1.5px,color:#0B3D27
+       classDef warning fill:#FBE0DA,stroke:#C24A2B,stroke-width:1.5px,color:#5E1C0C
+       classDef terminal fill:#1F2D3D,stroke:#0B1622,stroke-width:1.5px,color:#FFFFFF
 
 
 

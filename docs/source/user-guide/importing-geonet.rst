@@ -24,22 +24,60 @@ Import Process Overview
 =======================
 
 .. mermaid::
+   :align: center
 
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"15px","lineColor":"#3A4753","primaryColor":"#D6E4F5","primaryBorderColor":"#1B5FA8","primaryTextColor":"#0B2B4A","secondaryColor":"#CFEAE6","tertiaryColor":"#FBEAD2","mainBkg":"#D6E4F5","nodeBorder":"#1B5FA8","clusterBkg":"#F7F9FC","clusterBorder":"#AEBED2","titleColor":"#0F3D6B","edgeLabelBackground":"#FFFFFF"}}}%%
    flowchart LR
-       Query["QUERY"] --> Fetch["FETCH"]
-       Fetch --> Parse["PARSE"]
-       Parse --> Dedupe["DEDUPE"]
-       Dedupe --> Score["SCORE"]
-       Score --> Store["STORE"]
-       Store --> Report["REPORT"]
-       
-       Query -.-> Source["GeoNet API"]
-       Fetch -.-> Format["QuakeML"]
-       Parse -.-> Event["Event Extraction"]
-       Dedupe -.-> Compare["Duplicate Check"]
-       Score -.-> Quality["Quality Grading"]
-       Store -.-> DB["Database Insert"]
-       Report -.-> Summary["Import Summary"]
+       Start(["Start import"]):::terminal
+
+       subgraph Retrieve["Retrieve from GeoNet"]
+           Query[["/api/import/geonet"]]:::backend
+           Fetch[/"Fetch QuakeML response"/]:::process
+       end
+
+       subgraph Transform["Transform &amp; validate"]
+           Parse[/"Parse: extract events"/]:::process
+           Dedupe{"Duplicate match?"}:::decision
+           Score[/"Quality grading"/]:::process
+           ScoreLib[["lib/quality-scoring.ts"]]:::library
+       end
+
+       subgraph Persist["Persist &amp; summarize"]
+           Store[("catalogues")]:::datastore
+           Skipped("Skipped: duplicate"):::success
+           Report("Import summary"):::success
+       end
+
+       GeoNet{{"GeoNet FDSN service"}}:::external
+
+       Start --> Query
+       Query -. "FDSN query" .-> GeoNet
+       GeoNet -. "QuakeML 1.2 BED" .-> Fetch
+       Query --> Fetch
+       Fetch --> Parse
+       Parse --> Dedupe
+       Dedupe -->|"new event"| Score
+       Dedupe -->|"skip duplicate"| Skipped
+       Score --> ScoreLib
+       ScoreLib --> Store
+       Store --> Report
+       Skipped --> Report
+
+       style Retrieve fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Transform fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Persist fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+
+       classDef userAction fill:#E8EEF6,stroke:#0F3D6B,stroke-width:1.5px,color:#0B2B4A
+       classDef frontend fill:#D6E4F5,stroke:#1B5FA8,stroke-width:1.5px,color:#0B2B4A
+       classDef backend fill:#CFEAE6,stroke:#0E7C72,stroke-width:1.5px,color:#08423D
+       classDef library fill:#FBEAD2,stroke:#9C6A12,stroke-width:1.5px,color:#5A3D06
+       classDef datastore fill:#E3E7EB,stroke:#3A4753,stroke-width:1.5px,color:#1E2731
+       classDef external fill:#EFDDEC,stroke:#8E3A82,stroke-width:1.5px,color:#4A1C43,stroke-dasharray:4 3
+       classDef process fill:#FCEAD0,stroke:#D38B1E,stroke-width:1.5px,color:#5A3D06
+       classDef decision fill:#FFF3CC,stroke:#B8860B,stroke-width:1.5px,color:#5A4500
+       classDef success fill:#D5EFE0,stroke:#1B8A5A,stroke-width:1.5px,color:#0B3D27
+       classDef warning fill:#FBE0DA,stroke:#C24A2B,stroke-width:1.5px,color:#5E1C0C
+       classDef terminal fill:#1F2D3D,stroke:#0B1622,stroke-width:1.5px,color:#FFFFFF
 
 
 -----------

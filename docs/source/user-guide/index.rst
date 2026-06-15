@@ -133,31 +133,58 @@ Platform at a Glance
 ------------------------
 
 .. mermaid::
+   :align: center
 
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"15px","lineColor":"#3A4753","primaryColor":"#D6E4F5","primaryBorderColor":"#1B5FA8","primaryTextColor":"#0B2B4A","secondaryColor":"#CFEAE6","tertiaryColor":"#FBEAD2","mainBkg":"#D6E4F5","nodeBorder":"#1B5FA8","clusterBkg":"#F7F9FC","clusterBorder":"#AEBED2","titleColor":"#0F3D6B","edgeLabelBackground":"#FFFFFF"}}}%%
    flowchart TD
+       Start(["Seismic data"])
+
        subgraph Inputs ["Data Ingestion"]
-           Upload["UPLOAD<br/>(CSV, JSON, QuakeML)"]
-           Import["IMPORT<br/>(GeoNet FDSN)"]
+           Upload("Upload file (CSV / JSON / QuakeML)")
+           Import{{"GeoNet FDSN import"}}
        end
 
        subgraph Core ["Core Platform"]
-           Merge["MERGE & DEDUPE"]
-           Store["MONGODB STORAGE"]
-           Quality["QUALITY ASSESSMENT"]
+           Quality[/"Quality assessment (A+ to F)"/]
+           Merge[/"Merge &amp; dedupe"/]
+           Store[("MongoDB storage")]
        end
 
-       subgraph Outputs ["Analysis & Export"]
-           Analytics["ANALYTICS<br/>(Maps, Charts, Stats)"]
-           Export["EXPORT<br/>(CSV, QuakeML, GeoJSON)"]
+       subgraph Outputs ["Analysis &amp; Export"]
+           Analytics[/"Analytics (maps, charts, stats)"/]
+           Export[/"Export (CSV / QuakeML / GeoJSON)"/]
        end
 
+       Start --> Upload
+       Start -. "live feed" .-> Import
        Upload --> Quality
        Import --> Quality
        Quality --> Merge
        Merge --> Store
-       
        Store --> Analytics
        Store --> Export
+
+       style Inputs fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Core fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Outputs fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+
+       class Start terminal
+       class Upload userAction
+       class Quality,Merge,Export,Analytics process
+       class Import external
+       class Store datastore
+
+       classDef userAction fill:#E8EEF6,stroke:#0F3D6B,stroke-width:1.5px,color:#0B2B4A
+       classDef frontend fill:#D6E4F5,stroke:#1B5FA8,stroke-width:1.5px,color:#0B2B4A
+       classDef backend fill:#CFEAE6,stroke:#0E7C72,stroke-width:1.5px,color:#08423D
+       classDef library fill:#FBEAD2,stroke:#9C6A12,stroke-width:1.5px,color:#5A3D06
+       classDef datastore fill:#E3E7EB,stroke:#3A4753,stroke-width:1.5px,color:#1E2731
+       classDef external fill:#EFDDEC,stroke:#8E3A82,stroke-width:1.5px,color:#4A1C43,stroke-dasharray:4 3
+       classDef process fill:#FCEAD0,stroke:#D38B1E,stroke-width:1.5px,color:#5A3D06
+       classDef decision fill:#FFF3CC,stroke:#B8860B,stroke-width:1.5px,color:#5A4500
+       classDef success fill:#D5EFE0,stroke:#1B8A5A,stroke-width:1.5px,color:#0B3D27
+       classDef warning fill:#FBE0DA,stroke:#C24A2B,stroke-width:1.5px,color:#5E1C0C
+       classDef terminal fill:#1F2D3D,stroke:#0B1622,stroke-width:1.5px,color:#FFFFFF
 
 -----------
 Quick Links

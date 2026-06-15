@@ -22,61 +22,90 @@ High-Level Components
 =====================
 
 .. mermaid::
+   :align: center
 
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"15px","lineColor":"#3A4753","primaryColor":"#D6E4F5","primaryBorderColor":"#1B5FA8","primaryTextColor":"#0B2B4A","secondaryColor":"#CFEAE6","tertiaryColor":"#FBEAD2","mainBkg":"#D6E4F5","nodeBorder":"#1B5FA8","clusterBkg":"#F7F9FC","clusterBorder":"#AEBED2","titleColor":"#0F3D6B","edgeLabelBackground":"#FFFFFF"}}}%%
    flowchart TB
-       subgraph Client["🖥️ Client Browser"]
+       subgraph Client["Client Browser"]
            UI["React UI Components"]
            State["React State Management"]
            Maps["Leaflet Map Visualizations"]
        end
-       
-       subgraph NextJS["⚡ Next.js 13+ Application"]
+
+       subgraph NextJS["Next.js 13+ Application"]
            subgraph Frontend["Frontend (App Router)"]
-               Pages["Pages & Layouts"]
+               Pages["Pages &amp; Layouts"]
                Components["React Components"]
                Hooks["Custom Hooks"]
            end
-           
+
            subgraph Backend["Backend (API Routes)"]
-               UploadAPI["/api/upload"]
-               CataloguesAPI["/api/catalogues"]
-               EventsAPI["/api/events"]
-               MergeAPI["/api/merge"]
-               ImportAPI["/api/import"]
+               UploadAPI[["/api/upload"]]
+               CataloguesAPI[["/api/catalogues"]]
+               EventsAPI[["/api/events"]]
+               MergeAPI[["/api/merge"]]
+               ImportAPI[["/api/import"]]
            end
-           
+
            subgraph Libraries["Core Libraries"]
-               Parsers["lib/parsers.ts<br/>CSV, JSON, QuakeML"]
-               EqUtils["lib/earthquake-utils.ts<br/>Validation & Normalization"]
-               QualityCheck["lib/data-quality-checker.ts"]
-               CrossField["lib/cross-field-validation.ts"]
-               QuakeML["lib/quakeml-parser.ts"]
+               Parsers[["lib/parsers.ts (CSV, JSON, QuakeML)"]]
+               EqUtils[["lib/earthquake-utils.ts (validate &amp; normalize)"]]
+               QualityCheck[["lib/data-quality-checker.ts"]]
+               CrossField[["lib/cross-field-validation.ts"]]
+               QuakeML[["lib/quakeml-parser.ts"]]
            end
        end
-       
-       subgraph Database["💾 MongoDB Database"]
-           DB[(earthquake_catalogue)]
+
+       subgraph Database["MongoDB Database"]
+           DB[("earthquake_catalogue")]
            Collections[("Collections")]
            Indexes[("Indexes")]
        end
-       
-       subgraph External["🌐 External Services"]
-           GeoNet["GeoNet API<br/>(NZ Earthquakes)"]
+
+       subgraph ExternalSvc["External Services"]
+           GeoNet{{"GeoNet API (NZ earthquakes)"}}
        end
-       
+
        UI --> Pages
        State --> Components
        Maps --> Components
-       
-       Pages --> Backend
+
+       Pages --> UploadAPI
        Components --> Hooks
-       
-       Backend --> Libraries
-       Libraries --> DB
+
+       UploadAPI --> Parsers
+       Parsers --> DB
        DB --> Collections
        Collections --> Indexes
-       
-       ImportAPI --> External
+
+       ImportAPI -. "import NZ data" .-> GeoNet
+
+       class UI,Components,Hooks,Pages,Maps frontend
+       class State userAction
+       class UploadAPI,CataloguesAPI,EventsAPI,MergeAPI,ImportAPI backend
+       class Parsers,EqUtils,QualityCheck,CrossField,QuakeML library
+       class DB,Collections,Indexes datastore
+       class GeoNet external
+
+       classDef userAction fill:#E8EEF6,stroke:#0F3D6B,stroke-width:1.5px,color:#0B2B4A
+       classDef frontend fill:#D6E4F5,stroke:#1B5FA8,stroke-width:1.5px,color:#0B2B4A
+       classDef backend fill:#CFEAE6,stroke:#0E7C72,stroke-width:1.5px,color:#08423D
+       classDef library fill:#FBEAD2,stroke:#9C6A12,stroke-width:1.5px,color:#5A3D06
+       classDef datastore fill:#E3E7EB,stroke:#3A4753,stroke-width:1.5px,color:#1E2731
+       classDef external fill:#EFDDEC,stroke:#8E3A82,stroke-width:1.5px,color:#4A1C43,stroke-dasharray:4 3
+       classDef process fill:#FCEAD0,stroke:#D38B1E,stroke-width:1.5px,color:#5A3D06
+       classDef decision fill:#FFF3CC,stroke:#B8860B,stroke-width:1.5px,color:#5A4500
+       classDef success fill:#D5EFE0,stroke:#1B8A5A,stroke-width:1.5px,color:#0B3D27
+       classDef warning fill:#FBE0DA,stroke:#C24A2B,stroke-width:1.5px,color:#5E1C0C
+       classDef terminal fill:#1F2D3D,stroke:#0B1622,stroke-width:1.5px,color:#FFFFFF
+
+       style Client fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style NextJS fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Frontend fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Backend fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Libraries fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style Database fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+       style ExternalSvc fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
 
 **Key Components:**
 

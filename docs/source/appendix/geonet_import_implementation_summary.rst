@@ -39,34 +39,41 @@ Import Workflow
 ^^^^^^^^^^^^^^^
 
 .. mermaid::
+   :align: center
 
-    sequenceDiagram
-        participant User
-        participant UI as Import Page
-        participant API as /api/import/geonet
-        participant GNS as GeoNet Service
-        participant DB as Database
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"14px","actorBkg":"#D6E4F5","actorBorder":"#1B5FA8","actorTextColor":"#0B2B4A","actorLineColor":"#AEBED2","signalColor":"#3A4753","signalTextColor":"#1E2731","labelBoxBkgColor":"#CFEAE6","labelBoxBorderColor":"#0E7C72","labelTextColor":"#08423D","loopTextColor":"#08423D","noteBkgColor":"#FFF3CC","noteBorderColor":"#B8860B","noteTextColor":"#5A4500","activationBkgColor":"#CFEAE6","activationBorderColor":"#0E7C72"}}}%%
+   sequenceDiagram
+       actor User
+       participant UI as Import Page
+       participant API as Import API
+       participant GNS as GeoNet Service
+       participant DB as Database
 
-        User->>UI: Select Filter Options (Time, Mag, etc.)
-        User->>UI: Click "Start Import"
-        UI->>API: POST /api/import/geonet
-        API->>GNS: Fetch Events (FDSN Service)
-        GNS-->>API: Return QuakeML/Text Data
-        
-        loop Every Event
-            API->>DB: Check for Duplicates (source_id)
-            alt New Event
-                API->>DB: Insert Event
-            else Existing Event
-                API->>DB: Update Event (if newer)
-            else Unchanged
-                API->>DB: Skip
-            end
-        end
-        
-        API->>DB: Save Import History
-        API-->>UI: Return Stats (New, Updated, Skipped)
-        UI-->>User: Show Success & Stats
+       Note over User,UI: Configure the import
+       User->>UI: Select filter options (time, magnitude, etc.)
+       User->>UI: Click Start Import
+       UI->>+API: POST /api/import/geonet
+
+       API->>+GNS: Fetch events (FDSN Event Web Service)
+       GNS-->>-API: Return QuakeML / text data
+
+       loop Every event
+           API->>DB: Check for duplicates (source_id)
+           alt New event
+               rect rgb(213,239,224)
+               API->>DB: Insert event
+               end
+           else Existing event
+               API->>DB: Update event (if newer)
+           else Unchanged
+               API->>DB: Skip
+           end
+       end
+
+       API->>DB: Save import history
+       API-->>UI: Return stats (new, updated, skipped)
+       deactivate API
+       UI-->>User: Show success & stats
 
 
 2. Import Service (`lib/geonet-import-service.ts`)

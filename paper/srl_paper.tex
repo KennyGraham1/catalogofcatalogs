@@ -681,9 +681,10 @@ The five dimension scores $Q_d \in [0,100]$ are:
     conferred by analyst review.
 \end{description}
 
-The score $Q$ maps to letter grades as shown in Table~\ref{tab:grades}.
-Grades are displayed per event on the map and table views, and aggregated
-at catalogue level.
+Figure~\ref{fig:quality} summarises the five dimensions, their weights, and the
+grade mapping; the score $Q$ maps to the letter grades in
+Table~\ref{tab:grades}.  Grades are displayed per event on the map and table
+views, and aggregated at catalogue level.
 
 \begin{table}[ht]
 \centering
@@ -747,9 +748,13 @@ Default thresholds are based on international standards for global earthquake
 association \citep{storchak2013, engdahl1998}.  All three thresholds are
 user-adjustable in the merge UI.
 
-Candidate groups that violate physical-validity gates (magnitude range
-$> 3$, spatial spread $> 200\,\text{km}$, group size $> 10$) are flagged
-as merge conflicts and excluded from automated resolution.
+Candidate groups that violate magnitude-scaled physical-validity gates are
+flagged as merge conflicts and excluded from automated resolution.  A group is
+rejected if its magnitude range exceeds $0.5$ ($M<4$), $0.8$ ($M\,4$--$5.5$),
+$1.2$ ($M\,5.5$--$7$), or $1.5$ ($M\geq7$); if its spatial spread exceeds
+$100$\,km ($M<5$), $150$\,km ($M\,5$--$6$), or $200$\,km ($M\geq6$); or if more
+than $15$ events fall in a single group.  A network-mismatch guard further
+prevents merging two distinct events reported by the same network.
 
 \subsection{Merge strategies}
 \label{sec:strategies}
@@ -1367,6 +1372,52 @@ URLs are given in Section~\ref{sec:software}.
     $180^{\circ}$.
   }
   \label{fig:gap}
+\end{figure}
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[
+  font=\footnotesize,
+  dim/.style={draw, rounded corners, align=left, text width=37mm,
+              minimum height=8.5mm, fill=blue!6, inner sep=3pt},
+  qnode/.style={draw, rounded corners, align=center, text width=23mm,
+                minimum height=17mm, fill=teal!12},
+  grade/.style={draw, align=left, text width=25mm, minimum height=4.3mm,
+                inner sep=2pt, font=\scriptsize},
+  arr/.style={-{Latex[length=1.6mm]}, thin, gray!70}
+]
+  \node[dim] (loc) {\textbf{Location} ($w=0.35$)\\[1pt]\scriptsize horizontal/depth/time uncertainty};
+  \node[dim, below=1.8mm of loc] (net) {\textbf{Network geometry} ($0.25$)\\[1pt]\scriptsize azimuthal gap, station/phase counts};
+  \node[dim, below=1.8mm of net] (sol) {\textbf{Solution fit} ($0.15$)\\[1pt]\scriptsize RMS arrival-time residual};
+  \node[dim, below=1.8mm of sol] (mag) {\textbf{Magnitude} ($0.15$)\\[1pt]\scriptsize magnitude uncertainty, \# stations};
+  \node[dim, below=1.8mm of mag] (ev) {\textbf{Evaluation} ($0.10$)\\[1pt]\scriptsize mode (auto/manual), review status};
+
+  \node[qnode, right=18mm of net] (Q) {$\displaystyle Q=\sum_d w_d Q_d$\\[3pt]$0$--$100$};
+
+  \draw[arr] (loc.east) -- (Q.north west);
+  \draw[arr] (net.east) -- (Q.west);
+  \draw[arr] (sol.east) -- (Q.west);
+  \draw[arr] (mag.east) -- (Q.south west);
+  \draw[arr] (ev.east)  -- (Q.south west);
+
+  \node[grade, fill=green!55, right=12mm of Q, yshift=13mm] (g1) {A$^{+}$\hfill 95--100};
+  \node[grade, fill=green!40, below=0.6mm of g1] (g2) {A\hfill 85--94};
+  \node[grade, fill=green!25, below=0.6mm of g2] (g3) {B$^{+}$\hfill 75--84};
+  \node[grade, fill=yellow!45, below=0.6mm of g3] (g4) {B\hfill 65--74};
+  \node[grade, fill=orange!45, below=0.6mm of g4] (g5) {C\hfill 45--64};
+  \node[grade, fill=orange!65, below=0.6mm of g5] (g6) {D\hfill 35--44};
+  \node[grade, fill=red!45, below=0.6mm of g6] (g7) {F\hfill $<$35};
+
+  \draw[arr] (Q.east) -- (g4.west);
+\end{tikzpicture}
+\caption{The per-event quality index (Section~\ref{sec:quality}).  Five
+dimensions, each computed from the listed event attributes and weighted as
+shown, are combined into a single score $Q \in [0,100]$
+(equation~\ref{eq:quality}) that maps to an A$^{+}$--F grade
+(Table~\ref{tab:grades}; colours match the map view).  Missing attributes
+incur per-dimension penalties, so sparsely-documented events are scored
+conservatively.}
+\label{fig:quality}
 \end{figure}
 
 \begin{figure}[ht]

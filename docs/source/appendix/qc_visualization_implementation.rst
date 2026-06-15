@@ -149,22 +149,47 @@ Implemented a comprehensive Quality Control (QC) visualization feature for earth
 -------------------
 
 .. mermaid::
+   :align: center
 
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"15px","lineColor":"#3A4753","primaryColor":"#D6E4F5","primaryBorderColor":"#1B5FA8","primaryTextColor":"#0B2B4A","secondaryColor":"#CFEAE6","tertiaryColor":"#FBEAD2","mainBkg":"#D6E4F5","nodeBorder":"#1B5FA8","clusterBkg":"#F7F9FC","clusterBorder":"#AEBED2","titleColor":"#0F3D6B","edgeLabelBackground":"#FFFFFF"}}}%%
    flowchart TD
-       Start([Start]) --> Select["1. Select Catalogues"]
-       Select --> Config["2. Configure Merge<br/>(Thresholds & Strategy)"]
-       
-       Config --> Preview["3. Generate QC Preview"]
-       Preview --> Review["4. Review Duplicate Groups<br/>(Check Map & Warnings)"]
-       
-       Review --> Good{"Satisfied?"}
-       
-       Good -- No --> Adjust["Adjust Configuration"]
+       BeginNode(["Start"]):::terminal
+       Select("1. Select Catalogues"):::userAction
+       Config("2. Configure Merge (Thresholds &amp; Strategy)"):::userAction
+       Preview[["3. Generate QC Preview (dry-run merge)"]]:::backend
+       Compute[/"Detect duplicate groups &amp; validate"/]:::process
+       Review("4. Review Duplicate Groups (Map &amp; Warnings)"):::userAction
+       Good{"Satisfied?"}:::decision
+       Adjust("Adjust Configuration"):::userAction
+       Proceed("5. Proceed with Merge"):::userAction
+       Execute[["6. Execute Merge &amp; Save"]]:::backend
+       Saved[("catalogues")]:::datastore
+       EndNode(["Done"]):::terminal
+
+       BeginNode --> Select
+       Select --> Config
+       Config --> Preview
+       Preview --> Compute
+       Compute --> Review
+       Review --> Good
+       Good -- "no" --> Adjust
        Adjust --> Preview
-       
-       Good -- Yes --> Proceed["5. Proceed with Merge"]
-       Proceed --> Execute["6. Execute & Save"]
-       Execute --> End([Done])
+       Good -- "yes" --> Proceed
+       Proceed --> Execute
+       Execute --> Saved
+       Saved --> EndNode
+
+       classDef userAction fill:#E8EEF6,stroke:#0F3D6B,stroke-width:1.5px,color:#0B2B4A
+       classDef frontend fill:#D6E4F5,stroke:#1B5FA8,stroke-width:1.5px,color:#0B2B4A
+       classDef backend fill:#CFEAE6,stroke:#0E7C72,stroke-width:1.5px,color:#08423D
+       classDef library fill:#FBEAD2,stroke:#9C6A12,stroke-width:1.5px,color:#5A3D06
+       classDef datastore fill:#E3E7EB,stroke:#3A4753,stroke-width:1.5px,color:#1E2731
+       classDef external fill:#EFDDEC,stroke:#8E3A82,stroke-width:1.5px,color:#4A1C43,stroke-dasharray:4 3
+       classDef process fill:#FCEAD0,stroke:#D38B1E,stroke-width:1.5px,color:#5A3D06
+       classDef decision fill:#FFF3CC,stroke:#B8860B,stroke-width:1.5px,color:#5A4500
+       classDef success fill:#D5EFE0,stroke:#1B8A5A,stroke-width:1.5px,color:#0B3D27
+       classDef warning fill:#FBE0DA,stroke:#C24A2B,stroke-width:1.5px,color:#5E1C0C
+       classDef terminal fill:#1F2D3D,stroke:#0B1622,stroke-width:1.5px,color:#FFFFFF
 
 
 **Step 1: Select Catalogues**

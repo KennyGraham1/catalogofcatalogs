@@ -15,20 +15,61 @@ The system has 4 user roles:
 - **Admin** - Full system access including user management
 
 .. mermaid::
+   :align: center
 
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"15px","lineColor":"#3A4753","primaryColor":"#D6E4F5","primaryBorderColor":"#1B5FA8","primaryTextColor":"#0B2B4A","secondaryColor":"#CFEAE6","tertiaryColor":"#FBEAD2","mainBkg":"#D6E4F5","nodeBorder":"#1B5FA8","clusterBkg":"#F7F9FC","clusterBorder":"#AEBED2","titleColor":"#0F3D6B","edgeLabelBackground":"#FFFFFF"}}}%%
    flowchart TD
-       Start([User Needs Admin Access]) --> Method{Method?}
-       
-       Method -- "Script (Rec)" --> Script["Run: npx tsx scripts/promote-to-admin.ts"]
-       Method -- "Database" --> DB["Update 'role' to 'admin' in MongoDB"]
-       Method -- "GUI" --> GUI["Existing Admin uses User Management UI"]
-       
-       Script --> Logout[Log Out & Log Back In]
-       DB --> Logout
+       Start(["User needs admin access"])
+       Method{"Which method?"}
+
+       subgraph Promote["Promote to admin (any one path)"]
+           Script[/"Run scripts/promote-to-admin.ts"/]
+           DBSet[("users: role = admin")]
+           GUI["User Management UI"]
+       end
+
+       Logout("Log out &amp; log back in")
+       Verify{"User Management menu appears?"}
+       OK("Admin access confirmed")
+       Retry("Re-check role &amp; session")
+       Done(["Done"])
+
+       Start --> Method
+       Method -->|"script (recommended)"| Script
+       Method -->|"database shell"| DBSet
+       Method -->|"existing admin"| GUI
+
+       Script --> Logout
+       DBSet --> Logout
        GUI --> Logout
-       
-       Logout --> Verify[Verify 'User Management'<br/>menu appears]
-       Verify --> End([Done])
+
+       Logout --> Verify
+       Verify -->|"yes"| OK
+       Verify -->|"no"| Retry
+       Retry --> Logout
+       OK --> Done
+
+       style Promote fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
+
+       class Start,Done terminal
+       class Method,Verify decision
+       class Script process
+       class DBSet datastore
+       class GUI frontend
+       class Logout,Retry userAction
+       class OK success
+
+       classDef userAction fill:#E8EEF6,stroke:#0F3D6B,stroke-width:1.5px,color:#0B2B4A
+       classDef frontend fill:#D6E4F5,stroke:#1B5FA8,stroke-width:1.5px,color:#0B2B4A
+       classDef backend fill:#CFEAE6,stroke:#0E7C72,stroke-width:1.5px,color:#08423D
+       classDef library fill:#FBEAD2,stroke:#9C6A12,stroke-width:1.5px,color:#5A3D06
+       classDef datastore fill:#E3E7EB,stroke:#3A4753,stroke-width:1.5px,color:#1E2731
+       classDef external fill:#EFDDEC,stroke:#8E3A82,stroke-width:1.5px,color:#4A1C43,stroke-dasharray:4 3
+       classDef process fill:#FCEAD0,stroke:#D38B1E,stroke-width:1.5px,color:#5A3D06
+       classDef decision fill:#FFF3CC,stroke:#B8860B,stroke-width:1.5px,color:#5A4500
+       classDef success fill:#D5EFE0,stroke:#1B8A5A,stroke-width:1.5px,color:#0B3D27
+       classDef warning fill:#FBE0DA,stroke:#C24A2B,stroke-width:1.5px,color:#5E1C0C
+       classDef terminal fill:#1F2D3D,stroke:#0B1622,stroke-width:1.5px,color:#FFFFFF
 
 **New users are created as Viewers by default.** To access admin features, you need to be promoted to admin.
 

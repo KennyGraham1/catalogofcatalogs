@@ -14,35 +14,50 @@ I've successfully implemented a comprehensive password change feature for the Ea
 ----------------------
 
 .. mermaid::
+   :align: center
 
+   %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, \"Helvetica Neue\", Arial, sans-serif","fontSize":"14px","actorBkg":"#D6E4F5","actorBorder":"#1B5FA8","actorTextColor":"#0B2B4A","actorLineColor":"#AEBED2","signalColor":"#3A4753","signalTextColor":"#1E2731","labelBoxBkgColor":"#CFEAE6","labelBoxBorderColor":"#0E7C72","labelTextColor":"#08423D","loopTextColor":"#08423D","noteBkgColor":"#FFF3CC","noteBorderColor":"#B8860B","noteTextColor":"#5A4500","activationBkgColor":"#CFEAE6","activationBorderColor":"#0E7C72"}}}%%
    sequenceDiagram
        actor User
-       participant UI as Frontend Page
-       participant API as /api/auth/change-password
+       participant UI as Change-Password Page
+       participant API as Change-Password API
        participant Auth as Auth Handler
        participant DB as Database
 
-       User->>UI: Enter Current & New Password
-       UI->>UI: Validate Length & Match
+       Note over API: Route: POST /api/auth/change-password
+       User->>UI: Enter current & new password
+       UI->>UI: Validate length & match
        UI->>API: POST {current, new}
-       
-       API->>Auth: Verify Session
-       Auth-->>API: Session Valid
-       
-       API->>DB: Fetch User Hash
-       DB-->>API: User Record
-       
+
+       activate API
+       API->>Auth: Verify session
+       activate Auth
+       Auth-->>API: Session valid
+       deactivate Auth
+
+       API->>DB: Fetch user hash
+       activate DB
+       DB-->>API: User record
+       deactivate DB
+
        API->>API: bcrypt.compare(current, hash)
-       alt Invalid Password
-           API-->>UI: 401 Unauthorized
-           UI-->>User: Error: "Current password incorrect"
-       else Valid Password
-           API->>API: bcrypt.hash(new, 10)
-           API->>DB: Update Password Hash
-           DB-->>API: Success
-           API-->>UI: 200 OK
-           UI-->>User: Success & Redirect to Profile
+       alt Invalid password
+           rect rgb(251,224,218)
+               API-->>UI: 401 Unauthorized
+               UI-->>User: Error: current password incorrect
+           end
+       else Valid password
+           rect rgb(213,239,224)
+               API->>API: bcrypt.hash(new, 10)
+               API->>DB: Update password hash
+               activate DB
+               DB-->>API: Success
+               deactivate DB
+               API-->>UI: 200 OK
+               UI-->>User: Success & redirect to profile
+           end
        end
+       deactivate API
 
 
 1. **Change Password Page** (`/change-password`)
