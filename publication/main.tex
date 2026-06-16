@@ -1,6 +1,8 @@
-\documentclass[12pt]{article}
-\usepackage[a4paper,inner=2cm,top=2.5cm,bottom=2.5cm,outer=4cm,marginparwidth=3cm]{geometry}
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=2.5cm]{geometry}
 
+\usepackage[T1]{fontenc}
+\usepackage{lmodern} % scalable serif (Latin Modern); required for microtype expansion
 \usepackage[dvipsnames]{xcolor}
 \usepackage{float}
 \usepackage{graphicx}
@@ -11,29 +13,10 @@
 \usepackage{array}
 \usepackage{booktabs} % For professional tables
 \usepackage{longtable}
-\usepackage{tabulary}
 \usepackage{pdflscape}% For landscape pages
 \usepackage{microtype}
-\usepackage{csquotes}
-\usepackage{fancyhdr}
-\usepackage[scaled]{helvet}
-\renewcommand*\familydefault{\sfdefault}
-\usepackage[left]{lineno}
-\renewcommand{\linenumberfont}{\normalfont\tiny\color{gray}}
-\usepackage[ddmmyyyy,hhmmss]{datetime}
-\definecolor{tealgreen}{RGB}{0, 102, 102}
-\definecolor{midnightgreen}{RGB}{0, 64, 77}
-\usepackage{titlesec}
-\titleformat{\section}
-{\color{midnightgreen}\normalfont\Large\bfseries}
-{\color{midnightgreen}\thesection}{1em}{}
-\titleformat{\subsection}
-{\color{tealgreen}\normalfont\normalsize\bfseries}
-{\color{tealgreen}\thesubsection}{1em}{}
-\usepackage{vhistory}
 \usepackage[round]{natbib}
 \usepackage[hidelinks,bookmarksnumbered]{hyperref}
-\usepackage[nameinlink,noabbrev]{cleveref}
 \hypersetup{
 pdftitle={Towards a FAIR Framework for Earthquake Catalogs in Aotearoa New Zealand},
 pdfauthor={Kenny Graham and co-authors},
@@ -48,35 +31,15 @@ colorlinks=false
 \newcommand{\catalogs}{catalogs}
 
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{1em plus 0.1em minus 0.2em}
+\setlength{\parskip}{0.6em plus 0.1em minus 0.1em}
 
-\pagestyle{fancy}
-\fancyhead{}
-\fancyfoot{}
-\fancyhead[RO,LE]{Framework for Earthquake Cataloging}
-\fancyfoot[RO,LE]{Page \thepage}
-\fancyfoot[C]{\textbf{Draft for review}}
-\fancyfoot[RE, LO]{Created: \today\ at \currenttime}
-\setlength{\headheight}{14.5pt}
+\pagestyle{plain}
 
-\newcounter{note}
-\stepcounter{note}
 \renewcommand{\abstractname}{Executive Summary}
-\newcommand{\Note}[1]{%
-\marginpar{%
-\tiny{\color{tealgreen}{\thenote\ \ #1}}%
-}%
-\stepcounter{note}%
-}
-\newcommand{\MNote}[1]{%
-\marginpar{%
-\tiny{\color{tealgreen}{#1}}%
-}%
-}
 
 \begin{document}
 
- \title{Towards a FAIR Framework for Earthquake \catalogs\ in Aotearoa New Zealand \\[4pt] {\large A Community White Paper} \\[3pt] {\normalsize\itshape Making New Zealand's earthquake catalogs Findable, Accessible, Interoperable, and Reusable} \vhCurrentVersion}
+ \title{Towards a FAIR Framework for Earthquake \catalogs\ in Aotearoa New Zealand \\[4pt] {\large A Community White Paper} \\[3pt] {\normalsize\itshape Making New Zealand's earthquake catalogs Findable, Accessible, Interoperable, and Reusable} \\[3pt]{\normalsize Version 0.1 --- Draft for review}}
 
  \author{
 Kenny Graham$^{1}$,
@@ -105,7 +68,7 @@ Two national workshops (2023 and 2024) brought together researchers, agencies, a
 \end{abstract}
 
 \bigskip
-\noindent{\color{midnightgreen}\large\bfseries Key Recommendations}
+\noindent{\large\bfseries Key Recommendations}
 \begin{enumerate}
 \setlength{\itemsep}{1pt}
 \item Adopt a shared catalog metadata profile and controlled parameter lexicon aligned with QuakeML and FDSN conventions, distinguishing required from recommended fields.
@@ -115,14 +78,8 @@ Two national workshops (2023 and 2024) brought together researchers, agencies, a
 \item Stand up formal governance (a Steering Committee and a Data Stewardship Team) that operationalises both FAIR and CARE principles, underpinned by sustained multi-year funding.
 \end{enumerate}
 
-% \vspace{6cm}
-\begin{versionhistory}
-\vhEntry{v0.1}{21/05/2025}{Kenny Draft}{First draft}
-\end{versionhistory}
 \clearpage
 
-\linenumbers
-\modulolinenumbers[5]
 
 \tableofcontents
 \pagebreak
@@ -145,31 +102,59 @@ The opportunity is to add a thin coordinating layer --- a ``catalog of catalogs'
 
 \begin{figure}[H]
 \centering
-\resizebox{0.96\textwidth}{!}{%
-\begin{tikzpicture}[font=\footnotesize, >={Stealth[round]},
-  cat/.style={draw, rounded corners, fill=gray!10, align=center, minimum height=0.7cm, text width=2.1cm},
-  hub/.style={draw, rounded corners, fill=tealgreen!15, align=center, minimum height=1.1cm, text width=2.3cm}]
-% LEFT: fragmented
-\node[font=\bfseries, text=midnightgreen] at (2.0,4.6) {Today: fragmented};
-\node[cat] at (0.2,3.5) {GeoNet national};
-\node[cat] at (3.2,3.7) {Taup\=o catalogue};
-\node[cat] at (1.0,2.3) {Aftershock / OBS};
-\node[cat] at (3.6,2.4) {Historical};
-\node[cat] at (0.5,1.1) {Derived / PSHA};
-\node[cat] at (3.4,1.1) {Other regional};
-\node[align=center, text width=4.3cm, font=\itshape] at (2.0,0.1) {Different formats, IDs, and magnitude scales; combined by hand};
-% RIGHT: unified
-\begin{scope}[xshift=8.5cm]
-\node[font=\bfseries, text=midnightgreen] at (2.2,4.6) {Proposed: catalog of catalogs};
-\node[cat] (g) at (0.0,3.7) {GeoNet};
-\node[cat] (t) at (0.0,2.7) {Taup\=o};
-\node[cat] (a) at (0.0,1.7) {Aftershock};
-\node[cat] (h) at (0.0,0.7) {Historical};
-\node[hub] (H) at (3.6,2.2) {FAIR portal \& API};
-\foreach \n in {g,t,a,h} {\draw[->,thick,color=tealgreen] (\n.east) -- (H.west);}
-\node[align=center, text width=3.4cm, font=\itshape] at (3.6,0.3) {One standard; discoverable, citable, interoperable};
+\begin{tikzpicture}[
+    font=\footnotesize,
+    cat/.style={draw=black, line width=0.4pt, rounded corners=2pt,
+                fill=gray!8, align=center, inner sep=4pt,
+                minimum height=0.6cm, text width=2.0cm},
+    hub/.style={draw=black, line width=0.4pt, rounded corners=2pt,
+                fill=gray!20, align=center, inner sep=5pt,
+                minimum height=1.0cm, text width=2.0cm},
+    grp/.style={font=\footnotesize\bfseries},
+    note/.style={font=\itshape, align=center},
+    feed/.style={draw=black, line width=0.5pt},
+    arr/.style={-{Stealth[length=2mm,width=1.6mm]}, draw=black, line width=0.5pt}]
+
+% ===================== LEFT: fragmented =====================
+\begin{scope}
+  \node[grp] at (2.45,5.05) {Today: fragmented};
+  % Tidy 2-column x 3-row grid: intentional, aligned, but UNconnected.
+  \node[cat] at (1.0,4.30) {GeoNet national};
+  \node[cat] at (3.9,4.30) {Taup\=o catalog};
+  \node[cat] at (1.0,3.20) {Aftershock / OBS};
+  \node[cat] at (3.9,3.20) {Historical};
+  \node[cat] at (1.0,2.10) {Derived / PSHA};
+  \node[cat] at (3.9,2.10) {Other regional};
+  \node[note, text width=4.6cm] at (2.45,0.75)
+       {Different formats, IDs, and magnitude scales; combined by hand};
 \end{scope}
-\end{tikzpicture}}
+
+% ===================== Divider =====================
+\draw[draw=black, line width=0.4pt] (5.95,0.30) -- (5.95,5.30);
+
+% ===================== RIGHT: unified =====================
+\begin{scope}[xshift=6.7cm]
+  \node[grp] at (2.55,5.05) {Proposed: catalog of catalogs};
+  \node[cat] (g) at (0.95,4.30) {GeoNet};
+  \node[cat] (t) at (0.95,3.50) {Taup\=o};
+  \node[cat] (a) at (0.95,2.70) {Aftershock};
+  \node[cat] (h) at (0.95,1.90) {Historical};
+  \node[hub] (H) at (4.20,3.10) {FAIR portal \& API};
+  % Clean feed: each box -> vertical bus (plain line); single arrow bus -> hub.
+  \def\busx{2.45}
+  \coordinate (bt) at (\busx,4.30); % top of bus (GeoNet row)
+  \coordinate (bb) at (\busx,1.90); % bottom of bus (Historical row)
+  \coordinate (bj) at (\busx,3.10); % junction, aligned to hub centre
+  \draw[feed] (bt) -- (bb);                 % the collecting bus
+  \foreach \n in {g,t,a,h} {
+     \draw[feed] (\n.east) -- (\n.east -| {(\busx,0)});
+  }
+  \draw[arr] (bj) -- (H.west);              % single arrow into hub
+  \node[note, text width=3.6cm] at (4.20,0.75)
+       {One standard; discoverable, citable, interoperable};
+\end{scope}
+
+\end{tikzpicture}
 \caption{The problem and the opportunity. Today, New Zealand's earthquake catalogs are developed independently and combined manually. The proposed framework adds a coordinating layer that makes them interoperable through shared standards, a common portal, and a programmatic API --- complementing GeoNet rather than replacing it.}
 \label{fig:fragmented}
 \end{figure}
@@ -279,13 +264,13 @@ The framework was co-designed with the community. Two pre-conference workshops a
 
 \subsection{Prototype Portal: Proof of Concept}
 \label{sec:prototype}
-To ground the framework in a working system, the working group built a functional prototype portal and used it at the 2024 workshop to demonstrate ingestion, merge, export, and analytics workflows with representative New Zealand datasets. We describe it as a proof of concept rather than a validated production service: the capabilities below are implemented in the prototype, whereas the national framework in Section~\ref{sec:framework} is a proposal that, except where noted, is not yet implemented. The prototype demonstrates:
+To ground the framework in a working system, the working group built a functional prototype portal --- \emph{Catalogue of Catalogues} (CofC) --- and used it at the 2024 workshop to demonstrate ingestion, merge, export, and analytics workflows with representative New Zealand datasets. The prototype is open-source (MIT licence) and archived with a citable release (see Data and Code Availability); we summarise it here as evidence of feasibility rather than as a validated production service. The capabilities below are implemented in the prototype, whereas the national framework in Section~\ref{sec:framework} is a proposal that, except where noted, is not yet implemented. The prototype demonstrates:
 \begin{itemize}
 \setlength{\itemsep}{1pt}
 \item \textbf{Ingestion} of CSV/tab-delimited text (with automatic delimiter and date detection), JSON/GeoJSON variants, and QuakeML~1.2, with an alias-based field-mapping interface and direct, de-duplicating sync from GeoNet's FDSN Event service;
 \item \textbf{Search and visualisation} --- spatial (bounding box, polygon, radius), time, magnitude, and depth filtering on an interactive map with event clustering, uncertainty ellipses, focal mechanisms, and station coverage;
-\item \textbf{Merge and conflation} with four configurable strategies, conflict detection and logging, lineage tracking, and a pre-commit preview (Section~\ref{sec:merge});
-\item \textbf{Analytics} --- Gutenberg-Richter $b$-value \citep{Aki1965}, completeness magnitude ($M_c$) \citep{Wiemer2000}, seismic-moment (energy) release, Gardner-Knopoff declustering \citep{GardnerKnopoff1974}, and multi-catalog magnitude-frequency comparison; and
+\item \textbf{Merge and conflation} with five configurable strategies, conflict detection and logging, lineage tracking, and a pre-commit preview (Section~\ref{sec:merge});
+\item \textbf{Analytics} --- Gutenberg-Richter $b$-value \citep{Aki1965}, completeness magnitude ($M_c$) \citep{Wiemer2000}, cumulative seismic-moment release, Gardner-Knopoff declustering \citep{GardnerKnopoff1974}, and multi-catalog magnitude-frequency comparison; and
 \item \textbf{Multi-format export} (CSV, GeoJSON, KML, QuakeML~1.2), including version-specific exports.
 \end{itemize}
 Community feedback from the 2024 workshop informed refinements to the metadata schema, merge options, and quality-grading approach described next.
@@ -298,46 +283,87 @@ The framework addresses the end-to-end lifecycle of catalog data; Figure~\ref{fi
 \centering
 \resizebox{\textwidth}{!}{%
 \begin{tikzpicture}[
-  >={Stealth[round]},
   font=\footnotesize,
-  src/.style={draw, rounded corners, fill=tealgreen!8, align=center, text width=2.6cm, minimum height=0.9cm},
-  proc/.style={draw, rounded corners, fill=midnightgreen!12, align=center, text width=3.0cm, minimum height=1.0cm},
-  cons/.style={draw, rounded corners, fill=gray!12, align=center, text width=2.8cm, minimum height=0.8cm},
-  hdr/.style={font=\footnotesize\bfseries, text=midnightgreen},
-  arr/.style={->, thick, color=tealgreen}
+  >={Stealth[length=2mm,width=1.6mm]},
+  box/.style={draw=black, line width=0.4pt, rounded corners=2pt, align=center, inner sep=4.5pt},
+  src/.style={box, fill=gray!8, text width=2.85cm, minimum height=0.66cm},
+  proc/.style={box, fill=gray!20, align=center},
+  acc/.style={box, fill=white, align=center},
+  cons/.style={box, fill=gray!8, text width=2.7cm, minimum height=0.72cm},
+  hdr/.style={font=\footnotesize\bfseries, text=black},
+  arr/.style={->, draw=black, line width=0.5pt},
+  busarr/.style={-, draw=black, line width=0.5pt}
 ]
-% Sources
-\node[src] (s1) at (0,4.0) {GeoNet national (FDSN)};
-\node[src] (s2) at (0,2.9) {Regional / volcano};
-\node[src] (s3) at (0,1.8) {Temporary / OBS};
-\node[src] (s4) at (0,0.7) {Historical / pre-instrumental};
-\node[src] (s5) at (0,-0.4) {Derived / synthetic};
-\node[hdr] at (0,5.0) {Catalog sources};
-% Ingestion
-\node[proc] (ing) at (3.7,1.8) {Ingestion \& field mapping {\scriptsize (CSV, JSON, GeoJSON, QuakeML, FDSN sync; duplicate detection)}};
-\node[hdr] at (3.7,5.0) {Ingestion};
-% Store + services
-\node[proc] (store) at (7.6,3.0) {Canonical versioned store {\scriptsize (major.minor.patch, DOIs, lineage)}};
-\node[proc] (svc) at (7.6,0.4) {Core services {\scriptsize quality scoring; merge \& conflation; event-ID mapping; provenance}};
-\node[hdr] at (7.6,5.0) {Curation \& services};
-% Access
-\node[proc] (portal) at (11.5,3.0) {Portal {\scriptsize search, map, analytics}};
-\node[proc] (api) at (11.5,0.4) {REST / FDSN API {\scriptsize versioned exports: CSV/GeoJSON/KML/QuakeML}};
-\node[hdr] at (11.5,5.0) {Access};
-% Consumers
-\node[cons] (c1) at (15.2,3.4) {Research \& reproducibility};
-\node[cons] (c2) at (15.2,2.3) {Hazard \& risk (NSHM)};
-\node[cons] (c3) at (15.2,1.2) {Engineering \& insurance};
-\node[cons] (c4) at (15.2,0.1) {Public \& emergency mgmt};
-\node[hdr] at (15.2,5.0) {Users};
-% arrows
-\foreach \s in {s1,s2,s3,s4,s5} {\draw[arr] (\s.east) -- (ing.west);}
-\draw[arr] (ing.east) -- (store.west);
-\draw[arr] (ing.east) -- (svc.west);
-\draw[arr,<->] (store) -- (svc);
+% ---------- column x-positions ----------
+\def\xsrc{0}
+\def\xing{3.55}
+\def\xstore{7.55}
+\def\xacc{11.5}
+\def\xcons{15.6}
+
+% ---------- Sources ----------
+\node[hdr] at (\xsrc,4.95) {Catalog sources};
+\node[src] (s1) at (\xsrc,4.2)  {GeoNet national\\(FDSN)};
+\node[src] (s2) at (\xsrc,3.1)  {Regional / volcano};
+\node[src] (s3) at (\xsrc,2.0)  {Temporary / OBS};
+\node[src] (s4) at (\xsrc,0.9)  {Historical / pre-instrumental};
+\node[src] (s5) at (\xsrc,-0.2) {Derived / synthetic};
+
+% ---------- Ingestion ----------
+\node[hdr] at (\xing,4.95) {Ingestion};
+\node[proc, text width=3.0cm, minimum height=1.6cm] (ing) at (\xing,2.0)
+  {Ingestion \& field mapping\\[2pt]{\scriptsize CSV, JSON, GeoJSON, QuakeML, FDSN sync; duplicate detection}};
+
+% ---------- Curation & services ----------
+\node[hdr] at (\xstore,4.95) {Curation \& services};
+\node[proc, text width=3.1cm, minimum height=1.15cm] (store) at (\xstore,3.05)
+  {Canonical versioned store\\[1pt]{\scriptsize major.minor.patch, DOIs, lineage}};
+\node[proc, text width=3.1cm, minimum height=1.3cm] (svc) at (\xstore,0.85)
+  {Core services\\[1pt]{\scriptsize quality scoring; merge \& conflation; event-ID mapping; provenance}};
+
+% ---------- Access ----------
+\node[hdr] at (\xacc,4.95) {Access};
+\node[acc, text width=2.9cm, minimum height=1.15cm] (portal) at (\xacc,3.05)
+  {Portal\\[1pt]{\scriptsize search, map, analytics}};
+\node[acc, text width=2.9cm, minimum height=1.3cm] (api) at (\xacc,0.85)
+  {REST / FDSN API\\[1pt]{\scriptsize versioned exports:\\ CSV / GeoJSON /\\ KML / QuakeML}};
+
+% ---------- Users ----------
+\node[hdr] at (\xcons,4.95) {Users};
+\node[cons] (c1) at (\xcons,3.65) {Research \& reproducibility};
+\node[cons] (c2) at (\xcons,2.55) {Hazard \& risk (NSHM)};
+\node[cons] (c3) at (\xcons,1.45) {Engineering \& insurance};
+\node[cons] (c4) at (\xcons,0.35) {Public \& emergency mgmt};
+
+% ================= arrows =================
+% sources -> ingestion (orthogonal funnel into a single vertical bus)
+\def\xsbus{1.9}
+\foreach \s in {s1,s2,s3,s4,s5} {
+  \draw[busarr] (\s.east) -- ($(\xsbus,0)!(\s.east)!(\xsbus,1)$);
+}
+\draw[busarr] (\xsbus,4.2) -- (\xsbus,-0.2);
+\draw[arr] (\xsbus,2.0) -- (ing.west);
+
+% ingestion -> store and -> services
+\draw[arr] (ing.east) -- ($(ing.east)+(0.55,0)$) |- (store.west);
+\draw[arr] (ing.east) -- ($(ing.east)+(0.55,0)$) |- (svc.west);
+
+% store <-> services
+\draw[arr,<->] (store.south) -- (svc.north);
+
+% store -> portal ; services -> api
 \draw[arr] (store.east) -- (portal.west);
-\draw[arr] (svc.east) -- (api.west);
-\foreach \c in {c1,c2,c3,c4} {\draw[arr] (portal.east) -- (\c.west); \draw[arr] (api.east) -- (\c.west);}
+\draw[arr] (svc.east)   -- (api.west);
+
+% portal & api funnel into a single access bus that fans out to users
+\def\xabus{13.55}
+\draw[busarr] (portal.east) -| (\xabus,3.05);
+\draw[busarr] (api.east)    -| (\xabus,0.85);
+\draw[busarr] (\xabus,3.65) -- (\xabus,0.35);
+% fan-out: bus -> each user (orthogonal, no crossings)
+\foreach \c in {c1,c2,c3,c4} {
+  \draw[arr] ($(\xabus,0)!(\c.west)!(\xabus,1)$) -- (\c.west);
+}
 \end{tikzpicture}%
 }
 \caption{End-to-end architecture of the proposed framework. Heterogeneous catalog sources are ingested and mapped to a canonical, versioned store; curation services (quality scoring, merge and conflation, event-identifier mapping, and provenance) feed a portal and a programmatic API that serve research, hazard, engineering, and public users. Capabilities identified as implemented in Section~\ref{sec:prototype} are exercised end-to-end by the prototype.}
@@ -350,23 +376,24 @@ A core metadata profile aligned with QuakeML and FDSN conventions captures ident
 \subsection{Interoperability: Programmatic Access and Cross-Catalog Identifiers}
 A unified API provides machine-readable access across catalogs, returning CSV, GeoJSON, and QuakeML, with bulk downloads of versioned datasets to support reproducible research; it builds on existing GeoNet interfaces and standards \citep{GeoNetAPI, GeoNetFDSN, QuakeML}. The endpoint design is given in Appendix~\ref{app:spec}.
 
-A persistent interoperability challenge is that the same earthquake carries different public identifiers across agencies --- a New Zealand event may appear as a GeoNet Public ID, a USGS event code, and an ISC event number --- so researchers aggregating sources must de-duplicate by hand. The framework includes an event-identity mapping service that maintains cross-agency equivalences, matched using configurable spatial, temporal, and magnitude thresholds (illustratively, separation $<$\,20\,km, time offset $<$\,30\,s, magnitude difference $<$\,0.5). These values are deliberately permissive to absorb differing location procedures; because wide windows can group genuinely distinct events in dense aftershock sequences, thresholds are configurable per source and ambiguous matches are flagged for expert review rather than merged automatically. The service aligns with the approach used by EMSC \citep{emsc_webservices} and extends it to the New Zealand context.
+A persistent interoperability challenge is that the same earthquake carries different public identifiers across agencies --- a New Zealand event may appear as a GeoNet Public ID, a USGS event code, and an ISC event number --- so researchers aggregating sources must de-duplicate by hand. The framework includes an event-identity mapping service that maintains cross-agency equivalences, matched using configurable spatial, temporal, and magnitude thresholds (illustratively, separation $<$\,20\,km, time offset $<$\,30\,s, magnitude difference $<$\,0.5; for comparison, the ANSS composite catalog uses operational windows of 16\,s and 100\,km, \citealp{NCEDCComCat}). These values are deliberately permissive to absorb differing location procedures; because wide windows can group genuinely distinct events in dense aftershock sequences, thresholds are configurable per source and ambiguous matches are flagged for expert review rather than merged automatically. The service aligns with the approach used by EMSC \citep{emsc_webservices} and extends it to the New Zealand context.
 
 \subsection{Catalog Merge and Conflation}
 \label{sec:merge}
-Catalog conflation --- combining events from multiple independent catalogs into a unified view --- is a central operation. The framework specifies four merge strategies, all implemented in the prototype (Section~\ref{sec:prototype}); users choose by scientific objective:
+Catalog conflation --- combining events from multiple independent catalogs into a unified view --- is a central operation that builds on established cross-agency practice \citep{Si2024, NCEDCComCat}. The framework specifies five merge strategies, all implemented in the prototype (Section~\ref{sec:prototype}); users choose by scientific objective:
 \begin{itemize}
-  \item \textbf{Priority-weighted}: a nominated agency's solution is preferred; others are recorded as alternatives.
-  \item \textbf{Uncertainty-weighted average}: location, time, and magnitude are an inverse-variance-weighted mean across solutions.
-  \item \textbf{Quality-based}: the highest quality-scored solution (Section~\ref{sec:quality}) is retained.
-  \item \textbf{Complete-event}: the solution with the most populated recommended fields is retained.
+  \item \textbf{Quality-based} (default): the highest quality-scored solution (Section~\ref{sec:quality}) is retained.
+  \item \textbf{Priority-based}: a nominated authoritative agency's solution is preferred; others are recorded as alternatives.
+  \item \textbf{Newest data}: the most recently determined solution is retained, where later analyses supersede earlier ones.
+  \item \textbf{Most complete}: the solution with the most populated fields is retained, maximising metadata density.
+  \item \textbf{Averaged}: location, depth, and magnitude are combined across solutions by inverse-variance weighting (with an ISC magnitude-type hierarchy to avoid scale saturation). Because agency solutions for one event share data and processing assumptions and are therefore not statistically independent, the merged uncertainty is reported conservatively --- not below the smallest contributing value --- rather than as the (smaller) independent-combination result \citep{Si2024}.
 \end{itemize}
-Conflicts are detected and logged when solutions disagree beyond configurable thresholds (spatial separation, temporal offset, magnitude difference, depth range, network mismatch). Each merged event retains explicit lineage to its source events and the configuration used, enabling full audit and reproducibility; a dry-run preview returns conflict statistics without committing a new version. Table~\ref{tab:merge_example} shows a worked example.
+Conflicts are detected and logged when solutions disagree beyond configurable thresholds (spatial separation, temporal offset, magnitude difference, depth range, network mismatch); duplicate detection during dense aftershock sequences follows nearest-neighbour methods \citep{Tanaka2022}. Each merged event retains explicit lineage to its source events and the configuration used, enabling full audit and reproducibility; a dry-run preview returns conflict statistics without committing a new version. Table~\ref{tab:merge_example} shows a worked example.
 
 \begin{table}[H]
 \centering
 \small
-\caption{Worked example: uncertainty-weighted merge of one event reported by two agencies (illustrative values).}
+\caption{Worked example: averaged merge of one event reported by two agencies (illustrative values). Merged point values are inverse-variance-weighted means; because the two agency solutions are correlated rather than independent, the merged uncertainty is reported conservatively as the smallest contributing value, not the smaller independent-combination result.}
 \label{tab:merge_example}
 \setlength{\tabcolsep}{5pt}
 \renewcommand{\arraystretch}{1.15}
@@ -375,19 +402,28 @@ Conflicts are detected and logged when solutions disagree beyond configurable th
 \textbf{Field} & \textbf{Source A (GeoNet)} & \textbf{Source B (USGS)} & \textbf{Merged (uncertainty-weighted)} \\
 \midrule
 Event identifier & 2016p858000 & us1000778i & merged-0001 (lineage to A, B) \\
-Origin time (s past 11:02:00 UTC) & 56.3 $\pm$\,0.5 & 56.7 $\pm$\,0.8 & 56.4 $\pm$\,0.4 \\
+Origin time (s past 11:02:00 UTC) & 56.3 $\pm$\,0.5 & 56.7 $\pm$\,0.8 & 56.4 $\pm$\,0.5 \\
 Latitude (°) & $-42.737$ & $-42.740$ & $-42.738$ \\
 Longitude (°) & 173.054 & 173.100 & 173.061 \\
-Depth (km) & 15.1 $\pm$\,2.0 & 15.0 $\pm$\,4.0 & 15.1 $\pm$\,1.8 \\
-Magnitude ($M_w$) & 7.8 $\pm$\,0.1 & 7.8 $\pm$\,0.1 & 7.8 $\pm$\,0.07 \\
-Horizontal unc. (km) & 1.5 & 3.0 & 1.3 \\
+Depth (km) & 15.1 $\pm$\,2.0 & 15.0 $\pm$\,4.0 & 15.1 $\pm$\,2.0 \\
+Magnitude ($M_w$) & 7.8 $\pm$\,0.1 & 7.8 $\pm$\,0.1 & 7.8 $\pm$\,0.1 \\
+Horizontal unc. (km) & 1.5 & 3.0 & 1.5 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \subsection{Data Quality Assessment}
 \label{sec:quality}
-A standardised, transparent quality score supports informed reuse decisions, building on established practice for assessing catalog completeness and quality \citep{Woessner2005}. Quality is assessed across five dimensions: \textbf{completeness} (fraction of required/recommended fields populated), \textbf{accuracy} (internal consistency checks), \textbf{reliability} (reviewed-vs-automatic proportion, station count, azimuthal gap, phase count), \textbf{consistency} (temporal ordering, duplicate absence, cross-field agreement), and \textbf{traceability} (processing documentation, contact, version/publication links). An overall score (0--100) is a weighted sum (illustratively 40/20/15/15/10\,\%) mapping to the grade bands in Table~\ref{tab:quality_grades}. These weights and bands are an illustrative starting point, not an empirically calibrated standard: they should be tuned by the community against representative New Zealand catalogs, and both are configurable. The detailed automated checks and the full eight-band scheme are given in Appendix~\ref{app:spec}; flagged statistical outliers are annotated for caution rather than removed automatically.
+A standardised, transparent quality score supports informed reuse decisions, building on established practice for assessing catalog quality \citep{Woessner2005} and on the criteria used to benchmark GeoNet location quality \citep{WarrenSmith2025}. Each event receives a score (0--100) computed as a weighted sum over five dimensions of solution quality:
+\begin{itemize}
+\setlength{\itemsep}{1pt}
+\item \textbf{Location} (35\,\%) --- horizontal, depth, and time uncertainties, weighted most heavily on horizontal uncertainty;
+\item \textbf{Network geometry} (25\,\%) --- azimuthal gap and used-station and used-phase counts, the primary instrumental predictors of location error \citep{Bondar2004, WarrenSmith2025};
+\item \textbf{Solution fit} (15\,\%) --- the RMS arrival-time residual of the location;
+\item \textbf{Magnitude} (15\,\%) --- magnitude uncertainty and the number of contributing stations; and
+\item \textbf{Evaluation} (10\,\%) --- manually reviewed/final solutions score above automatic/preliminary ones.
+\end{itemize}
+Each dimension penalises missing fields, so sparsely documented events are scored conservatively. Field completeness, physical-consistency, and magnitude-homogeneity checks are handled separately by the automated validation suite (Appendix~\ref{app:spec}). The score maps to the grade bands in Table~\ref{tab:quality_grades}; the weights and bands are configurable defaults rather than an empirically calibrated standard, and should be tuned by the community against representative New Zealand catalogs. Flagged statistical outliers are annotated for caution rather than removed automatically.
 
 \begin{table}[H]
 \centering
@@ -416,14 +452,22 @@ Persistent identifiers make those releases citable. The catalog series carries a
 Processing steps (detection, picking, location, velocity models, magnitude calibration) and provenance are documented following a consistent model of entities, activities, and agents, with software version and execution date as minimum requirements \citep{PROVO}. Uncertainties for time, location, and magnitude are reported as standard deviations (with confidence-ellipse parameters where anisotropic) and always carry the magnitude type code; events without quantified uncertainties are flagged, and historical events may carry a qualitative confidence class (e.g.\ ``well-constrained'', ``felt-only''). Field-level representations are specified in Appendix~\ref{app:spec}.
 
 \subsection{Special Catalog Types}
-Different catalog types need adapted handling to preserve scientific value. In brief: regional research catalogs are ingested as distinct, separately versioned catalogs and cross-referenced --- not silently merged --- with the national catalog, because different processing assumptions can introduce systematic biases; temporary deployments are labelled with their time window and station geometry; historical and pre-instrumental catalogs use qualitative confidence classes and macroseismic intensity fields (Modified Mercalli or EMS-98, \citealp{Grunthal1998}) and form a distinct collection; and derived and synthetic catalogs carry explicit provenance to their sources. Appendix~\ref{app:spec} gives the detailed handling.
+Different catalog types need adapted handling to preserve scientific value:
+\begin{itemize}
+\setlength{\itemsep}{1pt}
+\item \textbf{Regional research catalogs} are ingested as distinct, separately versioned catalogs and cross-referenced --- not silently merged --- with the national catalog, because different processing assumptions can introduce systematic biases.
+\item \textbf{Temporary deployments} are labelled with their time window and station geometry.
+\item \textbf{Historical and pre-instrumental catalogs} use qualitative confidence classes and macroseismic intensity fields (Modified Mercalli or EMS-98, \citealp{Grunthal1998}), and form a distinct collection.
+\item \textbf{Derived and synthetic catalogs} carry explicit provenance to their source versions.
+\end{itemize}
+Appendix~\ref{app:spec} gives the detailed handling.
 
 \subsection{Licensing and Access; FAIR Compliance Indicators}
 To support FAIR reusability, every dataset and metadata record should carry an explicit, machine-readable license \citep{FAIRPrinciples2016, GOFAIR}; for government-funded baseline products a default open license aligned with New Zealand Government Open Access and Licensing (NZGOAL) guidance is recommended, with documented exceptions for embargoed, sensitive, or culturally restricted data \citep{NZGOAL2022}. Access is governed by a role-based model with catalog-level public/registered/restricted designations and, where needed, field-level masking of culturally sensitive locations; all write operations are audited. These mechanisms are detailed in Appendix~\ref{app:spec}. Progress should be tracked against a FAIR compliance matrix that maps each FAIR sub-principle (F1--F4, A1--A2, I1--I3, R1.1--R1.3) to a framework mechanism and a measurable, annually reported indicator --- for example, the percentage of catalogs with a resolvable DOI (F1), mean metadata-completeness (F2), API uptime (A1), and the percentage carrying a machine-readable license (R1.1). The full matrix is given in Table~\ref{tab:fair_matrix} (Appendix~\ref{app:spec}).
 
 \subsection{Aotearoa New Zealand Data Governance: FAIR with CARE}
 \label{sec:care}
-In Aotearoa New Zealand the framework must be implemented consistently with both FAIR and the CARE Principles for Indigenous Data Governance, so that stewardship recognises Indigenous rights, authority, and benefit alongside openness \citep{CAREPrinciples2020}. For catalogs incorporating m\=atauranga-informed interpretations, iwi-relevant records, or sensitive contextual information, governance processes should document appropriate access conditions, attribution, and engagement pathways. The data-level access controls described above (Appendix~\ref{app:spec}) provide one technical mechanism to restrict or mask sensitive fields --- but they are only a mechanism: the appropriate conditions must be determined \emph{with}, not \emph{for}, iwi and hap\=u, who should be engaged as partners and decision-makers from the outset rather than consulted after the design is fixed. Accordingly, the Steering Committee (Section~\ref{sec:steering}) should include representation from relevant M\=aori communities and data-sovereignty advocates, so that CARE is operationalised rather than aspirational.
+In Aotearoa New Zealand, openness operates within Te Tiriti o Waitangi: the Crown--M\=aori partnership creates obligations of governance, protection, and active participation that extend to data about, or of significance to, tangata whenua. Earth Sciences New Zealand is a Crown research entity, so the framework must give effect to those obligations, applying the CARE Principles for Indigenous Data Governance \citep{CAREPrinciples2020} alongside FAIR and consistent with M\=aori data-sovereignty practice \citep{KukutaiTaylor2016}. Concretely, the four CARE principles are operationalised as follows. \emph{Collective benefit}: engagement and benefit-sharing arrangements for catalogs of significance to iwi and hap\=u. \emph{Authority to control}: iwi and hap\=u determine the access and use conditions for their data --- the portal's access controls (Appendix~\ref{app:spec}) only \emph{implement} conditions that iwi and hap\=u set, and never substitute for that authority. \emph{Responsibility}: documented engagement pathways, attribution, and reporting back to communities. \emph{Ethics}: review of culturally sensitive records before release. Here ``m\=atauranga-informed'' means catalog records or interpretations that draw on M\=aori knowledge --- for example, oral-tradition accounts of historical earthquakes or place-based knowledge of shaking and ground effects --- which carry their own provenance and access expectations. To make this real rather than aspirational, iwi and hap\=u must be engaged as partners and decision-makers from the outset, and the Steering Committee (Section~\ref{sec:steering}) must include M\=aori membership with a substantive governance role, not a single advisory seat.
 
 \section{Implementation: Governance, Roadmap, and Funding}
 \label{sec:implementation}
@@ -431,43 +475,67 @@ In Aotearoa New Zealand the framework must be implemented consistently with both
 \subsection{Governance, Roles, and Responsibilities}
 \subsubsection{Steering Committee}
 \label{sec:steering}
-A Steering Committee provides strategic oversight and ensures community ownership. Membership should include Earth Sciences New Zealand, at least two universities with active seismology programmes, a government user (e.g.\ the National Emergency Management Agency), an engineering or insurance representative, an Indigenous data-sovereignty advocate, and an international advisor from a peer organisation (e.g.\ ISC, EMSC, or GFZ). It meets at least quarterly with defined decision-making processes and staggered three-year terms. The Committee approves new data sources for ingestion, ratifies versioning decisions affecting the national record, oversees international partnerships (e.g.\ alignment with EPOS), and commissions annual reporting against FAIR compliance indicators.
+A Steering Committee provides strategic oversight and ensures community ownership. Membership should include Earth Sciences New Zealand, at least two universities with active seismology programmes, a government user (e.g.\ the National Emergency Management Agency), an engineering or insurance representative, M\=aori representation with the mandate to speak to data-sovereignty matters (a substantive governance role, not a single advisory seat; see Section~\ref{sec:care}), and an international advisor from a peer organisation (e.g.\ ISC, EMSC, or GFZ). It meets at least quarterly with defined decision-making processes and staggered three-year terms. The Committee approves new data sources for ingestion, ratifies versioning decisions affecting the national record, oversees international partnerships (e.g.\ alignment with EPOS), and commissions annual reporting against FAIR compliance indicators.
 
 \subsubsection{Data Stewardship Team}
 \label{sec:steward}
-A Data Stewardship Team led by Earth Sciences New Zealand handles day-to-day operations: a Data Stewardship Lead, Data Managers (ingestion, metadata curation, quality review), a Software Engineer (API, infrastructure, security), and a User Support Analyst. External researchers may also submit catalogs through a defined contribution process (Section~\ref{sec:contribution}). These governance roles (contributor, reviewer, maintainer, steward) are distinct from the portal's technical access roles defined in Appendix~\ref{app:spec}.
+A Data Stewardship Team led by Earth Sciences New Zealand handles day-to-day operations: a Data Stewardship Lead, Data Managers (ingestion, metadata curation, quality review), a Software Engineer (API, infrastructure, security), and a User Support Analyst. External researchers may also submit catalogs through a defined contribution process (Section~\ref{sec:contribution}). These governance roles (contributor, reviewer, maintainer) are distinct from the portal's technical access roles defined in Appendix~\ref{app:spec}.
 
 \subsubsection{Catalog Contribution Process}
 \label{sec:contribution}
-External researchers and institutions may submit catalogs for inclusion. Submissions require: catalog name and description, responsible institution and contact, time period and geographic coverage, event count and magnitude range, format and metadata documentation, and a declared license. A two-stage review process applies: technical QC (format validity, completeness score, duplicate check) followed by scientific peer review (methods assessment, comparison with existing catalogs). The expected review timeline is four to eight weeks, with written feedback provided regardless of outcome. Approved catalogs are assigned a DOI and version record.
+External researchers and institutions may submit catalogs for inclusion. Submissions require: catalog name and description, responsible institution and contact, time period and geographic coverage, event count and magnitude range, format and metadata documentation, and a declared license. A two-stage review process applies: technical QC by the Data Stewardship Team (format validity, completeness score, duplicate check) followed by scientific peer review by a standing panel of subject-matter seismologists drawn from the contributing institutions (methods assessment, comparison with existing catalogs). To keep within the four-to-eight-week timeline despite the Committee meeting only quarterly, the Steering Committee sets ingestion policy and approves \emph{categories} of source, while the Team approves individual contributions against that policy and escalates only novel or contentious cases. Written feedback is provided regardless of outcome, and approved catalogs are assigned a DOI and version record.
 
 \subsubsection{Success Metrics and Annual Reporting}
-Progress should be measured annually against indicators including: number of catalogs ingested; total event count and geographic coverage; proportion of catalogs at quality grade~A or above; API uptime (target 99.5\%); registered users; downloads and API queries; and peer-reviewed publications citing the platform or a versioned catalog DOI. Reporting against the FAIR sub-principle indicators (Table~\ref{tab:fair_matrix}) should also be included, and annual reports published openly. Illustrative two-year targets: the full GeoNet national catalog (well over one million events) plus 20 or more additional regional, temporary, and historical catalogs accessible through one interface; 200 or more registered users across the research, engineering, and agency communities; 10 or more research outputs citing a versioned catalog DOI; and API availability exceeding 99\%. These are indicative planning targets, not commitments, and should be revisited once the service is established.
+Progress should be measured annually against indicators including: number of catalogs ingested; total event count and geographic coverage; proportion of catalogs at quality grade~A or above; API uptime (target 99.5\%); registered users; downloads and API queries; and peer-reviewed publications citing the platform or a versioned catalog DOI. Reporting against the FAIR sub-principle indicators (Table~\ref{tab:fair_matrix}) should also be included, and annual reports published openly. Illustrative two-year targets: the full GeoNet national catalog (well over one million events) plus 20 or more additional regional, temporary, and historical catalogs accessible through one interface; 200 or more registered users across the research, engineering, and agency communities; 10 or more research outputs citing a versioned catalog DOI; and API availability approaching the 99.5\% operational target. These are indicative planning targets, not commitments, and should be revisited once the service is established.
 
 \subsection{Roadmap}
 Development proceeds in four phases (Figure~\ref{fig:roadmap}): planning and mobilisation; prototyping and pilot integration; full-scale implementation and public launch; and sustained operation as a national core service with annual review and FAIR compliance reporting.
 
 \begin{figure}[H]
 \centering
-\resizebox{\textwidth}{!}{%
-\begin{tikzpicture}[font=\footnotesize, >={Stealth[round]}]
-\draw[->, very thick, color=tealgreen] (-0.3,0) -- (16.3,0);
-\foreach \x/\t/\d in {%
-  0.3/{Phase 1}/{Planning \& mobilisation\\(0--6 months)\\Governance, schema, architecture},
-  4.3/{Phase 2}/{Prototype \& pilot\\(6--18 months)\\Core portal/API; 5--10 pilot catalogs; training},
-  8.6/{Phase 3}/{Full-scale launch\\(18--36 months)\\Ingest major datasets; event-ID service; DOI minting},
-  12.9/{Phase 4}/{Sustained service\\(36+ months)\\National core service; annual FAIR reporting}} {
-  \fill[midnightgreen] (\x,0) circle (3.2pt);
-  \node[anchor=south west, text=midnightgreen, font=\bfseries] at (\x,0.18) {\t};
-  \node[anchor=north west, align=left, text width=3.7cm] at (\x,-0.18) {\d};
+\begin{tikzpicture}[
+  font=\footnotesize,
+  phase/.style={
+    draw=black, line width=0.4pt, fill=gray!8,
+    rounded corners=2pt, align=center, text width=3.2cm,
+    inner sep=4.5pt, anchor=north
+  },
+  title/.style={font=\footnotesize\bfseries, align=center, anchor=south, text width=3.2cm},
+  milestone/.style={circle, draw=black, line width=0.4pt, fill=gray!25,
+    inner sep=0pt, minimum size=5pt},
+  axis/.style={-{Stealth[length=2mm,width=1.6mm]}, black, line width=0.5pt}
+]
+% phase x-centres, evenly spaced
+\def\xa{0}\def\xb{4}\def\xc{8}\def\xd{12}\def\axisy{0}
+% horizontal timeline axis
+\draw[axis] (\xa-1.7,\axisy) -- (\xd+2.4,\axisy);
+% milestone markers and connector ticks (down to blocks, up to titles)
+\foreach \x in {\xa,\xb,\xc,\xd}{
+  \node[milestone] at (\x,\axisy) {};
+  \draw[black, line width=0.4pt] (\x,\axisy-0.30) -- (\x,\axisy+0.30);
 }
-\end{tikzpicture}}
+% bold phase titles above axis
+\node[title] at (\xa,\axisy+0.34) {Phase~1\\Planning \& mobilisation};
+\node[title] at (\xb,\axisy+0.34) {Phase~2\\Prototype \& pilot};
+\node[title] at (\xc,\axisy+0.34) {Phase~3\\Full-scale launch};
+\node[title] at (\xd,\axisy+0.34) {Phase~4\\Sustained service};
+% timeframes just under axis
+\node[anchor=north, font=\footnotesize\itshape] at (\xa,\axisy-0.30) {0--6 months};
+\node[anchor=north, font=\footnotesize\itshape] at (\xb,\axisy-0.30) {6--18 months};
+\node[anchor=north, font=\footnotesize\itshape] at (\xc,\axisy-0.30) {18--36 months};
+\node[anchor=north, font=\footnotesize\itshape] at (\xd,\axisy-0.30) {36+ months};
+% uniform stacked description blocks below
+\node[phase] at (\xa,\axisy-0.85) {Governance,\\schema, and\\architecture};
+\node[phase] at (\xb,\axisy-0.85) {Core portal/API;\\5--10 pilot catalogs;\\training};
+\node[phase] at (\xc,\axisy-0.85) {Ingest major datasets;\\event-ID service;\\DOI minting};
+\node[phase] at (\xd,\axisy-0.85) {National core\\service; annual\\FAIR reporting};
+\end{tikzpicture}
 \caption{Indicative four-phase roadmap from planning to a sustained national service.}
 \label{fig:roadmap}
 \end{figure}
 
 \subsection{Funding and Resourcing}
-Indicative resourcing for a mature service is on the order of three to four full-time-equivalent (FTE) staff (Section~\ref{sec:steward}), together with cloud or on-premises infrastructure for storage, compute, and backup, and recurring DOI registration fees. A realistic path begins with a smaller team during Phases~1--2 and scales to the full complement at Phase~3. The figures here are indicative of scale, not costed estimates; precise budgets should be developed with host institutions and pursued through research-infrastructure programmes and operational budgets.
+Indicative resourcing for a mature service is on the order of three to four full-time-equivalent (FTE) staff (Section~\ref{sec:steward}) --- a stewardship lead, one to two data managers, a software engineer, and part-time user support --- together with cloud or on-premises infrastructure for storage, compute, and backup, and recurring DOI-registration fees. At New Zealand loaded-salary rates this implies a steady-state operating cost on the order of NZD~0.6--0.9~million per year (lower during the smaller-team Phases~1--2), exclusive of one-off build costs. The natural home is a national research-infrastructure line --- for example, an Earth Sciences New Zealand core-function budget or a research-infrastructure programme such as those administered by MBIE --- so that the service is funded as a standing capability rather than a fixed-term project. Indefinite retention of every versioned release is a growing-storage liability; it is bounded by keeping only changelogs and metadata for superseded \emph{patch} releases, retaining full event tables only for DOI-bearing major and minor versions, and moving older releases to tiered/cold storage. The figures here are indicative of scale, not costed estimates; precise budgets should be developed with the host institution.
 
 \section{Benefits by Stakeholder}
 A coordinated, FAIR-and-CARE catalog capability delivers concrete, audience-specific value:
@@ -477,7 +545,7 @@ A coordinated, FAIR-and-CARE catalog capability delivers concrete, audience-spec
 \item \textbf{Hazard and risk modellers} (e.g.\ the National Seismic Hazard Model) get comparable, documented inputs with consistent magnitudes and uncertainties, reducing the bespoke harmonisation that the 2022 NSHM required \citep{NSHM2022BSSA}.
 \item \textbf{Engineering and insurance} users obtain trusted, traceable inputs with explicit quality grades and licences, supporting defensible design and risk decisions.
 \item \textbf{Emergency management and the public} benefit from clearer, better-documented event information and a single authoritative point of discovery.
-\item \textbf{Iwi and hap\=u} are engaged as partners in governance, with technical mechanisms (access conditions, attribution, masking) that operationalise CARE.
+\item \textbf{Iwi and hap\=u} are engaged as partners in governance, setting the access and attribution conditions for data of significance to them, which the platform then implements (Section~\ref{sec:care}).
 \item \textbf{The national system} reduces duplication, preserves at-risk legacy and temporary datasets, and aligns New Zealand with international best practice \citep{EPOSSeisTCS}.
 \end{itemize}
 
@@ -486,7 +554,7 @@ We anticipate, and address, the main objections to this proposal:
 \begin{itemize}
 \setlength{\itemsep}{2pt}
 \item \textbf{``Isn't this duplicating GeoNet?''} No. The framework is an aggregation and curation layer over GeoNet and the many catalogs outside it; GeoNet remains the authoritative operational source and a primary data provider (Figure~\ref{fig:architecture}).
-\item \textbf{``Who pays once the establishment funding ends?''} Long-term sustainability is the reason for the governance and funding model in Section~\ref{sec:implementation}: a hosted national core service with a small standing team, not a project that ends with a grant.
+\item \textbf{``Who pays once the establishment funding ends?''} The service is designed as a standing national capability --- a small team of three to four FTE plus infrastructure (Section~\ref{sec:implementation}, Funding), hosted on a core-function or research-infrastructure budget --- not a project that ends with a grant. An indicative steady-state cost (order NZD~0.6--0.9~million per year) and a bounded-retention storage policy are given there.
 \item \textbf{``What if researchers don't contribute their catalogs?''} The contribution process is low-friction and offers tangible incentives --- DOIs, citations, increased visibility, and quality feedback --- and the system delivers value from GeoNet and pilot catalogs from day one.
 \item \textbf{``Why not just use EPOS, ISC, or ComCat?''} Those systems are complementary and the framework is designed to interoperate with them, but none curates New Zealand's regional, temporary, and historical catalogs or addresses CARE obligations; a national capability is still required.
 \item \textbf{``Will standardisation flatten legitimate scientific differences?''} No. Alternative solutions are preserved with lineage, regional catalogs are cross-referenced rather than silently merged, and merge strategies are explicit and reproducible.
@@ -506,7 +574,7 @@ We welcome feedback on this draft and expressions of interest in participating i
 
 \section*{Data and Code Availability}
 \addcontentsline{toc}{section}{Data and Code Availability}
-In keeping with the FAIR principles it advocates, the material supporting this white paper is intended to be openly available. The prototype portal source code, the canonical metadata schema, and the controlled parameter lexicon are to be released under an open license at \texttt{[repository URL to be inserted]}, and a citable version of this document will be assigned a DOI (\texttt{[DOI to be inserted]}). The earthquake catalogs used as examples are available from their respective providers: the GeoNet national catalog \citep{GeoNetEqCatalogue}, USGS ComCat \citep{usgs_comcat}, and the Swiss Seismological Service \citep{sed_report}.
+In keeping with the FAIR principles it advocates, the material supporting this white paper is intended to be openly available. The prototype portal source code, the canonical metadata schema, and the controlled parameter lexicon are released under the MIT license at \url{https://github.com/KennyGraham1/catalogofcatalogs} (documentation at \url{https://catalogofcatalogs.readthedocs.io/}), with tagged releases archived under a Zenodo DOI. A citable version of this white paper will likewise be deposited with a DOI. The earthquake catalogs used as examples are available from their respective providers: the GeoNet national catalog \citep{GeoNetEqCatalogue}, USGS ComCat \citep{usgs_comcat}, and the Swiss Seismological Service \citep{sed_report}.
 
 \section*{Acknowledgements}
 We thank participants in the 2023 and 2024 workshops for their contributions, and colleagues across Earth Sciences New Zealand and partner universities for their ongoing input to this framework.
@@ -648,10 +716,21 @@ Role assignments are managed by Administrators and recorded in an audit log; a r
 \textbf{Audit and compliance.} All write operations (catalog creation, import, merge, deletion) are recorded with the authenticated user identity, timestamp, and operation details; read access to restricted catalogs is similarly logged. Where usage agreements are attached to a catalog (for example, a requirement to cite a companion publication), the agreement is presented at download time and acceptance is recorded.
 
 \subsection{Uncertainty Representation}
-Origin location and time uncertainties are reported as standard deviations: \texttt{time\_uncertainty} (seconds), \texttt{horizontal\_uncertainty} (kilometres), and \texttt{depth\_uncertainty} (kilometres). Where horizontal uncertainty is anisotropic, the semi-major and semi-minor axes of the 68\% confidence ellipse and its azimuth are reported, mapping directly to QuakeML \texttt{OriginUncertainty} elements \citep{QuakeML}. Magnitude uncertainties are reported as the standard deviation on the stated scale, and the magnitude type code must always accompany the value. Events without quantified uncertainties carry a boolean \texttt{uncertainty\_available} field set to false; historical events may substitute a qualitative confidence class. When events are merged, uncertainty-weighted averaging combines standard deviations by inverse-variance weighting, while priority/quality strategies retain the selected solution's uncertainty and record alternatives; the merge log documents the strategy and resulting uncertainty.
+Origin location and time uncertainties are reported as standard deviations: \texttt{time\_uncertainty} (seconds), \texttt{horizontal\_uncertainty} (kilometres), and \texttt{depth\_uncertainty} (kilometres). Where horizontal uncertainty is anisotropic, the semi-major and semi-minor axes of the confidence ellipse, its azimuth, and the stated confidence level (conventionally 68\%) are reported, mapping to QuakeML \texttt{OriginUncertainty} elements \citep{QuakeML}. Magnitude uncertainties are reported as the standard deviation on the stated scale, and the magnitude type code must always accompany the value. Events without quantified uncertainties carry a boolean \texttt{uncertainty\_available} field set to false; historical events may substitute a qualitative confidence class. When events are merged, the averaging strategy combines location, time, and magnitude by inverse-variance weighting; because agency solutions for one event are typically correlated rather than independent, the merged uncertainty is reported conservatively --- not below the smallest contributing value --- rather than the smaller independent-combination result. Priority and quality strategies retain the selected solution's uncertainty and record alternatives; the merge log documents the strategy and resulting uncertainty.
 
 \subsection{Quality Checks and Full Grade Scheme}
-Representative automated checks include: events ordered chronologically; no future-dated events; depth within a physically plausible range for the region (e.g.\ $-5$ to 1000\,km, the negative bound allowing for events above the sea-level datum); magnitude within a plausible range for the declared region; uncertainty values non-negative and within parameter-specific sanity bounds (for example, horizontal uncertainty not exceeding the catalog's declared spatial extent, and magnitude uncertainty below a configurable ceiling such as 1.0 magnitude unit); no coordinate pair repeated for distinct events at an identical time; station count $\geq$\,5 for the event to be considered well-constrained; and azimuthal gap $<$\,180° for reliable depth estimates \citep{usgs_comcat}. Results are summarised as passed, warning, or failed. The full eight-band grade scheme underlying the summary in Table~\ref{tab:quality_grades} is given in Table~\ref{tab:quality_grades_full}.
+Representative automated checks include:
+\begin{itemize}
+\setlength{\itemsep}{1pt}
+\item events ordered chronologically, with no future-dated events;
+\item depth within a physically plausible range for the region --- for New Zealand, about $-5$ to 700\,km, covering Hikurangi--Kermadec subduction depths and allowing for events above the sea-level datum (a higher default applies to global catalogs);
+\item magnitude within a plausible range for the declared region;
+\item uncertainty values non-negative and within parameter-specific sanity bounds (for example, horizontal uncertainty not exceeding the catalog's declared spatial extent, and magnitude uncertainty below a configurable ceiling such as 1.0 unit);
+\item no coordinate pair repeated for distinct events at an identical time (duplicate detection);
+\item station count $\geq$\,5 for an event to be considered well-constrained; and
+\item azimuthal gap $<$\,180° for reliable depth estimates \citep{usgs_comcat}.
+\end{itemize}
+Results are summarised as passed, warning, or failed. The full eight-band grade scheme underlying the summary in Table~\ref{tab:quality_grades} is given in Table~\ref{tab:quality_grades_full}.
 
 \begin{table}[H]
 \centering
@@ -713,13 +792,13 @@ R1.3 & Conformance to FDSN/QuakeML community standards & \% of catalogs passing 
 \end{tabular}
 \end{table}
 
-\section{Summary of Workshop Tables 1--8}
+\section{Summary of Workshop Themes}
 \label{app:workshop}
 This appendix summarises the full set of workshop discussions captured across eight interactive tables. The content reflects community perspectives on minimum catalog attributes, metadata requirements, processing concerns, governance needs, and priorities for a national FAIR-aligned framework for earthquake catalogs in Aotearoa New Zealand.
 \begin{table}[H]
 \centering
 \small
-\caption{Summary of Key Themes from Workshop Tables 1--8}
+\caption{Summary of Key Themes from the Workshop Discussions}
 \setlength{\tabcolsep}{6pt}
 \renewcommand{\arraystretch}{1.15}
 \begin{tabular}{p{3.2cm} p{11cm}}
@@ -758,6 +837,31 @@ More metadata fields and filters; better uncertainty representation; link with 2
 \end{table}
 
 
+
+\section{Glossary}
+\label{app:glossary}
+\begin{description}
+\setlength{\itemsep}{1pt}
+\item[ANSS / ComCat] Advanced National Seismic System; its Comprehensive Earthquake Catalog (USGS).
+\item[Azimuthal gap] the largest angle, seen from an epicentre, between adjacent recording stations; a smaller gap means a better-constrained location.
+\item[CARE] Collective benefit, Authority to control, Responsibility, Ethics --- principles for Indigenous data governance.
+\item[Conflation / merge] combining records of the same earthquake from different catalogs into one unified event.
+\item[Declustering] separating mainshock--aftershock sequences from background seismicity (e.g.\ the Gardner--Knopoff method).
+\item[DOI] Digital Object Identifier --- a persistent, citable identifier for a dataset or document.
+\item[EMSC / ISC] European-Mediterranean Seismological Centre; International Seismological Centre.
+\item[EPOS] European Plate Observing System --- a coordinated FAIR data infrastructure for solid-Earth science.
+\item[FAIR] Findable, Accessible, Interoperable, Reusable --- principles for scientific data management.
+\item[FDSN] International Federation of Digital Seismograph Networks; its web services are a global standard for seismic data access.
+\item[GeoNet] New Zealand's geological-hazard monitoring programme, operated by Earth Sciences New Zealand.
+\item[$M_c$] magnitude of completeness --- the lowest magnitude above which all earthquakes in a catalog are reliably recorded.
+\item[$M_w$, $M_L$] moment magnitude and local (Richter) magnitude --- two magnitude scales.
+\item[NSHM] (Aotearoa New Zealand) National Seismic Hazard Model.
+\item[OBS] ocean-bottom seismometer --- a seafloor instrument used in temporary offshore deployments.
+\item[Provenance] the documented origin and processing history of a dataset (inputs, methods, software, agents).
+\item[PSHA] probabilistic seismic hazard analysis.
+\item[QuakeML / StationXML] standard XML formats for exchanging earthquake parameters and station metadata.
+\item[WFS] Web Feature Service --- an OGC standard for serving geographic features.
+\end{description}
 
 \bibliographystyle{apalike}
 \bibliography{catalogBib}

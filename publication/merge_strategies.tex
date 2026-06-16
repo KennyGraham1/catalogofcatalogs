@@ -43,7 +43,7 @@ has emerged across the community.  Different groups have developed independent
 solutions—from the rule-based proximity approaches of the
 \citeauthor{NCEDCComCat}~(\citeyear{NCEDCComCat}) and the ISC bulletin
 \citep{Bondar2011}, to the graph-theoretic frameworks of
-\citet{Benz2019}, to the physics-based nearest-neighbour discriminant of
+\citet{Patton2016}, to the physics-based nearest-neighbour discriminant of
 \citet{Tanaka2022}—each optimised for different data volumes, network
 configurations, and seismicity regimes.  The goal of this review is to
 synthesise the methodological state of the art into a coherent framework that
@@ -224,7 +224,7 @@ grid (hash grid), k-d tree, or R-tree, allowing events within $\Delta d_{\max}$
 to be retrieved in $O(\log n)$ time.  Combined with a time-sorted event list
 and an early-exit rule when the candidate's origin time exceeds
 $t_i + \Delta t_{\max}$, the algorithm achieves $O(n \log n)$ overall
-complexity in the typical case \citep{Benz2019}.
+complexity in the typical case \citep{Patton2016}.
 
 Grid-based indexes use a fixed cell size calibrated to the distance threshold.
 At high latitudes, degrees of longitude subtend shorter distances, so the cell
@@ -299,7 +299,7 @@ early-exit threshold (evaluated at $M_i$ alone), causing valid matches to be
 discarded.  The conservative fix is to replace $f_t(M_i)$ in
 \eqref{eq:earlyexit} with $f_t(\max(M_i, M_j))$, or equivalently to use the
 maximum expected candidate magnitude (e.g.\ $M_i + 2$) as a conservative upper
-bound when evaluating the exit condition \citep{Benz2019}.
+bound when evaluating the exit condition \citep{Patton2016}.
 
 \paragraph{Limitation: dense aftershock sequences.}
 During intense aftershock sequences the inter-event time between consecutive
@@ -374,7 +374,7 @@ discrimination \citep{Hainzl2016}.  It also requires a minimum \catalog\ length
 The methodologically strongest general-purpose approach constructs an undirected
 association graph $G = (V, E)$ in which each node $v \in V$ is an origin report
 and each edge $e \in E$ connects a pair of reports that satisfy a proximity
-criterion \citep{Benz2019, Zaliapin2013}.  Connected components of $G$,
+criterion \citep{Patton2016, Zaliapin2013}.  Connected components of $G$,
 recoverable in $O(n\,\alpha(n))$ time via the Union-Find (Disjoint-Set Union)
 algorithm \citep{Tarjan1975} — where $\alpha$ is the inverse Ackermann
 function and is effectively constant for all practical $n$ — correspond to
@@ -401,11 +401,11 @@ implementation this is only guaranteed when events are processed strictly in
 time order and no candidate is marked processed before its later matches are
 evaluated.  When the sweep marks B as processed upon matching with A, a
 subsequent evaluation of C against B is never performed, and the A-B-C cluster
-is incorrectly split \citep{Benz2019}.  The graph approach has no such
+is incorrectly split \citep{Patton2016}.  The graph approach has no such
 pathology: transitivity is guaranteed by the connected-component structure.
 
 \paragraph{Integer linear programming refinement.}
-\citet{Benz2019} extended the graph approach by applying Integer Linear
+\citet{Patton2016} extended the graph approach by applying Integer Linear
 Programming (ILP) to resolve ambiguous components — cases where a connected
 component may span two closely spaced but genuinely distinct earthquakes.  The
 ILP minimises the total number of source events $k$ required to explain all
@@ -429,10 +429,10 @@ The ILP constraint that \emph{no two reports from the same network belong to the
 same source event} is the algorithmic expression of what we term the
 \emph{same-agency duplicate flag}: if two records from the same agency fall
 within the proximity window, they almost certainly describe two distinct physical
-earthquakes, not two observations of one \citep{Benz2019, Tanaka2022}.
+earthquakes, not two observations of one \citep{Patton2016, Tanaka2022}.
 
 The USGS NEIC Hydra production system uses a graph-association framework
-conceptually equivalent to the first stage of \citet{Benz2019}
+conceptually equivalent to the first stage of \citet{Patton2016}
 \citep{usgs_comcat}.
 
 % -----------------------------------------------------------------------------
@@ -1174,9 +1174,9 @@ and re-evaluated before the event is included in the merged output.
   $|\Delta M_\mathrm{w}|$: two authoritative sources & $> 0.3$ & W & \citet{Si2024} \\
   $|\Delta M_\mathrm{w}|$: converted vs.\ observed & $> 0.5$ & W & \citet{Grunthal2016} \\
   Magnitude range in group & $> 1.0$ (for $M < 5$) & W & \citet{Tanaka2022} \\
-  Group size (events from different networks) & $> 10$ & E & \citet{Benz2019} \\
-  Same network appears twice in group & any & E & \citet{Benz2019} \\
-  Spatial epicentre spread & $> 100$\,km for $M < 5$ & W & \citet{Benz2019} \\
+  Group size (events from different networks) & $> 10$ & E & \citet{Patton2016} \\
+  Same network appears twice in group & any & E & \citet{Patton2016} \\
+  Spatial epicentre spread & $> 100$\,km for $M < 5$ & W & \citet{Patton2016} \\
   Depth range within group & $> 50$\,km (shallow) & W & \citet{ISCGEM2018} \\
   Wide time spread (informational) & $> 30$\,s for $M < 5$ & I & \citet{ISCGEM2018} \\
 \end{longtable}
@@ -1189,7 +1189,7 @@ almost certainly spans two distinct physical earthquakes.  This is because any
 competent network applies intra-network deduplication upstream of its data
 submission; consequently, two records from the same network in the same time-
 distance window represent genuinely distinct detected events, not two reports
-of one event \citep{Benz2019}.  The group should be dissolved and a secondary
+of one event \citep{Patton2016}.  The group should be dissolved and a secondary
 pairwise pass performed on its members, constrained by the same-agency rule as
 in the ILP constraint \eqref{eq:ilp}.
 
@@ -1199,7 +1199,7 @@ When a group fails validation (e.g.\ because of a same-agency clash or
 anomalous magnitude range), the correct response is not to emit all members as
 singletons, but to attempt a constrained re-grouping.  A one-level secondary
 greedy pass within the failed group — where the same-agency rule is enforced as
-a hard constraint — can recover valid sub-groups \citep{Benz2019, Tanaka2022}.
+a hard constraint — can recover valid sub-groups \citep{Patton2016, Tanaka2022}.
 Sub-groups that still fail validation after the secondary pass are emitted as
 singletons with a QC flag recording the failed-group origin.
 
@@ -1240,7 +1240,7 @@ implementation status.
   \endhead
   \bottomrule
   \endfoot
-  Event association & Graph DSU \citep{Benz2019} & Greedy forward-sweep & Medium \\
+  Event association & Graph DSU \citep{Patton2016} & Greedy forward-sweep & Medium \\
   Dense sequences & Nearest-neighbour $\eta$ \citep{Tanaka2022} & Adaptive windows & Low \\
   Magnitude conversion & GOR / non-linear \citep{Grunthal2016, ISCGEM2018} & Linear OLS \citep{Scordilis2006} & \textbf{High} \\
   Multi-estimate averaging & $\alpha$-trimmed median \citep{ISCGEM2018} or Bayesian \citep{Si2024} & Priority selection & Medium \\
