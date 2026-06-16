@@ -7,6 +7,22 @@ import { TextEncoder, TextDecoder } from 'util'
 global.TextEncoder = TextEncoder
 global.TextDecoder = TextDecoder
 
+// Polyfill the File (and Blob) globals for the Node test environment.
+// `File` only became a Node.js global in Node 20; on the Node 18 CI leg it is
+// available solely via `node:buffer`. Without this, @jest-environment-node
+// tests that use `new File(...)` (e.g. file-upload.test.ts) fail with
+// "ReferenceError: File is not defined" on Node 18 while passing on Node 20.
+if (typeof global.File === 'undefined' || typeof global.Blob === 'undefined') {
+  try {
+    const { File: NodeFile, Blob: NodeBlob } = require('node:buffer')
+    if (typeof global.File === 'undefined' && NodeFile) global.File = NodeFile
+    if (typeof global.Blob === 'undefined' && NodeBlob) global.Blob = NodeBlob
+  } catch (e) {
+    // node:buffer File/Blob unavailable (very old Node); node-env File tests
+    // will then fail loudly rather than silently passing.
+  }
+}
+
 // Polyfill Request/Response/Headers for Next.js server components
 // Only apply polyfills if running on Node.js 18+ where undici is compatible
 // In CI (Node 18+), these will work; locally on older Node, integration tests may be skipped
