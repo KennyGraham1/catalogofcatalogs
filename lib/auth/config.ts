@@ -9,9 +9,16 @@ import { getUserByEmail, verifyPassword, updateLastLogin, toSafeUser, isJwtVersi
 import { UserRole } from './types';
 import { writeAuditLog } from '../audit';
 
-// Validate NEXTAUTH_SECRET at module load time
-// This ensures the application fails fast if the secret is not configured
-if (typeof window === 'undefined' && process.env.NODE_ENV !== 'test') {
+// Validate NEXTAUTH_SECRET at module load time so the application fails fast if
+// the secret is not configured at runtime. The check is skipped during
+// `next build` (NEXT_PHASE === 'phase-production-build'), where importing this
+// module to collect page data must not require deployment secrets; the secret
+// is still enforced when the server actually runs.
+if (
+  typeof window === 'undefined' &&
+  process.env.NODE_ENV !== 'test' &&
+  process.env.NEXT_PHASE !== 'phase-production-build'
+) {
   const secret = process.env.NEXTAUTH_SECRET;
 
   if (!secret) {

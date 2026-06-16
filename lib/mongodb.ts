@@ -8,15 +8,11 @@
 import { MongoClient, Db, Collection, MongoClientOptions, ClientSession } from 'mongodb';
 import type { Document } from 'mongodb';
 
-// MongoDB connection URI from environment variable.
-// In production this must be set explicitly — silently falling back to localhost
-// would connect to a non-existent database and surface as confusing query errors.
-if (typeof window === 'undefined' && process.env.NODE_ENV === 'production' && !process.env.MONGODB_URI) {
-  throw new Error(
-    'MONGODB_URI environment variable is required in production. ' +
-    'Set it to a MongoDB connection string (mongodb:// or mongodb+srv://).'
-  );
-}
+// MongoDB connection URI from the environment, resolved lazily so this module
+// can be *imported* during `next build` without a database configured. The
+// production requirement is enforced at connection time (see getMongoClient)
+// rather than at import time — an import-time throw crashes the build while
+// Next.js collects page data for any route that imports this module.
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 
 // Detect if using Atlas (mongodb+srv://)
@@ -148,6 +144,17 @@ async function connectWithRetry(retryCount = 0): Promise<MongoClient> {
 export async function getMongoClient(): Promise<MongoClient> {
   if (typeof window !== 'undefined') {
     throw new Error('MongoDB client cannot be used on the client side');
+  }
+
+  // In production a real URI must be configured. Enforced here, at connection
+  // time, rather than at import time so that `next build` can import this
+  // module without a database; silently using localhost in production would
+  // otherwise surface as confusing query errors.
+  if (process.env.NODE_ENV === 'production' && !process.env.MONGODB_URI) {
+    throw new Error(
+      'MONGODB_URI environment variable is required in production. ' +
+      'Set it to a MongoDB connection string (mongodb:// or mongodb+srv://).'
+    );
   }
 
   // Return existing client if connected
