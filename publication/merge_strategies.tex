@@ -8,6 +8,8 @@
 \usepackage{float}
 \usepackage[hidelinks,bookmarksnumbered]{hyperref}
 \usepackage[nameinlink,noabbrev]{cleveref}
+\usepackage{graphicx}
+\setlength{\emergencystretch}{2em}
 
 % Consistent terminology
 \newcommand{\catalog}{catalog}
@@ -66,8 +68,8 @@ distinct but are frequently conflated in practice:
 \end{enumerate}
 
 The distinction matters because applying a magnitude conversion formula
-\emph{before} the association step—for instance to make thresholds
-magnitude-scale-independent—introduces feedback loops: converted magnitudes may
+\emph{before} the association step---for instance, to make thresholds
+independent of magnitude scale---introduces feedback loops: converted magnitudes may
 shift an event across an association threshold, altering which pairs are grouped,
 which in turn changes the sample from which conversion coefficients are estimated
 \citep{Storchak2013, Grunthal2016}.  The correct order is always: associate
@@ -189,7 +191,7 @@ documented threshold choices from major operational systems.
            inter-network duplicate pairs only; intra-network deduplication is
            assumed to have been handled upstream by each contributing agency.}
   \label{tab:windows}
-  \begin{tabular}{p{4.8cm}lll}
+  \begin{tabular}{p{4.3cm}ccp{3.1cm}}
     \toprule
     System / Study & $\Delta t$ (s) & $\Delta d$ (km) & Reference \\
     \midrule
@@ -413,11 +415,12 @@ edges in a component, subject to the constraint that no two reports assigned to
 the same source event originate from the same network:
 
 \begin{equation}
-  \text{minimise} \quad k
-  \quad \text{subject to} \quad
-  \forall (i,j) \in E : \mathrm{source}(i) = \mathrm{source}(j),
-  \quad
-  \forall i,j : \mathrm{net}(i) = \mathrm{net}(j) \Rightarrow \mathrm{source}(i) \neq \mathrm{source}(j).
+  \begin{aligned}
+    \text{minimise} \quad & k \\
+    \text{subject to} \quad
+      & \forall (i,j) \in E : \mathrm{source}(i) = \mathrm{source}(j), \\
+      & \forall i,j : \mathrm{net}(i) = \mathrm{net}(j) \Rightarrow \mathrm{source}(i) \neq \mathrm{source}(j).
+  \end{aligned}
   \label{eq:ilp}
 \end{equation}
 
