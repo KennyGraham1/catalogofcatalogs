@@ -48,8 +48,6 @@ Catalogues produced by temporary deployments and targeted experiments make up a 
 - **Not a census.** Because earthquake-catalogue production is decentralised and continuous, a residual long tail remains: likely-missing material includes further PhD-thesis catalogues, additional dedicated catalogues for NZ Mw≥6 aftershock responses since 1960, more geothermal fields (Ohaaki, Mokai, Ngāwhā), and the **SISIE/MOANA/SHIRE** offshore experiments not yet retained as distinct event catalogues.
 - **Discoverability is the core problem.** Temporary-deployment and regional catalogues live across journal supplements, Zenodo, IRIS/EarthScope, and FDSN network DOIs: the fragmentation the Registry exists to fix.
 - **Heterogeneity.** Magnitude scales vary (ML, Mw via GeoNet CMT “MwNZ” from 2003-08, the homogenised MLNZ20→Mw used for NSHM 2022); magnitude of completeness (Mc) is rarely stated and is spatially variable; depths span 0–~600 km for subduction seismicity but many regional catalogues are shallow-crustal only.
-- **A few entries are not conventional event lists** (e.g. the NZNSN *waveform* dataset; the `nz3drx` 3-D *location method* within the GeoNet DOI), they are included for completeness and flagged in their records.
-- **A few entries are provisional** (e.g. the 2013 Seddon / Lake Grassmere and 2009 Dusky Sound response deployments, and two forecast/test-centre catalogues), included pending a clearly attributable standalone dataset.
 
 ---
 
@@ -1254,7 +1252,7 @@ A dedicated double-difference (HypoDD) relocated earthquake catalogue for two Ta
 - **Data source:** Events located by the local Rotokawa geothermal-field seismic network (operator monitoring), 2008-2012; located using local-network arrival-time picks. Interpreted in the context of deep fluid reinjection (e.g. Nga Awa Purua power station) and production records.
 - **Availability:** available (DOI) · DOI [10.1016/j.geothermics.2014.11.001](https://doi.org/10.1016/j.geothermics.2014.11.001)
 
-A field-specific induced-microseismicity catalogue for the Rotokawa geothermal field (TVZ) covering mid-2008 to end-2012, interpreted as injection-induced via cooling-driven reservoir contraction (reinjected fluid ~200 C cooler than the reservoir). It documents the spatial-temporal variation of microseismicity and its close correlation with deep reinjection rate. It is distinct from the inventoried Rotokawa matched-filter catalogue (Hopp et al. 2020, 2012-2015) and the Mroczek et al. 2020 anisotropy catalogue (2012-2015): different time window and detection approach (local-network locations rather than 2012-2015 array template matching).
+A field-specific induced-microseismicity catalogue for the Rotokawa geothermal field (TVZ) covering mid-2008 to end-2012, interpreted as injection-induced via cooling-driven reservoir contraction (reinjected fluid ~200 C cooler than the reservoir). It documents the spatial-temporal variation of microseismicity and its close correlation with deep reinjection rate. It is distinct from the inventoried Rotokawa matched-filter catalogue (Hopp et al. 2020, 2012-2015): a different time window and detection approach (local-network locations rather than 2012-2015 array template matching).
 
 **Key references:**
 - Sherburn, S., Sewell, S.M., Bourguignon, S., Cumming, W., Bannister, S., Bardsley, C., Winick, J., Quinao, J., Wallis, I.C. (2015). Microseismicity at Rotokawa geothermal field, New Zealand, 2008-2012. Geothermics, 54, 23-34. https://doi.org/10.1016/j.geothermics.2014.11.001

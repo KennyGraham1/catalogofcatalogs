@@ -332,8 +332,6 @@ W(String.raw`\section{Coverage gaps and FAIR weaknesses}\label{sec:gaps}
 \item \textbf{Not a census.} Because earthquake-catalogue production is decentralised and continuous, a residual long tail remains: likely-missing material includes further PhD-thesis catalogues, additional dedicated catalogues for New Zealand $M_w\!\geq\!6$ aftershock responses since 1960, more geothermal fields (Ohaaki, Mokai, Ng\=awh\=a), and the SISIE/MOANA/SHIRE offshore experiments not yet retained as distinct event catalogues.
 \item \textbf{Discoverability is the core problem.} Temporary-deployment and regional catalogues live across journal supplements, Zenodo, IRIS/EarthScope, and FDSN network DOIs: the fragmentation a registry exists to fix.
 \item \textbf{Heterogeneity.} Magnitude scales vary ($M_L$; $M_w$ via the GeoNet moment-tensor catalogue from 2003; the homogenised $M_{LNZ20}\!\rightarrow\!M_w$ used for NSHM 2022); the magnitude of completeness $M_c$ is rarely stated and is spatially variable; depths span 0--$\sim$600\,km for subduction seismicity, while many regional catalogues are shallow-crustal only.
-\item \textbf{A few entries are not conventional event lists} (e.g.\ the National Seismograph Network \emph{waveform} dataset; the \texttt{nz3drx} 3-D \emph{location method} carried within the GeoNet catalogue DOI). They are included for completeness and flagged in their records.
-\item \textbf{A few entries are provisional} (e.g.\ the 2013 Seddon / Lake Grassmere and 2009 Dusky Sound response deployments, and two forecast / test-centre catalogues), included pending a clearly attributable standalone dataset.
 \end{itemize}`);
 
 // ===================== 7. THE INVENTORY ==================================
