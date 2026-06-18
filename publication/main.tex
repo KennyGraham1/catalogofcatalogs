@@ -96,11 +96,13 @@ Earthquake catalogues are the cornerstone of seismology and the shared evidence 
 In Aotearoa New Zealand that evidence base is fragmented. GeoNet curates the authoritative national catalogue, with broad coverage and open access through web and programmatic services \citep{GeoNetEqCatalogue, GeoNetFDSN, GeoNetAPI}; but its location quality and completeness vary markedly across the country with station density \citep{WarrenSmith2025}, and metadata conventions have evolved over time. Alongside it sit many high-value catalogues that are effectively invisible to the national system:
 \begin{itemize}
 \setlength{\itemsep}{1pt}
-\item regional and volcano-specific catalogues, for example, the consistent, high-precision Taup\={o} Volcanic Zone catalogue of 86{,}579 events \citep{Illsley2025};
-\item temporary aftershock and ocean-bottom deployments with lower magnitude thresholds;
-\item historical and pre-instrumental compilations from written and oral records; and
-\item derived and synthetic catalogues built for hazard and risk modelling.
+\item regional and volcano-specific catalogues built with dense local networks or specialised methods, for example the consistent, high-precision Taup\={o} Volcanic Zone catalogue of 86{,}579 events \citep{Illsley2025}, central Alpine Fault microseismicity from the SAMBA borehole array \citep{Michailos2019}, and nested-tomography relocations of Hikurangi subduction seismicity \citep{AzizZanjani2021};
+\item temporary aftershock and ocean-bottom deployments with lower magnitude thresholds, such as the dense relocations of the 2016 Kaik\=oura aftershock sequence \citep{Lanza2019} and the offshore HOBITSS ocean-bottom catalogue on the northern Hikurangi margin \citep{Yarce2019};
+\item historical and pre-instrumental compilations from written and oral records, including Eiby's annotated list of New Zealand earthquakes from 1460 \citep{Eiby1968a}, the \emph{Atlas of Isoseismal Maps of New Zealand Earthquakes} \citep{Downes1995}, and revised magnitudes for 1901--1993 \citep{Dowrick1998}; and
+\item derived and synthetic catalogues built for hazard and risk modelling, from the magnitude-homogenised catalogue prepared for the 2022 National Seismic Hazard Model \citep{Christophersen2024} to multi-hundred-thousand-year RSQSim synthetic catalogues \citep{Shaw2021}.
 \end{itemize}
+
+These are not isolated exceptions. A companion inventory covering 1960--2026 identifies at least 80 such catalogues---spanning regional and volcano-seismic networks, temporary onshore and offshore deployments, aftershock responses, historical compilations, and hazard-model datasets---and the true number is higher still. Temporary deployments alone are the single largest group, yet they remain among the least discoverable through the national system (see Data and Code Availability).
 
 Because these catalogues use different formats, identifiers, magnitude scales, and metadata, combining them is manual and error-prone. The 2022 National Seismic Hazard Model illustrates the cost: a flagship national product required a dedicated effort to standardise magnitudes across sources before they could be used \citep{NSHM2022BSSA, Christophersen2024}. The consequences of the status quo are lost researcher time, reduced reproducibility, and less transparent uncertainty in decisions that can affect public safety and major infrastructure.
 
@@ -151,14 +153,15 @@ The framework is shaped by concrete user needs identified at the workshops: gain
   \node[cat] (t) at (0.95,3.50) {Taup\=o};
   \node[cat] (a) at (0.95,2.70) {Aftershock};
   \node[cat] (h) at (0.95,1.90) {Historical};
-  \node[hub] (H) at (4.20,3.10) {FAIR portal \& API};
+  \node[cat] (m) at (0.95,1.10) {\itshape + many more};
+  \node[hub] (H) at (4.20,3.05) {FAIR portal \& API};
   % Clean feed: each box -> vertical bus (plain line); single arrow bus -> hub.
   \def\busx{2.45}
   \coordinate (bt) at (\busx,4.30); % top of bus (GeoNet row)
-  \coordinate (bb) at (\busx,1.90); % bottom of bus (Historical row)
-  \coordinate (bj) at (\busx,3.10); % junction, aligned to hub centre
+  \coordinate (bb) at (\busx,1.10); % bottom of bus (+ many more row)
+  \coordinate (bj) at (\busx,3.05); % junction, aligned to hub centre
   \draw[feed] (bt) -- (bb);                 % the collecting bus
-  \foreach \n in {g,t,a,h} {
+  \foreach \n in {g,t,a,h,m} {
      \draw[feed] (\n.east) -- (\n.east -| bt);
   }
   \draw[arr] (bj) -- (H.west);              % single arrow into hub
@@ -167,7 +170,7 @@ The framework is shaped by concrete user needs identified at the workshops: gain
 \end{scope}
 
 \end{tikzpicture}
-\caption{The problem and the opportunity. Today, New Zealand's earthquake catalogues are developed independently and combined manually. The proposed framework adds a coordinating layer that makes them interoperable through shared standards, a common portal, and a programmatic API.}
+\caption{The problem and the opportunity (representative types shown; the full inventory lists more than 80 catalogues). Today, New Zealand's earthquake catalogues are developed independently and combined manually. The proposed framework adds a coordinating layer that makes them interoperable through shared standards, a common portal, and a programmatic API.}
 \label{fig:fragmented}
 \end{figure}
 
@@ -207,20 +210,20 @@ Derived / international & NSHM-derived snapshots; ISC, ComCat, EMSC combined cat
 \end{tabular}
 \end{table}
 
-Mature international systems provide useful reference points: the USGS Advanced National Seismic System Comprehensive Earthquake Catalog (ComCat) federates 100+ networks \citep{usgs_comcat}; the Swiss Seismological Service couples a dense network with cross-border data \citep{sed_report}; the European-Mediterranean Seismological Centre (EMSC) and the International Seismological Centre (ISC) aggregate across many agencies \citep{emsc_webservices, isc_data_collection}; and EPOS provides standardised FAIR services across Europe \citep{EPOSSeisTCS}. These systems share common standards, notably the International Federation of Digital Seismograph Networks (FDSN) web services and the QuakeML data format, which New Zealand already supports. Appendix~\ref{app:international} summarises each. Table~\ref{tab:catalog_comparison} compares these systems and identifies five recurring priority gaps: (1)~consistent representation of uncertainty or confidence; (2)~formal version control with Digital Object Identifiers (DOIs) and changelogs for citable releases; (3)~a cross-agency event-identifier mapping service; (4)~integration of historical and pre-instrumental data; and (5)~formal governance with dedicated funding. These gaps motivate the framework components and Key Recommendations that follow.
+Mature international systems provide useful reference points: the USGS Advanced National Seismic System Comprehensive Earthquake Catalog (ComCat) federates the regional and national networks of the ANSS \citep{usgs_comcat}; the Swiss Seismological Service couples a dense network with cross-border data \citep{sed_report}; the European-Mediterranean Seismological Centre (EMSC) and the International Seismological Centre (ISC) aggregate across many agencies \citep{emsc_webservices, isc_data_collection}; and EPOS provides standardised FAIR services across Europe \citep{EPOSSeisTCS}. These systems share common standards, notably the International Federation of Digital Seismograph Networks (FDSN) web services and the QuakeML data format, which New Zealand already supports. Appendix~\ref{app:international} summarises each. The comparison is a qualitative synthesis from public documentation and expert judgement, not a scored audit; the New Zealand column reflects the authors' assessment across multiple national catalogues, whereas the comparators are single national or federated systems. Table~\ref{tab:catalog_comparison} compares these systems and identifies five recurring priority gaps: (1)~consistent representation of uncertainty or confidence; (2)~formal version control with Digital Object Identifiers (DOIs) and changelogs for citable releases; (3)~a cross-agency event-identifier mapping service; (4)~integration of historical and pre-instrumental data; and (5)~formal governance with dedicated funding. These gaps motivate the framework components and Key Recommendations that follow.
 
 \begin{landscape}
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{3cm}>{\raggedright\arraybackslash}p{4cm}>{\raggedright\arraybackslash}p{3.5cm}>{\raggedright\arraybackslash}p{3.5cm}>{\raggedright\arraybackslash}p{3.5cm}@{}}
-\caption{Comparison of NZ and International Earthquake Catalogue Capabilities}
+\caption{Comparison of NZ and International Earthquake Catalogue Capabilities. A qualitative synthesis from public documentation and expert judgement, not a scored audit; the third column cites SED for national-service capability and EPOS for the pan-European federation layer (cells prefixed ``EPOS:'').}
 \label{tab:catalog_comparison} \\
 \toprule
-\textbf{Feature} & \textbf{New Zealand} & \textbf{USGS ComCat} & \textbf{Swiss SED / EPOS} & \textbf{Gaps \& Priorities} \\
+\textbf{Feature} & \textbf{New Zealand} & \textbf{USGS ComCat} & \textbf{Switzerland (SED) / EPOS} & \textbf{Gaps \& Priorities} \\
 \midrule
 \endfirsthead
 
 \multicolumn{5}{c}{\tablename\ \thetable{} -- \textit{continued}} \\
 \toprule
-\textbf{Feature} & \textbf{New Zealand} & \textbf{USGS ComCat} & \textbf{Swiss SED / EPOS} & \textbf{Gaps \& Priorities} \\
+\textbf{Feature} & \textbf{New Zealand} & \textbf{USGS ComCat} & \textbf{Switzerland (SED) / EPOS} & \textbf{Gaps \& Priorities} \\
 \midrule
 \endhead
 
@@ -232,42 +235,56 @@ Mature international systems provide useful reference points: the USGS Advanced 
 \endlastfoot
 
 \textbf{Core parameters} &
-Origin time, location, depth, magnitude, phase picks, station counts &
+Hypocentre (origin time, location, depth), magnitude, phase picks/arrivals, station counts; QuakeML carries location/magnitude uncertainties and multiple magnitudes \citep{GeoNetEqCatalogue, gns_neid} &
 Hypocenter, magnitudes, phase data, moment tensors, macroseismic data \citep{usgs_comcat} &
-Historical + instrumental events, uniform $M_w$, uncertainties, intensities \citep{sed_report} &
+Historical + instrumental events, homogenised local-magnitude scale ($M_{Lhc}$) with $M_w$ for notable events, uncertainties, intensities \citep{sed_report} &
 Lacks full uncertainty propagation for all events \\
 \addlinespace
 
 \textbf{Metadata \& provenance} &
-Some document processing pipelines; incomplete or inconsistent across catalogues &
+GeoNet documents core processing; provenance incomplete or inconsistent across the wider NZ catalogue ecosystem &
 Maintains standards, data dictionaries, method documentation \citep{usgs_comcat} &
-Adheres to FDSN, StationXML, QuakeML standards \citep{sed_report} &
+Documented processing, 3D velocity models, homogenised ECOS database \citep{sed_report, ECOS09} &
 Need consistent, centralised metadata policies \\
 \addlinespace
 
 \textbf{Versioning \& review} &
 Rapid + review workflows; some reprocessing &
 Versioned updates, multiple origins per event, revisions over time \citep{usgs_comcat} &
-Unified access to evolving datasets, harmonisation &
+Continuous access to evolving datasets and harmonisation (EPOS); static snapshots such as ECOS-09 (SED); no per-version catalogue DOIs/changelogs \citep{sed_report, EPOSSeisTCS} &
 Formalise version control (DOIs, changelogs) \\
 \addlinespace
 
 \textbf{Access \& APIs} &
-Quake Search, FDSN, QuakeML, CSV/GeoJSON export &
+Quake Search and WFS (CSV, GeoJSON, KML, GML), FDSN (QuakeML), GeoNet API \citep{GeoNetFDSN, GeoNetEqCatalogue} &
 FDSN API, GeoJSON/CSV feeds, search interfaces \citep{USGSFDSN} &
-Integrated access to waveforms, parametric data via standards \citep{EPOSSeisTCS} &
+EPOS: integrated access to waveforms and parametric data via standards \citep{EPOSSeisTCS} &
 Enhance federated discovery, cross-catalogue queries \\
 \addlinespace
 
+\textbf{Latency / solution status} &
+GeoNet automatic solutions within minutes, then manually reviewed; periodic reprocessing &
+Real-time GeoJSON feeds; preferred solution revised as reviews land \citep{USGSFDSN} &
+SED automatic then reviewed; EMSC near-real-time; ISC reviewed bulletin issued $\sim$24 months later \citep{isc_review} &
+Expose solution status (automatic vs reviewed) and update latency uniformly, per record \\
+\addlinespace
+
 \textbf{Historical data} &
-Some pre-instrumental events with greater uncertainty &
-Includes large historic events, variable completeness &
+Some pre-instrumental events with greater uncertainty \citep{gns_neid} &
+Includes large historic events, variable completeness \citep{usgs_comcat} &
 Centuries of data, macroseismic fields, uncertainties \citep{sed_report} &
 Strengthen integration, metadata, uncertainty modelling \\
 \addlinespace
 
+\textbf{Coverage \& completeness ($M_c$)} &
+$M_c \approx M_L$ 1--2 in well-monitored regions; varies spatially and through time \citep{WarrenSmith2025, gns_neid} &
+$\sim$$M$4.5+ globally (common analysis threshold); $\sim$$M$2.5 in well-monitored US regions \citep{usgs_comcat} &
+$M_c$ 1.0--1.5 via a dense network; record from 1879 (historical to 250\,AD) \citep{sed_report, ECOS09} &
+Quantify and report completeness ($M_c$) and coverage consistently across NZ catalogues \\
+\addlinespace
+
 \textbf{Uncertainty \& quality} &
-Many provide estimates (location/magnitude error); not universal &
+GeoNet reports location/magnitude uncertainties and quality metrics (RMS, azimuthal gap, station/phase counts) via QuakeML; uneven across other NZ catalogues \citep{WarrenSmith2025, GeoNetFDSN} &
 Quality metrics: RMS, station count, azimuthal gap \citep{usgs_comcat} &
 Emphasises uncertainty, solution quality, EPOS standards \citep{sed_report} &
 Universal uncertainty reporting needed \\
@@ -276,28 +293,28 @@ Universal uncertainty reporting needed \\
 \textbf{Multi-catalogue linking} &
 Mostly separate; limited cross-catalogue mapping &
 Aggregates many networks, links multiple origins per event \citep{usgs_comcat} &
-Harmonised catalogues across Europe; cross-border exchange \citep{EPOSSeisTCS} &
+EPOS: harmonised catalogues across Europe and cross-border exchange; EMSC/ISC reconcile bulletins across many agencies (Appendix~\ref{app:international}) \citep{EPOSSeisTCS} &
 Build Event ID mapping service, federated portal \\
 \addlinespace
 
 \textbf{Special products} &
 Focal mechanisms, moment tensors, slow slip as standalone datasets &
 Hosts moment tensors, additional products tied to events \citep{usgs_comcat} &
-Integrates fault, slip, seismological products &
+EPOS: integrates fault, slip, and seismological products via standardised services \citep{EPOSSeisTCS} &
 Better integrate special-purpose catalogues \\
 \addlinespace
 
 \textbf{Standards compliance} &
-Supports FDSN/QuakeML; not all catalogues fully adhere &
+Supports FDSN/QuakeML; not all catalogues fully adhere \citep{GeoNetFDSN} &
 FDSN and QuakeML in APIs and exports \citep{USGSFDSN} &
-Full QuakeML, StationXML, FDSN compliance \citep{sed_report} &
+Implements FDSN web services (event, station, dataselect); QuakeML and StationXML \citep{sed_report} &
 Ensure full compliance across all catalogues \\
 \addlinespace
 
 \textbf{Governance \& sustainability} &
 ESNZ/GeoNet or individual researchers; less formal structure &
 Formal governance, funding, institutional roles (USGS/ANSS/NEIC) \citep{usgs_comcat} &
-Robust institutional backing, cross-national coordination &
+Robust institutional backing, cross-national coordination \citep{sed_report} &
 Establish formal governance, roles, funding \\
 
 \end{longtable}
@@ -650,16 +667,11 @@ Development proceeds in four phases (Figure~\ref{fig:roadmap}): planning and mob
 \node[title] at (\xb,\axisy+0.34) {Phase~2\\Prototype \& pilot};
 \node[title] at (\xc,\axisy+0.34) {Phase~3\\Full-scale launch};
 \node[title] at (\xd,\axisy+0.34) {Phase~4\\Sustained service};
-% timeframes just under axis
-\node[anchor=north, font=\footnotesize\itshape] at (\xa,\axisy-0.30) {0--6 months};
-\node[anchor=north, font=\footnotesize\itshape] at (\xb,\axisy-0.30) {6--18 months};
-\node[anchor=north, font=\footnotesize\itshape] at (\xc,\axisy-0.30) {18--36 months};
-\node[anchor=north, font=\footnotesize\itshape] at (\xd,\axisy-0.30) {36+ months};
-% uniform stacked description blocks below
-\node[phase] at (\xa,\axisy-0.85) {Governance,\\schema, and\\architecture};
-\node[phase] at (\xb,\axisy-0.85) {Core portal/API;\\5--10 pilot catalogues;\\training};
-\node[phase] at (\xc,\axisy-0.85) {Ingest major datasets;\\event-ID service;\\DOI minting};
-\node[phase] at (\xd,\axisy-0.85) {National core\\service; annual\\FAIR reporting};
+% uniform stacked description blocks below the axis
+\node[phase] at (\xa,\axisy-0.40) {Governance,\\schema, and\\architecture};
+\node[phase] at (\xb,\axisy-0.40) {Core portal/API;\\5--10 pilot catalogues;\\training};
+\node[phase] at (\xc,\axisy-0.40) {Ingest major datasets;\\event-ID service;\\DOI minting};
+\node[phase] at (\xd,\axisy-0.40) {National core\\service; annual\\FAIR reporting};
 \end{tikzpicture}%
 }
 \caption{Indicative four-phase roadmap from planning to a sustained national service.}
@@ -708,7 +720,7 @@ We welcome feedback and expressions of interest in participating in the governan
 
 \section*{Data and Code Availability}
 \addcontentsline{toc}{section}{Data and Code Availability}
-In keeping with the FAIR principles it advocates, the prototype portal source code, the metadata schema, the controlled parameter lexicon, and the companion review of catalogue-merging strategies are available under the MIT licence at \url{https://github.com/KennyGraham1/catalogofcatalogs} (documentation at \url{https://catalogofcatalogs.readthedocs.io/}). The earthquake catalogues used as examples are available from their respective providers: the GeoNet national catalogue \citep{GeoNetEqCatalogue}, USGS ComCat \citep{usgs_comcat}, and the Swiss Seismological Service \citep{sed_report}.
+In keeping with the FAIR principles it advocates, the prototype portal source code, the metadata schema, the controlled parameter lexicon, the companion review of catalogue-merging strategies, and a companion inventory of New Zealand earthquake catalogues (1960--2026) are available under the MIT licence at \url{https://github.com/KennyGraham1/catalogofcatalogs} (documentation at \url{https://catalogofcatalogs.readthedocs.io/}). The earthquake catalogues used as examples are available from their respective providers: the GeoNet national catalogue \citep{GeoNetEqCatalogue}, USGS ComCat \citep{usgs_comcat}, and the Swiss Seismological Service \citep{sed_report}.
 
 \section*{Acknowledgements}
 We thank participants in the 2023 and 2024 workshops for their contributions, and colleagues across Earth Sciences New Zealand and partner universities for their input to this framework.
@@ -723,7 +735,7 @@ This appendix expands the summary in Section~\ref{sec:landscape} and Table~\ref{
 GeoNet maintains New Zealand's earthquake catalogue as part of the National Earthquake Information Database, the central repository for NZ seismic events~\citep{gns_neid}. The catalogue contains origin time, location, magnitude, and seismic phase data, with each event assigned a unique Public ID~\citep{GeoNetEqCatalogue}, spanning instrumentally recorded earthquakes (1930s--present) and historical events from oral/written records~\citep{gns_neid}. Data access includes Quake Search (CSV, GeoJSON, KML, GML)~\citep{GeoNetEqCatalogue} and services compliant with the International Federation of Digital Seismograph Networks (FDSN) and Web Feature Service (WFS) standards, delivering QuakeML with uncertainties, phase arrivals, and multiple magnitude determinations~\citep{GeoNetFDSN,GeoNetLocationInfo}. Completeness is approximately $M_L$ 1--2 in well-monitored regions (higher elsewhere and through time); location quality varies markedly with station coverage, as quantified by \citet{WarrenSmith2025}. A 2022 revision moved the catalogue toward more consistent magnitude reporting nationwide~\citep{gns_neid}.
 
 \subsection{United States (USGS ComCat)}
-The United States Geological Survey (USGS) operates the federated Advanced National Seismic System (ANSS) Comprehensive Earthquake Catalog (ComCat), covering global earthquakes ($M$4.5+ complete globally; $M$1--2.5 in the US)~\citep{usgs_comcat}, accessed via the FDSN Event API with QuakeML, CSV/GeoJSON/KML, and real-time GeoJSON feeds~\citep{USGSFDSN}. Entries include quality metrics (stations used, azimuthal gap, RMS residuals) and magnitude uncertainty; ComCat integrates 100+ networks, stores multiple solutions per event with one preferred, and hosts products such as ShakeMap and crowdsourced intensity data~\citep{usgs_comcat}.
+The United States Geological Survey (USGS) operates the federated Advanced National Seismic System (ANSS) Comprehensive Earthquake Catalog (ComCat), covering global earthquakes ($\sim$$M$4.5 and above as a common global analysis threshold, and roughly $M$2.5 in well-monitored US regions)~\citep{usgs_comcat}, accessed via the FDSN Event API with QuakeML, CSV/GeoJSON/KML, and real-time GeoJSON feeds~\citep{USGSFDSN}. Entries include quality metrics (stations used, azimuthal gap, RMS residuals) and magnitude uncertainty; ComCat integrates the ANSS regional and national networks, stores multiple solutions per event with one preferred, and hosts products such as ShakeMap and crowdsourced intensity data~\citep{usgs_comcat}.
 
 \subsection{Switzerland (SED)}
 The Swiss Seismological Service (SED) maintains a high-quality catalogue dating to 1879~\citep{sed_report}, with historical events to 250~AD. A dense network achieves $M_c$ 1.0--1.5 completeness; SED introduced updated magnitude scales ($M_{Lhc}$, 2020), employs 3D velocity models and relative relocation, and provides formal uncertainties via QuakeML since 2013~\citep{sed_report}. Data are accessible through FDSN web services, and cross-border collaboration integrates 60+ stations from France, Germany, Italy, and Austria~\citep{sed_report}. The ECOS project unified historical records into a homogenised database~\citep{ECOS09}.
