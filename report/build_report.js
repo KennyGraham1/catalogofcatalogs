@@ -23,7 +23,7 @@ const CAT = [
   ['aftershock-response', 'Aftershock-sequence rapid-response catalogues',
     'Sequence-specific catalogues, often built from rapid-response temporary instrumentation deployed around a significant mainshock.'],
   ['temp-onshore', 'Temporary onshore passive-seismic deployments',
-    'Time-limited onshore passive-seismic experiments and dense arrays, frequently registered under temporary FDSN network codes; the largest and least-discoverable group in the inventory.'],
+    'Published earthquake catalogues from time-limited onshore passive-seismic experiments and dense arrays; among the least-discoverable parts of the national record.'],
   ['temp-offshore-obs', 'Temporary offshore / ocean-bottom (OBS) deployments',
     'Ocean-bottom seismometer deployments along the offshore Hikurangi margin and the Kermadec volcanic arc.'],
   ['volcano-geothermal-induced', 'Volcano-seismic, geothermal and induced catalogues',
@@ -64,6 +64,7 @@ const norm = (s) => { s = scrub(clean(s).replace(/^<([^>]*)>$/, '$1')); return (
 function tex(s) {
   if (s == null) return '';
   s = String(s);
+  s = s.replace(/\s*—\s*/g, ', ');   // avoid em-dashes in prose
   s = s.replace(/\\/g, '@@BS@@');
   s = s.replace(/([&%$#_{}])/g, '\\$1');
   s = s.replace(/~/g, '@@TIL@@').replace(/\^/g, '@@CAR@@');
@@ -184,7 +185,7 @@ W(String.raw`\documentclass[10pt,a4paper]{article}
 \DeclareUnicodeCharacter{014C}{\=O}\DeclareUnicodeCharacter{014D}{\=o}
 \DeclareUnicodeCharacter{016A}{\=U}\DeclareUnicodeCharacter{016B}{\=u}
 \DeclareUnicodeCharacter{00F3}{\'o}\DeclareUnicodeCharacter{00E9}{\'e}\DeclareUnicodeCharacter{00FC}{\"u}
-\DeclareUnicodeCharacter{2013}{--}\DeclareUnicodeCharacter{2014}{---}
+\DeclareUnicodeCharacter{2013}{--}\DeclareUnicodeCharacter{2014}{--}
 \DeclareUnicodeCharacter{2018}{\textquoteleft}\DeclareUnicodeCharacter{2019}{\textquoteright}
 \DeclareUnicodeCharacter{201C}{\textquotedblleft}\DeclareUnicodeCharacter{201D}{\textquotedblright}
 \DeclareUnicodeCharacter{2265}{$\geq$}\DeclareUnicodeCharacter{2264}{$\leq$}
@@ -207,7 +208,7 @@ W(String.raw`\documentclass[10pt,a4paper]{article}
 \newcommand{\kv}[2]{\item \textbf{#1:} #2}
 
 \title{\vspace{-1.0cm}\Huge\bfseries Earthquake Catalogues of Aotearoa New Zealand, 1960--2026\\[6pt]
-\Large A Registry-style Inventory of National, Regional, Temporary-Deployment, and Derived Catalogues\thanks{Each entry is a discovery record summarising what a catalogue contains and where to obtain it; confirm details against the cited source before quantitative use.}}
+\Large A Curated Inventory of National, Regional, Temporary-Deployment, and Derived Catalogues\thanks{Each entry is a discovery record summarising what a catalogue contains and where to obtain it; confirm details against the cited source before quantitative use.}}
 \author{Kenny Graham\\\small Earth Sciences New Zealand\\\small Aotearoa New Zealand FAIR Earthquake Catalogue Framework project}
 \date{18 June 2026}
 
@@ -218,7 +219,7 @@ W(String.raw`\documentclass[10pt,a4paper]{article}
 // ---- abstract ------------------------------------------------------------
 W(String.raw`
 \begin{abstract}
-\noindent New Zealand's earthquake-catalogue record is curated nationally by GeoNet (Earth Sciences New Zealand / GNS Science) but is complemented by a large, fragmented body of regional, temporary-deployment, volcano-seismic, slow-earthquake, and derived catalogues that are individually valuable yet difficult to discover, compare, and cite. This report inventories \textbf{${total} distinct earthquake catalogues} that were developed for, or that cover, Aotearoa New Zealand and its offshore margins with coverage overlapping the period 1960--2026, with particular emphasis on \textbf{temporary seismic deployments} (passive-seismic experiments, ocean-bottom deployments, and aftershock rapid-response arrays). Each catalogue is profiled against the minimum-attributes \emph{Catalogue Submission Profile} proposed for a national \textquotedblleft catalogue of catalogues\textquotedblright, recording what it contains and how to obtain it. Of the ${total} catalogues, ${nDOI} carry a resolvable DOI or stable dataset identifier. Temporary deployments form the single largest group, underscoring both the richness of New Zealand's regional seismology and the discoverability gap that a federated registry is designed to close. The inventory is offered as a working population of that registry and as a reproducible, citable reference for researchers, hazard modellers, and engineers.
+\noindent New Zealand's earthquake-catalogue record is curated nationally by GeoNet (Earth Sciences New Zealand / GNS Science) but is complemented by a large, fragmented body of regional, temporary-deployment, volcano-seismic, slow-earthquake, and derived catalogues that are individually valuable yet difficult to discover, compare, and cite. This report presents a curated inventory of \textbf{${total} distinct earthquake catalogues} that were developed for, or that cover, Aotearoa New Zealand and its offshore margins with coverage overlapping the period 1960--2026, with particular emphasis on \textbf{temporary seismic deployments} (passive-seismic experiments, ocean-bottom deployments, and aftershock rapid-response arrays). Each catalogue is profiled against the minimum-attributes \emph{Catalogue Submission Profile} proposed for a national \textquotedblleft catalogue of catalogues\textquotedblright, recording what it contains and how to obtain it. Of the ${total} catalogues, ${nDOI} carry a resolvable DOI or stable dataset identifier. Catalogues from temporary deployments and targeted experiments make up a substantial share, underscoring both the richness of New Zealand's regional seismology and the discoverability gap that a federated registry is designed to close. The inventory is offered as a working population of that registry and as a reproducible, citable reference for researchers, hazard modellers, and engineers.
 \end{abstract}
 \vspace{4pt}
 {\small\noindent\textbf{Keywords:} earthquake catalogue; seismicity; temporary deployment; ocean-bottom seismometer; slow slip; FAIR data; Aotearoa New Zealand; GeoNet; metadata.}
@@ -227,7 +228,7 @@ W(String.raw`
 
 // ===================== 1. INTRODUCTION ===================================
 W(String.raw`\section{Introduction and scope}\label{sec:intro}
-An earthquake catalogue is the evidence base for seismicity research, seismic-hazard estimation, and engineering design. In Aotearoa New Zealand that evidence base is distributed across one authoritative national operational catalogue and many high-value but loosely coupled regional, temporary, and derived catalogues. Because these use different formats, identifiers, magnitude scales, and metadata conventions, combining them is manual and error-prone---a cost made explicit by national products such as the 2022 National Seismic Hazard Model, which required dedicated effort to standardise magnitudes across sources.
+An earthquake catalogue is the evidence base for seismicity research, seismic-hazard estimation, and engineering design. In Aotearoa New Zealand that evidence base is distributed across one authoritative national operational catalogue and many high-value but loosely coupled regional, temporary, and derived catalogues. Because these use different formats, identifiers, magnitude scales, and metadata conventions, combining them is manual and error-prone, a cost made explicit by national products such as the 2022 National Seismic Hazard Model, which required dedicated effort to standardise magnitudes across sources.
 
 This report addresses the first practical step toward a federated capability: \emph{knowing which catalogues exist}. It inventories the earthquake catalogues developed for, or covering, New Zealand and its offshore margins (including the Hikurangi and Kermadec subduction systems and the subantarctic) whose coverage overlaps the period 1960--2026. Catalogues that begin earlier and extend into the period, and historical or derived catalogues used for New Zealand even where compiled recently, are included. Special attention is given to \textbf{temporary deployments}, which are scientifically rich yet routinely invisible to the national system.
 
@@ -235,9 +236,9 @@ Each catalogue is described using the \emph{Catalogue Submission Profile} (Appen
 
 // ===================== 2. SCOPE & SOURCES ================================
 W(String.raw`\section{Scope, sources, and compilation}\label{sec:methods}
-This inventory was compiled from peer-reviewed publications, dataset repositories (for example Zenodo, IRIS/EarthScope, and PANGAEA), FDSN network records, and the catalogues and reports of GeoNet / GNS Science and partner institutions. Each catalogue was profiled against the submission schema (Appendix~\ref{app:schema}) and cross-checked against its defining publication or dataset; persistent identifiers and citations were checked against the original source, and fields that could not be established from the sources are left blank rather than inferred.
+This inventory was curated from peer-reviewed publications, dataset repositories (for example Zenodo, IRIS/EarthScope, and PANGAEA), FDSN network records, and the catalogues and reports of GeoNet / GNS Science and partner institutions. Each catalogue was profiled against the submission schema (Appendix~\ref{app:schema}) and reviewed against its defining publication or dataset; persistent identifiers and citations were checked against the original source, and fields that could not be established from the sources are left blank rather than inferred.
 
-The inventory is a \emph{discovery} resource: each entry summarises what a catalogue contains and how to obtain it, and is not a certification of scientific adequacy---confirm details against the cited source before quantitative use. It is also not a census: earthquake-catalogue production in Aotearoa New Zealand is decentralised and continuous, so a residual long tail of specialised and thesis-derived catalogues remains (Section~\ref{sec:gaps}). Of the ${total} catalogues listed, ${nDOI} carry a resolvable DOI or stable dataset identifier.`);
+The inventory is a \emph{discovery} resource: each entry summarises what a catalogue contains and how to obtain it, and is not a certification of scientific adequacy; confirm details against the cited source before quantitative use. It is also not a census: earthquake-catalogue production in Aotearoa New Zealand is decentralised and continuous, so a residual long tail of specialised and thesis-derived catalogues remains (Section~\ref{sec:gaps}). Of the ${total} catalogues listed, ${nDOI} carry a resolvable DOI or stable dataset identifier.`);
 
 // ===================== 3. OVERVIEW =======================================
 W(String.raw`\section{The shape of New Zealand's catalogue ecosystem}\label{sec:overview}
@@ -245,11 +246,11 @@ New Zealand's earthquake-catalogue landscape has three tiers.
 
 \textbf{(1) One authoritative national operational catalogue.} The GeoNet catalogue, produced by GNS Science / Earth Sciences New Zealand, provides continuous instrumental coverage (locations from the 1930s; descriptive events from $\sim$1460) and is underpinned by the permanent National Seismograph Network (FDSN code \texttt{NZ}). It is the parent dataset for nearly every derived New Zealand catalogue.
 
-\textbf{(2) A large, scattered body of regional, temporary-deployment, volcano/geothermal, and special-purpose catalogues}, produced mostly by universities (Victoria University of Wellington, Otago, Auckland, Canterbury) and international partners. These deliver far higher \emph{local} precision---dense arrays, ocean-bottom and borehole sensors, and matched-filter / template-matching detection---but are typically published as one-off datasets discoverable only through the originating paper.
+\textbf{(2) A large, scattered body of regional, temporary-deployment, volcano/geothermal, and special-purpose catalogues}, produced mostly by universities (Victoria University of Wellington, Otago, Auckland, Canterbury) and international partners. These deliver far higher \emph{local} precision (dense arrays, ocean-bottom and borehole sensors, and matched-filter / template-matching detection), but are typically published as one-off datasets discoverable only through the originating paper.
 
 \textbf{(3) Derived products}: relocated and reprocessed catalogues, magnitude-homogenised and declustered hazard-model catalogues (NSHM 2010 and 2022), and physics-based synthetic (RSQSim) catalogues.
 
-Temporary deployments are the \textbf{single largest group} in this inventory (${counts['temp-onshore'] || 0} onshore $+$ ${counts['temp-offshore-obs'] || 0} offshore, plus a large share of the volcano-seismic and aftershock-response catalogues), yet they are precisely the catalogues \emph{least} discoverable in the national system. Scattered across journal supplements, Zenodo, IRIS/EarthScope, PANGAEA, and FDSN temporary-network DOIs, and using heterogeneous magnitude and depth conventions, they are exactly the material a federated registry is designed to surface.`);
+Catalogues produced by temporary deployments and targeted experiments make up a substantial part of this inventory (${counts['temp-onshore'] || 0} onshore and ${counts['temp-offshore-obs'] || 0} offshore here, alongside much of the volcano-seismic and aftershock-response work), yet they are among the catalogues \emph{least} discoverable in the national system. Scattered across journal supplements, Zenodo, IRIS/EarthScope, PANGAEA, and FDSN temporary-network DOIs, and using heterogeneous magnitude and depth conventions, they are exactly the material a federated registry is designed to surface.`);
 
 // ===================== 4. TIMELINE =======================================
 W(String.raw`\section{Historical development, 1960--2026}\label{sec:timeline}
@@ -311,7 +312,7 @@ for (const [k] of CAT) {
   for (const e of cats.filter(e => e.profile.category === k)) {
     idx++;
     const p = e.profile;
-    const period = `${norm(p.start_date) ? tex(norm(p.start_date)) : '?'}\\,--\\,${norm(p.end_date) ? tex(norm(p.end_date)) : (clean(p.end_date) ? tex(clean(p.end_date)) : '?')}`;
+    const period = `${tex(norm(p.start_date) || '?')}\\,--\\,${tex(norm(p.end_date) || '?')}`;
     const availWord = norm(p.data_availability).replace(/available \(DOI\)/i, 'open (DOI)').replace(/available on request/i, 'on request').replace(/not available/i, 'not avail.');
     const parts = [];
     if (availWord) parts.push(tex(availWord));
@@ -329,7 +330,7 @@ W(String.raw`\end{longtable}
 W(String.raw`\section{Coverage gaps and FAIR weaknesses}\label{sec:gaps}
 \begin{itemize}[leftmargin=1.4em,itemsep=3pt]
 \item \textbf{Not a census.} Because earthquake-catalogue production is decentralised and continuous, a residual long tail remains: likely-missing material includes further PhD-thesis catalogues, additional dedicated catalogues for New Zealand $M_w\!\geq\!6$ aftershock responses since 1960, more geothermal fields (Ohaaki, Mokai, Ng\=awh\=a), and the SISIE/MOANA/SHIRE offshore experiments not yet retained as distinct event catalogues.
-\item \textbf{Discoverability is the core problem.} Temporary-deployment and regional catalogues live across journal supplements, Zenodo, IRIS/EarthScope, and FDSN network DOIs---the fragmentation a registry exists to fix.
+\item \textbf{Discoverability is the core problem.} Temporary-deployment and regional catalogues live across journal supplements, Zenodo, IRIS/EarthScope, and FDSN network DOIs: the fragmentation a registry exists to fix.
 \item \textbf{Heterogeneity.} Magnitude scales vary ($M_L$; $M_w$ via the GeoNet moment-tensor catalogue from 2003; the homogenised $M_{LNZ20}\!\rightarrow\!M_w$ used for NSHM 2022); the magnitude of completeness $M_c$ is rarely stated and is spatially variable; depths span 0--$\sim$600\,km for subduction seismicity, while many regional catalogues are shallow-crustal only.
 \item \textbf{A few entries are not conventional event lists} (e.g.\ the National Seismograph Network \emph{waveform} dataset; the \texttt{nz3drx} 3-D \emph{location method} carried within the GeoNet catalogue DOI). They are included for completeness and flagged in their records.
 \item \textbf{A few entries are provisional} (e.g.\ the 2013 Seddon / Lake Grassmere and 2009 Dusky Sound response deployments, and two forecast / test-centre catalogues), included pending a clearly attributable standalone dataset.
@@ -354,7 +355,7 @@ for (const [k, title, intro] of CAT) {
     if (meta.length) W(`{\\small\\itshape ${tex(meta.join(' · '))}}\\par\\vspace{2pt}`);
     W(`\\begin{itemize}[leftmargin=1.3em,itemsep=0.6pt,topsep=1pt,parsep=0pt]`);
     if (norm(p.aka)) W(`\\kv{Also known as}{${tex(norm(p.aka))}}`);
-    W(`\\kv{Coverage}{${norm(p.start_date) ? tex(norm(p.start_date)) : tex(clean(p.start_date) || '?')} — ${norm(p.end_date) ? tex(norm(p.end_date)) : tex(clean(p.end_date) || '?')}}`);
+    W(`\\kv{Coverage}{${tex(norm(p.start_date) || 'unknown')} to ${tex(norm(p.end_date) || 'unknown')}}`);
     if (norm(p.region)) W(`\\kv{Region}{${tex(norm(p.region))}}`);
     if (norm(p.bounding_box)) W(`\\kv{Bounding box}{${tex(norm(p.bounding_box))}}`);
     if (norm(p.depth_range)) W(`\\kv{Depth range}{${tex(norm(p.depth_range))}}`);
@@ -377,7 +378,7 @@ for (const [k, title, intro] of CAT) {
 
 // ===================== 8. CONCLUSION =====================================
 W(String.raw`\section{Conclusion}\label{sec:conclusion}
-This report inventories ${total} earthquake catalogues developed for, or covering, Aotearoa New Zealand with coverage spanning 1960--2026, profiled to a common submission schema. The exercise confirms both the strength of the national record and the scale of the discoverability gap below it: temporary deployments and regional catalogues---the most precise local datasets New Zealand seismology produces---are also the hardest to find, compare, and cite. Populating a lightweight, openly versioned registry with descriptors such as these is a low-cost, near-term step that would make the country's earthquake science measurably more findable, comparable, and reusable. This inventory is offered as a starting population of that registry and as a reproducible reference that can be extended as the long tail is filled in.`);
+This report inventories ${total} earthquake catalogues developed for, or covering, Aotearoa New Zealand with coverage spanning 1960--2026, profiled to a common submission schema. The exercise confirms both the strength of the national record and the scale of the discoverability gap below it: temporary deployments and regional catalogues, the most precise local datasets New Zealand seismology produces, are also the hardest to find, compare, and cite. Populating a lightweight, openly versioned registry with descriptors such as these is a low-cost, near-term step that would make the country's earthquake science measurably more findable, comparable, and reusable. This inventory is offered as a starting population of that registry and as a reproducible reference that can be extended as the long tail is filled in.`);
 
 // ===================== APPENDIX + BIBLIOGRAPHY ===========================
 W(String.raw`\appendix

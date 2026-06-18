@@ -9,6 +9,7 @@
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,positioning,fit,backgrounds,calc}
 \usepackage{caption}
+\usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{array}
 \usepackage{booktabs} % For professional tables
@@ -64,9 +65,9 @@ $^{3}$ University of Canterbury
 
 \newpage
 \begin{abstract}
-Earthquake catalogues underpin seismology, monitoring, engineering, and risk management. Aotearoa New Zealand produces many of them (the GeoNet national catalogue alongside regional, volcano-specific, temporary-deployment, historical, and derived catalogues), but they are fragmented: built to different standards, documented inconsistently, and rarely interoperable. The 2022 National Seismic Hazard Model had to re-standardise magnitudes across sources before it could use them \citep{NSHM2022BSSA, Christophersen2024}; high-value research catalogues such as the 86{,}579-event Taup\={o} Volcanic Zone catalogue \citep{Illsley2025} sit outside any common system; and location quality across the national catalogue varies markedly with station coverage \citep{WarrenSmith2025}. Combining catalogues today is a manual, error-prone task.
+Earthquake catalogues underpin seismology, monitoring, engineering, and risk management. Aotearoa New Zealand produces many of them (the GeoNet national catalogue alongside regional, volcano-specific, temporary-deployment, historical, and derived catalogues), but they are fragmented: built to different standards, documented inconsistently, and rarely interoperable. The 2022 National Seismic Hazard Model had to re-standardise magnitudes across sources before it could use them \citep{NSHM2022BSSA, Christophersen2024}; high-value research catalogues such as the 86{,}579-event Taup\={o} Volcanic Zone catalogue \citep{Illsley2025} sit outside any common system; and location quality across the national catalogue varies markedly with station coverage \citep{WarrenSmith2025}. Combining catalogues today is a manual, error-prone task. A companion registry-style inventory (1960--2026) documents 94 of them, spanning national, regional, temporary, historical, and derived types.
 
-Two national workshops (2023 and 2024) brought together researchers, agencies, and industry to identify needs and shape a practical framework guided by the FAIR principles (Findable, Accessible, Interoperable, Reusable) and, in the Aotearoa New Zealand context, by the CARE Principles for Indigenous Data Governance (Collective benefit, Authority to control, Responsibility, and Ethics). This white paper sets out the current landscape, the community-identified gaps, and a proposed national framework: a ``catalogue of catalogues'' that \emph{complements rather than replaces} GeoNet. The framework makes catalogues findable through a common submission profile and provides FAIR services (quality assessment, merge and conflation, analytics, versioning, and programmatic access) for the catalogues it coordinates. It is accompanied by proposed governance, a roadmap, and an indicative resourcing envelope. A working prototype demonstrates the technical feasibility of the core workflows, from ingestion and merging through analytics to multi-format export. We ask New Zealand's earth-science community, its agencies, and its research-infrastructure funders to review and refine the standards proposed here and to help establish a sustained national capability.
+Two national workshops (2023 and 2024) brought together researchers, agencies, and industry to identify needs and shape a practical framework guided by the FAIR principles (Findable, Accessible, Interoperable, Reusable). This white paper sets out the current landscape, the community-identified gaps, and a proposed national framework: a ``catalogue of catalogues'' that \emph{complements rather than replaces} GeoNet. The framework makes catalogues findable through a common submission profile and provides FAIR services (quality assessment, merge and conflation, analytics, versioning, and programmatic access) for the catalogues it coordinates. It is accompanied by proposed governance, a roadmap, and an indicative resourcing envelope. A working prototype demonstrates the technical feasibility of the core workflows, from ingestion and merging through analytics to multi-format export. We ask New Zealand's earth-science community, its agencies, and its research-infrastructure funders to review and refine the standards proposed here and to help establish a sustained national capability.
 \end{abstract}
 
 \bigskip
@@ -102,7 +103,7 @@ In Aotearoa New Zealand that evidence base is fragmented. GeoNet curates the aut
 \item derived and synthetic catalogues built for hazard and risk modelling, from the magnitude-homogenised catalogue prepared for the 2022 National Seismic Hazard Model \citep{Christophersen2024} to multi-hundred-thousand-year RSQSim synthetic catalogues \citep{Shaw2021}.
 \end{itemize}
 
-These are not isolated exceptions. A companion inventory covering 1960--2026 identifies at least 80 such catalogues---spanning regional and volcano-seismic networks, temporary onshore and offshore deployments, aftershock responses, historical compilations, and hazard-model datasets---and the true number is higher still. Temporary deployments alone are the single largest group, yet they remain among the least discoverable through the national system (see Data and Code Availability).
+These are not isolated exceptions. A companion inventory covering 1960--2026 identifies 94 such catalogues, spanning regional and volcano-seismic networks, temporary onshore and offshore deployments, aftershock responses, historical compilations, and hazard-model datasets; the true number is higher still. Temporary deployments (onshore and offshore combined) are the largest group, yet they remain among the least discoverable through the national system (see Data and Code Availability).
 
 Because these catalogues use different formats, identifiers, magnitude scales, and metadata, combining them is manual and error-prone. The 2022 National Seismic Hazard Model illustrates the cost: a flagship national product required a dedicated effort to standardise magnitudes across sources before they could be used \citep{NSHM2022BSSA, Christophersen2024}. The consequences of the status quo are lost researcher time, reduced reproducibility, and less transparent uncertainty in decisions that can affect public safety and major infrastructure.
 
@@ -170,7 +171,7 @@ The framework is shaped by concrete user needs identified at the workshops: gain
 \end{scope}
 
 \end{tikzpicture}
-\caption{The problem and the opportunity (representative types shown; the full inventory lists more than 80 catalogues). Today, New Zealand's earthquake catalogues are developed independently and combined manually. The proposed framework adds a coordinating layer that makes them interoperable through shared standards, a common portal, and a programmatic API.}
+\caption{The problem and the opportunity (representative types shown; the full inventory lists 94 catalogues). Today, New Zealand's earthquake catalogues are developed independently and combined manually. The proposed framework adds a coordinating layer that makes them interoperable through shared standards, a common portal, and a programmatic API.}
 \label{fig:fragmented}
 \end{figure}
 
@@ -210,11 +211,11 @@ Derived / international & NSHM-derived snapshots; ISC, ComCat, EMSC combined cat
 \end{tabular}
 \end{table}
 
-Mature international systems provide useful reference points: the USGS Advanced National Seismic System Comprehensive Earthquake Catalog (ComCat) federates the regional and national networks of the ANSS \citep{usgs_comcat}; the Swiss Seismological Service couples a dense network with cross-border data \citep{sed_report}; the European-Mediterranean Seismological Centre (EMSC) and the International Seismological Centre (ISC) aggregate across many agencies \citep{emsc_webservices, isc_data_collection}; and EPOS provides standardised FAIR services across Europe \citep{EPOSSeisTCS}. These systems share common standards, notably the International Federation of Digital Seismograph Networks (FDSN) web services and the QuakeML data format, which New Zealand already supports. Appendix~\ref{app:international} summarises each. The comparison is a qualitative synthesis from public documentation and expert judgement, not a scored audit; the New Zealand column reflects the authors' assessment across multiple national catalogues, whereas the comparators are single national or federated systems. Table~\ref{tab:catalog_comparison} compares these systems and identifies five recurring priority gaps: (1)~consistent representation of uncertainty or confidence; (2)~formal version control with Digital Object Identifiers (DOIs) and changelogs for citable releases; (3)~a cross-agency event-identifier mapping service; (4)~integration of historical and pre-instrumental data; and (5)~formal governance with dedicated funding. These gaps motivate the framework components and Key Recommendations that follow.
+Mature international systems provide useful reference points: the USGS Advanced National Seismic System Comprehensive Earthquake Catalog (ComCat) federates the regional and national networks of the ANSS \citep{usgs_comcat}; the Swiss Seismological Service couples a dense network with cross-border data \citep{sed_report}; the European-Mediterranean Seismological Centre (EMSC) and the International Seismological Centre (ISC) aggregate across many agencies \citep{emsc_webservices, isc_data_collection}; and EPOS provides standardised FAIR services across Europe \citep{EPOSSeisTCS}. These systems share common standards, notably the International Federation of Digital Seismograph Networks (FDSN) web services and the QuakeML data format, which New Zealand already supports. Appendix~\ref{app:international} summarises each. The comparison is a qualitative synthesis from public documentation and expert judgement, not a scored audit; the New Zealand column reflects the authors' assessment across New Zealand's many catalogues, whereas the comparators are single national or federated systems. Table~\ref{tab:catalog_comparison} compares these systems across the rows shown; five recurring priorities stand out: (1)~consistent representation of uncertainty or confidence; (2)~formal version control with Digital Object Identifiers (DOIs) and changelogs for citable releases; (3)~a cross-agency event-identifier mapping service; (4)~integration of historical and pre-instrumental data; and (5)~formal governance with dedicated funding. These gaps motivate the framework components and Key Recommendations that follow.
 
 \begin{landscape}
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{3cm}>{\raggedright\arraybackslash}p{4cm}>{\raggedright\arraybackslash}p{3.5cm}>{\raggedright\arraybackslash}p{3.5cm}>{\raggedright\arraybackslash}p{3.5cm}@{}}
-\caption{Comparison of NZ and International Earthquake Catalogue Capabilities. A qualitative synthesis from public documentation and expert judgement, not a scored audit; the third column cites SED for national-service capability and EPOS for the pan-European federation layer (cells prefixed ``EPOS:'').}
+\caption{Comparison of NZ and International Earthquake Catalogue Capabilities. A qualitative synthesis from public documentation and expert judgement, not a scored audit; the third column cites SED for national-service capability and EPOS for the pan-European federation layer, with pan-European capabilities prefixed ``EPOS:'' where shown.}
 \label{tab:catalog_comparison} \\
 \toprule
 \textbf{Feature} & \textbf{New Zealand} & \textbf{USGS ComCat} & \textbf{Switzerland (SED) / EPOS} & \textbf{Gaps \& Priorities} \\
@@ -265,7 +266,7 @@ Enhance federated discovery, cross-catalogue queries \\
 \textbf{Latency / solution status} &
 GeoNet automatic solutions within minutes, then manually reviewed; periodic reprocessing &
 Real-time GeoJSON feeds; preferred solution revised as reviews land \citep{USGSFDSN} &
-SED automatic then reviewed; EMSC near-real-time; ISC reviewed bulletin issued $\sim$24 months later \citep{isc_review} &
+SED automatic then reviewed; EMSC near-real-time; ISC reviewed bulletin issued $\sim$24 months later \citep{isc_review, sed_report, emsc_webservices} &
 Expose solution status (automatic vs reviewed) and update latency uniformly, per record \\
 \addlinespace
 
@@ -286,7 +287,7 @@ Quantify and report completeness ($M_c$) and coverage consistently across NZ cat
 \textbf{Uncertainty \& quality} &
 GeoNet reports location/magnitude uncertainties and quality metrics (RMS, azimuthal gap, station/phase counts) via QuakeML; uneven across other NZ catalogues \citep{WarrenSmith2025, GeoNetFDSN} &
 Quality metrics: RMS, station count, azimuthal gap \citep{usgs_comcat} &
-Emphasises uncertainty, solution quality, EPOS standards \citep{sed_report} &
+Emphasises uncertainty, solution quality, EPOS standards \citep{sed_report, EPOSSeisTCS} &
 Universal uncertainty reporting needed \\
 \addlinespace
 
@@ -321,13 +322,13 @@ Establish formal governance, roles, funding \\
 \end{landscape}
 
 \section{A Community-Driven Process}
-The framework proposed in the following sections was shaped through community engagement. Two pre-conference workshops at the Geoscience Society of New Zealand annual meetings provided the primary engagement: a 2023 workshop framed needs and objectives, and a 2024 workshop reviewed progress and refined priorities \citep{GSNZWorkshop2023, GSNZWorkshop2024}. Participants spanned university researchers, GeoNet and Earth Sciences New Zealand staff, government agencies, and engineering and insurance users. Discussion was structured around eight discussion tables (covering minimum catalogue attributes, metadata and documentation, access and versioning, governance, and community priorities), whose outcomes are summarised in Appendix~\ref{app:workshop}. Between workshops, a working group met regularly to draft standards, test integration pathways, and build a prototype portal.
+The framework proposed in the following sections was shaped through community engagement. Two pre-conference workshops at the Geoscience Society of New Zealand annual meetings provided the primary engagement: a 2023 workshop framed needs and objectives, and a 2024 workshop reviewed progress and refined priorities \citep{GSNZWorkshop2023, GSNZWorkshop2024}. Participants spanned university researchers, GeoNet and Earth Sciences New Zealand staff, government agencies, and engineering and insurance users. Discussion was structured around eight discussion tables (covering minimum catalogue attributes, metadata and documentation, access and versioning, governance, and community priorities), whose outcomes are synthesised as nine cross-cutting themes in Appendix~\ref{app:workshop}. Throughout this period, a working group met regularly to draft standards, test integration pathways, and build the prototype portal.
 
 The workshops were designed as scoping and prioritisation exercises rather than as a statistically representative survey or a formal consensus vote. This paper therefore treats their outputs as community-informed evidence for needs and design direction; the proposed standards, governance model, and implementation roadmap are offered for review, calibration, and partner agreement.
 
 \subsection{Prototype Portal: Proof of Concept}
 \label{sec:prototype}
-To ground the framework in a working system, the working group built a functional prototype portal (\emph{Catalogue of Catalogues}, or CofC) and used it at the 2024 workshop to demonstrate the framework services of Section~\ref{sec:framework} (ingestion, merge, export, and analytics) with representative New Zealand datasets. The prototype is open-source (MIT licence; see Data and Code Availability). It is a proof of concept that exercises the workflows below functionally, establishing their technical feasibility; the national framework of Section~\ref{sec:framework} builds on that demonstration. The prototype implements:
+To ground the framework in a working system, the working group built a functional prototype portal (\emph{Catalogue of Catalogues}, or CofC) for the framework services of Section~\ref{sec:framework} (ingestion, merge, export, and analytics), using representative New Zealand datasets. Its design drew on the 2023 and 2024 workshops \citep{GSNZWorkshop2023, GSNZWorkshop2024}, and it was first presented, as a conference talk by the authors rather than a workshop with a published page, at the 2025 Geoscience Society of New Zealand annual meeting, where further community feedback informed its development. The prototype is open-source (MIT licence; see Data and Code Availability). It is a proof of concept that exercises the workflows below functionally, establishing their technical feasibility; the national framework of Section~\ref{sec:framework} builds on that demonstration. The prototype implements:
 \begin{itemize}
 \setlength{\itemsep}{1pt}
 \item \textbf{Ingestion} of CSV/tab-delimited text (with automatic delimiter and date detection), JSON/GeoJSON variants, and QuakeML~1.2, with an alias-based field-mapping interface and direct, de-duplicating sync from GeoNet's FDSN Event service;
@@ -336,7 +337,7 @@ To ground the framework in a working system, the working group built a functiona
 \item \textbf{Analytics}: $b$-value, completeness magnitude ($M_c$), moment release, declustering, and magnitude-frequency comparison, using standard methods \citep{Aki1965,Wiemer2000,GardnerKnopoff1974}; and
 \item \textbf{Multi-format export} (CSV, GeoJSON, KML, QuakeML~1.2), including version-specific exports.
 \end{itemize}
-Community feedback from the 2024 workshop informed refinements to the metadata schema, merge options, and quality-grading approach described in Sections~\ref{sec:merge} and~\ref{sec:quality}. The pilot phase (Section~\ref{sec:implementation}) will validate the prototype on named test catalogues, reporting event counts, accepted and rejected records, merge precision and recall, identifier-matching error rates on dense aftershock sequences, failure cases, and runtime and storage behaviour, with reproduction instructions.
+Community feedback from the workshops and the 2025 conference presentation informed refinements to the metadata schema, merge options, and quality-grading approach described in Sections~\ref{sec:merge} and~\ref{sec:quality}. The pilot phase (Section~\ref{sec:implementation}) will validate the prototype on named test catalogues, reporting event counts, accepted and rejected records, merge precision and recall, identifier-matching error rates on dense aftershock sequences, failure cases, and runtime and storage behaviour, with reproduction instructions.
 
 \section{The Proposed FAIR Framework}
 \label{sec:framework}
@@ -457,7 +458,7 @@ Curation services & Fully ingested event-level catalogue data and provenance & V
 \end{figure}
 
 \subsection{Metadata Standards and a Shared Lexicon}
-A core metadata profile aligned with QuakeML and FDSN conventions captures identifiers, origin parameters with uncertainties, magnitude types with errors, detection and quality metrics, methodology descriptors, event classification, and catalogue-level metadata \citep{QuakeML, GeoNetFDSN, USGSFDSN}. Required versus recommended fields are distinguished to balance utility against effort; the full field hierarchy is given in Table~\ref{tab:metadata_fields} (Appendix~\ref{app:spec}). The field-level mapping to QuakeML elements---including how constructs without a native QuakeML element (the composite quality score, cross-catalogue merge lineage, qualitative confidence classes, and macroseismic intensity) are carried via QuakeML's extension and comment mechanisms---is given in Table~\ref{tab:quakeml_crosswalk} (Appendix~\ref{app:spec}). A controlled vocabulary standardises magnitude types, event classifications, phase names and quality codes, units and formats, and dataset naming, improving interpretability and filtering across catalogues \citep{QuakeML, EventTypeNotes}. An illustrative subset of this lexicon is given in Table~\ref{tab:lexicon} (Appendix~\ref{app:spec}).
+A core metadata profile aligned with QuakeML and FDSN conventions captures identifiers, origin parameters with uncertainties, magnitude types with errors, detection and quality metrics, methodology descriptors, event classification, and catalogue-level metadata \citep{QuakeML, GeoNetFDSN, USGSFDSN}. Required versus recommended fields are distinguished to balance utility against effort; the full field hierarchy is given in Table~\ref{tab:metadata_fields} (Appendix~\ref{app:spec}). The field-level mapping to QuakeML elements, including how constructs without a native QuakeML element (the composite quality score, cross-catalogue merge lineage, qualitative confidence classes, and macroseismic intensity) are carried via QuakeML's extension and comment mechanisms, is given in Table~\ref{tab:quakeml_crosswalk} (Appendix~\ref{app:spec}). A controlled vocabulary standardises magnitude types, event classifications, phase names and quality codes, units and formats, and dataset naming, improving interpretability and filtering across catalogues \citep{QuakeML, EventTypeNotes}. An illustrative subset of this lexicon is given in Table~\ref{tab:lexicon} (Appendix~\ref{app:spec}).
 
 \subsection{Catalogue Submission Profile (Minimum Attributes)}
 \label{sec:profile}
@@ -524,31 +525,68 @@ Catalogue conflation, combining events from multiple independent catalogues into
   \item \textbf{Priority-based}: a nominated authoritative agency's solution is preferred; others are recorded as alternatives.
   \item \textbf{Newest data}: the most recently determined solution is retained, where later analyses supersede earlier ones.
   \item \textbf{Most complete}: the solution with the most populated fields is retained, maximising metadata density.
-  \item \textbf{Averaged}: location, depth, and magnitude are combined across solutions by inverse-variance weighting, using an ISC magnitude-type hierarchy to avoid scale saturation. Agency solutions for one event often share data and processing assumptions, so this strategy is best treated as exploratory unless validated for the catalogues being combined. Its merged uncertainty is reported conservatively---no smaller than the smallest contributing value---rather than the tighter value that would follow from assuming the solutions are statistically independent.
+  \item \textbf{Averaged}: location, depth, and magnitude are combined across solutions by inverse-variance weighting, using an ISC magnitude-type hierarchy to avoid scale saturation. Agency solutions for one event often share data and processing assumptions, so this strategy is best treated as exploratory unless validated for the catalogues being combined. Its merged uncertainty is reported conservatively (no smaller than the smallest contributing value) rather than the tighter value that would follow from assuming the solutions are statistically independent.
 \end{itemize}
-Conflicts are detected and logged when solutions disagree beyond configurable thresholds (spatial separation, temporal offset, magnitude difference, depth range, network mismatch); duplicate detection during dense aftershock sequences follows nearest-neighbour methods \citep{Tanaka2022}. Each merged event retains explicit lineage to its source events and the configuration used, enabling full audit and reproducibility; a dry-run preview returns conflict statistics without committing a new version. Production merge configurations should report validation results and sensitivity to threshold choice. Table~\ref{tab:merge_example} shows a worked example.
+For the averaged strategy, a quantity $x$ reported by sources $i$ with standard deviations $\sigma_i$ is combined as the inverse-variance-weighted mean, alongside the variance that would follow \emph{if} the solutions were statistically independent:
+\begin{equation*}
+\bar{x} = \frac{\sum_i w_i\,x_i}{\sum_i w_i}, \qquad
+w_i = \frac{1}{\sigma_i^{2}}, \qquad
+\sigma_{\text{indep}}^{2} = \frac{1}{\sum_i w_i}.
+\end{equation*}
+The weights $w_i$ pull the mean toward the better-constrained solution. However, agency solutions for the same event typically share waveforms, phase picks, and processing assumptions, so they are correlated rather than independent, and $\sigma_{\text{indep}}$ understates the true uncertainty. The framework therefore reports a conservative uncertainty floored at the most precise contributing solution,
+\begin{equation*}
+\sigma_{\text{reported}} = \max\!\bigl(\sigma_{\text{indep}},\ \min_i \sigma_i\bigr).
+\end{equation*}
+
+Conflicts are detected and logged when solutions disagree beyond configurable thresholds (spatial separation, temporal offset, magnitude difference, depth range, network mismatch); duplicate detection during dense aftershock sequences follows nearest-neighbour methods \citep{Tanaka2022}. Each merged event retains explicit lineage to its source events and the configuration used, enabling full audit and reproducibility; a dry-run preview returns conflict statistics without committing a new version. Production merge configurations should report validation results and sensitivity to threshold choice. Table~\ref{tab:merge_example} works this through for one event reported by two catalogues, and Figure~\ref{fig:merge_example} shows the resulting epicentre.
 
 \begin{table}[H]
 \centering
-\small
-\caption{Synthetic worked example: averaged merge of one event reported by two catalogues. Merged point values are inverse-variance-weighted means; the merged uncertainty is reported conservatively (see Section~\ref{sec:merge}). Values and identifiers are illustrative and are not official event solutions.}
+\footnotesize
+\caption{Synthetic worked example of the \emph{averaged} merge strategy for one earthquake reported by two catalogues (Source~A is entry \texttt{catA-0001}, Source~B is \texttt{catB-0172}; the merged event \texttt{merged-0001} retains lineage to both). Each quantity is the inverse-variance-weighted mean of the two solutions; the normalised weights $w_A\!:\!w_B$ (with $w_i=1/\sigma_i^{2}$) show how the mean is pulled toward the better-constrained Source~A. The last column contrasts the uncertainty obtained by \emph{incorrectly} assuming the solutions are independent, $\sigma_{\text{indep}}$, with the conservative value actually reported, $\sigma_{\text{reported}}=\max(\sigma_{\text{indep}},\,\min_i\sigma_i)$ (Section~\ref{sec:merge}); the floor is active in every row. Latitude and longitude are weighted by the horizontal uncertainty, so their merged epicentre uncertainty is the \emph{Horizontal unc.} row. Values and identifiers are illustrative and are not official event solutions.}
 \label{tab:merge_example}
-\setlength{\tabcolsep}{5pt}
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{p{3.1cm} p{3.1cm} p{3.1cm} p{3.5cm}}
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{2.7cm} p{2.0cm} p{2.0cm} p{1.5cm} p{1.7cm} p{2.5cm}}
 \toprule
-\textbf{Field} & \textbf{Source A} & \textbf{Source B} & \textbf{Merged (uncertainty-weighted)} \\
+\textbf{Quantity} & \textbf{Source A} & \textbf{Source B} & \textbf{Weights $w_A\!:\!w_B$} & \textbf{Merged mean} & \textbf{Merged $\sigma$ (indep.\,$\to$\,rep.)} \\
 \midrule
-Event identifier & catA-0001 & catB-0172 & merged-0001 (lineage to A, B) \\
-Origin time (s past reference minute) & 12.3 $\pm$\,0.5 & 12.7 $\pm$\,0.8 & 12.4 $\pm$\,0.5 \\
-Latitude ($^\circ$) & $-38.520$ & $-38.524$ & $-38.521$ \\
-Longitude ($^\circ$) & 176.120 & 176.150 & 176.126 \\
-Depth (km) & 8.0 $\pm$\,2.0 & 9.0 $\pm$\,4.0 & 8.2 $\pm$\,2.0 \\
-Magnitude ($M_w$) & 4.2 $\pm$\,0.1 & 4.3 $\pm$\,0.2 & 4.2 $\pm$\,0.1 \\
-Horizontal unc. (km) & 1.5 & 3.0 & 1.5 \\
+Origin time (s) & $12.3 \pm 0.5$ & $12.7 \pm 0.8$ & $0.72:0.28$ & $12.4$ & $0.42 \to 0.50$ \\
+Latitude ($^\circ$) & $-38.520$ & $-38.524$ & $0.80:0.20$ & $-38.521$ & n/a \\
+Longitude ($^\circ$) & $176.120$ & $176.150$ & $0.80:0.20$ & $176.126$ & n/a \\
+Horizontal unc.\ (km) & $1.5$ & $3.0$ & n/a & n/a & $1.34 \to 1.50$ \\
+Depth (km) & $8.0 \pm 2.0$ & $9.0 \pm 4.0$ & $0.80:0.20$ & $8.2$ & $1.79 \to 2.00$ \\
+Magnitude ($M_w$) & $4.2 \pm 0.1$ & $4.3 \pm 0.2$ & $0.80:0.20$ & $4.22$ & $0.089 \to 0.10$ \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[x=0.95cm,y=0.95cm,>={Stealth[length=2mm,width=1.6mm]},font=\footnotesize]
+% axes: local East--North frame (km), origin at Source A
+\draw[->,gray!70] (-2.1,0) -- (5.7,0) node[right,black]{East of A (km)};
+\draw[->,gray!70] (0,-3.7) -- (0,3.3) node[above,black]{North of A (km)};
+\foreach \xk in {-1,1,2,3,4,5} {\draw[gray!45] (\xk,-0.07)--(\xk,0.07) node[below=1pt,black,scale=0.8]{$\xk$};}
+\foreach \yk in {-3,-2,-1,1,2,3} {\draw[gray!45] (-0.07,\yk)--(0.07,\yk) node[left=1pt,black,scale=0.8]{$\yk$};}
+% 1-sigma horizontal uncertainty circles
+\draw[blue!60,dashed,line width=0.5pt] (0,0) circle (1.5);
+\draw[red!55,dashed,line width=0.5pt] (2.61,-0.44) circle (3.0);
+\draw[black!45,dotted,line width=0.6pt] (0.52,-0.09) circle (1.34);
+\draw[black,line width=0.9pt] (0.52,-0.09) circle (1.5);
+% A -> B baseline; merged sits ~20% along
+\draw[gray,->] (0,0) -- (2.61,-0.44);
+% solutions
+\fill[blue] (0,0) circle (2.3pt);
+\node[above left=0pt,blue!70!black] at (0,0) {A ($w{=}0.80$)};
+\fill[red] (2.61,-0.44) circle (2.3pt);
+\node[above right=1pt,red!60!black] at (2.61,-0.44) {B ($w{=}0.20$)};
+\fill[black] (0.52-0.075,-0.09-0.075) rectangle (0.52+0.075,-0.09+0.075);
+\node[below=4pt,black] at (0.52,-0.09) {merged};
+\end{tikzpicture}
+\caption{The averaged merge of Table~\ref{tab:merge_example}, in a local East--North frame centred on Source~A. The inverse-variance weights ($0.80:0.20$ horizontally) pull the merged epicentre (black square) about one-fifth of the way from the better-constrained Source~A (blue) toward Source~B (red); the dashed circles are the $1\sigma$ horizontal uncertainties ($1.5$ and $3.0$\,km). Crucially, the merged uncertainty is \emph{not} allowed to shrink below the most precise input: the solid circle is the reported $\sigma=1.5$\,km, whereas the dotted circle is the smaller $\sigma_{\text{indep}}=1.34$\,km that the (invalid) independence assumption would give. Epicentre coordinates are plotted from the unrounded weighted mean.}
+\label{fig:merge_example}
+\end{figure}
 
 \subsection{Data Quality Assessment}
 \label{sec:quality}
@@ -561,7 +599,7 @@ A standardised, transparent quality score can support informed reuse decisions, 
 \item \textbf{Magnitude} (15\,\%): magnitude uncertainty and the number of contributing stations; and
 \item \textbf{Evaluation} (10\,\%): manually reviewed/final solutions score above automatic/preliminary ones.
 \end{itemize}
-Each dimension penalises missing fields, so sparsely documented events are scored conservatively. Field completeness, physical-consistency, and magnitude-homogeneity checks are handled separately by the automated validation suite (Appendix~\ref{app:spec}). The score maps to the grade bands in Table~\ref{tab:quality_grades}. The weights and bands are configurable defaults; the pilot phase will calibrate them against representative New Zealand catalogues. The grades are screening guidance based on documentation and solution indicators---not a measure of event accuracy or of fitness for a specific hazard, engineering, or scientific analysis. Flagged statistical outliers are annotated for caution rather than removed automatically.
+Each dimension penalises missing fields, so sparsely documented events are scored conservatively. Field completeness, physical-consistency, and magnitude-homogeneity checks are handled separately by the automated validation suite (Appendix~\ref{app:spec}). The score maps to the grade bands in Table~\ref{tab:quality_grades}. The weights and bands are configurable defaults; the pilot phase will calibrate them against representative New Zealand catalogues. The grades are screening guidance based on documentation and solution indicators, not a measure of event accuracy or of fitness for a specific hazard, engineering, or scientific analysis. Flagged statistical outliers are annotated for caution rather than removed automatically.
 
 \begin{table}[H]
 \centering
@@ -720,10 +758,10 @@ We welcome feedback and expressions of interest in participating in the governan
 
 \section*{Data and Code Availability}
 \addcontentsline{toc}{section}{Data and Code Availability}
-In keeping with the FAIR principles it advocates, the prototype portal source code, the metadata schema, the controlled parameter lexicon, the companion review of catalogue-merging strategies, and a companion inventory of New Zealand earthquake catalogues (1960--2026) are available under the MIT licence at \url{https://github.com/KennyGraham1/catalogofcatalogs} (documentation at \url{https://catalogofcatalogs.readthedocs.io/}). The earthquake catalogues used as examples are available from their respective providers: the GeoNet national catalogue \citep{GeoNetEqCatalogue}, USGS ComCat \citep{usgs_comcat}, and the Swiss Seismological Service \citep{sed_report}.
+In keeping with the FAIR principles it advocates, the prototype portal source code, the metadata schema, the controlled parameter lexicon, the companion review of catalogue-merging strategies, and a companion inventory of New Zealand earthquake catalogues (1960--2026) are available under the MIT licence at \url{https://github.com/KennyGraham1/catalogofcatalogs} (documentation at \url{https://catalogofcatalogs.readthedocs.io/}); consistent with the persistent-identifier practice this paper advocates, a citable DOI for a versioned snapshot of these artefacts will be minted (e.g.\ via Zenodo) with the first tagged release. The earthquake catalogues used as examples are available from their respective providers: the GeoNet national catalogue \citep{GeoNetEqCatalogue}, USGS ComCat \citep{usgs_comcat}, and the Swiss Seismological Service \citep{sed_report}.
 
 \section*{Acknowledgements}
-We thank participants in the 2023 and 2024 workshops for their contributions, and colleagues across Earth Sciences New Zealand and partner universities for their input to this framework.
+We thank participants in the 2023 and 2024 workshops and at the 2025 Geoscience Society of New Zealand annual meeting for their contributions, and colleagues across Earth Sciences New Zealand and partner universities for their input to this framework.
 
 
 \appendix
@@ -849,12 +887,12 @@ Units \& formats & time: ISO 8601 UTC; coordinates: WGS84 decimal degrees; depth
 
 \subsection{QuakeML/FDSN Crosswalk}
 \label{sec:crosswalk}
-The framework adopts QuakeML~1.2 and the FDSN web-service conventions as its interchange backbone \citep{QuakeML}. Table~\ref{tab:quakeml_crosswalk} maps the framework's catalogue constructs to specific QuakeML elements. Most map directly to native QuakeML. QuakeML also permits free-text \texttt{comment} elements and custom elements from a foreign namespace; the framework uses these, together with companion records (W3C PROV provenance \citep{PROVO}, the DataCite DOI record, and the registry submission profile, Table~\ref{tab:profile}), to carry the constructs that have no native QuakeML element---chiefly the composite quality score, cross-catalogue merge lineage, qualitative confidence classes, and macroseismic intensity for historical events. A complete, versioned crosswalk will be published with the schema (see Data and Code Availability) and finalised in Phase~1.
+The framework adopts QuakeML~1.2 and the FDSN web-service conventions as its interchange backbone \citep{QuakeML}. Table~\ref{tab:quakeml_crosswalk} maps the framework's catalogue constructs to specific QuakeML elements. Most map directly to native QuakeML. QuakeML also permits free-text \texttt{comment} elements and custom elements from a foreign namespace; the framework uses these, together with companion records (W3C PROV provenance \citep{PROVO}, the DataCite DOI record, and the catalogue submission profile, Table~\ref{tab:profile}), to carry the constructs that have no native QuakeML element: chiefly the composite quality score, cross-catalogue merge lineage, qualitative confidence classes, and macroseismic intensity for historical events. A complete, versioned crosswalk will be published with the schema (see Data and Code Availability) and finalised in Phase~1.
 
 \begin{table}[H]
 \centering
 \small
-\caption{Crosswalk from framework catalogue constructs to QuakeML~1.2 / FDSN. Status: \textsf{native} = direct QuakeML element; \textsf{ext.} = QuakeML \texttt{comment} or foreign-namespace extension; \textsf{comp.} = carried in a companion record (W3C PROV, DataCite DOI, or the registry submission profile).}
+\caption{Crosswalk from framework catalogue constructs to QuakeML~1.2 / FDSN. Status: \textsf{native} = direct QuakeML element; \textsf{ext.} = QuakeML \texttt{comment} or foreign-namespace extension; \textsf{comp.} = carried in a companion record (W3C PROV, DataCite DOI, or the submission profile).}
 \label{tab:quakeml_crosswalk}
 \setlength{\tabcolsep}{5pt}
 \renewcommand{\arraystretch}{1.2}
@@ -876,7 +914,7 @@ Creation provenance & \texttt{creationInfo} (\texttt{agencyID}, \texttt{author},
 Composite quality score (0--100) and grade & No native element; framework-namespace extension on \texttt{origin}, derived from the \texttt{origin/quality} inputs above & \textsf{ext.} \\
 Qualitative confidence class; uncertainty-absent flag & Controlled \texttt{comment} / framework extension; \texttt{uncertainty\_available}\,=\,false & \textsf{ext.} \\
 Merge lineage / source-event mapping (``derivedFrom'') & No native construct; W3C PROV-O records \citep{PROVO} and the event-identifier mapping service, referenced from \texttt{comment} & \textsf{comp.} \\
-Catalogue-level descriptors (submission profile) & Minimal native support (\texttt{eventParameters/description}, \texttt{comment}); carried in the registry profile (Table~\ref{tab:profile}) & \textsf{comp.} \\
+Catalogue-level descriptors (submission profile) & Minimal native support (\texttt{eventParameters/description}, \texttt{comment}); carried in the submission profile (Table~\ref{tab:profile}) & \textsf{comp.} \\
 Persistent identifier and dataset version & DataCite DOI at dataset level; \texttt{creationInfo/version} per record & \textsf{comp.} \\
 \bottomrule
 \end{tabular}
