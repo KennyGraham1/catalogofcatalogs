@@ -64,7 +64,7 @@ $^{3}$ University of Canterbury
 
 \newpage
 \begin{abstract}
-Earthquake catalogues underpin seismology, monitoring, engineering, and risk management. Aotearoa New Zealand produces many of them (the GeoNet national catalogue alongside regional, volcano-specific, temporary-deployment, historical, and derived catalogues), but they are fragmented: built to different standards, documented inconsistently, and rarely interoperable. The 2022 National Seismic Hazard Model had to re-standardise magnitudes across sources before it could use them \citep{NSHM2022BSSA}; high-value research catalogues such as the 86{,}579-event Taup\={o} Volcanic Zone catalogue \citep{Illsley2025} sit outside any common system; and location quality across the national catalogue varies markedly with station coverage \citep{WarrenSmith2025}. Combining catalogues today is a manual, error-prone task.
+Earthquake catalogues underpin seismology, monitoring, engineering, and risk management. Aotearoa New Zealand produces many of them (the GeoNet national catalogue alongside regional, volcano-specific, temporary-deployment, historical, and derived catalogues), but they are fragmented: built to different standards, documented inconsistently, and rarely interoperable. The 2022 National Seismic Hazard Model had to re-standardise magnitudes across sources before it could use them \citep{NSHM2022BSSA, Christophersen2024}; high-value research catalogues such as the 86{,}579-event Taup\={o} Volcanic Zone catalogue \citep{Illsley2025} sit outside any common system; and location quality across the national catalogue varies markedly with station coverage \citep{WarrenSmith2025}. Combining catalogues today is a manual, error-prone task.
 
 Two national workshops (2023 and 2024) brought together researchers, agencies, and industry to identify needs and shape a practical framework guided by the FAIR principles (Findable, Accessible, Interoperable, Reusable) and, in the Aotearoa New Zealand context, by the CARE Principles for Indigenous Data Governance (Collective benefit, Authority to control, Responsibility, and Ethics). This white paper sets out the current landscape, the community-identified gaps, and a proposed national framework: a ``catalogue of catalogues'' that \emph{complements rather than replaces} GeoNet. The framework makes catalogues findable through a common submission profile and provides FAIR services (quality assessment, merge and conflation, analytics, versioning, and programmatic access) for the catalogues it coordinates. It is accompanied by proposed governance, a roadmap, and an indicative resourcing envelope. A working prototype demonstrates the technical feasibility of the core workflows, from ingestion and merging through analytics to multi-format export. We ask New Zealand's earth-science community, its agencies, and its research-infrastructure funders to review and refine the standards proposed here and to help establish a sustained national capability.
 \end{abstract}
@@ -102,7 +102,7 @@ In Aotearoa New Zealand that evidence base is fragmented. GeoNet curates the aut
 \item derived and synthetic catalogues built for hazard and risk modelling.
 \end{itemize}
 
-Because these catalogues use different formats, identifiers, magnitude scales, and metadata, combining them is manual and error-prone. The 2022 National Seismic Hazard Model illustrates the cost: a flagship national product required a dedicated effort to standardise magnitudes across sources before they could be used \citep{NSHM2022BSSA}. The consequences of the status quo are lost researcher time, reduced reproducibility, and less transparent uncertainty in decisions that can affect public safety and major infrastructure.
+Because these catalogues use different formats, identifiers, magnitude scales, and metadata, combining them is manual and error-prone. The 2022 National Seismic Hazard Model illustrates the cost: a flagship national product required a dedicated effort to standardise magnitudes across sources before they could be used \citep{NSHM2022BSSA, Christophersen2024}. The consequences of the status quo are lost researcher time, reduced reproducibility, and less transparent uncertainty in decisions that can affect public safety and major infrastructure.
 
 The opportunity is to add a thin coordinating layer (a ``catalogue of catalogues'') that makes these datasets findable, comparable, and citable. In practice it combines a common submission profile that makes catalogues findable with a set of richer FAIR services (comparison, merging, and citable versions) for the catalogues it coordinates. Internationally, initiatives such as the European Plate Observing System (EPOS) Seismology service show the value of standardised, FAIR data services and coordinated infrastructure \citep{EPOSSeisTCS, EPOSSeisDataServices}. This paper synthesises outcomes from two national workshops and intersession working-group activity to propose such a framework, tailored to New Zealand and governed under both FAIR and CARE principles.
 
@@ -327,7 +327,7 @@ The framework addresses the end-to-end lifecycle of catalogue data; Figure~\ref{
 
 Unless otherwise stated, the components in this section are proposed design requirements. The discovery-level requirements apply to the submission profile that describes every catalogue and are intentionally lightweight; the service-level requirements apply to catalogues ingested in full, and especially to DOI-bearing releases, and are correspondingly stricter.
 
-The framework is a single coordinating layer, the ``catalogue of catalogues''. Its common front door is a short submission profile (Section~\ref{sec:profile}): each catalogue is described by the profile, recording what it contains and how to obtain it, so that the catalogue is discoverable without necessarily transferring the underlying data. This discovery function is cheap to contribute to and is the immediate community deliverable, answering \emph{which catalogues exist, what they contain, and where to find them}. Building on it, the framework provides the richer FAIR services (programmatic access, cross-catalogue event-identifier mapping, merge and conflation, quality scoring, analytics, and versioned DOIs) for catalogues that are ingested in full, answering \emph{compare, merge, analyse, and cite}. A catalogue can therefore be described by a profile that links to wherever it lives, or opt in to full ingestion for the services that operate on event-level data. Discovery should be established first and at low cost; the full services are demonstrated by the prototype (Section~\ref{sec:prototype}) and would be built out across the roadmap (Section~\ref{sec:implementation}). The components below describe both the discovery profile and these services.
+The framework is a single coordinating layer, the ``catalogue of catalogues''. Its common front door is a short submission profile (Section~\ref{sec:profile}): each catalogue is described by the profile, recording what it contains and how to obtain it, so that the catalogue is discoverable without necessarily transferring the underlying data. This discovery function is cheap to contribute to and is the immediate community deliverable, answering \emph{which catalogues exist, what they contain, and where to find them}. Building on it, the framework provides the richer FAIR services (programmatic access, cross-catalogue event-identifier mapping, merge and conflation, quality scoring, analytics, and versioned DOIs) for catalogues that are ingested in full, answering \emph{compare, merge, analyse, and cite}. A catalogue can therefore be described by a profile that links to wherever it lives, or opt in to full ingestion for the services that operate on event-level data. Discovery should be established first and at low cost; the full services are demonstrated by the prototype (Section~\ref{sec:prototype}) and would be built out across the roadmap (Section~\ref{sec:implementation}). At the time of writing the index is a design proposal: it has not yet been populated, and the New Zealand catalogues named in this paper are motivating examples rather than live entries. Standing up an initial index with an agreed first set of catalogues, via the submission profile, is the near-term deliverable (Section~\ref{sec:implementation}). The components below describe both the discovery profile and these services.
 
 Table~\ref{tab:functions} summarises the framework's two functions, discovery and curation services, before the detailed architecture in Figure~\ref{fig:architecture}.
 
@@ -440,7 +440,7 @@ Curation services & Fully ingested event-level catalogue data and provenance & V
 \end{figure}
 
 \subsection{Metadata Standards and a Shared Lexicon}
-A core metadata profile aligned with QuakeML and FDSN conventions captures identifiers, origin parameters with uncertainties, magnitude types with errors, detection and quality metrics, methodology descriptors, event classification, and catalogue-level metadata \citep{QuakeML, GeoNetFDSN, USGSFDSN}. Required versus recommended fields are distinguished to balance utility against effort; the full field hierarchy is given in Table~\ref{tab:metadata_fields} (Appendix~\ref{app:spec}). A controlled vocabulary standardises magnitude types, event classifications, phase names and quality codes, units and formats, and dataset naming, improving interpretability and filtering across catalogues \citep{QuakeML, EventTypeNotes}. An illustrative subset of this lexicon is given in Table~\ref{tab:lexicon} (Appendix~\ref{app:spec}).
+A core metadata profile aligned with QuakeML and FDSN conventions captures identifiers, origin parameters with uncertainties, magnitude types with errors, detection and quality metrics, methodology descriptors, event classification, and catalogue-level metadata \citep{QuakeML, GeoNetFDSN, USGSFDSN}. Required versus recommended fields are distinguished to balance utility against effort; the full field hierarchy is given in Table~\ref{tab:metadata_fields} (Appendix~\ref{app:spec}). The field-level mapping to QuakeML elements---including how constructs without a native QuakeML element (the composite quality score, cross-catalogue merge lineage, qualitative confidence classes, and macroseismic intensity) are carried via QuakeML's extension and comment mechanisms---is given in Table~\ref{tab:quakeml_crosswalk} (Appendix~\ref{app:spec}). A controlled vocabulary standardises magnitude types, event classifications, phase names and quality codes, units and formats, and dataset naming, improving interpretability and filtering across catalogues \citep{QuakeML, EventTypeNotes}. An illustrative subset of this lexicon is given in Table~\ref{tab:lexicon} (Appendix~\ref{app:spec}).
 
 \subsection{Catalogue Submission Profile (Minimum Attributes)}
 \label{sec:profile}
@@ -674,7 +674,7 @@ A coordinated, FAIR-and-CARE catalogue capability delivers concrete, audience-sp
 \begin{itemize}
 \setlength{\itemsep}{2pt}
 \item \textbf{Researchers} gain discoverable, citable, version-pinned datasets and ready cross-catalogue comparison, making studies faster to run and easier to reproduce.
-\item \textbf{Hazard and risk modellers} (e.g.\ the National Seismic Hazard Model) get comparable, documented inputs with consistent magnitudes and uncertainties, reducing the bespoke harmonisation that the 2022 NSHM required \citep{NSHM2022BSSA}.
+\item \textbf{Hazard and risk modellers} (e.g.\ the National Seismic Hazard Model) get comparable, documented inputs with consistent magnitudes and uncertainties, reducing the bespoke harmonisation that the 2022 NSHM required \citep{NSHM2022BSSA, Christophersen2024}.
 \item \textbf{Engineering and insurance} users obtain traceable inputs with explicit licences and transparent quality scores, supporting more defensible design and risk decisions.
 \item \textbf{Emergency management and the public} benefit from clearer, better-documented event information and a single national point of discovery, while GeoNet remains the authoritative operational source.
 \item \textbf{Iwi and hap\=u} should be engaged as partners in governance, setting the access and attribution conditions for data of significance to them, which the framework then implements (Section~\ref{sec:care}).
@@ -805,7 +805,7 @@ Event type & Recommended & QuakeML event type vocabulary \\
 \end{table}
 
 \subsection{Controlled Parameter Lexicon}
-Table~\ref{tab:lexicon} shows representative entries from the controlled lexicon referenced in Section~\ref{sec:framework}. It is an illustrative subset, aligned with the QuakeML enumerations \citep{QuakeML, EventTypeNotes}, not the complete normative list, which is maintained with the released schema (see Data and Code Availability).
+Table~\ref{tab:lexicon} shows representative entries from the controlled lexicon referenced in Section~\ref{sec:framework}. It is an illustrative subset, aligned with the QuakeML enumerations \citep{QuakeML, EventTypeNotes}, not the complete normative list. A fuller controlled vocabulary is maintained with the schema in the project repository (see Data and Code Availability); its normative, versioned form will be published with the first DOI-bearing release.
 
 \begin{table}[H]
 \centering
@@ -831,6 +831,41 @@ Pick onset / polarity & onset: \textsf{emergent} / \textsf{impulsive} / \textsf{
 Depth determination & \textsf{from location}; \textsf{operator assigned}; \textsf{constrained by depth phases}; \textsf{constrained by direct phases} \\
 \addlinespace
 Units \& formats & time: ISO 8601 UTC; coordinates: WGS84 decimal degrees; depth: km below sea level \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{QuakeML/FDSN Crosswalk}
+\label{sec:crosswalk}
+The framework adopts QuakeML~1.2 and the FDSN web-service conventions as its interchange backbone \citep{QuakeML}. Table~\ref{tab:quakeml_crosswalk} maps the framework's catalogue constructs to specific QuakeML elements. Most map directly to native QuakeML. QuakeML also permits free-text \texttt{comment} elements and custom elements from a foreign namespace; the framework uses these, together with companion records (W3C PROV provenance \citep{PROVO}, the DataCite DOI record, and the registry submission profile, Table~\ref{tab:profile}), to carry the constructs that have no native QuakeML element---chiefly the composite quality score, cross-catalogue merge lineage, qualitative confidence classes, and macroseismic intensity for historical events. A complete, versioned crosswalk will be published with the schema (see Data and Code Availability) and finalised in Phase~1.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Crosswalk from framework catalogue constructs to QuakeML~1.2 / FDSN. Status: \textsf{native} = direct QuakeML element; \textsf{ext.} = QuakeML \texttt{comment} or foreign-namespace extension; \textsf{comp.} = carried in a companion record (W3C PROV, DataCite DOI, or the registry submission profile).}
+\label{tab:quakeml_crosswalk}
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{3.5cm} p{8.2cm} p{1.5cm}}
+\toprule
+\textbf{Framework construct} & \textbf{QuakeML~1.2 / FDSN representation} & \textbf{Status} \\
+\midrule
+Event and solution identifiers & \texttt{event@publicID}, \texttt{origin@publicID}, \texttt{magnitude@publicID} & \textsf{native} \\
+Origin time and hypocentre & \texttt{origin/time}, \texttt{/latitude}, \texttt{/longitude}, \texttt{/depth} (each \texttt{value} with \texttt{uncertainty}) & \textsf{native} \\
+Location uncertainty / confidence ellipse & \texttt{origin/originUncertainty} (\texttt{horizontalUncertainty}, \texttt{minHorizontalUncertainty}, \texttt{maxHorizontalUncertainty}, \texttt{azimuthMaxHorizontalUncertainty}, \texttt{confidenceEllipsoid}, \texttt{preferredDescription}) & \textsf{native} \\
+Network geometry and fit & \texttt{origin/quality} (\texttt{azimuthalGap}, \texttt{usedStationCount}, \texttt{usedPhaseCount}, \texttt{standardError}) & \textsf{native} \\
+Depth type; method; earth model & \texttt{origin/depthType}, \texttt{origin/methodID}, \texttt{origin/earthModelID} & \textsf{native} \\
+Evaluation mode and status & \texttt{origin/evaluationMode}, \texttt{origin/evaluationStatus} & \textsf{native} \\
+Magnitude (value, type, error, stations) & \texttt{magnitude/mag} (\texttt{value}, \texttt{uncertainty}), \texttt{magnitude/type}, \texttt{magnitude/stationCount} & \textsf{native} \\
+Phase picks and arrivals & \texttt{pick} (\texttt{time}, \texttt{phaseHint}, \texttt{onset}, \texttt{polarity}); \texttt{arrival} (\texttt{phase}, \texttt{azimuth}, \texttt{distance}, \texttt{timeResidual}) & \textsf{native} \\
+Event type and classification & \texttt{event/type}, \texttt{event/typeCertainty}, \texttt{description} & \textsf{native} \\
+Macroseismic intensity (historical) & No native element in QuakeML~1.2 (macroseismic is a QuakeML~2.0 package, still under development); carried via foreign-namespace extension / \texttt{comment}; intensity recorded as MMI or EMS-98 & \textsf{ext.} \\
+Creation provenance & \texttt{creationInfo} (\texttt{agencyID}, \texttt{author}, \texttt{version}, \texttt{creationTime}) & \textsf{native} \\
+Composite quality score (0--100) and grade & No native element; framework-namespace extension on \texttt{origin}, derived from the \texttt{origin/quality} inputs above & \textsf{ext.} \\
+Qualitative confidence class; uncertainty-absent flag & Controlled \texttt{comment} / framework extension; \texttt{uncertainty\_available}\,=\,false & \textsf{ext.} \\
+Merge lineage / source-event mapping (``derivedFrom'') & No native construct; W3C PROV-O records \citep{PROVO} and the event-identifier mapping service, referenced from \texttt{comment} & \textsf{comp.} \\
+Catalogue-level descriptors (submission profile) & Minimal native support (\texttt{eventParameters/description}, \texttt{comment}); carried in the registry profile (Table~\ref{tab:profile}) & \textsf{comp.} \\
+Persistent identifier and dataset version & DataCite DOI at dataset level; \texttt{creationInfo/version} per record & \textsf{comp.} \\
 \bottomrule
 \end{tabular}
 \end{table}
