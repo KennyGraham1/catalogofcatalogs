@@ -35,6 +35,8 @@ export interface GutenbergRichterResult {
   aValue: number;
   completeness: number;
   rSquared: number;
+  /** Formal Aki (1965) standard error of the b-value: sigma_b = b / sqrt(N). */
+  bUncertainty: number;
   dataPoints: { magnitude: number; logCount: number; count: number }[];
   fittedLine: { magnitude: number; logCount: number }[];
 }
@@ -326,6 +328,8 @@ export function calculateGutenbergRichter(
     .filter(m => m >= mc);
   const meanMag = magsAboveMc.reduce((sum, m) => sum + m, 0) / magsAboveMc.length;
   const bValue = Math.LOG10E / (meanMag - (mc - binWidth / 2));
+  // Formal Aki (1965) standard error of the MLE b-value: sigma_b = b / sqrt(N).
+  const bUncertainty = bValue / Math.sqrt(magsAboveMc.length);
   // a-value fixes the GR line through (Mc, N >= Mc): log10 N(M) = a - b*M.
   const aValue = Math.log10(magsAboveMc.length) + bValue * mc;
 
@@ -360,6 +364,7 @@ export function calculateGutenbergRichter(
     aValue,
     completeness,
     rSquared,
+    bUncertainty,
     dataPoints: cumulativeCounts,
     fittedLine
   };
@@ -429,12 +434,15 @@ export function estimateCompletenessMagnitude(
  * Gardner-Knopoff (1974) space-time window parameters
  * These are the standard parameters used for earthquake declustering
  *
- * Time window (days): T = 10^(0.5409*M - 0.547)  (Gardner & Knopoff, 1974)
+ * Two-branch time window (days): T = 10^(0.5409*M - 0.547) for M >= 6.5,
+ *   otherwise T = 10^(0.032*M + 2.7389)  (Gardner & Knopoff, 1974)
  * Distance window (km): L = 10^(0.1238*M + 0.983)  (Gardner & Knopoff, 1974)
- * (matches Eq. 16-17 in the paper and Table 1 of van Stiphout et al., 2012)
+ * (Table 1 of van Stiphout et al., 2012)
  */
 function getGardnerKnopoffWindow(magnitude: number): { timeWindowDays: number; distanceWindowKm: number } {
-  const timeWindowDays = Math.pow(10, 0.5409 * magnitude - 0.547);
+  const timeWindowDays = magnitude >= 6.5
+    ? Math.pow(10, 0.5409 * magnitude - 0.547)
+    : Math.pow(10, 0.032 * magnitude + 2.7389);
   const distanceWindowKm = Math.pow(10, 0.1238 * magnitude + 0.983);
 
   return { timeWindowDays, distanceWindowKm };

@@ -24,8 +24,9 @@
 \usepackage{tikz}
 \usetikzlibrary{positioning, arrows.meta}
 \usepackage{url}
-\usepackage{microtype}
 \usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
 \usepackage[utf8]{inputenc}
 
 % --- Hyperref setup -----------------------------------------
@@ -82,17 +83,18 @@ analysing earthquake catalogues from multiple agencies and formats, designed
 in accordance with the FAIR data principles (Findable, Accessible,
 Interoperable, Reusable).  CofC accepts data as CSV/TXT, GeoJSON,
 QuakeML~1.2 Basic Event Description (BED), and live FDSN web-service streams.
-A five-strategy merging engine detects duplicate events using configurable
-time ($\leq 60$\,s), distance ($\leq 50$\,km), and magnitude ($\leq 0.5$)
-thresholds and resolves conflicts via priority, quality-score, newest-data,
+A five-strategy merging engine detects duplicate events using configurable,
+adaptive time ($\leq 60$\,s) and distance ($\leq 50$\,km) windows (widened for
+larger and deeper events), with magnitude consistency enforced as a separate
+per-group gate, and resolves conflicts via priority, quality-score, newest-data,
 most-complete, or averaged-value rules.  A transparent quality-scoring system
 (0--100 index, A$^{+}$ to~F letter grade) evaluates each event across five
 dimensions: location precision, network geometry, solution fit, magnitude
 quality, and analyst-evaluation status.  Standard seismological
-analyses---Gutenberg-Richter $b$-value estimation via maximum likelihood,
+analyses, Gutenberg-Richter $b$-value estimation via maximum likelihood,
 magnitude of completeness ($M_c$) via the Maximum Curvature (MAXC) method,
 Gardner-Knopoff and Reasenberg window declustering, and cumulative seismic
-moment---are available in the browser.  Using a fully synthetic two-catalogue
+moment, are available in the browser.  Using a fully synthetic two-catalogue
 New Zealand example (no real event data), we illustrate the end-to-end
 workflow and verify that it is internally consistent and reproducible: an
 injected 50\% duplicate overlap is reproduced, quality scoring isolates an
@@ -112,11 +114,11 @@ documentation are freely available under the MIT licence.
 \subsection{The role of earthquake catalogues in seismology}
 
 Earthquake catalogues are the fundamental observational basis for quantitative
-seismology.  Every tool in the modern seismological toolkit---from
+seismology.  Every tool in the modern seismological toolkit, from
 probabilistic seismic hazard analysis (PSHA; \citealt{cornell1968}; e.g.\ the
 2022 Aotearoa New Zealand NSHM, \citealt{gerstenberger2024}) to
 operational earthquake forecasting \citep{schorlemmer2007} to tectonic
-geodesy---rests on the assumption that the underlying catalogue faithfully
+geodesy, rests on the assumption that the underlying catalogue faithfully
 represents the space-time-magnitude distribution of seismicity.  The
 Gutenberg-Richter (GR) frequency-magnitude relation \citep{gutenberg1944}
 and its $b$-value, which encodes the relative proportion of small to large
@@ -128,11 +130,11 @@ framework for short-term earthquake forecasting, requires a complete,
 Poissonian background catalogue that is free from both incompleteness and
 aftershock contamination.
 
-Regional monitoring agencies---GeoNet (New Zealand; \citealt{petersen2011}),
+Regional monitoring agencies, GeoNet (New Zealand; \citealt{petersen2011}),
 the Northern California Earthquake Data Center \citep{ncedc2014}, the
 International Seismological Centre (ISC; \citealt{storchak2013}), the
 Engdahl-van der Hilst-Buland relocated global catalogue
-\citep{engdahl1998}---each maintain catalogues with overlapping geographic
+\citep{engdahl1998}, each maintain catalogues with overlapping geographic
 coverage but different station networks, velocity models, magnitude scales,
 analysis procedures, and update frequencies.  Researchers routinely need to
 \emph{merge} or \emph{compare} these sources: to extend a short modern
@@ -146,15 +148,15 @@ invalid results.
 
 No universally adopted exchange format exists for seismological data.  The
 QuakeML~1.2 Basic Event Description (BED) schema \citep{schorlemmer2011}
-provides a comprehensive XML vocabulary---covering origins, magnitudes, focal
-mechanisms, picks, arrivals, and amplitude measurements---and is the standard
+provides a comprehensive XML vocabulary, covering origins, magnitudes, focal
+mechanisms, picks, arrivals, and amplitude measurements, and is the standard
 output of the FDSN Event Web Service \citep{fdsn2013}.  However, many agency
 archives remain in agency-specific CSV layouts, plain text bulletins, or
 legacy binary formats.  The GeoJSON format \citep{geojson2016} has gained
 traction for web-facing services but provides no controlled vocabulary for
 seismological fields; column and property names vary freely between providers.
 When a researcher assembles a multi-source dataset, the practical first step
-is writing bespoke format-conversion code---a task that is repetitive,
+is writing bespoke format-conversion code, a task that is repetitive,
 error-prone, and rarely shared or version-controlled.
 
 \subsection{Problem 2: Duplicate events and location scatter}
@@ -188,7 +190,7 @@ supports each, are collected in Section~\ref{sec:biases} and not repeated in
 between.
 
 \textbf{Magnitude of completeness ($M_c$).}  A catalogue is complete above
-$M_c$---the smallest magnitude at which essentially all events are
+$M_c$, the smallest magnitude at which essentially all events are
 detected by the network.  Below $M_c$, the GR relation breaks down
 \citep{rydelek1989}.  Fitting $b$ without first determining and enforcing
 $M_c$ leads to systematic underestimation \citep{woessner2005}.  Multiple
@@ -203,8 +205,8 @@ unless the analyst enforces the higher cut-off.
 different magnitude scales: local magnitude ($M_L$; \citealt{richter1935}),
 body-wave magnitude ($m_b$), surface-wave magnitude ($M_s$), and moment
 magnitude ($M_w$; \citealt{hanks1979,kanamori1977}).  Each scale saturates at
-a different value---$M_L$ above $\sim 6.5$, $m_b$ above $\sim 6.0$
-\citep{bormann2009}---and the inter-scale regressions carry substantial
+a different value, $M_L$ above $\sim 6.5$, $m_b$ above $\sim 6.0$
+\citep{bormann2009}, and the inter-scale regressions carry substantial
 scatter that depends on the regression method adopted \citep{das2011,castellaro2006}.
 Mixing scales inflates the apparent variance of the
 FMD, artificially shifts $M_c$, and can change the estimated $b$ by up to
@@ -222,25 +224,25 @@ relative to the declustered (Poissonian) catalogue, although the sign and size
 of the shift depend on the relative size distributions of the clustered and
 background populations \citep{gardner1974,marsan2008}.  We illustrate this
 shift directly in Section~\ref{sec:example}.  Multiple declustering algorithms
-exist---the window method of \citet{gardner1974} and the aftershock-zone
+exist, the window method of \citet{gardner1974} and the aftershock-zone
 scaling of \citet{kagan2002}, the link-based
 method of \citet{reasenberg1985}, and the ETAS-based stochastic method of
-\citet{zhuang2002}---with different sensitivities to swarm-type seismicity and
+\citet{zhuang2002}, with different sensitivities to swarm-type seismicity and
 to the aftershocks of aftershocks \citep{vanstiphout2012}.
 \citet{helmstetter2005} demonstrated that ignoring small-magnitude
-aftershocks---often the majority of any sequence---underestimates cascading
+aftershocks, often the majority of any sequence, underestimates cascading
 stress transfer and therefore the effective rate of background seismicity.
 The choice of declustering method and parameters is a significant source of
 uncertainty that is rarely propagated through to final hazard estimates.
 
 \textbf{Location quality filtering.}  Events recorded by sparse networks have
 large location uncertainties and poorly constrained depths.  If such events
-are systematically concentrated at one magnitude or depth range---as is
-typical for offshore events recorded by onshore networks---they introduce
+are systematically concentrated at one magnitude or depth range, as is
+typical for offshore events recorded by onshore networks, they introduce
 spatial bias into $b$-value mapping and Gutenberg-Richter fits.
-\citet{bondar2004} showed that network geometry---in particular the
+\citet{bondar2004} showed that network geometry, in particular the
 \emph{secondary} azimuthal gap, together with the number of stations and the
-nearest-station distance---controls horizontal location accuracy: large gaps
+nearest-station distance, controls horizontal location accuracy: large gaps
 (e.g.\ a primary gap exceeding $180^{\circ}$) are typically associated with
 errors of tens of kilometres.
 
@@ -268,12 +270,12 @@ provides peer-reviewed tutorials on these methods but no software platform.
 The need for such integration is intensifying.  Template-matching and
 machine-learning phase-detection workflows now routinely yield catalogues with
 up to an order of magnitude more events than traditional analyst-reviewed
-bulletins \citep{chamberlain2018,mousavi2022,illsley2025}, while every regional network
-continues to publish its own authoritative product.  A single study area may
+bulletins \citep{chamberlain2018,mousavi2022,illsley2025,michailos2025,chamberlain2025},
+while every regional network continues to publish its own authoritative product.  A single study area may
 therefore be covered by several catalogues that differ in completeness,
 magnitude scale, and location quality and must be reconciled before analysis.
-The constituent operations---format conversion, duplicate association,
-completeness estimation, declustering---are individually well understood and,
+The constituent operations, format conversion, duplicate association,
+completeness estimation, declustering, are individually well understood and,
 in isolation, available in existing tools.  The GEM OpenQuake Model Building
 Toolkit \citep{oqmbtk} compiles and homogenises multi-source catalogues with
 configurable space--time duplicate windows, declustering, and completeness
@@ -294,6 +296,8 @@ capabilities of representative tools with those of CofC.
 scripting; --: not supported.}
 \label{tab:comparison}
 \small
+\setlength{\tabcolsep}{4pt}
+\resizebox{\textwidth}{!}{%
 \begin{tabular}{@{}lcccccc@{}}
 \toprule
             & Multi-format & Duplicate    & Quality      & GR/$M_c$/    & Web, no      & Provenance/  \\
@@ -307,13 +311,14 @@ SeisComP                         & ($\checkmark$) & \checkmark     & --         
 Agency FDSN services             & --             & --             & --           & --             & \checkmark   & ($\checkmark$) \\
 \textbf{CofC} (this work)        & \checkmark     & \checkmark     & \checkmark   & \checkmark     & \checkmark   & \checkmark     \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
-At the institutional level, major agencies---GeoNet \citep{petersen2011},
+At the institutional level, major agencies, GeoNet \citep{petersen2011},
 the USGS Comprehensive Catalogue \citep[ComCat;][]{comcat},
 the Swiss Seismological Service, the ISC \citep{storchak2013}, and
-the EMSC---each publish their own catalogues with FDSN-compliant web
+the EMSC, each publish their own catalogues with FDSN-compliant web
 services, and the EPOS Seismology Thematic Core Service coordinates
 access across European networks.  ComCat additionally provides a web search
 interface and the \texttt{libcomcat} client for programmatic multi-source
@@ -331,7 +336,7 @@ basis for the reliability sub-score in CofC's quality-scoring system
 (Section~\ref{sec:quality}).  A high-resolution research catalogue for the
 Taupo Volcanic Zone \citep{illsley2025} illustrates the value of
 specialised regional products that can be ingested alongside the national
-catalogue---exactly the use case for which CofC is designed.
+catalogue, exactly the use case for which CofC is designed.
 
 \subsection{FAIR principles and reproducibility}
 \label{sec:fair}
@@ -339,7 +344,7 @@ catalogue---exactly the use case for which CofC is designed.
 A parallel motivation for CofC is the broader push towards FAIR scientific
 data: Findable, Accessible, Interoperable, and Reusable
 \citep{wilkinson2016}.  \citet{wilkinson2016} codified these principles
-to address a crisis of reproducibility in data-intensive science---the same
+to address a crisis of reproducibility in data-intensive science, the same
 crisis that afflicts earthquake catalogue analysis when preprocessing steps
 are undocumented, format conversions are ad hoc, and processed datasets are
 not versioned or persistently identified.  The FAIR principles have since been
@@ -347,8 +352,8 @@ adopted as the basis for data infrastructure by the European Plate Observing
 System (EPOS), which coordinates seismological data services across 24
 European nations.  For the Aotearoa New Zealand context in particular, FAIR is
 applied alongside the CARE Principles for Indigenous Data Governance
-\citep{carroll2020}---Collective benefit, Authority to control,
-Responsibility, and Ethics---which recognise M\=aori data-sovereignty
+\citep{carroll2020}, Collective benefit, Authority to control,
+Responsibility, and Ethics, which recognise M\=aori data-sovereignty
 interests in nationally significant datasets; the governance and
 access-control implications are developed in the companion white paper
 \citep{graham2026fair}.
@@ -389,8 +394,8 @@ implementation and statistical-analysis workflow.
 
 \subsection{The Catalogue of Catalogues}
 
-CofC addresses these three catalogue-analysis problems---together with the
-cross-cutting need for transparent quality assessment---in a single,
+CofC addresses these three catalogue-analysis problems, together with the
+cross-cutting need for transparent quality assessment, in a single,
 browser-accessible platform.  It ingests heterogeneous formats without
 custom scripting, detects and removes duplicate events using configurable
 thresholds grounded in the association standards of \citet{storchak2013}
@@ -409,7 +414,7 @@ consequential statistical biases (Section~\ref{sec:biases}).
 \subsection{Novelty and contributions}
 \label{sec:contributions}
 
-The individual algorithms CofC employs are deliberately standard---maximum-likelihood
+The individual algorithms CofC employs are deliberately standard, maximum-likelihood
 $b$-value estimation \citep{aki1965}, MAXC completeness estimation
 \citep{wiemer2000}, and Gardner-Knopoff \citep{gardner1974} and Reasenberg
 \citep{reasenberg1985} declustering.  The novelty of this work is therefore not
@@ -430,8 +435,8 @@ contributions are:
     with an integrated per-event quality index.
   \item \textbf{A transparent, configurable event-level quality index}
     (equation~\ref{eq:quality}): a five-dimension 0--100 score with letter
-    grades.  Its components---location precision, network geometry, solution
-    fit, magnitude quality, and evaluation status---are the standard
+    grades.  Its components, location precision, network geometry, solution
+    fit, magnitude quality, and evaluation status, are the standard
     determinants of solution quality used in agency review and ground-truth
     location-quality classification \citep{bondar2004,woessner2005,warrensmith2025};
     the contribution is their combination into a single reproducible,
@@ -450,8 +455,8 @@ contributions are:
     FAIR principles
     \citep{wilkinson2016} for routine catalogue work.
   \item \textbf{A bias-aware, guided analysis path} that surfaces the
-    underlying statistical assumptions---completeness, magnitude-scale
-    homogeneity, declustering, and quality filtering---at the point of use,
+    underlying statistical assumptions, completeness, magnitude-scale
+    homogeneity, declustering, and quality filtering, at the point of use,
     consolidating guidance previously dispersed across the CORSSA tutorials
     \citep{naylor2010,mignan2012,vanstiphout2012} into an executable workflow
     (Section~\ref{sec:biases}).
@@ -464,7 +469,7 @@ CofC presents the catalogue workflow as a single guided pipeline
 (Figure~\ref{fig:workflow}): heterogeneous inputs are ingested and normalised,
 every event is quality-scored on import, duplicate events are detected and
 resolved during merging, standard seismicity analyses are run in the browser,
-and processed catalogues are re-exported in standard formats---with all
+and processed catalogues are re-exported in standard formats, with all
 intermediate state and provenance persisted in the database at every step.
 
 \begin{figure}[ht]
@@ -646,8 +651,8 @@ The weights are largest for the dimensions that most directly govern whether a
 solution is usable in quantitative analysis: location precision and network
 geometry are the primary determinants of hypocentral accuracy
 \citep{bondar2004,warrensmith2025}; the arrival-time fit and magnitude quality
-are secondary; and the analyst-evaluation status---informative but partly
-redundant with the instrumental metrics---carries the least weight.  Each
+are secondary; and the analyst-evaluation status, informative but partly
+redundant with the instrumental metrics, carries the least weight.  Each
 dimension applies an explicit penalty when its underlying fields are absent,
 so events with sparse metadata are scored conservatively.  The weights are
 intentionally round-valued and are exposed as configurable parameters of the
@@ -658,24 +663,24 @@ separately by the cross-field validation suite (Section~\ref{sec:crossfield}).
 The five dimension scores $Q_d \in [0,100]$ are:
 
 \begin{description}[leftmargin=2em]
-  \item[$Q_{\text{loc}}$ — Location (35\%)]  Solution precision from the
+  \item[$Q_{\text{loc}}$: Location (35\%)]  Solution precision from the
     reported horizontal, depth, and time uncertainties, weighted most heavily
     on horizontal uncertainty.  Missing uncertainty fields incur a partial
     penalty, so unconstrained solutions cannot score full marks.
-  \item[$Q_{\text{net}}$ — Network geometry (25\%)]  Azimuthal gap,
-    used-station count, and used-phase count.  Azimuthal gap (primary and
-    secondary) is among the principal predictors of horizontal location error
+  \item[$Q_{\text{net}}$: Network geometry (25\%)]  Azimuthal gap,
+    used-station count, and used-phase count.  Azimuthal gap is among the
+    principal predictors of horizontal location error
     \citep{bondar2004,warrensmith2025}: a gap $\leq 90^{\circ}$ with
     $\geq 20$ stations earns full points, whereas a gap $\geq 180^{\circ}$ or
     very few stations is heavily penalised.  GeoNet location quality has been
     benchmarked against exactly these criteria \citep{warrensmith2025}.
-  \item[$Q_{\text{sol}}$ — Solution fit (15\%)]  The RMS arrival-time residual
+  \item[$Q_{\text{sol}}$: Solution fit (15\%)]  The RMS arrival-time residual
     (standard error) of the location: $< 0.3$\,s earns full points, with
     progressively larger penalties above $0.5$ and $1.0$\,s.
-  \item[$Q_{\text{mag}}$ — Magnitude (15\%)]  Magnitude uncertainty and the
+  \item[$Q_{\text{mag}}$: Magnitude (15\%)]  Magnitude uncertainty and the
     number of stations contributing to the magnitude; small uncertainties and
     $\geq 10$ amplitude measurements earn full points.
-  \item[$Q_{\text{eval}}$ — Evaluation (10\%)]  Evaluation mode and status:
+  \item[$Q_{\text{eval}}$: Evaluation (10\%)]  Evaluation mode and status:
     manually reviewed or final solutions score highest; automatic or
     preliminary solutions are penalised, reflecting the additional confidence
     conferred by analyst review.
@@ -733,20 +738,24 @@ affected event; warnings are displayed for review; info flags are informational.
 
 \subsection{Duplicate detection}
 
-Duplicate detection uses a three-criterion window.  Two events from different
-source catalogues are considered duplicate candidates if simultaneously:
+Duplicate detection uses an adaptive time-and-distance matching window.  Two
+events from different source catalogues are considered duplicate candidates when
+both
 \begin{align}
-  |\Delta t|     &\leq 60\,\text{s}, \label{eq:dt} \\
-  d              &\leq 50\,\text{km}, \label{eq:dd} \\
-  |\Delta M|     &\leq 0.5, \label{eq:dm}
+  |\Delta t|     &\leq \tau, \label{eq:dt} \\
+  d              &\leq \delta, \label{eq:dd}
 \end{align}
-where $d$ is the great-circle distance computed from coordinates.
-Near-antimeridian pairs use unit-vector averaging to avoid sign-wrapping
-errors in the Pacific region.
+where $d$ is the great-circle distance computed from coordinates and the baseline
+windows $\tau \leq 60$\,s and $\delta \leq 50$\,km are widened automatically for
+larger and deeper events (up to roughly $3\times$ in time, $4\times$ in distance,
+and $1.5\times$ for depth).  Magnitude is not part of the matching test; magnitude
+consistency is instead enforced as the per-group range gate described below.
+Near-antimeridian pairs use unit-vector averaging to avoid sign-wrapping errors in
+the Pacific region.
 
-Default thresholds are based on international standards for global earthquake
-association \citep{storchak2013, engdahl1998}.  All three thresholds are
-user-adjustable in the merge UI.
+The baseline windows are user-configurable in the merge UI (with strict, moderate,
+and loose presets) and follow international practice for global earthquake
+association \citep{storchak2013, engdahl1998}.
 
 Candidate groups that violate magnitude-scaled physical-validity gates are
 flagged as merge conflicts and excluded from automated resolution.  A group is
@@ -771,8 +780,8 @@ applied.  CofC offers five strategies (Table~\ref{tab:strategies}).
 \textbf{Strategy} & \textbf{Description} \\
 \midrule
 Quality-based (recommended)
-  & Scores each candidate on equation~\eqref{eq:quality} and retains the highest-scoring event.
-    Ties broken by evaluation-status hierarchy. \\
+  & Scores each candidate on equation~\eqref{eq:quality} and retains the highest-scoring event
+    (evaluation status contributes to the score rather than acting as a separate tie-break). \\
 Priority-based
   & A designated primary catalogue always wins; duplicates from other catalogues are discarded.
     Useful when one agency is the recognised authority. \\
@@ -783,10 +792,12 @@ Most complete
   & The event with the greatest number of non-null fields is kept,
     maximising metadata density in the merged product. \\
 Average values
-  & Latitude, longitude, depth, and magnitude are averaged across duplicates
-    using ISC magnitude-type hierarchy (Mw $>$ Ms $>$ mb $>$ ML) to prevent
-    scale saturation.  Depth from the solution with the lowest uncertainty.
-    Appropriate for closely consistent solutions. \\
+  & Latitude and longitude are combined by inverse-variance (uncertainty-weighted)
+    averaging, so lower-uncertainty solutions contribute more; magnitude is taken from
+    the highest-priority ISC/IASPEI type (Mw $>$ Ms $>$ mb $>$ ML $>$ Md) rather than
+    averaged, to avoid scale saturation; depth is taken from the lowest-uncertainty
+    solution and origin time is the earliest in the group. Best treated as exploratory,
+    for closely consistent solutions. \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -827,11 +838,11 @@ Equation~\eqref{eq:sigma_b} is the asymptotic counting-statistics error and
 finite-sample effects captured by the estimator of \citet{shibolt1982}, and,
 more importantly, it excludes the systematic sensitivity of $\hat{b}$ to the
 choice of $M_c$, to magnitude-scale heterogeneity, and to declustering, which
-together typically dominate (Section~\ref{sec:biases}).  We therefore report
-the formal $\sigma_b$ but caution that realistic uncertainties are larger.
-Results are displayed as a GR plot (cumulative and non-cumulative), the fitted
-line, and a $\pm 2\sigma_b$ confidence band (approximately 95\% for large
-samples).
+together typically dominate (Section~\ref{sec:biases}).  We therefore treat the
+formal $\sigma_b$ of Equation~\eqref{eq:sigma_b} as a lower bound and caution that
+realistic uncertainties are larger.  CofC computes $\sigma_b = \hat{b}/\sqrt{N}$
+and returns it with each Gutenberg-Richter estimate, displayed alongside the GR
+plot (cumulative and non-cumulative) and the fitted line.
 
 \subsection{Magnitude of completeness}
 \label{sec:mc}
@@ -858,12 +869,15 @@ verification against the FMD plot.  For high-precision $M_c$ estimation,
 the Goodness-of-Fit Test (GFT) or Entire Magnitude Range (EMR) method of
 \citet{woessner2005} should be applied as external post-processing.
 
-CofC displays a warning when the number of events above $M_c$ falls below
-$N = 200$, a commonly adopted minimum for a reliable $b$-value estimate
-(cf.\ \citealt{marzocchi2003}).  Below this threshold the formal
-$\sigma_b = \hat{b}/\sqrt{N}$ already exceeds 0.07,
-which is comparable to the biases discussed in Section~\ref{sec:biases}, and
-the confidence interval on $b$ becomes too wide for quantitative hazard use.
+A commonly adopted minimum for a reliable $b$-value estimate is $N \approx 200$
+events above $M_c$ (cf.\ \citealt{marzocchi2003}); below this the formal
+$\sigma_b = \hat{b}/\sqrt{N}$ already exceeds 0.07, comparable to the biases
+discussed in Section~\ref{sec:biases}, and the confidence interval on $b$ becomes
+too wide for quantitative hazard use.  CofC enforces hard floors below which an
+estimate is withheld rather than reported, requiring at least 10 events (and three
+populated magnitude bins) for a Gutenberg-Richter fit and at least 50 events for
+$M_c$ estimation; the $N \approx 200$ figure is a guideline the analyst should
+apply when interpreting results.
 
 \subsection{Declustering}
 \label{sec:decluster}
@@ -875,11 +889,14 @@ GR analysis.  CofC implements the Gardner-Knopoff window method
 interaction zone is:
 \begin{align}
   L(M)  &= 10^{0.1238M + 0.983}\;\text{km}, \\
-  T(M)  &= 10^{0.5409M - 0.547}\;\text{days},
+  T(M)  &= \begin{cases}
+            10^{0.5409M - 0.547}\;\text{days}, & M \geq 6.5, \\
+            10^{0.032M + 2.7389}\;\text{days}, & M < 6.5,
+           \end{cases}
 \end{align}
-the latter being the larger-magnitude ($M \gtrsim 6.5$) branch of the
-Gardner-Knopoff time window.  Events falling within $L(M)$ and $T(M)$ of a
-larger mainshock are flagged as aftershocks.  The Reasenberg \citeyearpar{reasenberg1985} algorithm, which
+the two-branch time window $T(M)$ following the larger-magnitude relation for
+$M \geq 6.5$ and the small-magnitude relation otherwise.  Events falling within
+$L(M)$ and $T(M)$ of a larger mainshock are flagged as aftershocks.  The Reasenberg \citeyearpar{reasenberg1985} algorithm, which
 uses an interaction zone based on the Omori--Utsu law
 \citep{omori1894,utsu1961} and adapts to the local seismicity rate, is
 available as an alternative.
@@ -893,7 +910,7 @@ reclassified as \texttt{foreshock} by a post-processing pass, but this
 reclassification is not applied by default because it is history-dependent
 and therefore not reproducible in real-time analysis \citep{vanstiphout2012}.
 
-\subsection{Seismic moment and energy}
+\subsection{Cumulative seismic moment}
 
 Cumulative seismic moment is computed as
 \begin{equation}
@@ -903,9 +920,11 @@ Cumulative seismic moment is computed as
 using the Hanks-Kanamori relation \citep{hanks1979,kanamori1977} in SI units
 (equivalently $M_w = \tfrac{2}{3}\log_{10} M_0 - 6.07$ for $M_0$ in
 \si{\newton\metre}).  For events
-recorded with non-Mw magnitude types, CofC applies empirical regression
-conversions from \citet{das2011}.  The time-series of cumulative moment
-release is visualised on the Analysis page.
+recorded with non-$M_w$ magnitude types, CofC's conversion routines follow the
+empirical global relations of \citet{scordilis2006}; automatic homogenisation of
+mixed magnitude types within the analysis pipeline remains future work
+(Section~\ref{sec:biases}).  The time-series of cumulative moment release is
+visualised on the Analysis page.
 
 \subsection{Temporal pattern analysis}
 
@@ -914,15 +933,15 @@ aimed at detecting non-stationarity in the catalogue.
 
 \textbf{Seismicity rate time series.}  Events above the estimated $M_c$ are
 binned at a user-selected interval (day, week, or month) and plotted as a
-rate time series.  Sudden rate changes---which often correspond to network
-upgrades, station outages, or changes in processing procedures---are
+rate time series.  Sudden rate changes, which often correspond to network
+upgrades, station outages, or changes in processing procedures, are
 immediately visible and can be used to identify breakpoints for time-varying
 $M_c$ analysis \citep{mignan2012}.
 
 \textbf{Interevent-time distribution.}  The distribution of times between
 successive events above $M_c$ is plotted against the exponential distribution
-expected for a Poissonian process.  Systematic departures---most commonly the
-excess of short interevent times produced by aftershock clusters---provide a
+expected for a Poissonian process.  Systematic departures, most commonly the
+excess of short interevent times produced by aftershock clusters, provide a
 visual diagnostic of whether the catalogue has been adequately declustered
 before analyses that assume Poissonian seismicity.
 
@@ -931,12 +950,12 @@ before analyses that assume Poissonian seismicity.
 
 Processed or merged catalogues can be exported in:
 \begin{itemize}[leftmargin=*]
-  \item \textbf{CSV} --- flat table with all fields, suitable for ZMAP
+  \item \textbf{CSV}: flat table with all fields, suitable for ZMAP
     \citep{wiemer2001}, ObsPy \citep{obspy2010}, and R/Python workflows.
-  \item \textbf{QuakeML~1.2 BED} \citep{schorlemmer2011} --- re-serialisation
+  \item \textbf{QuakeML~1.2 BED} \citep{schorlemmer2011}: re-serialisation
     of the parsed origin, magnitude, and extended fields, with merge
     provenance recorded as QuakeML \texttt{comment} elements.
-  \item \textbf{GeoJSON} \citep{geojson2016} --- suitable for GIS software
+  \item \textbf{GeoJSON} \citep{geojson2016}: suitable for GIS software
     and web mapping.
 \end{itemize}
 
@@ -977,7 +996,7 @@ for offshore events.
 \subsection{Step 3: Merge}
 
 Applying the Quality-based strategy with default thresholds
-(equations~\ref{eq:dt}--\ref{eq:dm}) identifies 49\,000 duplicate pairs
+(equations~\ref{eq:dt} and~\ref{eq:dd}) identifies 49\,000 duplicate pairs
 (50\% of Agency~B events have a GeoNet counterpart);
 Figure~\ref{fig:map}(a) illustrates the duplicate-matching geometry, in which
 the same earthquake reported by both agencies falls within the matching
@@ -990,8 +1009,8 @@ from the Quality-based resolution of duplicate pairs.  Because the overlap is in
 ground truth for the matched pairs and here functions as a consistency check
 on the merge bookkeeping rather than a benchmark of detection accuracy.
 Quantifying duplicate-detection precision and recall on genuinely
-heterogeneous real catalogues---where location scatter is non-Gaussian and
-clocks and magnitude scales differ---and validating the quality score against
+heterogeneous real catalogues, where location scatter is non-Gaussian and
+clocks and magnitude scales differ, and validating the quality score against
 an independent benchmark such as \citet{warrensmith2025} are left to future
 work (Section~\ref{sec:discussion}).
 
@@ -1000,7 +1019,7 @@ work (Section~\ref{sec:discussion}).
 Applying a quality threshold of $Q \geq 70$ (upper grade~B and above) to the
 merged catalogue retains 143\,650 events (85\% of the 169\,000 unique events).
 The 25\,350 removed events are predominantly offshore Agency~B sources with
-azimuthal gap $> 180^{\circ}$ and $\sigma_{\text{loc}} > 10$~km---exactly
+azimuthal gap $> 180^{\circ}$ and $\sigma_{\text{loc}} > 10$~km, exactly
 the population visible in the tail of Figure~\ref{fig:gap}.  Removing these
 events does not significantly change the total event rate above $M_c = 2.0$
 for onshore New Zealand, but it eliminates a spatially biased subset that
@@ -1024,9 +1043,52 @@ the merge strategy applied.
 As an additional preprocessing step, applying Gardner-Knopoff declustering
 (Section~\ref{sec:decluster}) reduces the catalogue by a further 23\%,
 removing the clustered aftershock population and lowering $\hat{b}$
-slightly to $0.94 \pm 0.005$ (Figure~\ref{fig:fmd})---illustrating the
+slightly to $0.94 \pm 0.005$ (Figure~\ref{fig:fmd}), illustrating the
 sensitivity of $b$-value estimates to preprocessing choices
-(Section~\ref{sec:biases}).
+(Section~\ref{sec:biases}).  Figure~\ref{fig:funnel} summarises the
+event-count flow through these steps.
+
+\begin{figure}[ht]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[font=\footnotesize]
+  \tikzset{
+    bar/.style={draw=blue!55!black, fill=blue!#1, minimum height=9mm, anchor=center},
+    stage/.style={anchor=east, font=\footnotesize\bfseries},
+    cut/.style={anchor=west, text=red!60!black, font=\footnotesize},
+  }
+  % bars centred at x=0; width (cm) proportional to event count (9\,cm = 218\,000)
+  \node[bar=10, minimum width=9.00cm] (b1) at (0,0)     {218\,000};
+  \node[bar=16, minimum width=6.98cm] (b2) at (0,-1.25) {169\,000};
+  \node[bar=24, minimum width=5.93cm] (b3) at (0,-2.50) {143\,650};
+  \node[bar=34, minimum width=2.01cm] (b4) at (0,-3.75) {48\,600};
+  \node[stage] at (-5.1,0)     {Ingested records};
+  \node[stage] at (-5.1,-1.25) {Merged (unique)};
+  \node[stage] at (-5.1,-2.50) {Quality $\geq 70$};
+  \node[stage] at (-5.1,-3.75) {Above $M_c\,2.0$};
+  \foreach \a/\b in {b1/b2,b2/b3,b3/b4} {
+    \draw[blue!25] (\a.south west)--(\b.north west);
+    \draw[blue!25] (\a.south east)--(\b.north east);
+  }
+  \node[cut] (c1) at (5.3,-0.625) {$-49\,000$ duplicate pairs};
+  \node[cut] (c2) at (5.3,-1.875) {$-25\,350$ low quality ($Q<70$)};
+  \node[cut] (c3) at (5.3,-3.125) {$-95\,050$ below $M_c$};
+  \draw[->,red!50!black] (c1.west) -- (4.0,-0.625);
+  \draw[->,red!50!black] (c2.west) -- (3.2,-1.875);
+  \draw[->,red!50!black] (c3.west) -- (2.0,-3.125);
+  \node[anchor=north, font=\footnotesize] (res) at (0,-4.6)
+    {Gutenberg--Richter fit: $\hat{b}=1.02\pm0.005$\quad(after declustering, $\hat{b}=0.94$)};
+  \draw[->,blue!55!black] (b4.south) -- (res.north);
+\end{tikzpicture}%
+}
+\caption{Quantitative event-count flow through the CofC pipeline for the
+synthetic worked example (Section~\ref{sec:example}).  Bar widths are
+proportional to the number of events; each stage removes a characterised subset
+(red) before the Gutenberg--Richter $b$-value is estimated on the surviving
+population.  All counts are properties of the controlled synthetic inputs, not
+real New Zealand seismicity.}
+\label{fig:funnel}
+\end{figure}
 
 \section{Guidance on Avoiding Statistical Biases}
 \label{sec:biases}
@@ -1064,9 +1126,9 @@ saturates above $M \approx 6.0$ \citep{bormann2009}.
   \item Inspect the magnitude-type distribution in the Analysis page before
     fitting.
   \item Convert to a single preferred scale (ideally Mw) using empirical
-    regressions \citep{das2011,hanks1979}---preferably orthogonal rather than
+    regressions \citep{das2011,hanks1979}, preferably orthogonal rather than
     ordinary least-squares fits, to avoid conversion bias
-    \citep{castellaro2006,lolli2012}---where possible.
+    \citep{castellaro2006,lolli2012}, where possible.
   \item If conversion is not possible, split the catalogue by magnitude type
     and fit each subset separately.
 \end{enumerate}
@@ -1092,7 +1154,7 @@ distributions.
 
 \textbf{Problem.}  GR analysis assumes independent, Poissonian arrivals.
 Aftershock sequences cluster in space, time, and magnitude, violating this
-assumption and shifting the estimated $b$---in the synthetic example of
+assumption and shifting the estimated $b$, in the synthetic example of
 Section~\ref{sec:example} the quality-filtered catalogue gives
 $\hat{b} = 1.02$ before declustering versus $0.94$ after, an upward bias in the
 un-declustered value.
@@ -1135,7 +1197,7 @@ period conflates eras with different completeness.
 \textbf{Guidance.}
 \begin{enumerate}[leftmargin=*]
   \item Use the CofC time-series view to identify sudden jumps in event rate
-    or minimum magnitude---likely indicators of network changes.
+    or minimum magnitude, likely indicators of network changes.
   \item Split the catalogue at breakpoints and estimate $b$ for each period
     separately.
   \item The \citet{mignan2012} review provides detailed methods for
@@ -1186,8 +1248,8 @@ infrastructural.  The methodological gap is well documented in the CORSSA
 literature \citep{naylor2010, mignan2012, vanstiphout2012}: the biases
 described in Section~\ref{sec:biases} are known, quantifiable, and avoidable,
 yet they continue to appear in published seismicity studies because the
-corrective steps---enforcing $M_c$, homogenising magnitude scales, declustering,
-and quality filtering---are each individually inconvenient to apply and are
+corrective steps, enforcing $M_c$, homogenising magnitude scales, declustering,
+and quality filtering, are each individually inconvenient to apply and are
 rarely performed together in a reproducible workflow.  The infrastructural gap
 is that no production-ready tool integrates all of them: ZMAP \citep{wiemer2001}
 handles GR analysis and spatial $b$-value mapping but not merging or quality
@@ -1204,9 +1266,9 @@ that preserves provenance at every step.
 The quality-scoring system (equation~\ref{eq:quality}) is designed to be
 interpretable: each sub-score corresponds to a well-understood determinant of
 solution quality, grounded in the seismological literature.  Azimuthal gap
-(primary and secondary) is among the principal network-geometry predictors of
-horizontal location error \citep{bondar2004}; used-station count and
-nearest-station distance further constrain the solution;
+is among the principal network-geometry predictors of
+horizontal location error \citep{bondar2004}; used-station and
+used-phase counts further constrain the solution;
 location and magnitude uncertainties are direct quantitative measures of
 solution precision.  By making these criteria explicit and combining them into
 a single 0--100 index, CofC provides a reproducible basis for quality-based
@@ -1226,9 +1288,9 @@ per-field uncertainty filters in the advanced filter API.
 
 A persistent challenge in observational seismology is that two researchers
 applying the same analysis method to nominally the same dataset can obtain
-different results, because their preprocessing choices---format conversion,
+different results, because their preprocessing choices, format conversion,
 duplicate removal, $M_c$ cut-off, declustering algorithm and parameters,
-quality filters---differ in ways that are rarely fully reported
+quality filters, differ in ways that are rarely fully reported
 \citep{schorlemmer2007}.  CofC attacks this problem at the infrastructure
 level: every catalogue stored in the platform carries a complete provenance
 record (source catalogue IDs per event, merge strategy and parameters, quality
@@ -1246,8 +1308,8 @@ CofC is fast and requires no assumptions about the GR model, but
 $\sim 0.1$--$0.2$ magnitude units in typical network conditions.  The $+0.2$
 correction applied by default mitigates this but does not eliminate it.  The
 Goodness-of-Fit Test (GFT) and Entire-Magnitude Range (EMR) methods of
-\citet{woessner2005} are more accurate---particularly for catalogues with
-gradual network growth---and will be added in a future release.  For
+\citet{woessner2005} are more accurate, particularly for catalogues with
+gradual network growth, and will be added in a future release.  For
 time-varying $M_c$, the bootstrap approach described by \citet{mignan2012}
 is planned.
 
@@ -1280,7 +1342,7 @@ We have presented CofC, a browser-based platform for earthquake catalogue
 management, merging, quality scoring, and seismological analysis.  The core
 contribution is infrastructural: a single persistent interface that integrates
 format ingestion, duplicate detection, transparent quality scoring, and
-provenance-preserving export---the steps that are individually inconvenient
+provenance-preserving export, the steps that are individually inconvenient
 yet collectively determine the validity of downstream statistical analysis.
 Using a fully synthetic two-catalogue New Zealand example, we illustrated the
 end-to-end workflow and verified that it is internally consistent and
@@ -1290,8 +1352,8 @@ spatial seismicity analysis, and Gutenberg-Richter analysis of the
 quality-filtered catalogue returns the input $\hat{b} = 1.02$ with full
 provenance retained.  These figures characterise the controlled synthetic
 inputs and the software's behaviour on them, not real New Zealand seismicity;
-validation on heterogeneous real catalogues---duplicate-detection precision and
-recall, and quality-score calibration against independent benchmarks---is the
+validation on heterogeneous real catalogues, duplicate-detection precision and
+recall, and quality-score calibration against independent benchmarks, is the
 priority next step.  By making preprocessing choices explicit and exportable,
 CofC supports the shift towards reproducible, openly documented seismological
 practice advocated by the CORSSA community \citep{naylor2010} and the FAIR data
@@ -1347,7 +1409,7 @@ URLs are given in Section~\ref{sec:software}.
     boxed region and shows that the same earthquake is reported by both
     agencies with a small offset; such events are flagged as duplicates when
     they fall within the time, distance, and magnitude window
-    (equations~\ref{eq:dt}--\ref{eq:dm}).  \textit{(b)}~The merged catalogue
+    (equations~\ref{eq:dt} and~\ref{eq:dd}).  \textit{(b)}~The merged catalogue
     coloured by provenance: events seen only by GeoNet (blue), events present
     in both and resolved to a single solution (green), and events seen only by
     Agency~B (orange).  The Agency-B-only events concentrate offshore along the

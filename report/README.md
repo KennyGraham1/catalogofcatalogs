@@ -8,7 +8,7 @@ covering Aotearoa New Zealand (1960–2026, with emphasis on temporary deploymen
 
 | File | Description |
 |---|---|
-| `nz_earthquake_catalogues_1960-2026.pdf` | Compiled report (60 pp): abstract, scope, overview, timeline, statistics, master index (with reference + DOI per catalogue), 81 detailed entries across 9 categories, references. |
+| `nz_earthquake_catalogues_1960-2026.pdf` | Compiled report (61 pp): abstract, scope, overview, timeline, statistics, master index (with reference + DOI per catalogue), 81 detailed entries across 9 categories (with cross-reference notes on related catalogues), references. |
 | `nz_earthquake_catalogues_1960-2026.tex` | LaTeX source (article class, `natbib` numeric, `xurl`). |
 | `nz_catalogues.bib` | BibTeX database (128 references; `@article`/`@misc`/`@techreport`). |
 | `build_report.js` | Build script: renders `inventory_data.json` into the `.tex` + `.bib`. |

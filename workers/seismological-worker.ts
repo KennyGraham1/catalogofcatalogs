@@ -103,6 +103,7 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
   const mc = minMagnitude ?? minMag;
   const meanMag = magnitudes.reduce((sum, m) => sum + m, 0) / magnitudes.length;
   const bValue = Math.LOG10E / (meanMag - (mc - binWidth / 2));
+  const bUncertainty = bValue / Math.sqrt(magnitudes.length);
   const aValue = Math.log10(magnitudes.length) + bValue * mc;
 
   const meanY = cumulativeCounts.reduce((sum, p) => sum + p.logCount, 0) / n;
@@ -133,6 +134,7 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
     aValue,
     completeness: completeness + binWidth * 0.5,
     rSquared,
+    bUncertainty,
     dataPoints: cumulativeCounts,
     fittedLine
   };
@@ -181,13 +183,15 @@ function estimateCompleteness(events: EarthquakeEvent[]) {
 }
 
 /**
- * Gardner-Knopoff (1974) space-time window parameters
- * Standard parameters used for earthquake declustering
+ * Gardner-Knopoff (1974) space-time window parameters (two-branch),
+ * as compiled in Table 1 of van Stiphout et al. (2012).
  */
 function getGardnerKnopoffWindow(magnitude: number): { timeWindowDays: number; distanceWindowKm: number } {
-  // Uhrhammer (1986) revision - widely used
-  const timeWindowDays = Math.pow(10, 0.5386 * magnitude - 0.547);
-  // Gardner & Knopoff (1974) original distance relation
+  // Two-branch Gardner-Knopoff time window: M >= 6.5 vs smaller events
+  const timeWindowDays = magnitude >= 6.5
+    ? Math.pow(10, 0.5409 * magnitude - 0.547)
+    : Math.pow(10, 0.032 * magnitude + 2.7389);
+  // Gardner & Knopoff (1974) distance relation
   const distanceWindowKm = Math.pow(10, 0.1238 * magnitude + 0.983);
   return { timeWindowDays, distanceWindowKm };
 }

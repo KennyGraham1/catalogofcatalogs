@@ -82,7 +82,7 @@ New Zealand's earthquake-catalogue landscape has three tiers.
 
 \textbf{(3) Derived products}: relocated and reprocessed catalogues, magnitude-homogenised and declustered hazard-model catalogues (NSHM 2010 and 2022), and physics-based synthetic (RSQSim) catalogues.
 
-Catalogues produced by temporary deployments and targeted experiments make up a substantial part of this inventory (9 onshore and 4 offshore here, alongside much of the volcano-seismic and aftershock-response work), yet they are among the catalogues \emph{least} discoverable in the national system. Scattered across journal supplements, Zenodo, IRIS/EarthScope, PANGAEA, and FDSN temporary-network DOIs, and using heterogeneous magnitude and depth conventions, they are exactly the material a federated registry is designed to surface.
+Catalogues produced by temporary deployments and targeted experiments make up a substantial part of this inventory (9 onshore and 4 offshore here, alongside much of the volcano-seismic and aftershock-response work), yet they are among the catalogues \emph{least} discoverable in the national system, and so are exactly the material a federated registry is designed to surface (their specific discoverability and heterogeneity issues are detailed in Section~\ref{sec:gaps}).
 \section{Historical development, 1960--2026}\label{sec:timeline}
 \begin{description}[leftmargin=0pt,style=unboxed,itemsep=3pt]
 \item[1960s--1970s (analogue era).] The national catalogue is maintained by the DSIR Seismological Observatory; the \emph{Computer File of New Zealand Earthquakes} runs to 1974, while Eiby's \emph{Descriptive Catalogue} and \emph{Annotated List (1460--1965)} bridge the instrumental and historical records. Globally relocated coverage exists via ISC-GEM (from 1904) and later ISC-EHB (from 1964).
@@ -308,6 +308,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available (DOI) $\cdot$ DOI \href{https://doi.org/10.31905/PY08W6S3}{\nolinkurl{10.31905/PY08W6S3}}}
 \end{itemize}
 \par\vspace{2pt}A global, internally consistent 'groomed' dataset of teleseismically well-constrained earthquakes (1964-2021; the 1964-2008 portion rebuilt for this release) relocated with the EHB procedure to minimise location and especially depth bias. The qualifying New Zealand / Kermadec / Hikurangi subset provides homogeneous high-quality teleseismic hypocentres and depths suitable for slab and structure studies. It is a global product, not a standalone NZ catalogue; the NZ events are a regional subset.
+\par{\small\itshape Related: One of three ISC global products with NZ coverage in this inventory (with ISC-GEM and the ISC Bulletin); ISC-EHB applies the EHB relocation procedure to well-recorded events.}
 \par\vspace{2pt}\textbf{Key references:} \cite{Weston2018,Engdahl2020,InternationalSeismologicalCentre2022}.
 \catentryrule
 \subsubsection*{\hypertarget{c:5}{5.}~ ISC-GEM Global Instrumental Earthquake Catalogue (New Zealand coverage)}
@@ -325,6 +326,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available (DOI) $\cdot$ DOI \href{https://doi.org/10.31905/D808B825}{\nolinkurl{10.31905/D808B825}}}
 \end{itemize}
 \par\vspace{2pt}A homogeneous global catalogue of large instrumental earthquakes (1904-2014, extended toward 2018+) with relocated hypocentres and recomputed moment magnitudes (Mw), selected by time-dependent magnitude thresholds. The qualifying large New Zealand / Kermadec / Hikurangi events provide a long-period, large-event source/benchmark used in NZ seismic-hazard work (e.g. NSHM 2022). It is a global product, not NZ-specific; NZ events are a subset.
+\par{\small\itshape Related: Companion ISC global products are ISC-EHB and the comprehensive ISC Bulletin; ISC-GEM is the magnitude-thresholded, relocated instrumental catalogue (1904-2014).}
 \par\vspace{2pt}\textbf{Key references:} \cite{DiGiacomo2018,Storchak2015,InternationalSeismologicalCentre2021}.
 \catentryrule
 \subsubsection*{\hypertarget{c:6}{6.}~ Taupo Volcanic Zone Consistent High-Precision Earthquake Catalogue (2007-2023)}
@@ -375,6 +377,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available (DOI) $\cdot$ DOI \href{https://doi.org/10.5281/zenodo.3529755}{\nolinkurl{10.5281/zenodo.3529755}}}
 \end{itemize}
 \par\vspace{2pt}A decade-long (2008-2017) double-difference (hypoDD) relocated microseismicity catalogue of the central Southern Alps / Alpine Fault, produced to map along-strike variations in seismogenic thickness and the fault's microseismic behaviour. Built by combining permanent GeoNet data with multiple temporary Southern Alps deployments. Predecessor to the 2025 matched-filter catalogue.
+\par{\small\itshape Related: The 2008-2017 double-difference catalogue; extended by the central Southern Alps matched-filter catalogue (Michailos et al. 2025, 2009-2020).}
 \par\vspace{2pt}\textbf{Key references:} \cite{Michailos2019,Michailos2019a}.
 \catentryrule
 \subsubsection*{\hypertarget{c:9}{9.}~ Central Southern Alps Matched-Filter Microseismicity Catalogue (Michailos 2009-2020)}
@@ -391,6 +394,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available (DOI) $\cdot$ DOI \href{https://doi.org/10.5281/zenodo.15002912}{\nolinkurl{10.5281/zenodo.15002912}}}
 \end{itemize}
 \par\vspace{2pt}A template-matching (matched-filter) enhanced microseismicity catalogue for the central Southern Alps / Alpine Fault (2009-2020) that substantially densifies the 2019 SAMBA catalogue with many additional small events. Produced to study temporal seismicity variations, including rainfall/snowmelt-triggered seismicity. A distinct child of the Michailos 2008-2017 catalogue rather than a duplicate.
+\par{\small\itshape Related: Extends the 2008-2017 double-difference catalogue (Michailos et al. 2019) to 2009-2020 using template matching.}
 \par\vspace{2pt}\textbf{Key references:} \cite{Michailos2025,Michailos2025a}.
 \catentryrule
 \subsubsection*{\hypertarget{c:10}{10.}~ ISC Bulletin / Reviewed ISC Bulletin (New Zealand component)}
@@ -408,6 +412,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available (DOI) $\cdot$ DOI \href{https://doi.org/10.31905/D808B830}{\nolinkurl{10.31905/D808B830}}}
 \end{itemize}
 \par\vspace{2pt}The ISC Bulletin is regarded as the definitive long-term parametric record of global seismicity, compiling hypocentres, phase arrival times, amplitudes and magnitudes, and collected focal-mechanism solutions. The 'Reviewed' product applies manual analyst checking and ISC relocation to all events with M\textgreater{}=3.5 (and selectively for 2.5\textless{}=M\textless{}3.5), producing the authoritative reviewed location/magnitude record for moderate-to-large NZ events. It is distinct from the ISC-EHB and ISC-GEM derivative products and is widely cited for NZ regional/teleseismic locations.
+\par{\small\itshape Related: The comprehensive ISC global bulletin; the relocated ISC-EHB and large-event ISC-GEM products are listed separately.}
 \par\vspace{2pt}\textbf{Key references:} \cite{InternationalSeismologicalCentre2026,Bondr2011,Storchak2017,Storchak2020}.
 \catentryrule
 \subsubsection*{\hypertarget{c:11}{11.}~ DWARFS Rupture-Limiting Section Boundary Relocated Microseismicity \& Focal-Mechanism Catalogue, Alpine Fault (Warren-Smith et al. 2022)}
@@ -896,6 +901,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available (DOI) $\cdot$ DOI \href{https://doi.org/10.5281/zenodo.2022405}{\nolinkurl{10.5281/zenodo.2022405}}}
 \end{itemize}
 \par\vspace{2pt}Built to investigate whether a spatial/temporal relationship exists between microseismicity and the shallow \textasciitilde{}2-week September-October 2014 slow slip event (SSE) targeted by the year-long HOBITSS deployment above the northern Hikurangi plate interface. Earthquakes were detected and located by hand-picking P/S arrivals on OBS plus onshore GeoNet stations. The catalogue reveals a 'microseismicity gap' bordering the 2014 slow-slip patch, later reused by Yarce et al. (2023).
+\par{\small\itshape Related: Companion products from the same 2014-2015 HOBITSS ocean-bottom deployment: the automatic-detection earthquake catalogue (Yarce et al. 2023) and the focal-mechanism / stress-tensor catalogue (Warren-Smith et al. 2019). This is the manually picked microearthquake catalogue.}
 \par\vspace{2pt}\textbf{Key references:} \cite{Yarce2019,Yarce2018,UniversityofTexasatAustin2014}.
 \catentryrule
 \subsubsection*{\hypertarget{c:40}{40.}~ HOBITSS Automatic-Detection Earthquake Catalogue (2014 SSE, REST detector)}
@@ -914,6 +920,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available (DOI) $\cdot$ DOI \href{https://doi.org/10.5281/zenodo.7274399}{\nolinkurl{10.5281/zenodo.7274399}}}
 \end{itemize}
 \par\vspace{2pt}An automatically generated earthquake catalogue for the two months around the September-October 2014 northern Hikurangi slow slip event, created to test whether automated detection increases catalogue completeness and to examine the temporal relationship between SSEs and microseismicity. REST applied to HOBITSS OBS + GeoNet data found more than three times as many events as manual analysis, and shows seismicity increasing during and remaining elevated for \textasciitilde{}2 weeks after the 2014 SSE. A larger, distinct product from the same OBS deployment as the manual Yarce et al. (2019) catalogue.
+\par{\small\itshape Related: The automatic-detection counterpart (REST detector, focused on the 2014 slow-slip event) to the manually picked HOBITSS microearthquake catalogue (Yarce et al. 2019).}
 \par\vspace{2pt}\textbf{Key references:} \cite{Yarce2023,Yarce2022,UniversityofTexasatAustin2014}.
 \catentryrule
 \subsubsection*{\hypertarget{c:41}{41.}~ Brothers Volcano Ocean-Bottom Hydrophone Seismicity Catalogue (south Kermadec arc)}
@@ -997,6 +1004,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available on request $\cdot$ DOI \href{https://doi.org/10.1029/2025JB031644}{\nolinkurl{10.1029/2025JB031644}}}
 \end{itemize}
 \par\vspace{2pt}Built from a dedicated temporary broadband deployment (ECLIPSE programme) to improve location control under Lake Taupo where the permanent network gives poor coverage, and to separate magmatic from tectonic seismicity through the 2022-2023 unrest. Resolves an arcuate caldera-ring-fault structure at roughly 6 km depth. A priority temporary-deployment catalogue.
+\par{\small\itshape Related: Overlaps the 2019 Taupo unrest catalogue (Illsley-Kemp et al. 2021) and the 2019 northern-TVZ cascading-swarm catalogue (Aber et al. 2025); this entry spans the longer 2019-2022 ECLIPSE deployment.}
 \par\vspace{2pt}\textbf{Key references:} \cite{Mestel2025}.
 \catentryrule
 \subsubsection*{\hypertarget{c:46}{46.}~ Taupo 2019 Volcanic Unrest Earthquake Catalogue (Illsley-Kemp et al. 2021)}
@@ -1014,6 +1022,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available on request $\cdot$ DOI \href{https://doi.org/10.1029/2021GC009803}{\nolinkurl{10.1029/2021GC009803}}}
 \end{itemize}
 \par\vspace{2pt}Catalogue of the first instrumentally recorded Taupo caldera unrest episode (2019), documenting \textgreater{}1,100 caldera earthquakes culminating in an M5.2 event, interpreted as related to a magma-mush margin. Integrates seismicity with ground deformation and gas data to assess causes, mechanisms and implications of the unrest.
+\par{\small\itshape Related: The 2019 events also appear in the longer 2019-2022 magmatic-seismicity catalogue (Mestel et al. 2025); northern-TVZ swarms of the same year are catalogued separately (Aber et al. 2025).}
 \par\vspace{2pt}\textbf{Key references:} \cite{IllsleyKemp2021}.
 \catentryrule
 \subsubsection*{\hypertarget{c:47}{47.}~ Taupo 2022-2023 Volcanic Unrest Seismicity Catalogue (Lamb et al. 2024)}
@@ -1046,6 +1055,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available on request $\cdot$ DOI \href{https://doi.org/10.1029/2024GC012079}{\nolinkurl{10.1029/2024GC012079}}}
 \end{itemize}
 \par\vspace{2pt}Documents and analyses 10 spatio-temporal earthquake swarms cascading along \textasciitilde{}175 km of the northern and central Taupo Volcanic Zone (March-September 2019), near Okataina and Rotorua and extending toward Whakaari/White Island, interpreted as fault-magma interaction. Treats the same 2019 episode as Illsley-Kemp et al. 2021 but focuses on the broader northern-TVZ cascading sequence rather than the Taupo caldera.
+\par{\small\itshape Related: Covers the 2019 northern-TVZ swarms; the Taupo caldera unrest of the same year is catalogued by Illsley-Kemp et al. (2021) and Mestel et al. (2025).}
 \par\vspace{2pt}\textbf{Key references:} \cite{Aber2025}.
 \catentryrule
 \subsubsection*{\hypertarget{c:49}{49.}~ Tarawera 2019 Dyke-Intrusion Earthquake Catalogue (Puhipuhi, Okataina; Benson et al. 2021)}
@@ -1358,6 +1368,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available on request $\cdot$ DOI \href{https://doi.org/10.1186/s40623-019-1039-1}{\nolinkurl{10.1186/s40623-019-1039-1}}}
 \end{itemize}
 \par\vspace{2pt}Multi-region ambient tectonic tremor catalogue across four New Zealand areas (Manawatu, Cape Turnagain, Marlborough and Puysegur), notably documenting tremor in the Puysegur/Fiordland subduction system in addition to the Hikurangi-related regions. Tremor was detected using a duration-energy scaling approach plus visual inspection of GeoNet data over roughly 2005-2016. It is a tremor catalogue rather than a hypocentral earthquake catalogue.
+\par{\small\itshape Related: The Manawatu portion overlaps the deep slow-slip-and-tremor catalogue of Fasola et al. (2023); this catalogue spans several regions (Manawatu, Cape Turnagain, Marlborough, Puysegur).}
 \par\vspace{2pt}\textbf{Key references:} \cite{Romanet2019}.
 \catentryrule
 \subsubsection*{\hypertarget{c:67}{67.}~ Alpine Fault Low-Frequency Earthquake Catalogue (Chamberlain et al. 2014)}
@@ -1375,6 +1386,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available on request $\cdot$ DOI \href{https://doi.org/10.1002/2014GC005436}{\nolinkurl{10.1002/2014GC005436}}}
 \end{itemize}
 \par\vspace{2pt}First low-frequency earthquake (LFE) catalogue for the deep Alpine Fault: approximately 8,760 LFEs in 14 families over 36 months (2009-2012), revealing punctuated slow slip at roughly 20-30 km depth. It was built from GeoNet and SAMBA continuous data using matched-filter detection within tremor and is the earliest NZ LFE catalogue, serving as a precursor to Baratin et al. (2018).
+\par{\small\itshape Related: Extended by Baratin et al. (2018), which adds focal mechanisms and additional years to these LFE families.}
 \par\vspace{2pt}\textbf{Key references:} \cite{Chamberlain2014}.
 \catentryrule
 \subsubsection*{\hypertarget{c:68}{68.}~ Alpine Fault Low-Frequency Earthquake Catalogue with Focal Mechanisms (Baratin et al. 2018)}
@@ -1392,6 +1404,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available on request $\cdot$ DOI \href{https://doi.org/10.1016/j.epsl.2017.12.021}{\nolinkurl{10.1016/j.epsl.2017.12.021}}}
 \end{itemize}
 \par\vspace{2pt}Extended, longer-duration deep Alpine Fault LFE catalogue (2009-2017) that adds the first LFE focal mechanisms for the region. It shows that increased LFE rates coincide with tremor and regional earthquakes, interpreted as quasi-continuous deformation and triggered slow slip on the deep Alpine Fault. It builds on and extends the Chamberlain et al. (2014) template set.
+\par{\small\itshape Related: Builds on and extends the Alpine Fault LFE catalogue of Chamberlain et al. (2014), adding focal mechanisms.}
 \par\vspace{2pt}\textbf{Key references:} \cite{Baratin2018}.
 \catentryrule
 \subsubsection*{\hypertarget{c:69}{69.}~ Kaimanawa (Deep Hikurangi) Low-Frequency Earthquake Catalogue (Aden-Antoniow et al. 2024)}
@@ -1473,6 +1486,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available on request $\cdot$ DOI \href{https://doi.org/10.1038/s41561-019-0367-x}{\nolinkurl{10.1038/s41561-019-0367-x}}}
 \end{itemize}
 \par\vspace{2pt}A focal-mechanism catalogue for microearthquakes in the subducting Pacific oceanic crust at the northern Hikurangi margin offshore Gisborne, derived from the 2014-2015 HOBITSS ocean-bottom seismometer deployment. Used to perform time-varying stress-tensor inversions and track the stress shape ratio (R) as a proxy for fluid pressure cycling before, during, and after four shallow slow slip events. The product is distinct in content (focal mechanisms plus a stress-ratio time series) from the HOBITSS hypocentral microearthquake catalogues (Yarce et al. 2019, 2023).
+\par{\small\itshape Related: Derived from the same 2014-2015 HOBITSS deployment as the manual (Yarce et al. 2019) and automatic-detection (Yarce et al. 2023) earthquake catalogues; this product provides focal mechanisms and stress-tensor estimates.}
 \par\vspace{2pt}\textbf{Key references:} \cite{WarrenSmith2019}.
 \catentryrule
 \subsubsection*{\hypertarget{c:74}{74.}~ Hikurangi Trench Earthquake-Swarm Catalogue (ETAS-based, Nishikawa et al. 2021)}
@@ -1503,6 +1517,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available on request $\cdot$ DOI \href{https://doi.org/10.1029/2023GL105428}{\nolinkurl{10.1029/2023GL105428}}}
 \end{itemize}
 \par\vspace{2pt}Investigates whether small, short-term ETS-like slow-slip events occur at the deep Manawatu/Kaimanawa tremor source, where tectonic tremor lies adjacent to (not co-located with) the deep long-term Manawatu and Kaimanawa slow-slip events on the central Hikurangi subduction interface. The authors cluster existing tremor, decompose GNSS at tremor times to recover tremor-associated displacement offsets, and invert these for slip on the plate interface, concluding the interface below deep long-term SSEs likely slips frequently in small ETS-like SSEs too small to detect individually with geodesy. Distinct in focus (deep Manawatu tremor-associated slip modeling) from the northern Hikurangi tremor catalogue (Todd \& Schwartz 2016) and the source ambient-tremor catalogue (Romanet \& Ide 2019).
+\par{\small\itshape Related: The Manawatu tremor here also features in the multi-region ambient-tremor catalogue of Romanet \& Ide (2019); this entry focuses on deep short-term slow slip and tremor.}
 \par\vspace{2pt}\textbf{Key references:} \cite{Fasola2023,Romanet2019}.
 \catentryrule
 \subsubsection*{\hypertarget{c:76}{76.}~ Global Centroid Moment Tensor (GCMT) catalogue (New Zealand component)}
@@ -1554,6 +1569,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available (DOI) $\cdot$ DOI \href{https://doi.org/10.21420/A2SN-XM76}{\nolinkurl{10.21420/A2SN-XM76}}}
 \end{itemize}
 \par\vspace{2pt}A GNS Science reprocessing that recomputes earthquake magnitudes for the NZ catalogue and standardises them to moment magnitude (Mw) so that earthquake size is consistent over the full catalogue period. It was produced to provide a temporally consistent magnitude backbone for the 2022 National Seismic Hazard Model, correcting step changes (e.g. the 2012 SeisComP transition) and the systematic ML-vs-Mw offset. It is the magnitude basis later folded into the Rollins integrated catalogue and the NSHM 2022 seismicity rate model.
+\par{\small\itshape Related: A companion NSHM 2022 input catalogue; the augmented / integrated catalogue (Rollins et al. 2022) adds event classifications and depth-distribution models.}
 \par\vspace{2pt}\textbf{Key references:} \cite{Christophersen2022,Christophersen2024}.
 \catentryrule
 \subsubsection*{\hypertarget{c:79}{79.}~ Integrated / Augmented Earthquake Catalogue for Aotearoa New Zealand (NSHM 2022; Rollins et al.)}
@@ -1570,6 +1586,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available (DOI) $\cdot$ DOI \href{https://doi.org/10.21420/XT4Y-WY45}{\nolinkurl{10.21420/XT4Y-WY45}}}
 \end{itemize}
 \par\vspace{2pt}An augmented, integrated NZ earthquake catalogue built for the 2022 National Seismic Hazard Model. It merges higher-quality depths, uncertainties, focal mechanisms and relocated hypocentres into the GeoNet catalogue, applies the Christophersen 2022 standardized Mw magnitudes, and classifies events as upper-plate (crustal), subduction-interface, or intraslab to feed the separate components of the Seismicity Rate Model. Revised parameters were imported for \textasciitilde{}60\% of events (incl. \textasciitilde{}92\% of 2000-2020 events).
+\par{\small\itshape Related: Builds on the Mw-homogenised NSHM 2022 catalogue (Christophersen et al. 2022), adding event classifications and depth-distribution models.}
 \par\vspace{2pt}\textbf{Key references:} \cite{Rollins2022,Rollins2025,Rollins2024}.
 \catentryrule
 \subsubsection*{\hypertarget{c:80}{80.}~ RSQSim Synthetic Earthquake Catalogue for New Zealand (NSHM2012 fault system, 276 kyr)}

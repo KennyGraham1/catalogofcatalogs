@@ -111,8 +111,6 @@ The opportunity is to add a thin coordinating layer (a ``catalogue of catalogues
 
 This paper has three aims: (i) to characterise the landscape of New Zealand's earthquake catalogues and benchmark it against mature international systems; (ii) to propose a common set of minimum attributes for describing and creating catalogues; and (iii) to set out a gap analysis and near-term community steps toward a federated, harmonised national catalogue capability for earthquake science and engineering.
 
-Terminology in this paper is used as follows. The \emph{framework} (the ``catalogue of catalogues'') is a single coordinating layer: every catalogue is described by a common submission profile (Section~\ref{sec:profile}) so that it is discoverable, and the framework provides FAIR services (validation, cross-catalogue identifiers, merging, analytics, exports, and DOI-bearing releases). A catalogue's data may remain externally held and linked, or be ingested in full so that it can use the services that operate on event-level data.
-
 The framework is shaped by concrete user needs identified at the workshops: gaining an overview of which catalogues exist and where to find them; locating catalogues for a specific region; merging and comparing catalogues; and identifying which catalogues meet the requirements of a given analysis (for example, those that include phase picks, not just hypocentres). Figure~\ref{fig:fragmented} contrasts the current and proposed states.
 
 \begin{figure}[H]
@@ -192,21 +190,21 @@ This ecosystem is large and heterogeneous. Table~\ref{tab:nztypes} illustrates t
 \toprule
 \textbf{Type} & \textbf{Examples} & \textbf{Strengths / limitations} \\
 \midrule
-Volcano-seismic / microseismic & Taup\=o, Whakaari, Ruapehu, geothermal fields & Precise depths, uniform local methods; limited spatial scope, weak interoperability \\
+Volcano-seismic / microseismic & Taup\=o, Whakaari, Ruapehu, geothermal fields \citep{Illsley2025} & Precise depths, uniform local methods; limited spatial scope, weak interoperability \\
 \addlinespace
-National operational & GeoNet rapid and reviewed, GeoNet centroid moment tensors (CMT), strong-motion datasets & Consistency, continuity, accessibility, manual review; evolving conventions, mixed magnitude types \\
+National operational & GeoNet rapid and reviewed, GeoNet centroid moment tensors (CMT), strong-motion datasets \citep{GeoNetEqCatalogue} & Consistency, continuity, accessibility, manual review; evolving conventions, mixed magnitude types \\
 \addlinespace
-Local / regional deployments & Alpine Fault OBS, Hikurangi (e.g.\ HOBITSS), Kaik\=oura/Cook Strait aftershocks, TVZ experiments (SAMBA, COSA, PTANGO) & High-quality velocity models, precise locations and depths; short duration, limited discoverability \\
+Local / regional deployments & Alpine Fault OBS, Hikurangi (e.g.\ HOBITSS), Kaik\=oura/Cook Strait aftershocks, TVZ experiments (SAMBA, COSA, PTANGO) \citep{Michailos2019, Yarce2019, AzizZanjani2021} & High-quality velocity models, precise locations and depths; short duration, limited discoverability \\
 \addlinespace
-Source-mechanism & Ristau moment tensors, Global Centroid Moment Tensor (GCMT), finite-fault and stress-drop inversions & Kinematic and stress information for hazard and tectonics; standalone, weakly integrated \\
+Source-mechanism & Ristau moment tensors, Global Centroid Moment Tensor (GCMT), finite-fault and stress-drop inversions \citep{Ekstrom2012} & Kinematic and stress information for hazard and tectonics; standalone, weakly integrated \\
 \addlinespace
-Historical / pre-instrumental & Pre-1940 compilations, oral and written records, NSHM inputs & Extend the record by centuries; large uncertainties, poor depth/location, few small events \\
+Historical / pre-instrumental & Pre-1940 compilations, oral and written records, NSHM inputs \citep{Eiby1968a, Downes1995, NSHM2022BSSA} & Extend the record by centuries; large uncertainties, poor depth/location, few small events \\
 \addlinespace
-Slow-slip, palaeoseismic, geodetic & Slow-slip detections, palaeoseismic records, offshore geodetic detections & Unique long-timescale and aseismic information; sparse coverage, imprecise timing \\
+Slow-slip, palaeoseismic, geodetic & Slow-slip detections, palaeoseismic records, offshore geodetic detections \citep{Wallace2010, Fasola2023} & Unique long-timescale and aseismic information; sparse coverage, imprecise timing \\
 \addlinespace
-Research / method-specific & Template-matching, machine-learning, relocation, and waveform-inversion catalogues & Gains in completeness and precision, documented methods; bespoke formats, variable access \\
+Research / method-specific & Template-matching, machine-learning, relocation, and waveform-inversion catalogues \citep{Michailos2025, Chamberlain2025, Eberhart2022} & Gains in completeness and precision, documented methods; bespoke formats, variable access \\
 \addlinespace
-Derived / international & NSHM-derived snapshots; ISC, ComCat, EMSC combined catalogues & Broad or standardised coverage; not NZ-specific, variable completeness \\
+Derived / international & NSHM-derived snapshots; ISC, ComCat, EMSC combined catalogues \citep{usgs_comcat, isc_data_collection, emsc_webservices} & Broad or standardised coverage; not NZ-specific, variable completeness \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -215,7 +213,7 @@ Mature international systems provide useful reference points: the USGS Advanced 
 
 \begin{landscape}
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{3cm}>{\raggedright\arraybackslash}p{4cm}>{\raggedright\arraybackslash}p{3.5cm}>{\raggedright\arraybackslash}p{3.5cm}>{\raggedright\arraybackslash}p{3.5cm}@{}}
-\caption{Comparison of NZ and International Earthquake Catalogue Capabilities. A qualitative synthesis from public documentation and expert judgement, not a scored audit; the third column cites SED for national-service capability and EPOS for the pan-European federation layer, with pan-European capabilities prefixed ``EPOS:'' where shown.}
+\caption{Comparison of NZ and International Earthquake Catalogue Capabilities. The third column cites SED for national-service capability and EPOS for the pan-European federation layer, with pan-European capabilities prefixed ``EPOS:'' where shown.}
 \label{tab:catalog_comparison} \\
 \toprule
 \textbf{Feature} & \textbf{New Zealand} & \textbf{USGS ComCat} & \textbf{Switzerland (SED) / EPOS} & \textbf{Gaps \& Priorities} \\
@@ -345,7 +343,7 @@ The framework addresses the end-to-end lifecycle of catalogue data; Figure~\ref{
 
 Unless otherwise stated, the components in this section are proposed design requirements. The discovery-level requirements apply to the submission profile that describes every catalogue and are intentionally lightweight; the service-level requirements apply to catalogues ingested in full, and especially to DOI-bearing releases, and are correspondingly stricter.
 
-The framework is a single coordinating layer, the ``catalogue of catalogues''. Its common front door is a short submission profile (Section~\ref{sec:profile}): each catalogue is described by the profile, recording what it contains and how to obtain it, so that the catalogue is discoverable without necessarily transferring the underlying data. This discovery function is cheap to contribute to and is the immediate community deliverable, answering \emph{which catalogues exist, what they contain, and where to find them}. Building on it, the framework provides the richer FAIR services (programmatic access, cross-catalogue event-identifier mapping, merge and conflation, quality scoring, analytics, and versioned DOIs) for catalogues that are ingested in full, answering \emph{compare, merge, analyse, and cite}. A catalogue can therefore be described by a profile that links to wherever it lives, or opt in to full ingestion for the services that operate on event-level data. Discovery should be established first and at low cost; the full services are demonstrated by the prototype (Section~\ref{sec:prototype}) and would be built out across the roadmap (Section~\ref{sec:implementation}). At the time of writing the index is a design proposal: it has not yet been populated, and the New Zealand catalogues named in this paper are motivating examples rather than live entries. Standing up an initial index with an agreed first set of catalogues, via the submission profile, is the near-term deliverable (Section~\ref{sec:implementation}). The components below describe both the discovery profile and these services.
+The framework is a single coordinating layer, the ``catalogue of catalogues''. Its common front door is a short submission profile (Section~\ref{sec:profile}): each catalogue is described by the profile, recording what it contains and how to obtain it, so that the catalogue is discoverable without necessarily transferring the underlying data. This discovery function is cheap to contribute to and is the immediate community deliverable, answering \emph{which catalogues exist, what they contain, and where to find them}. Building on it, the framework provides the richer FAIR services (programmatic access, cross-catalogue event-identifier mapping, merge and conflation, quality scoring, analytics, and versioned DOIs) for catalogues that are ingested in full, answering \emph{compare, merge, analyse, and cite}. A catalogue can therefore be described by a profile that links to wherever it lives, or opt in to full ingestion for the services that operate on event-level data. The full services are demonstrated by the prototype (Section~\ref{sec:prototype}) and would be built out across the roadmap (Section~\ref{sec:implementation}). At the time of writing the index is a design proposal: it has not yet been populated, and the New Zealand catalogues named in this paper are motivating examples rather than live entries. Standing up an initial index with an agreed first set of catalogues, via the submission profile, is the near-term deliverable (Section~\ref{sec:implementation}). The components below describe both the discovery profile and these services.
 
 Table~\ref{tab:functions} summarises the framework's two functions, discovery and curation services, before the detailed architecture in Figure~\ref{fig:architecture}.
 
@@ -519,7 +517,7 @@ A persistent interoperability challenge is that the same earthquake carries diff
 
 \subsection{Catalogue Merge and Conflation}
 \label{sec:merge}
-Catalogue conflation, combining events from multiple independent catalogues into a unified view, is a central operation that builds on established cross-agency practice \citep{Si2024, NCEDCComCat}.\footnote{A companion review of catalogue-merging strategies accompanies this paper in the project repository (see Data and Code Availability).} The framework specifies five merge strategies, all implemented in the prototype (Section~\ref{sec:prototype}); users choose by scientific objective:
+Catalogue conflation, combining events from multiple independent catalogues into a unified view, is a central operation that builds on established cross-agency practice \citep{Si2024, NCEDCComCat}.\footnote{A companion review of catalogue-merging strategies accompanies this paper in the project repository (see Data and Code Availability).} The framework specifies five merge strategies, all exercised by the prototype (Section~\ref{sec:prototype}); users choose by scientific objective:
 \begin{itemize}
   \item \textbf{Quality-based} (default): the highest quality-scored solution (Section~\ref{sec:quality}) is retained.
   \item \textbf{Priority-based}: a nominated authoritative agency's solution is preferred; others are recorded as alternatives.
@@ -537,6 +535,8 @@ The weights $w_i$ pull the mean toward the better-constrained solution. However,
 \begin{equation*}
 \sigma_{\text{reported}} = \max\!\bigl(\sigma_{\text{indep}},\ \min_i \sigma_i\bigr).
 \end{equation*}
+
+This is the framework's specified averaged-merge behaviour. The prototype currently realises the epicentre inverse-variance averaging and, to avoid magnitude-scale saturation, selects magnitude by the ISC type hierarchy and depth from the lowest-uncertainty solution; inverse-variance depth weighting and the conservative merged-uncertainty floor are specified for full implementation.
 
 Conflicts are detected and logged when solutions disagree beyond configurable thresholds (spatial separation, temporal offset, magnitude difference, depth range, network mismatch); duplicate detection during dense aftershock sequences follows nearest-neighbour methods \citep{Tanaka2022}. Each merged event retains explicit lineage to its source events and the configuration used, enabling full audit and reproducibility; a dry-run preview returns conflict statistics without committing a new version. Production merge configurations should report validation results and sensitivity to threshold choice. Table~\ref{tab:merge_example} works this through for one event reported by two catalogues, and Figure~\ref{fig:merge_example} shows the resulting epicentre.
 
@@ -628,15 +628,7 @@ Persistent identifiers make those releases citable. The catalogue series carries
 Processing steps (detection, picking, location, velocity models, magnitude calibration) and provenance are documented following the W3C PROV model of entities, activities, and agents, with software version and execution date as minimum requirements \citep{PROVO}. Uncertainties for time, location, and magnitude are reported as standard deviations (with confidence-ellipse parameters where anisotropic) and always carry the magnitude type code; events without quantified uncertainties are flagged, and historical events may carry a qualitative confidence class (e.g.\ ``well-constrained'', ``felt-only''). Field-level representations are specified in Appendix~\ref{app:spec}.
 
 \subsection{Special Catalogue Types}
-Different catalogue types need adapted handling to preserve scientific value:
-\begin{itemize}
-\setlength{\itemsep}{1pt}
-\item \textbf{Regional research catalogues} are ingested as distinct, separately versioned catalogues and cross-referenced, not silently merged, with the national catalogue, because different processing assumptions can introduce systematic biases.
-\item \textbf{Temporary deployments} are labelled with their time window and station geometry.
-\item \textbf{Historical and pre-instrumental catalogues} use qualitative confidence classes and macroseismic intensity fields (Modified Mercalli or EMS-98, \citealp{Grunthal1998}), and form a distinct collection.
-\item \textbf{Derived and synthetic catalogues} carry explicit provenance to their source versions.
-\end{itemize}
-Appendix~\ref{app:spec} gives the detailed handling.
+Different catalogue types need adapted handling to preserve scientific value. Regional research catalogues, in particular, are ingested as distinct, separately versioned catalogues and cross-referenced (not silently merged) with the national catalogue, because their differing processing assumptions can introduce systematic biases; temporary deployments, historical and pre-instrumental catalogues, and derived or synthetic catalogues likewise receive type-specific treatment, detailed in Appendix~\ref{app:spec}.
 
 \subsection{Licensing and Access; FAIR Compliance Indicators}
 To support FAIR reusability, every dataset and metadata record should carry an explicit, machine-readable licence \citep{FAIRPrinciples2016, GOFAIR}. For government-funded baseline products, a default open licence is recommended, aligned with New Zealand Government Open Access and Licensing (NZGOAL) guidance \citep{NZGOAL2022}, with documented exceptions for embargoed, sensitive, or culturally restricted data. Access is governed by a role-based model with catalogue-level public/registered/restricted designations and, where needed, field-level masking of culturally sensitive locations; all write operations are audited. These mechanisms are detailed in Appendix~\ref{app:spec}. Progress should be tracked against a FAIR compliance matrix that maps each FAIR sub-principle (F1--F4, A1--A2, I1--I3, R1.1--R1.3) to a framework mechanism and a measurable, annually reported indicator: for example, the percentage of catalogues with a resolvable DOI (F1), mean metadata-completeness (F2), API uptime (A1), and the percentage carrying a machine-readable licence (R1.1). The full matrix is given in Table~\ref{tab:fair_matrix} (Appendix~\ref{app:spec}).
@@ -659,7 +651,7 @@ A Steering Committee provides strategic oversight and ensures community ownershi
 
 \subsubsection{Data Stewardship Team}
 \label{sec:steward}
-Day-to-day operation is led by Earth Sciences New Zealand and need not be large. At its simplest the framework is maintained by a part-time data steward (coordination, metadata curation, and quality review); software-engineering and user-support effort are drawn in as needed, and the team grows toward one to two FTE only if the full services are operated at scale. External researchers may also submit catalogues through a defined contribution process (Section~\ref{sec:contribution}). These governance roles (contributor, reviewer, maintainer) are distinct from the portal's technical access roles defined in Appendix~\ref{app:spec}.
+Day-to-day operation is led by Earth Sciences New Zealand and need not be large. At its simplest the framework is maintained by a part-time data steward (coordination, metadata curation, and quality review); resourcing and FTE scaling are set out in Section~\ref{sec:implementation} (Funding and Resourcing). External researchers may also submit catalogues through a defined contribution process (Section~\ref{sec:contribution}). These governance roles (contributor, reviewer, maintainer) are distinct from the portal's technical access roles defined in Appendix~\ref{app:spec}.
 
 \subsubsection{Catalogue Contribution Process}
 \label{sec:contribution}
@@ -744,7 +736,7 @@ We anticipate, and address, the main objections to this proposal:
 \end{itemize}
 
 \section{Conclusion and Call to Action}
-New Zealand has the data, the expertise, and strong community interest in making its earthquake catalogues FAIR; what is missing is a coordinating framework and the governance to sustain it. This white paper has set out such a framework, compared it with international practice, and demonstrated its technical feasibility through a working prototype. In doing so it has characterised the catalogue landscape and compared it internationally, proposed minimum attributes, a metadata profile, and a shared lexicon, and set out a gap analysis with near-term community steps. The remaining step is collective review, partner agreement, and sustained implementation.
+New Zealand has the data, the expertise, and strong community interest in making its earthquake catalogues FAIR; what is missing is a coordinating framework and the governance to sustain it. This white paper has set out such a framework, compared it with international practice, and demonstrated its technical feasibility through a working prototype. The remaining step is collective review, partner agreement, and sustained implementation.
 
 We invite GeoNet and Earth Sciences New Zealand, universities, government agencies, iwi and hap\=u partners, and the engineering and insurance sectors to:
 \begin{enumerate}
@@ -981,7 +973,7 @@ Role assignments are managed by Administrators and recorded in an audit log; a r
 \textbf{Audit and compliance.} All write operations (catalogue creation, import, merge, deletion) are recorded with the authenticated user identity, timestamp, and operation details; read access to restricted catalogues is similarly logged. Where usage agreements are attached to a catalogue (for example, a requirement to cite a companion publication), the agreement is presented at download time and acceptance is recorded.
 
 \subsection{Uncertainty Representation}
-Origin location and time uncertainties are reported as standard deviations where available: \texttt{time\_uncertainty} (seconds), \texttt{horizontal\_uncertainty} (kilometres), and \texttt{depth\_uncertainty} (kilometres). Where horizontal uncertainty is anisotropic, the semi-major and semi-minor axes of the confidence ellipse, its azimuth, and the stated confidence level (conventionally 68\%) are reported, mapping to QuakeML \texttt{OriginUncertainty} elements \citep{QuakeML}. Magnitude uncertainties are reported as the standard deviation on the stated scale when available, and the magnitude type code must always accompany the value. Events without quantified uncertainties carry a boolean \texttt{uncertainty\_available} field set to false; historical events may substitute a qualitative confidence class. Thus the framework requires uncertainty to be represented explicitly, but does not require every legacy or historical record to have a quantified uncertainty. When events are merged, the averaging strategy combines location, time, and magnitude by inverse-variance weighting; because agency solutions for one event are typically correlated rather than independent, the merged uncertainty is reported conservatively (not below the smallest contributing value) rather than the smaller independent-combination result. Priority and quality strategies retain the selected solution's uncertainty and record alternatives; the merge log documents the strategy and resulting uncertainty.
+Origin location and time uncertainties are reported as standard deviations where available: \texttt{time\_uncertainty} (seconds), \texttt{horizontal\_uncertainty} (kilometres), and \texttt{depth\_uncertainty} (kilometres). Where horizontal uncertainty is anisotropic, the semi-major and semi-minor axes of the confidence ellipse, its azimuth, and the stated confidence level (conventionally 68\%) are reported, mapping to QuakeML \texttt{OriginUncertainty} elements \citep{QuakeML}. Magnitude uncertainties are reported as the standard deviation on the stated scale when available, and the magnitude type code must always accompany the value. Events without quantified uncertainties carry a boolean \texttt{uncertainty\_available} field set to false; historical events may substitute a qualitative confidence class. Thus the framework requires uncertainty to be represented explicitly, but does not require every legacy or historical record to have a quantified uncertainty. When events are merged, the averaging strategy reports a conservative uncertainty floored at the most precise contributing solution (Section~\ref{sec:merge}); priority and quality strategies retain the selected solution's uncertainty and record alternatives, and the merge log documents the strategy and resulting uncertainty.
 
 \subsection{Quality Checks and Full Grade Scheme}
 Representative automated checks include:
@@ -1000,7 +992,7 @@ Results are summarised as passed, warning, or failed. These checks are sanity sc
 \begin{table}[H]
 \centering
 \small
-\caption{Full quality grade thresholds and screening guidance (default scheme; the pilot phase will calibrate the thresholds).}
+\caption{Full quality grade thresholds and screening guidance (default scheme).}
 \label{tab:quality_grades_full}
 \setlength{\tabcolsep}{5pt}
 \renewcommand{\arraystretch}{1.15}
@@ -1012,8 +1004,7 @@ A+ & 95--100 & Very strong documented indicators; still verify suitability for t
 A  & 85--94  & Strong documented indicators; suitable for screening and candidate selection. \\
 B+ & 75--84  & Moderate indicators; document limitations in methods sections. \\
 B  & 65--74  & Fair indicators; consider supplementing with additional metadata. \\
-C+ & 55--64  & Weak indicators; expert review recommended before quantitative use. \\
-C  & 45--54  & Very weak indicators; limited utility for quantitative analysis without review. \\
+C  & 45--64  & Weak indicators; expert review recommended before quantitative use. \\
 D  & 35--44  & Minimal documented support; use only for discovery or illustrative purposes. \\
 F  & $<$35   & Not recommended for quantitative analysis without substantial review. \\
 \bottomrule

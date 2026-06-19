@@ -250,7 +250,7 @@ New Zealand's earthquake-catalogue landscape has three tiers.
 
 \textbf{(3) Derived products}: relocated and reprocessed catalogues, magnitude-homogenised and declustered hazard-model catalogues (NSHM 2010 and 2022), and physics-based synthetic (RSQSim) catalogues.
 
-Catalogues produced by temporary deployments and targeted experiments make up a substantial part of this inventory (${counts['temp-onshore'] || 0} onshore and ${counts['temp-offshore-obs'] || 0} offshore here, alongside much of the volcano-seismic and aftershock-response work), yet they are among the catalogues \emph{least} discoverable in the national system. Scattered across journal supplements, Zenodo, IRIS/EarthScope, PANGAEA, and FDSN temporary-network DOIs, and using heterogeneous magnitude and depth conventions, they are exactly the material a federated registry is designed to surface.`);
+Catalogues produced by temporary deployments and targeted experiments make up a substantial part of this inventory (${counts['temp-onshore'] || 0} onshore and ${counts['temp-offshore-obs'] || 0} offshore here, alongside much of the volcano-seismic and aftershock-response work), yet they are among the catalogues \emph{least} discoverable in the national system, and so are exactly the material a federated registry is designed to surface (their specific discoverability and heterogeneity issues are detailed in Section~\ref{sec:gaps}).`);
 
 // ===================== 4. TIMELINE =======================================
 W(String.raw`\section{Historical development, 1960--2026}\label{sec:timeline}
@@ -368,6 +368,7 @@ for (const [k, title, intro] of CAT) {
     if (av.length) W(`\\kv{Availability}{${av.join(' $\\cdot$ ')}}`);
     W(`\\end{itemize}`);
     if (norm(p.description)) W(`\\par\\vspace{2pt}${tex(scrub(clean(p.description)))}`);
+    if (norm(p.related)) W(`\\par{\\small\\itshape Related: ${tex(scrub(clean(p.related)))}}`);
     const keys = (p.key_references || []).filter(Boolean).map(addRef).filter(Boolean);
     if (keys.length) W(`\\par\\vspace{2pt}\\textbf{Key references:} \\cite{${keys.join(',')}}.`);
     W(`\\catentryrule`);

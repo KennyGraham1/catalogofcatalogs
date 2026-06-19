@@ -2137,6 +2137,9 @@ export default function AnalyticsPage() {
                       <CardContent>
                         <div className="text-3xl font-bold text-violet-900 dark:text-violet-100 font-mono">
                           {grAnalysis.bValue.toFixed(3)}
+                          {grAnalysis.bUncertainty != null && (
+                            <span className="text-base font-normal text-muted-foreground"> ± {grAnalysis.bUncertainty.toFixed(3)}</span>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 mt-2">
                           <Badge
