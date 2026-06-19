@@ -28,6 +28,8 @@
 \usepackage{lmodern}
 \usepackage{microtype}
 \usepackage[utf8]{inputenc}
+\usepackage{pdflscape}
+\usepackage{float}
 
 % --- Hyperref setup -----------------------------------------
 \hypersetup{
@@ -274,6 +276,31 @@ bulletins \citep{chamberlain2018,mousavi2022,illsley2025,michailos2025,chamberla
 while every regional network continues to publish its own authoritative product.  A single study area may
 therefore be covered by several catalogues that differ in completeness,
 magnitude scale, and location quality and must be reconciled before analysis.
+This proliferation is spatially concentrated: a companion inventory of New
+Zealand earthquake catalogues (Figure~\ref{fig:coverage}) shows that
+intensively studied areas, such as the Taup\=o Volcanic Zone, the Hikurangi
+margin, Canterbury, and the central Alpine Fault, are each covered by many
+overlapping regional catalogues (panel~b), while large offshore tracts,
+Fiordland, and the far south remain thinly catalogued (panel~a).  Reconciling
+such overlapping products into a single, quality-aware view is precisely the
+task CofC is built for.
+
+\begin{landscape}
+\centering
+\includegraphics[width=\linewidth,height=0.78\textheight,keepaspectratio]{figures/nz_catalogue_coverage.pdf}
+\par\medskip
+\captionof{figure}{Spatial coverage of a companion inventory of New Zealand
+earthquake catalogues (81 catalogues, 1960--2026).  (a)~Footprint of each
+regional catalogue (a representative bounding box) over the coastline and
+active faults, coloured by type; 18 national or NZ-wide catalogues span the
+full extent and are not drawn, and two Kermadec-arc catalogues lie north of the
+map.  (b)~Number of regional catalogues overlapping each $0.1^{\circ}$ cell,
+highlighting intensively studied areas (Taup\=o Volcanic Zone, Hikurangi
+margin, Canterbury, central Alpine Fault) against thinly catalogued offshore
+tracts, Fiordland, and the far south.  This many-catalogues-per-area pattern is
+the motivation for a merging-and-quality platform.}
+\label{fig:coverage}
+\end{landscape}
 The constituent operations, format conversion, duplicate association,
 completeness estimation, declustering, are individually well understood and,
 in isolation, available in existing tools.  The GEM OpenQuake Model Building
@@ -411,16 +438,16 @@ The remainder of this paper describes the platform architecture
 (Section~\ref{sec:example}), and detailed guidance on avoiding the most
 consequential statistical biases (Section~\ref{sec:biases}).
 
-\subsection{Novelty and contributions}
+\subsection{Contributions}
 \label{sec:contributions}
 
 The individual algorithms CofC employs are deliberately standard, maximum-likelihood
 $b$-value estimation \citep{aki1965}, MAXC completeness estimation
 \citep{wiemer2000}, and Gardner-Knopoff \citep{gardner1974} and Reasenberg
-\citep{reasenberg1985} declustering.  The novelty of this work is therefore not
-a new estimator but the \emph{integration} of the complete multi-catalogue
+\citep{reasenberg1985} declustering.  The contribution of this work is therefore not
+a new estimator but the \emph{integration} of the multi-catalogue
 workflow into a single open, web-native, provenance-preserving platform,
-together with an transparent event-level quality index.  Specifically, the
+together with a transparent event-level quality index.  Specifically, the
 contributions are:
 
 \begin{enumerate}[leftmargin=*]
@@ -624,7 +651,7 @@ Table~\ref{tab:formats} summarises the five supported formats.
 \toprule
 \textbf{Format} & \textbf{Extension(s)} & \textbf{Notes} \\
 \midrule
-CSV / TXT          & .csv, .txt       & Flexible column mapping via template system; supports $\sim$40 field names per column. \\
+CSV / TXT          & .csv, .txt       & Configurable column mapping via template system; supports $\sim$40 field names per column. \\
 GeoJSON            & .geojson, .json  & RFC~7946 \citep{geojson2016} Feature or FeatureCollection; properties auto-mapped. \\
 QuakeML~1.2 BED    & .xml, .quakeml   & Full preferred-origin / preferred-magnitude extraction; all nested arrays preserved. \\
 GeoNet live import & (FDSN WS)        & Configurable date range; streams directly into a new catalogue. \\
@@ -1282,7 +1309,7 @@ report in a methods section but are less flexible: a threshold approach
 discards events entirely, whereas the quality score allows users to weight
 the trade-off between sample size and data quality continuously.  CofC
 exposes both approaches: the quality score for continuous ranking and
-per-field uncertainty filters in the advanced filter API.
+per-field uncertainty filters in the filter API.
 
 \subsection{Towards reproducible seismicity analysis}
 

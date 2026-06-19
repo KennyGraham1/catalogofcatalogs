@@ -6,6 +6,8 @@
 \usepackage{microtype}
 \usepackage{booktabs}
 \usepackage{longtable}
+\usepackage{graphicx}
+\usepackage{rotating}
 \usepackage{array}
 \usepackage{enumitem}
 \usepackage{xcolor}
@@ -57,7 +59,7 @@
 \thispagestyle{fancy}
 
 \begin{abstract}
-\noindent New Zealand's earthquake-catalogue record is curated nationally by GeoNet (Earth Sciences New Zealand / GNS Science) but is complemented by a large, fragmented body of regional, temporary-deployment, volcano-seismic, slow-earthquake, and derived catalogues that are individually valuable yet difficult to discover, compare, and cite. This report presents a curated inventory of \textbf{81 distinct earthquake catalogues} that were developed for, or that cover, Aotearoa New Zealand and its offshore margins with coverage overlapping the period 1960--2026, with particular emphasis on \textbf{temporary seismic deployments} (passive-seismic experiments, ocean-bottom deployments, and aftershock rapid-response arrays). Each catalogue is profiled against the minimum-attributes \emph{Catalogue Submission Profile} proposed for a national \textquotedblleft catalogue of catalogues\textquotedblright, recording what it contains and how to obtain it. Of the 81 catalogues, 73 carry a resolvable DOI or stable dataset identifier. Catalogues from temporary deployments and targeted experiments make up a substantial share, underscoring both the richness of New Zealand's regional seismology and the discoverability gap that a federated registry is designed to close. The inventory is offered as a working population of that registry and as a reproducible, citable reference for researchers, hazard modellers, and engineers.
+\noindent New Zealand's earthquake-catalogue record is curated nationally by GeoNet (Earth Sciences New Zealand / GNS Science) but is complemented by a large, fragmented body of regional, temporary-deployment, volcano-seismic, slow-earthquake, and derived catalogues that are individually valuable yet difficult to discover, compare, and cite. This report presents a curated inventory of \textbf{81 distinct earthquake catalogues} that were developed for, or that cover, Aotearoa New Zealand and its offshore margins with coverage overlapping the period 1960--2026, with particular emphasis on \textbf{temporary seismic deployments} (passive-seismic experiments, ocean-bottom deployments, and aftershock rapid-response arrays). Each catalogue is profiled against the minimum-attributes \emph{Catalogue Submission Profile} proposed for a national \textquotedblleft catalogue of catalogues\textquotedblright, recording what it contains and how to obtain it. Of the 81 catalogues, 73 carry a resolvable DOI or stable dataset identifier. Catalogues from temporary deployments and targeted experiments make up a substantial share, reflecting both the diversity of New Zealand's regional seismology and the discoverability gap that a federated registry is intended to address. The inventory is offered as a working population of that registry and as a reproducible, citable reference for researchers, hazard modellers, and engineers.
 \end{abstract}
 \vspace{4pt}
 {\small\noindent\textbf{Keywords:} earthquake catalogue; seismicity; temporary deployment; ocean-bottom seismometer; slow slip; FAIR data; Aotearoa New Zealand; GeoNet; metadata.}
@@ -231,6 +233,15 @@ Derived, homogenised and synthetic / hazard-model & \textcolor{barblue}{\rule{2.
 81 & \hyperlink{c:81}{RSQSim Synthetic Earthquake Catalogue + Ground Motions for New Zealand (NZNSHM22 fault system)} & synthetic (RSQSim simulated span; published 2025)\,--\,synthetic (RSQSim simulated span) & background & open (DOI), \cite{Shaw2025}, {\footnotesize \href{https://doi.org/10.5281/zenodo.14532399}{\nolinkurl{10.5281/zenodo.14532399}}} \\
 \end{longtable}
 \end{small}
+\section{Spatial coverage}\label{sec:spatial}
+Figure~\ref{fig:coverage} maps where the inventory's catalogues sit. Panel~(a) shows the footprint of each regional catalogue (a representative bounding box) over the New Zealand coastline and active-fault network, coloured by type; the 18 national / NZ-wide catalogues are not drawn because they span the whole country, and two Kermadec-arc catalogues lie north of the map. Panel~(b) counts how many regional catalogues overlap each $0.1^\circ$ cell, which shows where catalogues concentrate, the Taup\=o Volcanic Zone, the Hikurangi margin, Canterbury, and the central Alpine Fault, while large offshore tracts, Fiordland, and the far south remain thinly catalogued. This spatial unevenness is the visual counterpart of the gaps discussed in Section~\ref{sec:gaps}.
+
+\begin{sidewaysfigure}
+\centering
+\includegraphics[width=0.9\textheight]{figures/nz_catalogue_coverage.pdf}
+\caption{Spatial coverage of the Aotearoa New Zealand earthquake-catalogue inventory. \textbf{(a)} Regional catalogue footprints (representative bounding boxes) coloured by category, over the coastline and active-fault network; national / NZ-wide and Kermadec-arc catalogues are handled in the annotations. \textbf{(b)} Number of regional catalogues overlapping each $0.1^\circ$ grid cell. Footprints are indicative extents for discovery, not precise data boundaries.}
+\label{fig:coverage}
+\end{sidewaysfigure}
 \section{Coverage gaps and FAIR weaknesses}\label{sec:gaps}
 \begin{itemize}[leftmargin=1.4em,itemsep=3pt]
 \item \textbf{Not a census.} Because earthquake-catalogue production is decentralised and continuous, a residual long tail remains: likely-missing material includes further PhD-thesis catalogues, additional dedicated catalogues for New Zealand $M_w\!\geq\!6$ aftershock responses since 1960, more geothermal fields (Ohaaki, Mokai, Ng\=awh\=a), and the SISIE/MOANA/SHIRE offshore experiments not yet retained as distinct event catalogues.
@@ -252,7 +263,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Magnitude}{Roughly M0 to M8+ instrumental; magnitude of completeness varies spatially and over time (network-dependent), Mc not stated on landing page}
 \kv{Events}{\textasciitilde{}700,000+ (approx; \textasciitilde{}20,000 new events added per year)}
 \kv{Content}{hypocentral locations; phase arrival-time picks; amplitude picks; quality information; historical observations}
-\kv{Producer / contact}{GNS Science (Earth Sciences New Zealand) / GeoNet; Geohazards Information Manager (info@geonet.org.nz)}
+\kv{Producer / contact}{GNS Science (Earth Sciences New Zealand) / GeoNet; Geohazards Information Manager (info@\allowbreak{}geonet.org.nz)}
 \kv{Data source}{Continuous waveforms from the New Zealand National Seismograph Network (FDSN code NZ) plus historical felt/observational records; routinely processed by GeoNet (SeisComP since 2012). Successor to the DSIR Seismological Observatory / IGNS national catalogue lineage.}
 \kv{Availability}{available (DOI) $\cdot$ DOI \href{https://doi.org/10.21420/0S8P-TZ38}{\nolinkurl{10.21420/0S8P-TZ38}}}
 \end{itemize}
@@ -326,7 +337,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Availability}{available (DOI) $\cdot$ DOI \href{https://doi.org/10.31905/D808B825}{\nolinkurl{10.31905/D808B825}}}
 \end{itemize}
 \par\vspace{2pt}A homogeneous global catalogue of large instrumental earthquakes (1904-2014, extended toward 2018+) with relocated hypocentres and recomputed moment magnitudes (Mw), selected by time-dependent magnitude thresholds. The qualifying large New Zealand / Kermadec / Hikurangi events provide a long-period, large-event source/benchmark used in NZ seismic-hazard work (e.g. NSHM 2022). It is a global product, not NZ-specific; NZ events are a subset.
-\par{\small\itshape Related: Companion ISC global products are ISC-EHB and the comprehensive ISC Bulletin; ISC-GEM is the magnitude-thresholded, relocated instrumental catalogue (1904-2014).}
+\par{\small\itshape Related: Companion ISC global products are ISC-EHB and the full ISC Bulletin; ISC-GEM is the magnitude-thresholded, relocated instrumental catalogue (1904-2014).}
 \par\vspace{2pt}\textbf{Key references:} \cite{DiGiacomo2018,Storchak2015,InternationalSeismologicalCentre2021}.
 \catentryrule
 \subsubsection*{\hypertarget{c:6}{6.}~ Taupo Volcanic Zone Consistent High-Precision Earthquake Catalogue (2007-2023)}
@@ -342,7 +353,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Data source}{GeoNet permanent network waveforms integrated with temporary TVZ deployments (incl. HADES array, Bannister 2009; back-arc rifting arrays); EQTransformer ML phase picking, 3-D velocity model location, GrowClust3D relative relocation.}
 \kv{Availability}{available (DOI) $\cdot$ DOI \href{https://doi.org/10.26443/seismica.v4i1.1490}{\nolinkurl{10.26443/seismica.v4i1.1490}}}
 \end{itemize}
-\par\vspace{2pt}Produced to create a single internally consistent, high-precision earthquake catalogue spanning the whole \textasciitilde{}300 km Taupō Volcanic Zone over 2007-2023, overcoming the heterogeneity of routine locations across many separate deployments. Uses EQTransformer machine-learning phase picking, location in a 3-D velocity model, and GrowClust3D relative relocation. A flagship ML + 3-D reprocessing effort merging permanent GeoNet data with temporary TVZ arrays.
+\par\vspace{2pt}Produced to create a single internally consistent, high-precision earthquake catalogue spanning the whole \textasciitilde{}300 km Taupō Volcanic Zone over 2007-2023, overcoming the heterogeneity of routine locations across many separate deployments. Uses EQTransformer machine-learning phase picking, location in a 3-D velocity model, and GrowClust3D relative relocation. An ML + 3-D reprocessing effort merging permanent GeoNet data with temporary TVZ arrays.
 \par\vspace{2pt}\textbf{Key references:} \cite{IllsleyKemp2025}.
 \catentryrule
 \subsubsection*{\hypertarget{c:7}{7.}~ Wellington Region Double-Difference Relocated Catalogue (Du et al. 2004)}
@@ -411,8 +422,8 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Data source}{Parametric earthquake data (hypocentres, phase arrival-time picks, amplitude/magnitude readings, collected focal-mechanism solutions) reported to the ISC by \textasciitilde{}150 seismological agencies and networks worldwide, grouped and relocated by the ISC. The NZ component derives mainly from GNS Science / GeoNet (and historically DSIR) station and bulletin contributions, supplemented by globally collected phases.}
 \kv{Availability}{available (DOI) $\cdot$ DOI \href{https://doi.org/10.31905/D808B830}{\nolinkurl{10.31905/D808B830}}}
 \end{itemize}
-\par\vspace{2pt}The ISC Bulletin is regarded as the definitive long-term parametric record of global seismicity, compiling hypocentres, phase arrival times, amplitudes and magnitudes, and collected focal-mechanism solutions. The 'Reviewed' product applies manual analyst checking and ISC relocation to all events with M\textgreater{}=3.5 (and selectively for 2.5\textless{}=M\textless{}3.5), producing the authoritative reviewed location/magnitude record for moderate-to-large NZ events. It is distinct from the ISC-EHB and ISC-GEM derivative products and is widely cited for NZ regional/teleseismic locations.
-\par{\small\itshape Related: The comprehensive ISC global bulletin; the relocated ISC-EHB and large-event ISC-GEM products are listed separately.}
+\par\vspace{2pt}The ISC Bulletin is regarded as among the most complete long-term parametric records of global seismicity, compiling hypocentres, phase arrival times, amplitudes and magnitudes, and collected focal-mechanism solutions. The 'Reviewed' product applies manual analyst checking and ISC relocation to all events with M\textgreater{}=3.5 (and selectively for 2.5\textless{}=M\textless{}3.5), producing the authoritative reviewed location/magnitude record for moderate-to-large NZ events. It is distinct from the ISC-EHB and ISC-GEM derivative products and is widely cited for NZ regional/teleseismic locations.
+\par{\small\itshape Related: The full ISC global bulletin; the relocated ISC-EHB and large-event ISC-GEM products are listed separately.}
 \par\vspace{2pt}\textbf{Key references:} \cite{InternationalSeismologicalCentre2026,Bondr2011,Storchak2017,Storchak2020}.
 \catentryrule
 \subsubsection*{\hypertarget{c:11}{11.}~ DWARFS Rupture-Limiting Section Boundary Relocated Microseismicity \& Focal-Mechanism Catalogue, Alpine Fault (Warren-Smith et al. 2022)}
@@ -447,7 +458,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Data source}{GeoNet seismic waveform archive (events reassessed from the GeoNet catalogue 2001-2021); automated re-picking and relocation workflow by VUW}
 \kv{Availability}{available (DOI) $\cdot$ DOI \href{https://doi.org/10.5281/zenodo.18820779}{\nolinkurl{10.5281/zenodo.18820779}}}
 \end{itemize}
-\par\vspace{2pt}A modern, NZ-wide, research-quality earthquake EVENT catalogue produced with a uniform automated workflow: EQTransformer deep-learning phase picking applied to GeoNet waveforms, location/relocation in the NZWide2.3 3-D velocity model (Eberhart-Phillips et al. 2022) with depth-fixing removed, and consistent local-magnitude calculation. It reassesses 407,553 earthquakes from the GeoNet catalogue spanning 1 Jan 2001 - 1 Jan 2021, providing freshly picked and located hypocentres, location uncertainties, local magnitudes, phase arrival-time picks and amplitude picks. It is a freshly re-picked/located catalogue rather than a magnitude-homogenised compilation of pre-existing solutions, making it distinct from NSHM 'consistent magnitudes' compilations and the GeoNet operational catalogue, and it is NZ-wide rather than a single-region relocation study.
+\par\vspace{2pt}A modern, NZ-wide earthquake EVENT catalogue produced with a uniform automated workflow: EQTransformer deep-learning phase picking applied to GeoNet waveforms, location/relocation in the NZWide2.3 3-D velocity model (Eberhart-Phillips et al. 2022) with depth-fixing removed, and consistent local-magnitude calculation. It reassesses 407,553 earthquakes from the GeoNet catalogue spanning 1 Jan 2001 - 1 Jan 2021, providing freshly picked and located hypocentres, location uncertainties, local magnitudes, phase arrival-time picks and amplitude picks. It is a freshly re-picked/located catalogue rather than a magnitude-homogenised compilation of pre-existing solutions, making it distinct from NSHM 'consistent magnitudes' compilations and the GeoNet operational catalogue, and it is NZ-wide rather than a single-region relocation study.
 \par\vspace{2pt}\textbf{Key references:} \cite{Williams2026,Williams2024,EberhartPhillips2022a}.
 \catentryrule
 \subsection{Historical and macroseismic (felt-report) catalogues}
@@ -1296,7 +1307,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Magnitude}{Local magnitude (MLNZ20 scale, Christophersen et al. 2022); range approx. -0.5 to 3.9; magnitude of completeness Mc \textasciitilde{}0.6 (maximum-curvature and goodness-of-fit); Gutenberg-Richter b-value \textasciitilde{}0.8. For comparison GeoNet reports 65 events (M 0.4-3.9) over the same region/period.}
 \kv{Events}{368 earthquakes within the AVF region of interest (611 true earthquakes total before regional filtering); separate quarry-blast and unclassified-event catalogues also released; \textgreater{}5x the GeoNet count for the same region/period}
 \kv{Content}{hypocentral locations; phase arrival-time picks; amplitude picks; quality information; other (also separate quarry-blast and unclassified-event catalogues; focal mechanisms recommended but NOT yet computed)}
-\kv{Producer / contact}{Calum John Chamberlain (Victoria University of Wellington), calum.chamberlain@vuw.ac.nz; co-authors Jenni Hopkins, John Townend (VUW), Kasper van Wijk (University of Auckland), Nathanial Lindsey (FiberSense); dataset prepared by MSc student Sarah O'Hagan (VUW)}
+\kv{Producer / contact}{Calum John Chamberlain (Victoria University of Wellington), calum.chamberlain@\allowbreak{}vuw.ac.nz; co-authors Jenni Hopkins, John Townend (VUW), Kasper van Wijk (University of Auckland), Nathanial Lindsey (FiberSense); dataset prepared by MSc student Sarah O'Hagan (VUW)}
 \kv{Data source}{GeoNet seismic waveform archive (Auckland Volcano Seismic Network plus 5 GeoNet broadband sites within 200 km; \textasciitilde{}16 stations) downloaded from the GeoNet AWS public S3 bucket, 01/01/2011-01/01/2022. Re-detected/relocated independently of the routine GeoNet catalogue. Funded by Natural Hazards Commission Toka Tu Ake biennial research fund; Chamberlain supported by a Rutherford Discovery Fellowship.}
 \kv{Availability}{available (DOI) $\cdot$ DOI \href{https://doi.org/10.5281/zenodo.15825886}{\nolinkurl{10.5281/zenodo.15825886}}}
 \end{itemize}
@@ -1352,7 +1363,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \kv{Data source}{Densified onshore GeoNet seismic network (northern Hikurangi / Raukumara Peninsula); envelope cross-correlation of continuous seismic data to detect and locate tectonic tremor.}
 \kv{Availability}{available on request $\cdot$ DOI \href{https://doi.org/10.1002/2016JB013480}{\nolinkurl{10.1002/2016JB013480}}}
 \end{itemize}
-\par\vspace{2pt}First comprehensive tectonic tremor catalogue for the northern Hikurangi margin (2010-2015), associating tremor with geodetic transients off the Raukumara Peninsula and helping identify slow slip events. It used envelope cross-correlation on the densified onshore GeoNet network. This is a tremor catalogue rather than a hypocentral earthquake catalogue.
+\par\vspace{2pt}First systematic tectonic tremor catalogue for the northern Hikurangi margin (2010-2015), associating tremor with geodetic transients off the Raukumara Peninsula and helping identify slow slip events. It used envelope cross-correlation on the densified onshore GeoNet network. This is a tremor catalogue rather than a hypocentral earthquake catalogue.
 \par\vspace{2pt}\textbf{Key references:} \cite{Todd2016}.
 \catentryrule
 \subsubsection*{\hypertarget{c:66}{66.}~ Ambient Tectonic Tremor Catalogue: Manawatu, Cape Turnagain, Marlborough \& Puysegur (Romanet \& Ide 2019)}
@@ -1622,7 +1633,7 @@ Each entry follows the submission-profile schema (Appendix~\ref{app:schema}). Th
 \par\vspace{2pt}\textbf{Key references:} \cite{Shaw2025,Shaw2025a}.
 \catentryrule
 \section{Conclusion}\label{sec:conclusion}
-This report inventories 81 earthquake catalogues developed for, or covering, Aotearoa New Zealand with coverage spanning 1960--2026, profiled to a common submission schema. The exercise confirms both the strength of the national record and the scale of the discoverability gap below it: temporary deployments and regional catalogues, the most precise local datasets New Zealand seismology produces, are also the hardest to find, compare, and cite. Populating a lightweight, openly versioned registry with descriptors such as these is a low-cost, near-term step that would make the country's earthquake science measurably more findable, comparable, and reusable. This inventory is offered as a starting population of that registry and as a reproducible reference that can be extended as the long tail is filled in.
+This report inventories 81 earthquake catalogues developed for, or covering, Aotearoa New Zealand with coverage spanning 1960--2026, profiled to a common submission schema. The exercise confirms both the strength of the national record and the scale of the discoverability gap below it: temporary deployments and regional catalogues, often the most detailed local datasets available, are also the hardest to find, compare, and cite. Populating a lightweight, openly versioned registry with descriptors such as these is a low-cost, near-term step that would make the country's earthquake science measurably more findable, comparable, and reusable. This inventory is offered as a starting population of that registry and as a reproducible reference that can be extended as the long tail is filled in.
 \appendix
 \section{The Catalogue Submission Profile (schema)}\label{app:schema}
 Each entry is described by the minimum-attributes submission profile proposed for the national \textquotedblleft catalogue of catalogues\textquotedblright. Required fields are kept to a small core to lower the barrier to contribution; controlled drop-downs are preferred over free text.

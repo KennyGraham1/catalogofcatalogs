@@ -43,6 +43,14 @@ Catalogues produced by temporary deployments and targeted experiments make up a 
 - **2010s (GeoNet modernises; sequences drive dense catalogues).** GeoNet moves to SeisComP with 3-D NonLinLoc (2012). The **Canterbury** sequence (Darfield 2010, Christchurch 2011) and **Kaikōura 2016** drive dense aftershock and ocean-bottom catalogues (**HOBITSS**, 2014–15). Matched-filter / template-matching catalogues emerge (Chamberlain; Michailos), and slow-slip and tremor/LFE catalogues mature (Wallace & Beavan 2010; Todd & Schwartz 2016).
 - **2020s (ML-scale relocation, synthetics, multi-year geodetic catalogues).** High-precision matched-filter and nested-tomography catalogues (TVZ; Hikurangi); long **RSQSim** synthetic catalogues for NSHM 2022; multi-year GNSS slow-slip catalogues (Michel 2025; Perez-Silva 2025); dense onshore arrays (**DWARFS**, **SALSA**, **SOSA**); volcanic-unrest catalogues at Taupō (2019; 2022–23); and geothermal induced-seismicity monitoring (Rotokawa, Ngatamariki).
 
+## Spatial coverage
+
+![Spatial coverage of the inventory: (a) regional catalogue footprints by category over the NZ coastline and active-fault network; (b) regional catalogue overlap density.](report/figures/nz_catalogue_coverage.png)
+
+*Where the inventory's catalogues sit. Panel (a) shows each regional catalogue's footprint (a representative bounding box) coloured by type; 18 national / NZ-wide catalogues span the whole country (not drawn), and two Kermadec-arc catalogues lie north of the map. Panel (b) counts regional catalogues overlapping each 0.1° cell, highlighting the Taupō Volcanic Zone, Hikurangi margin, Canterbury, and central Alpine Fault as the most densely catalogued areas, while offshore tracts, Fiordland, and the far south remain thinly covered. Footprints are indicative extents for discovery, not precise data boundaries.*
+
+**Interactive map:** an explorable version, with clickable footprints (period, region, DOI), category toggles, a coverage legend, and a national-catalogues panel, is at [`report/map/nz_catalogue_map.html`](report/map/nz_catalogue_map.html) (open in a browser).
+
 ## Coverage gaps & FAIR weaknesses
 
 - **Not a census.** Because earthquake-catalogue production is decentralised and continuous, a residual long tail remains: likely-missing material includes further PhD-thesis catalogues, additional dedicated catalogues for NZ Mw≥6 aftershock responses since 1960, more geothermal fields (Ohaaki, Mokai, Ngāwhā), and the **SISIE/MOANA/SHIRE** offshore experiments not yet retained as distinct event catalogues.
@@ -165,7 +173,7 @@ A global, internally consistent 'groomed' dataset of teleseismically well-constr
 
 A homogeneous global catalogue of large instrumental earthquakes (1904-2014, extended toward 2018+) with relocated hypocentres and recomputed moment magnitudes (Mw), selected by time-dependent magnitude thresholds. The qualifying large New Zealand / Kermadec / Hikurangi events provide a long-period, large-event source/benchmark used in NZ seismic-hazard work (e.g. NSHM 2022). It is a global product, not NZ-specific; NZ events are a subset.
 
-*Related:* Companion ISC global products are ISC-EHB and the comprehensive ISC Bulletin; ISC-GEM is the magnitude-thresholded, relocated instrumental catalogue (1904-2014).
+*Related:* Companion ISC global products are ISC-EHB and the full ISC Bulletin; ISC-GEM is the magnitude-thresholded, relocated instrumental catalogue (1904-2014).
 
 **Key references:**
 - Di Giacomo, D., Engdahl, E.R. & Storchak, D.A. (2018). The ISC-GEM Earthquake Catalogue (1904-2014): status after the Extension Project. Earth System Science Data, 10(4), 1877-1899. https://doi.org/10.5194/essd-10-1877-2018
@@ -187,7 +195,7 @@ A homogeneous global catalogue of large instrumental earthquakes (1904-2014, ext
 - **Data source:** GeoNet permanent network waveforms integrated with temporary TVZ deployments (incl. HADES array, Bannister 2009; back-arc rifting arrays); EQTransformer ML phase picking, 3-D velocity model location, GrowClust3D relative relocation.
 - **Availability:** available (DOI) · DOI [10.26443/seismica.v4i1.1490](https://doi.org/10.26443/seismica.v4i1.1490)
 
-Produced to create a single internally consistent, high-precision earthquake catalogue spanning the whole ~300 km Taupō Volcanic Zone over 2007-2023, overcoming the heterogeneity of routine locations across many separate deployments. Uses EQTransformer machine-learning phase picking, location in a 3-D velocity model, and GrowClust3D relative relocation. A flagship ML + 3-D reprocessing effort merging permanent GeoNet data with temporary TVZ arrays.
+Produced to create a single internally consistent, high-precision earthquake catalogue spanning the whole ~300 km Taupō Volcanic Zone over 2007-2023, overcoming the heterogeneity of routine locations across many separate deployments. Uses EQTransformer machine-learning phase picking, location in a 3-D velocity model, and GrowClust3D relative relocation. An ML + 3-D reprocessing effort merging permanent GeoNet data with temporary TVZ arrays.
 
 **Key references:**
 - Illsley-Kemp, F. & Mestel, E.R.H. (2025). A new consistent and high-precision earthquake catalogue for the Taupō Volcanic Zone, New Zealand. Seismica, 4(1). https://doi.org/10.26443/seismica.v4i1.1490
@@ -276,9 +284,9 @@ A template-matching (matched-filter) enhanced microseismicity catalogue for the 
 - **Data source:** Parametric earthquake data (hypocentres, phase arrival-time picks, amplitude/magnitude readings, collected focal-mechanism solutions) reported to the ISC by ~150 seismological agencies and networks worldwide, grouped and relocated by the ISC. The NZ component derives mainly from GNS Science / GeoNet (and historically DSIR) station and bulletin contributions, supplemented by globally collected phases.
 - **Availability:** available (DOI) · DOI [10.31905/D808B830](https://doi.org/10.31905/D808B830)
 
-The ISC Bulletin is regarded as the definitive long-term parametric record of global seismicity, compiling hypocentres, phase arrival times, amplitudes and magnitudes, and collected focal-mechanism solutions. The 'Reviewed' product applies manual analyst checking and ISC relocation to all events with M>=3.5 (and selectively for 2.5<=M<3.5), producing the authoritative reviewed location/magnitude record for moderate-to-large NZ events. It is distinct from the ISC-EHB and ISC-GEM derivative products and is widely cited for NZ regional/teleseismic locations.
+The ISC Bulletin is regarded as among the most complete long-term parametric records of global seismicity, compiling hypocentres, phase arrival times, amplitudes and magnitudes, and collected focal-mechanism solutions. The 'Reviewed' product applies manual analyst checking and ISC relocation to all events with M>=3.5 (and selectively for 2.5<=M<3.5), producing the authoritative reviewed location/magnitude record for moderate-to-large NZ events. It is distinct from the ISC-EHB and ISC-GEM derivative products and is widely cited for NZ regional/teleseismic locations.
 
-*Related:* The comprehensive ISC global bulletin; the relocated ISC-EHB and large-event ISC-GEM products are listed separately.
+*Related:* The full ISC global bulletin; the relocated ISC-EHB and large-event ISC-GEM products are listed separately.
 
 **Key references:**
 - International Seismological Centre (2026). On-line Bulletin. International Seismological Centre, Thatcham, United Kingdom. https://doi.org/10.31905/D808B830
@@ -326,7 +334,7 @@ Relocated hypocentre catalogues and focal-mechanism solutions for microseismicit
 - **Data source:** GeoNet seismic waveform archive (events reassessed from the GeoNet catalogue 2001-2021); automated re-picking and relocation workflow by VUW
 - **Availability:** available (DOI) · DOI [10.5281/zenodo.18820779](https://doi.org/10.5281/zenodo.18820779)
 
-A modern, NZ-wide, research-quality earthquake EVENT catalogue produced with a uniform automated workflow: EQTransformer deep-learning phase picking applied to GeoNet waveforms, location/relocation in the NZWide2.3 3-D velocity model (Eberhart-Phillips et al. 2022) with depth-fixing removed, and consistent local-magnitude calculation. It reassesses 407,553 earthquakes from the GeoNet catalogue spanning 1 Jan 2001 - 1 Jan 2021, providing freshly picked and located hypocentres, location uncertainties, local magnitudes, phase arrival-time picks and amplitude picks. It is a freshly re-picked/located catalogue rather than a magnitude-homogenised compilation of pre-existing solutions, making it distinct from NSHM 'consistent magnitudes' compilations and the GeoNet operational catalogue, and it is NZ-wide rather than a single-region relocation study.
+A modern, NZ-wide earthquake EVENT catalogue produced with a uniform automated workflow: EQTransformer deep-learning phase picking applied to GeoNet waveforms, location/relocation in the NZWide2.3 3-D velocity model (Eberhart-Phillips et al. 2022) with depth-fixing removed, and consistent local-magnitude calculation. It reassesses 407,553 earthquakes from the GeoNet catalogue spanning 1 Jan 2001 - 1 Jan 2021, providing freshly picked and located hypocentres, location uncertainties, local magnitudes, phase arrival-time picks and amplitude picks. It is a freshly re-picked/located catalogue rather than a magnitude-homogenised compilation of pre-existing solutions, making it distinct from NSHM 'consistent magnitudes' compilations and the GeoNet operational catalogue, and it is NZ-wide rather than a single-region relocation study.
 
 **Key references:**
 - Williams, C.-L., Chamberlain, C. J., & Townend, J. (2026). Consistent Earthquake Catalogue for New Zealand (Version 0.1) [Data set]. Zenodo. https://doi.org/10.5281/zenodo.18820779
@@ -1475,7 +1483,7 @@ Foundational inventory of Hikurangi slow slip events documented with continuous 
 - **Data source:** Densified onshore GeoNet seismic network (northern Hikurangi / Raukumara Peninsula); envelope cross-correlation of continuous seismic data to detect and locate tectonic tremor.
 - **Availability:** available on request · DOI [10.1002/2016JB013480](https://doi.org/10.1002/2016JB013480)
 
-First comprehensive tectonic tremor catalogue for the northern Hikurangi margin (2010-2015), associating tremor with geodetic transients off the Raukumara Peninsula and helping identify slow slip events. It used envelope cross-correlation on the densified onshore GeoNet network. This is a tremor catalogue rather than a hypocentral earthquake catalogue.
+First systematic tectonic tremor catalogue for the northern Hikurangi margin (2010-2015), associating tremor with geodetic transients off the Raukumara Peninsula and helping identify slow slip events. It used envelope cross-correlation on the densified onshore GeoNet network. This is a tremor catalogue rather than a hypocentral earthquake catalogue.
 
 **Key references:**
 - Todd, E. K., & Schwartz, S. Y. (2016). Tectonic tremor along the northern Hikurangi Margin, New Zealand, between 2010 and 2015. Journal of Geophysical Research: Solid Earth, 121, 8706-8719. https://doi.org/10.1002/2016JB013480

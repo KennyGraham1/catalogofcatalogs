@@ -166,6 +166,8 @@ W(String.raw`\documentclass[10pt,a4paper]{article}
 \usepackage{microtype}
 \usepackage{booktabs}
 \usepackage{longtable}
+\usepackage{graphicx}
+\usepackage{rotating}
 \usepackage{array}
 \usepackage{enumitem}
 \usepackage{xcolor}
@@ -219,7 +221,7 @@ W(String.raw`\documentclass[10pt,a4paper]{article}
 // ---- abstract ------------------------------------------------------------
 W(String.raw`
 \begin{abstract}
-\noindent New Zealand's earthquake-catalogue record is curated nationally by GeoNet (Earth Sciences New Zealand / GNS Science) but is complemented by a large, fragmented body of regional, temporary-deployment, volcano-seismic, slow-earthquake, and derived catalogues that are individually valuable yet difficult to discover, compare, and cite. This report presents a curated inventory of \textbf{${total} distinct earthquake catalogues} that were developed for, or that cover, Aotearoa New Zealand and its offshore margins with coverage overlapping the period 1960--2026, with particular emphasis on \textbf{temporary seismic deployments} (passive-seismic experiments, ocean-bottom deployments, and aftershock rapid-response arrays). Each catalogue is profiled against the minimum-attributes \emph{Catalogue Submission Profile} proposed for a national \textquotedblleft catalogue of catalogues\textquotedblright, recording what it contains and how to obtain it. Of the ${total} catalogues, ${nDOI} carry a resolvable DOI or stable dataset identifier. Catalogues from temporary deployments and targeted experiments make up a substantial share, underscoring both the richness of New Zealand's regional seismology and the discoverability gap that a federated registry is designed to close. The inventory is offered as a working population of that registry and as a reproducible, citable reference for researchers, hazard modellers, and engineers.
+\noindent New Zealand's earthquake-catalogue record is curated nationally by GeoNet (Earth Sciences New Zealand / GNS Science) but is complemented by a large, fragmented body of regional, temporary-deployment, volcano-seismic, slow-earthquake, and derived catalogues that are individually valuable yet difficult to discover, compare, and cite. This report presents a curated inventory of \textbf{${total} distinct earthquake catalogues} that were developed for, or that cover, Aotearoa New Zealand and its offshore margins with coverage overlapping the period 1960--2026, with particular emphasis on \textbf{temporary seismic deployments} (passive-seismic experiments, ocean-bottom deployments, and aftershock rapid-response arrays). Each catalogue is profiled against the minimum-attributes \emph{Catalogue Submission Profile} proposed for a national \textquotedblleft catalogue of catalogues\textquotedblright, recording what it contains and how to obtain it. Of the ${total} catalogues, ${nDOI} carry a resolvable DOI or stable dataset identifier. Catalogues from temporary deployments and targeted experiments make up a substantial share, reflecting both the diversity of New Zealand's regional seismology and the discoverability gap that a federated registry is intended to address. The inventory is offered as a working population of that registry and as a reproducible, citable reference for researchers, hazard modellers, and engineers.
 \end{abstract}
 \vspace{4pt}
 {\small\noindent\textbf{Keywords:} earthquake catalogue; seismicity; temporary deployment; ocean-bottom seismometer; slow slip; FAIR data; Aotearoa New Zealand; GeoNet; metadata.}
@@ -326,6 +328,17 @@ for (const [k] of CAT) {
 W(String.raw`\end{longtable}
 \end{small}`);
 
+// ===================== 5b. SPATIAL COVERAGE ==============================
+W(String.raw`\section{Spatial coverage}\label{sec:spatial}
+Figure~\ref{fig:coverage} maps where the inventory's catalogues sit. Panel~(a) shows the footprint of each regional catalogue (a representative bounding box) over the New Zealand coastline and active-fault network, coloured by type; the 18 national / NZ-wide catalogues are not drawn because they span the whole country, and two Kermadec-arc catalogues lie north of the map. Panel~(b) counts how many regional catalogues overlap each $0.1^\circ$ cell, which shows where catalogues concentrate, the Taup\=o Volcanic Zone, the Hikurangi margin, Canterbury, and the central Alpine Fault, while large offshore tracts, Fiordland, and the far south remain thinly catalogued. This spatial unevenness is the visual counterpart of the gaps discussed in Section~\ref{sec:gaps}.
+
+\begin{sidewaysfigure}
+\centering
+\includegraphics[width=0.9\textheight]{figures/nz_catalogue_coverage.pdf}
+\caption{Spatial coverage of the Aotearoa New Zealand earthquake-catalogue inventory. \textbf{(a)} Regional catalogue footprints (representative bounding boxes) coloured by category, over the coastline and active-fault network; national / NZ-wide and Kermadec-arc catalogues are handled in the annotations. \textbf{(b)} Number of regional catalogues overlapping each $0.1^\circ$ grid cell. Footprints are indicative extents for discovery, not precise data boundaries.}
+\label{fig:coverage}
+\end{sidewaysfigure}`);
+
 // ===================== 6. COVERAGE GAPS ==================================
 W(String.raw`\section{Coverage gaps and FAIR weaknesses}\label{sec:gaps}
 \begin{itemize}[leftmargin=1.4em,itemsep=3pt]
@@ -360,7 +373,7 @@ for (const [k, title, intro] of CAT) {
     if (norm(p.magnitude_info)) W(`\\kv{Magnitude}{${tex(norm(p.magnitude_info))}}`);
     if (norm(p.event_count)) W(`\\kv{Events}{${tex(norm(p.event_count))}}`);
     if (norm(p.content_flags)) W(`\\kv{Content}{${tex(norm(p.content_flags))}}`);
-    if (norm(p.contact)) W(`\\kv{Producer / contact}{${tex(norm(p.contact))}}`);
+    if (norm(p.contact)) W(`\\kv{Producer / contact}{${tex(norm(p.contact)).replace(/@/g, '@\\allowbreak{}')}}`);
     if (norm(p.data_source)) W(`\\kv{Data source}{${tex(norm(p.data_source))}}`);
     const av = [];
     if (norm(p.data_availability)) av.push(tex(norm(p.data_availability)));
@@ -377,7 +390,7 @@ for (const [k, title, intro] of CAT) {
 
 // ===================== 8. CONCLUSION =====================================
 W(String.raw`\section{Conclusion}\label{sec:conclusion}
-This report inventories ${total} earthquake catalogues developed for, or covering, Aotearoa New Zealand with coverage spanning 1960--2026, profiled to a common submission schema. The exercise confirms both the strength of the national record and the scale of the discoverability gap below it: temporary deployments and regional catalogues, the most precise local datasets New Zealand seismology produces, are also the hardest to find, compare, and cite. Populating a lightweight, openly versioned registry with descriptors such as these is a low-cost, near-term step that would make the country's earthquake science measurably more findable, comparable, and reusable. This inventory is offered as a starting population of that registry and as a reproducible reference that can be extended as the long tail is filled in.`);
+This report inventories ${total} earthquake catalogues developed for, or covering, Aotearoa New Zealand with coverage spanning 1960--2026, profiled to a common submission schema. The exercise confirms both the strength of the national record and the scale of the discoverability gap below it: temporary deployments and regional catalogues, often the most detailed local datasets available, are also the hardest to find, compare, and cite. Populating a lightweight, openly versioned registry with descriptors such as these is a low-cost, near-term step that would make the country's earthquake science measurably more findable, comparable, and reusable. This inventory is offered as a starting population of that registry and as a reproducible reference that can be extended as the long tail is filled in.`);
 
 // ===================== APPENDIX + BIBLIOGRAPHY ===========================
 W(String.raw`\appendix
