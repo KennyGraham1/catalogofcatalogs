@@ -709,7 +709,7 @@ export default function AnalyticsPage() {
   if (!cataloguesLoading && catalogues.length === 0) {
     return (
       <div className="container py-8">
-        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+        <div className="flex flex-col items-center justify-center min-h-[calc(100vh-9rem)] gap-4">
           <MapPin className="h-12 w-12 text-muted-foreground" />
           <h2 className="text-2xl font-bold">No Catalogues Available</h2>
           <p className="text-muted-foreground text-center max-w-md">
@@ -904,7 +904,7 @@ export default function AnalyticsPage() {
   if (loading) {
     return (
       <div className="container py-8">
-        <div className="flex flex-col items-center justify-center min-h-[60vh]">
+        <div className="flex flex-col items-center justify-center min-h-[calc(100vh-9rem)]">
           <Card className="w-full max-w-md border-0 shadow-lg bg-gradient-to-br from-background to-muted/30">
             <CardContent className="pt-8 pb-6">
               <div className="flex flex-col items-center gap-6">
@@ -980,7 +980,7 @@ export default function AnalyticsPage() {
     const currentCatalogue = catalogues.find(c => c.id === selectedCatalogue);
     return (
       <div className="container py-8">
-        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+        <div className="flex flex-col items-center justify-center min-h-[calc(100vh-9rem)] gap-4">
           <MapPin className="h-12 w-12 text-muted-foreground" />
           <h2 className="text-2xl font-bold">No Events Found</h2>
           <p className="text-muted-foreground text-center max-w-md">
@@ -1122,7 +1122,7 @@ export default function AnalyticsPage() {
 
       {/* Main Content */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-6 lg:grid-cols-12 gap-1">
+        <TabsList className="flex w-full justify-start gap-1 overflow-x-auto h-auto flex-nowrap">
           <TabsTrigger value="map" className="text-xs">
             <MapPin className="h-3 w-3 mr-1" />
             Map
@@ -1617,7 +1617,7 @@ export default function AnalyticsPage() {
                           </div>
                           <span>{statistics.percentageWithUncertainty}%</span>
                         </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div className="w-full bg-muted rounded-full h-2">
                           <div
                             className="bg-blue-500 h-2 rounded-full"
                             style={{ width: `${statistics.percentageWithUncertainty}%` }}
@@ -1633,7 +1633,7 @@ export default function AnalyticsPage() {
                           </div>
                           <span>{statistics.percentageWithFocalMechanism}%</span>
                         </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div className="w-full bg-muted rounded-full h-2">
                           <div
                             className="bg-green-500 h-2 rounded-full"
                             style={{ width: `${statistics.percentageWithFocalMechanism}%` }}
@@ -1649,7 +1649,7 @@ export default function AnalyticsPage() {
                           </div>
                           <span>{statistics.percentageWithStationData}%</span>
                         </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div className="w-full bg-muted rounded-full h-2">
                           <div
                             className="bg-purple-500 h-2 rounded-full"
                             style={{ width: `${statistics.percentageWithStationData}%` }}

@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { dedupeById } from '@/lib/utils';
-import { MapContainer, Circle, Popup, GeoJSON } from 'react-leaflet';
+import { MapContainer, CircleMarker, Popup, GeoJSON } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,7 +16,7 @@ import 'leaflet/dist/leaflet.css';
 
 import { useMapColors } from '@/hooks/use-map-theme';
 import { calculateQualityScore, getQualityColor, metricsFromEvent } from '@/lib/quality-scoring';
-import { getMagnitudeRadius, getMagnitudeColor, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
+import { getMagnitudePixelRadius, getMagnitudeColor, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 import { useNearbyFaults } from '@/hooks/use-nearby-faults';
 import { loadFaultData, getFaultsInBounds, simplifyFaultsForZoom, FaultCollection, FaultFeature } from '@/lib/fault-data';
 import type { PathOptions } from 'leaflet';
@@ -81,7 +81,8 @@ export default function UnifiedEarthquakeMap({
   showFaultLines = true,
   showActiveFaults = true
 }: UnifiedEarthquakeMapProps) {
-  const [selectedEvent, setSelectedEvent] = useState<Earthquake | null>(null);
+  const clickSeqRef = useRef(0);
+  const [activePopup, setActivePopup] = useState<{ event: Earthquake; seq: number } | null>(null);
   const [showFaults, setShowFaults] = useState(showFaultLines);
   const [colorMode, setColorMode] = useState<'magnitude' | 'depth' | 'quality'>(colorBy);
   const [faultData, setFaultData] = useState<FaultCollection | null>(null);
@@ -298,10 +299,10 @@ export default function UnifiedEarthquakeMap({
             const ariaLabel = `Magnitude ${eq.magnitude} earthquake at ${eq.latitude.toFixed(2)}, ${eq.longitude.toFixed(2)} on ${eventDate}`;
 
             return (
-              <Circle
+              <CircleMarker
                 key={eq.id ?? `eq-${index}`}
                 center={[eq.latitude, eq.longitude]}
-                radius={getMagnitudeRadius(eq.magnitude)}
+                radius={getMagnitudePixelRadius(eq.magnitude)}
                 pathOptions={{
                   color: getEventColor(eq),
                   fillColor: getEventColor(eq),
@@ -311,15 +312,27 @@ export default function UnifiedEarthquakeMap({
                   title: ariaLabel,
                 } as any}
                 eventHandlers={{
-                  click: () => setSelectedEvent(eq),
+                  click: () => {
+                    clickSeqRef.current += 1;
+                    setActivePopup({ event: eq, seq: clickSeqRef.current });
+                  },
                 }}
-              >
-                <Popup>
-                  <EventPopup event={eq} qualityScores={qualityScores} />
-                </Popup>
-              </Circle>
+              />
             );
           })}
+
+          {/* One popup, rendered only for the clicked event. Keeping the popup (and
+              its nearby-faults fetch in EventPopup) out of the per-marker loop avoids
+              mounting one fetch-firing popup per plotted earthquake. Keyed by a click
+              sequence so re-clicking the same marker reopens it. */}
+          {activePopup && (
+            <Popup
+              key={activePopup.seq}
+              position={[activePopup.event.latitude, activePopup.event.longitude]}
+            >
+              <EventPopup event={activePopup.event} qualityScores={qualityScores} />
+            </Popup>
+          )}
         </MapContainer>
       </div>
 

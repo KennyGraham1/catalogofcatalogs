@@ -5,18 +5,29 @@
  * User authentication page with email and password
  */
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { signIn } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { LoadingCard } from '@/components/ui/loading-spinner';
 
-export default function LoginPage() {
+/** Map NextAuth error codes to human-readable copy. */
+function humanizeAuthError(code: string): string {
+  if (code === 'CredentialsSignin') return 'Invalid email or password.';
+  return 'Unable to sign in. Please try again.';
+}
+
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const justRegistered = searchParams.get('registered') === 'true';
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -35,7 +46,7 @@ export default function LoginPage() {
       });
 
       if (result?.error) {
-        setError(result.error);
+        setError(humanizeAuthError(result.error));
       } else if (result?.ok) {
         router.push('/');
         router.refresh();
@@ -48,7 +59,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12 sm:px-6 lg:px-8">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold">Sign in</CardTitle>
@@ -58,6 +69,12 @@ export default function LoginPage() {
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
+            {justRegistered && !error && (
+              <Alert className="border-green-500/50 bg-green-50 text-green-900 dark:bg-green-950/40 dark:text-green-100">
+                <AlertDescription>Account created. Please sign in.</AlertDescription>
+              </Alert>
+            )}
+
             {error && (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
@@ -74,6 +91,7 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 disabled={loading}
+                autoComplete="email"
               />
             </div>
 
@@ -86,9 +104,10 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 disabled={loading}
+                autoComplete="current-password"
               />
               <div className="text-right">
-                <Link href="/forgot-password" className="text-sm text-blue-600 hover:text-blue-500">
+                <Link href="/forgot-password" className="text-sm text-primary hover:text-primary/80">
                   Forgot Password?
                 </Link>
               </div>
@@ -101,12 +120,13 @@ export default function LoginPage() {
               className="w-full"
               disabled={loading}
             >
-              {loading ? 'Signing in...' : 'Sign in'}
+              {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />}
+              {loading ? 'Signing in…' : 'Sign in'}
             </Button>
 
-            <p className="text-center text-sm text-gray-600">
+            <p className="text-center text-sm text-muted-foreground">
               Don&apos;t have an account?{' '}
-              <Link href="/register" className="font-medium text-blue-600 hover:text-blue-500">
+              <Link href="/register" className="font-medium text-primary hover:text-primary/80">
                 Register
               </Link>
             </p>
@@ -114,5 +134,13 @@ export default function LoginPage() {
         </form>
       </Card>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><LoadingCard text="Loading…" /></div>}>
+      <LoginForm />
+    </Suspense>
   );
 }

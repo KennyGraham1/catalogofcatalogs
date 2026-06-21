@@ -10,7 +10,7 @@
 
 import { geonetClient, GeoNetEventText } from './geonet-client';
 import { fetchTimeWindowChunked } from './geonet-chunking';
-import { dbQueries, MergedEvent } from './db';
+import { dbQueries, MergedEvent, normalizeEventType } from './db';
 import { createId } from './id';
 import { extractBoundsFromMergedEvents, boundsFromLatLon, unionBounds } from './geo-bounds-utils';
 import pLimit from 'p-limit';
@@ -249,11 +249,11 @@ export class GeoNetImportService {
             console.log(`[GeoNetImportService] Updated geographic bounds for catalogue ${catalogueId}`);
           }
 
-          // Update event count using incremental calculation
-          const currentCount = catalogue?.event_count ?? 0;
-          const newTotalCount = currentCount + newEvents;
-          await getDbQueries().updateCatalogueEventCount(catalogueId, newTotalCount);
-          console.log(`[GeoNetImportService] Updated event count for catalogue ${catalogueId}: ${newTotalCount}`);
+          // Recount from the DB rather than a running tally, which drifts under
+          // concurrent imports or partial-insert failures.
+          const actualCount = await getDbQueries().countEventsByCatalogue(catalogueId);
+          await getDbQueries().updateCatalogueEventCount(catalogueId, actualCount);
+          console.log(`[GeoNetImportService] Updated event count for catalogue ${catalogueId}: ${actualCount} (+${newEvents} this run)`);
         } catch (error) {
           console.error(`[GeoNetImportService] Failed to update catalogue metadata:`, error);
           // Don't fail the import if metadata update fails
@@ -344,18 +344,42 @@ export class GeoNetImportService {
     // GeoNet's FDSN event service caps a result set at 10,000 events and returns
     // HTTP 413 for any query that would exceed it, so broad imports must be split
     // into smaller time windows (NZ produces well over 10k located events/year).
-    return fetchTimeWindowChunked(
-      (starttime, endtime) => geonetClient.fetchEventsText({ ...baseParams, starttime, endtime }),
-      (ev) => ev.EventID,
-      startDate,
-      endDate,
-      {
-        onSplit: (s, e) =>
-          console.warn(
-            `[GeoNetImport] 10k-event cap hit for ${s.toISOString()}..${e.toISOString()}; subdividing time window.`
-          ),
+    const runChunked = (params: typeof baseParams) =>
+      fetchTimeWindowChunked(
+        (starttime, endtime) => geonetClient.fetchEventsText({ ...params, starttime, endtime }),
+        (ev) => ev.EventID,
+        startDate,
+        endDate,
+        {
+          onSplit: (s, e) =>
+            console.warn(
+              `[GeoNetImport] 10k-event cap hit for ${s.toISOString()}..${e.toISOString()}; subdividing time window.`
+            ),
+        }
+      );
+
+    // FDSN requires minlongitude <= maxlongitude. An antimeridian-crossing bbox
+    // (minLon > maxLon, RFC 7946 5.2) must be issued as two queries and merged,
+    // otherwise GeoNet returns nothing for NZ offshore (Kermadec) regions.
+    const minLon = baseParams.minlongitude;
+    const maxLon = baseParams.maxlongitude;
+    if (minLon != null && maxLon != null && minLon > maxLon) {
+      const [west, east] = await Promise.all([
+        runChunked({ ...baseParams, minlongitude: minLon, maxlongitude: 180 }),
+        runChunked({ ...baseParams, minlongitude: -180, maxlongitude: maxLon }),
+      ]);
+      const seen = new Set<string>();
+      const merged: GeoNetEventText[] = [];
+      for (const ev of [...west, ...east]) {
+        if (ev.EventID) {
+          if (seen.has(ev.EventID)) continue;
+          seen.add(ev.EventID);
+        }
+        merged.push(ev);
       }
-    );
+      return merged;
+    }
+    return runChunked(baseParams);
   }
 
   /**
@@ -651,7 +675,7 @@ export class GeoNetImportService {
         eventId: event.EventID
       }]),
       magnitude_type: event.MagType || null,
-      event_type: event.EventType || null,
+      event_type: normalizeEventType(event.EventType),
       focal_mechanisms: focalMechanisms,
     };
   }
@@ -700,7 +724,7 @@ export class GeoNetImportService {
         eventId: event.EventID
       }]),
       magnitude_type: event.MagType || null,
-      event_type: event.EventType || null,
+      event_type: normalizeEventType(event.EventType),
       focal_mechanisms: focalMechanisms,
     });
   }
@@ -749,7 +773,7 @@ export class GeoNetImportService {
       depth: event['Depth/km'],
       magnitude: event.Magnitude,
       magnitude_type: event.MagType || null,
-      event_type: event.EventType || null,
+      event_type: normalizeEventType(event.EventType),
       focal_mechanisms: focalMechanisms,
     });
   }

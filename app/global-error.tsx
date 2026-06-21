@@ -55,6 +55,20 @@ export default function GlobalError({
           >
             Try again
           </button>
+
+          <a
+            href="/"
+            style={{
+              padding: '0.5rem 1rem',
+              border: '1px solid #d1d5db',
+              borderRadius: '0.375rem',
+              color: '#374151',
+              textDecoration: 'none',
+              fontSize: '0.875rem',
+            }}
+          >
+            Go to Home
+          </a>
         </div>
       </body>
     </html>

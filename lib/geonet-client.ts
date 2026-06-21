@@ -70,7 +70,7 @@ export interface GeoNetEventText {
   Time: string;
   Latitude: number;
   Longitude: number;
-  'Depth/km': number;
+  'Depth/km': number | null;
   Author: string;
   Catalog: string;
   Contributor: string;
@@ -264,7 +264,7 @@ export class GeoNetClient {
                 console.warn(`[GeoNetClient] Invalid ${key} value "${value}" on line ${i}`);
                 hasValidRequiredFields = false;
               }
-              event[key] = key === 'Depth/km' ? 0 : numValue; // Default depth to 0 if invalid
+              event[key] = key === 'Depth/km' ? null : numValue; // unparseable depth -> null (don't fabricate a surface event)
             } else {
               event[key] = numValue;
             }

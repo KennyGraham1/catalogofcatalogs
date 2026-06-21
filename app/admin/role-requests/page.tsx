@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { useAuth } from '@/lib/auth/hooks';
 import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -120,8 +121,8 @@ export default function AdminRoleRequestsPage() {
 
   if (isLoading || loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p>Loading...</p>
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <LoadingSpinner size="lg" text="Loading…" />
       </div>
     );
   }

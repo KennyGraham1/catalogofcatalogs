@@ -5,6 +5,7 @@ import { Upload, X, File, FileSpreadsheet, FileJson, FilePlus, Loader2 } from 'l
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import type { UploadStage, UploadProgressInfo } from '@/types/upload';
+import { toast } from '@/hooks/use-toast';
 
 // Re-export for convenience
 export type { UploadStage, UploadProgressInfo } from '@/types/upload';
@@ -35,6 +36,10 @@ function formatBytes(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
+
+// Drag-drop bypasses the <input accept=...> filter, so enforce type/size in JS too.
+const ACCEPTED_EXTENSIONS = ['csv', 'txt', 'dat', 'qml', 'json', 'geojson', 'xml'];
+const MAX_FILE_BYTES = 500 * 1024 * 1024; // 500 MB hard ceiling per file
 
 function formatTimeRemaining(seconds: number): string {
   if (seconds < 60) return `${Math.ceil(seconds)}s remaining`;
@@ -100,20 +105,47 @@ export function FileUploader({
     setIsDragging(false);
   };
 
+  // Filter incoming files by extension + size, surface what was skipped, and only
+  // forward the valid ones. Applies to both drag-drop and the browse dialog.
+  const acceptFiles = (incoming: File[]) => {
+    const accepted: File[] = [];
+    const rejected: string[] = [];
+    for (const file of incoming) {
+      const ext = file.name.split('.').pop()?.toLowerCase() || '';
+      if (!ACCEPTED_EXTENSIONS.includes(ext)) {
+        rejected.push(`${file.name} — unsupported type`);
+      } else if (file.size > MAX_FILE_BYTES) {
+        rejected.push(`${file.name} — exceeds ${formatBytes(MAX_FILE_BYTES)}`);
+      } else {
+        accepted.push(file);
+      }
+    }
+    if (rejected.length > 0) {
+      toast({
+        title: `Skipped ${rejected.length} file${rejected.length > 1 ? 's' : ''}`,
+        description: rejected.slice(0, 5).join('; ') + (rejected.length > 5 ? '…' : ''),
+        variant: 'destructive',
+      });
+    }
+    if (accepted.length > 0) {
+      onFilesAdded(accepted);
+    }
+  };
+
   const handleDrop = (e: React.DragEvent) => {
     if (disabled) return;
     e.preventDefault();
     setIsDragging(false);
-    
+
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      onFilesAdded(Array.from(e.dataTransfer.files));
+      acceptFiles(Array.from(e.dataTransfer.files));
     }
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (disabled) return;
     if (e.target.files && e.target.files.length > 0) {
-      onFilesAdded(Array.from(e.target.files));
+      acceptFiles(Array.from(e.target.files));
     }
   };
 
@@ -163,7 +195,7 @@ export function FileUploader({
             <h3 className="font-semibold text-lg mb-1">Upload Earthquake Catalogues</h3>
             <p className="text-muted-foreground max-w-md mx-auto">
               Drag and drop your catalogue files here, or click to browse.
-              Supported formats: CSV, TXT, DAT, QML, JSON, GeoJSON, XML.
+              Supported formats: CSV, TXT, DAT, QML, JSON, GeoJSON, XML (max 500 MB each).
             </p>
           </div>
 
@@ -194,7 +226,7 @@ export function FileUploader({
 
       {/* Enhanced Progress Indicator */}
       {isActive && (
-        <div className="border rounded-lg p-4 bg-muted/30 space-y-3">
+        <div className="border rounded-lg p-4 bg-muted/30 space-y-3" role="status" aria-live="polite">
           {/* Stage indicator */}
           <div className="flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin text-primary" />
@@ -299,7 +331,7 @@ export function FileUploader({
                     <div>
                       <p className="font-medium">{file.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {(file.size / 1024).toFixed(1)} KB • {file.type || 'Unknown type'}
+                        {formatBytes(file.size)} • {file.type || 'Unknown type'}
                       </p>
                     </div>
                   </div>

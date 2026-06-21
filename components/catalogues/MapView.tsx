@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useMemo, memo, useCallback } from 'react';
 import { dedupeById } from '@/lib/utils';
 import L from 'leaflet';
-import { MapContainer, GeoJSON, FeatureGroup, Circle, Popup, Marker } from 'react-leaflet';
+import { MapContainer, GeoJSON, FeatureGroup, Circle, CircleMarker, Popup, Marker } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { EditControl } from 'react-leaflet-draw';
 import { Button } from '@/components/ui/button';
@@ -18,7 +18,7 @@ import { useCachedFetch } from '@/hooks/use-cached-fetch';
 import { useNearbyFaults } from '@/hooks/use-nearby-faults';
 import { useMapColors } from '@/hooks/use-map-theme';
 import { calculateQualityScore, getQualityColor, metricsFromEvent } from '@/lib/quality-scoring';
-import { getMagnitudeRadius, getMagnitudeColor, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
+import { getMagnitudeRadius, getMagnitudePixelRadius, getMagnitudeColor, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 import { loadFaultData, FaultCollection } from '@/lib/fault-data';
 import type { PathOptions } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -46,6 +46,8 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
   const [colorMode, setColorMode] = useState<'magnitude' | 'depth' | 'quality'>('magnitude');
   const [faultData, setFaultData] = useState<FaultCollection | null>(null);
   const [sampleSize, setSampleSize] = useState<number>(1000);
+  const clickSeqRef = useRef(0);
+  const [activePopup, setActivePopup] = useState<{ event: any; seq: number } | null>(null);
 
   // Dark mode support for marker colors
   const mapColors = useMapColors();
@@ -311,10 +313,10 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
           const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
 
           return (
-            <Circle
+            <CircleMarker
               key={event.id}
               center={[event.latitude, event.longitude]}
-              radius={getMagnitudeRadius(event.magnitude)}
+              radius={getMagnitudePixelRadius(event.magnitude)}
               pathOptions={{
                 color: getEventColor(event),
                 fillColor: getEventColor(event),
@@ -323,13 +325,27 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
                 // Add title for accessibility (shows on hover)
                 title: ariaLabel,
               } as any}
-            >
-              <Popup>
-                <EventPopupWithFaults event={event} qualityScores={qualityScores} />
-              </Popup>
-            </Circle>
+              eventHandlers={{
+                click: () => {
+                  clickSeqRef.current += 1;
+                  setActivePopup({ event, seq: clickSeqRef.current });
+                },
+              }}
+            />
           );
         })}
+
+        {/* One popup, rendered only for the clicked event, so the nearby-faults fetch
+            in EventPopupWithFaults fires once per click instead of once per plotted
+            marker. Keyed by click sequence so re-clicking a marker reopens it. */}
+        {activePopup && (
+          <Popup
+            key={activePopup.seq}
+            position={[activePopup.event.latitude, activePopup.event.longitude]}
+          >
+            <EventPopupWithFaults event={activePopup.event} qualityScores={qualityScores} />
+          </Popup>
+        )}
       </MapContainer>
 
       {/* Legend */}

@@ -56,6 +56,16 @@ import {
   Upload
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { GeographicSearchPanel, GeographicBounds } from '@/components/catalogues/GeographicSearchPanel';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { DataPagination } from '@/components/ui/data-pagination';
@@ -157,6 +167,7 @@ export default function MergePage() {
   ]);
   const [previewData, setPreviewData] = useState<any>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  const [confirmMergeOpen, setConfirmMergeOpen] = useState(false);
 
   // Ref to track progress interval for cleanup
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -270,7 +281,9 @@ export default function MergePage() {
         },
       };
 
-      console.log('Sending preview request:', requestBody);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('Sending preview request:', requestBody);
+      }
 
       const response = await fetch('/api/merge/preview', {
         method: 'POST',
@@ -334,6 +347,11 @@ export default function MergePage() {
       return;
     }
 
+    // All preconditions pass — confirm before the irreversible write.
+    setConfirmMergeOpen(true);
+  };
+
+  const executeMerge = async () => {
     setMergeStatus('merging');
     setMergeProgress(0);
 
@@ -396,19 +414,22 @@ export default function MergePage() {
         }),
       });
 
-      // Mark all fetch steps as complete
-      setMergeSteps(steps => steps.map(s =>
-        s.id.startsWith('fetch') || s.id === 'match' || s.id === 'merge' || s.id === 'bounds'
-          ? { ...s, status: 'complete' as const }
-          : s
-      ));
-
       if (!response.ok) {
         const errorInfo = await getApiError(response, 'Failed to merge catalogues');
         throw new Error(errorInfo.message);
       }
 
       const result = await response.json();
+
+      // Server accepted and returned the merge result — only now mark the
+      // fetch/match/merge/bounds steps complete (they previously flipped green
+      // right after the POST resolved, before the response was validated).
+      setMergeSteps(steps => steps.map(s =>
+        s.id.startsWith('fetch') || s.id === 'match' || s.id === 'merge' || s.id === 'bounds'
+          ? { ...s, status: 'complete' as const }
+          : s
+      ));
+      setMergeProgress(prev => Math.max(prev, 80));
 
       // Update save step
       if (!exportOnly) {
@@ -509,7 +530,7 @@ export default function MergePage() {
     }
 
     const totalEvents = getTotalSelectedEvents;
-    const overlapFactor = 0.15 * (selected.length - 1);
+    const overlapFactor = Math.min(0.9, Math.max(0, 0.15 * (selected.length - 1)));
     return Math.round(totalEvents * (1 - overlapFactor));
   }, [getSelectedCatalogues, getTotalSelectedEvents]);
 
@@ -1415,7 +1436,7 @@ export default function MergePage() {
                           </div>
                           <div className="flex-1">
                             <h4 className="text-sm font-medium text-blue-900 mb-1">
-                              🆕 Adaptive Thresholds Active
+                              Adaptive Thresholds Active
                             </h4>
                             <p className="text-xs text-blue-800 leading-relaxed">
                               The merge algorithm automatically adjusts matching thresholds based on event magnitude and depth.
@@ -1493,7 +1514,7 @@ export default function MergePage() {
                               <SelectValue placeholder="Select strategy" />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="quality">🆕 Quality-Based (Recommended)</SelectItem>
+                              <SelectItem value="quality">Quality-Based (Recommended)</SelectItem>
                               <SelectItem value="priority">Source Priority</SelectItem>
                               <SelectItem value="average">Average Values</SelectItem>
                               <SelectItem value="newest">Newest Data</SelectItem>
@@ -1501,7 +1522,7 @@ export default function MergePage() {
                             </SelectContent>
                           </Select>
                           <p className="text-xs text-muted-foreground">
-                            {mergeStrategy === 'quality' && '🆕 Select events with best quality metrics (station count, azimuthal gap, location error, magnitude uncertainty). Uses seismological best practices.'}
+                            {mergeStrategy === 'quality' && 'Select events with best quality metrics (station count, azimuthal gap, location error, magnitude uncertainty). Uses seismological best practices.'}
                             {mergeStrategy === 'priority' && 'Use data from higher priority sources when conflicts occur.'}
                             {mergeStrategy === 'average' && 'Average numerical values (magnitude, depth) from all sources. Uses magnitude hierarchy (Mw > Ms > mb > ML).'}
                             {mergeStrategy === 'newest' && 'Prefer the most recently updated event data.'}
@@ -1525,7 +1546,7 @@ export default function MergePage() {
                                 <SelectValue placeholder="Select priority" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="quality">🆕 Quality-Based Fallback</SelectItem>
+                                <SelectItem value="quality">Quality-Based Fallback</SelectItem>
                                 <SelectItem value="newest">Newest First</SelectItem>
                                 <SelectItem value="geonet">GeoNet &gt; Others</SelectItem>
                                 <SelectItem value="gns">GNS &gt; Others</SelectItem>
@@ -1549,7 +1570,7 @@ export default function MergePage() {
                           </div>
                           <div className="flex-1">
                             <h4 className="text-sm font-medium text-green-900 mb-1">
-                              🆕 Enhanced Merge Algorithm
+                              Enhanced Merge Algorithm
                             </h4>
                             <ul className="text-xs text-green-800 leading-relaxed space-y-1 list-disc list-inside">
                               <li><strong>Magnitude Hierarchy:</strong> Uses ISC standard (Mw &gt; Ms &gt; mb &gt; ML) to prevent saturation errors</li>
@@ -1755,6 +1776,32 @@ export default function MergePage() {
             </div>
           </CardFooter>
         </Card>
+
+        <AlertDialog open={confirmMergeOpen} onOpenChange={setConfirmMergeOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Merge {selectedCatalogues.length} catalogues?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This creates a new catalogue{mergedName.trim() ? <> named <strong>{mergedName.trim()}</strong></> : ''} from{' '}
+                {selectedCatalogues.length} sources (~{estimatedMergedEvents.toLocaleString()} events after de-duplication).
+                {exportOnly
+                  ? ' Export-only mode: nothing is written to the database.'
+                  : ' The merged catalogue is written to the database and cannot be undone from here.'}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  setConfirmMergeOpen(false);
+                  executeMerge();
+                }}
+              >
+                {exportOnly ? 'Merge for export' : 'Merge catalogues'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

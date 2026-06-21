@@ -86,58 +86,72 @@ export function detectDelimiter(content: string, maxSampleRows: number = 10): De
 }
 
 /**
- * Parse a single line with the specified delimiter, handling quoted values
+ * RFC 4180-compliant tokenizer over the WHOLE content: handles quoted fields,
+ * escaped quotes ("" -> "), embedded delimiters/newlines inside quotes, and CRLF/LF.
+ * Quoted whitespace is preserved; unquoted tokens are trimmed (which also strips a
+ * leading BOM and stray CR). For the space delimiter, runs of spaces collapse.
  */
-export function parseLine(line: string, delimiter: Delimiter): string[] {
-  const values: string[] = [];
-  let current = '';
+export function tokenizeDelimited(content: string, delimiter: Delimiter): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
   let inQuotes = false;
+  let fieldWasQuoted = false;
 
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
+  const pushField = () => {
+    row.push(fieldWasQuoted ? field : field.trim());
+    field = '';
+    fieldWasQuoted = false;
+  };
+  const pushRow = () => {
+    pushField();
+    rows.push(delimiter === ' ' ? row.filter((v) => v.length > 0) : row);
+    row = [];
+  };
 
-    if (char === '"') {
-      inQuotes = !inQuotes;
-    } else if (char === delimiter && !inQuotes) {
-      values.push(current.trim());
-      current = '';
-    } else {
-      current += char;
+  const len = content.length;
+  let i = 0;
+  while (i < len) {
+    const ch = content[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (content[i + 1] === '"') { field += '"'; i += 2; continue; } // escaped quote
+        inQuotes = false; i++; continue;
+      }
+      field += ch; i++; continue;
     }
+    if (ch === '"') { inQuotes = true; fieldWasQuoted = true; i++; continue; }
+    if (ch === delimiter) { pushField(); i++; continue; }
+    if (ch === '\r') { pushRow(); i += content[i + 1] === '\n' ? 2 : 1; continue; }
+    if (ch === '\n') { pushRow(); i++; continue; }
+    field += ch; i++;
   }
-
-  values.push(current.trim());
-  
-  // For space delimiter, filter out empty values (multiple consecutive spaces)
-  if (delimiter === ' ') {
-    return values.filter(v => v.length > 0);
-  }
-  
-  return values;
+  // flush any trailing field/row (content not ending in a newline)
+  if (field.length > 0 || row.length > 0 || fieldWasQuoted) pushRow();
+  // drop blank lines (a single empty field), but keep deliberately-empty multi-field rows
+  return rows.filter((r) => !(r.length <= 1 && (r[0] ?? '') === ''));
 }
 
 /**
- * Parse entire content with the specified delimiter
+ * Parse a single line with the specified delimiter (RFC 4180-aware).
+ */
+export function parseLine(line: string, delimiter: Delimiter): string[] {
+  return tokenizeDelimited(line, delimiter)[0] ?? [];
+}
+
+/**
+ * Parse entire content with the specified delimiter (RFC 4180-aware).
  */
 export function parseWithDelimiter(content: string, delimiter: Delimiter): {
   headers: string[];
   rows: string[][];
 } {
-  const lines = content.split('\n').filter(line => line.trim());
-  
-  if (lines.length === 0) {
+  const all = tokenizeDelimited(content, delimiter);
+  if (all.length === 0) {
     return { headers: [], rows: [] };
   }
-
-  const headers = parseLine(lines[0], delimiter).map(h => h.trim().toLowerCase());
-  const rows: string[][] = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseLine(lines[i], delimiter);
-    rows.push(values);
-  }
-
-  return { headers, rows };
+  const headers = all[0].map((h) => h.trim().toLowerCase());
+  return { headers, rows: all.slice(1) };
 }
 
 /**

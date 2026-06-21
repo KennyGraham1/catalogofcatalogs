@@ -105,6 +105,21 @@ export function getMagnitudeRadius(magnitude: number): number {
 }
 
 /**
+ * Screen-pixel radius for CircleMarker rendering. Unlike getMagnitudeRadius (which
+ * returns metres for a geographic Circle and must be reprojected on every zoom),
+ * a pixel radius lets Leaflet's canvas renderer draw thousands of points cheaply and
+ * keeps marker sizes legible at every zoom level. Mirrors the same magnitude tiers.
+ */
+export function getMagnitudePixelRadius(magnitude: number): number {
+  if (magnitude === null || magnitude === undefined || isNaN(magnitude)) {
+    return 3;
+  }
+  const clampedMag = Math.max(0, Math.min(10, magnitude));
+  const radii = [3, 3, 4, 5, 6, 8, 10, 12];
+  return radii[Math.min(Math.floor(clampedMag), 7)];
+}
+
+/**
  * Get human-readable label for magnitude
  */
 export function getMagnitudeLabel(magnitude: number): string {
@@ -216,6 +231,25 @@ export function normalizeTimestamp(time: string | number, dateFormat?: 'US' | 'I
   // Allow historical dates (earthquakes can be from centuries ago)
   // Minimum valid date: year 1000 CE (reasonable lower bound for historical seismology)
   const minValidDate = new Date('1000-01-01T00:00:00.000Z').getTime();
+
+  // Offset-less ISO 8601 (date, or date+time with space or T, NO timezone) MUST be
+  // treated as UTC: `new Date('2024-01-01 12:00:00')` parses as LOCAL time, silently
+  // shifting UTC earthquake times by the server timezone (and non-deterministically
+  // across deploy environments). Force UTC before the generic parse. Strings that
+  // carry an explicit Z/offset are not matched here and fall through to new Date().
+  const isoNoTz = trimmed.match(
+    /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,6}))?)?)?$/
+  );
+  if (isoNoTz) {
+    const [, y, mo, d, h = '00', mi = '00', s = '00', ms = ''] = isoNoTz;
+    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
+    const isoUtc = `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}T${h.padStart(2, '0')}:${mi.padStart(2, '0')}:${s.padStart(2, '0')}.${millis}Z`;
+    const utc = new Date(isoUtc);
+    if (!isNaN(utc.getTime()) && utc.getTime() >= minValidDate) {
+      return utc.toISOString();
+    }
+  }
+
   let date = new Date(trimmed);
   if (!isNaN(date.getTime()) && date.getTime() >= minValidDate) {
     return date.toISOString();

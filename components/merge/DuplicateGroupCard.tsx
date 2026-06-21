@@ -59,7 +59,7 @@ export function DuplicateGroupCard({ group, groupIndex, catalogueColors, onViewO
   const magRange = Math.max(...magnitudes) - Math.min(...magnitudes);
 
   return (
-    <Card className={`${group.isSuspicious ? 'border-orange-300 bg-orange-50/30' : ''}`}>
+    <Card className={`${group.isSuspicious ? 'border-orange-300 dark:border-orange-900/60 bg-orange-50/30 dark:bg-orange-950/20' : ''}`}>
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
           <div className="flex-1">
@@ -112,7 +112,7 @@ export function DuplicateGroupCard({ group, groupIndex, catalogueColors, onViewO
         </div>
 
         {group.validationWarnings.length > 0 && (
-          <div className="mt-2 p-2 bg-orange-100 border border-orange-200 rounded text-xs text-orange-800">
+          <div className="mt-2 p-2 bg-orange-100 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-900/50 rounded text-xs text-orange-800 dark:text-orange-200">
             <div className="flex items-start gap-2">
               <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
               <div>
@@ -157,13 +157,13 @@ export function DuplicateGroupCard({ group, groupIndex, catalogueColors, onViewO
                   return (
                     <tr 
                       key={idx} 
-                      className={`border-b ${isSelected ? 'bg-green-50 font-medium' : ''}`}
+                      className={`border-b ${isSelected ? 'bg-green-50 dark:bg-green-950/40 font-medium' : ''}`}
                     >
                       <td className="py-2 px-2">
                         <div className="flex items-center gap-2">
                           <div 
                             className="w-3 h-3 rounded-full flex-shrink-0" 
-                            style={{ backgroundColor: catalogueColors[event.catalogueId] || '#gray' }}
+                            style={{ backgroundColor: catalogueColors[event.catalogueId] || '#6b7280' }}
                           />
                           <span className="truncate max-w-[120px]" title={event.catalogueName}>
                             {event.catalogueName}

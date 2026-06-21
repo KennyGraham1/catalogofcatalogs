@@ -2,6 +2,7 @@
 
 import { ReactNode, useState } from 'react';
 import { Header } from './Header';
+import { Footer } from './Footer';
 import { ThemeProvider } from 'next-themes';
 import { Toaster } from '@/components/ui/toaster';
 import { CatalogueProvider } from '@/contexts/CatalogueContext';
@@ -77,7 +78,7 @@ export function Layout({ children }: LayoutProps) {
   });
 
   return (
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
       <CatalogueProvider>
         <div className="min-h-screen flex flex-col">
           <Header
@@ -88,6 +89,7 @@ export function Layout({ children }: LayoutProps) {
           <main className="flex-1 pt-20">
             {children}
           </main>
+          <Footer />
           <Toaster />
 
           {/* Global keyboard shortcut components */}

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,41 +22,133 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { DefaultFieldMappings } from '@/components/settings/DefaultFieldMappings';
 import { useAuth } from '@/lib/auth/hooks';
 import { UserRole } from '@/lib/auth/types';
+import { toast } from '@/hooks/use-toast';
 import {
   Settings,
   Database,
   Sliders,
   Save,
   Map,
-  Lock
+  Lock,
+  RotateCcw
 } from 'lucide-react';
+
+const SETTINGS_STORAGE_KEY = 'eqcat:settings';
+
+interface AppSettings {
+  language: string;
+  emailNotifications: boolean;
+  importFormat: string;
+  exportFormat: string;
+  mapProvider: string;
+  defaultView: string;
+  mapApiKey: string;
+  clusterEvents: boolean;
+  depthScale: string;
+  symbolSize: string;
+  batchSize: string;
+  cacheLimit: string;
+  parallelProcessing: boolean;
+  apiEndpoint: string;
+  externalFetch: string;
+  customScript: string;
+}
+
+const DEFAULT_SETTINGS: AppSettings = {
+  language: 'en',
+  emailNotifications: false,
+  importFormat: 'csv',
+  exportFormat: 'csv',
+  mapProvider: 'leaflet',
+  defaultView: 'global',
+  mapApiKey: '',
+  clusterEvents: true,
+  depthScale: 'rainbow',
+  symbolSize: 'magnitude',
+  batchSize: '1000',
+  cacheLimit: '256',
+  parallelProcessing: true,
+  apiEndpoint: 'https://api.example.com/earthquake-service',
+  externalFetch: '12',
+  customScript: '',
+};
+
+function loadSettings(): AppSettings {
+  if (typeof window === 'undefined') return DEFAULT_SETTINGS;
+  try {
+    const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!raw) return DEFAULT_SETTINGS;
+    return { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<AppSettings>) };
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
 
 export default function SettingsPage() {
   const { user } = useAuth();
   const canManageSettings = user?.role === UserRole.ADMIN;
   const isReadOnly = !canManageSettings;
 
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [saved, setSaved] = useState<AppSettings>(DEFAULT_SETTINGS);
+
+  // Hydrate from localStorage on mount (client-only).
+  useEffect(() => {
+    const loaded = loadSettings();
+    setSettings(loaded);
+    setSaved(loaded);
+  }, []);
+
+  const isDirty = JSON.stringify(settings) !== JSON.stringify(saved);
+
+  const set = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+    setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleSave = () => {
+    if (isReadOnly || !isDirty) return;
+    try {
+      window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+      setSaved(settings);
+      toast({ title: 'Settings saved', description: 'Your preferences have been stored in this browser.' });
+    } catch {
+      toast({ title: 'Could not save settings', description: 'Your browser blocked local storage.', variant: 'destructive' });
+    }
+  };
+
+  const handleReset = () => {
+    setSettings(saved);
+  };
+
   const renderSaveButton = () => {
-    const button = (
-      <Button disabled={isReadOnly}>
-        <Save className="mr-2 h-4 w-4" />
+    const saveButton = (
+      <Button disabled={isReadOnly || !isDirty} onClick={handleSave}>
+        <Save className="mr-2 h-4 w-4" aria-hidden="true" />
         Save Changes
       </Button>
     );
 
-    if (!isReadOnly) {
-      return button;
-    }
-
     return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex">{button}</span>
-          </TooltipTrigger>
-          <TooltipContent>Admin access required to save settings.</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <div className="flex items-center gap-2">
+        {isDirty && !isReadOnly && (
+          <Button variant="ghost" onClick={handleReset}>
+            <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
+            Discard
+          </Button>
+        )}
+        {isReadOnly ? (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">{saveButton}</span>
+              </TooltipTrigger>
+              <TooltipContent>Admin access required to save settings.</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          saveButton
+        )}
+      </div>
     );
   };
 
@@ -70,7 +163,7 @@ export default function SettingsPage() {
         </div>
 
         {isReadOnly && (
-          <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+          <Alert className="border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
             <Lock className="h-4 w-4" />
             <AlertTitle>View-only settings</AlertTitle>
             <AlertDescription>
@@ -106,7 +199,7 @@ export default function SettingsPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <Label htmlFor="language">Language</Label>
-                      <Select defaultValue="en" disabled={isReadOnly}>
+                      <Select value={settings.language} onValueChange={(v) => set('language', v)} disabled={isReadOnly}>
                         <SelectTrigger id="language">
                           <SelectValue placeholder="Select language" />
                         </SelectTrigger>
@@ -136,9 +229,15 @@ export default function SettingsPage() {
                       <Label htmlFor="notifications" className="text-base">
                         Email Notifications
                       </Label>
-                      <Switch id="notifications" disabled={isReadOnly} />
+                      <Switch
+                        id="notifications"
+                        checked={settings.emailNotifications}
+                        onCheckedChange={(v) => set('emailNotifications', v)}
+                        disabled={isReadOnly}
+                        aria-describedby="notifications-desc"
+                      />
                     </div>
-                    <p className="text-sm text-muted-foreground">
+                    <p id="notifications-desc" className="text-sm text-muted-foreground">
                       Receive email notifications for completed catalogue processing
                     </p>
                   </div>
@@ -152,7 +251,7 @@ export default function SettingsPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <Label htmlFor="import-format">Default Import Format</Label>
-                      <Select defaultValue="csv" disabled={isReadOnly}>
+                      <Select value={settings.importFormat} onValueChange={(v) => set('importFormat', v)} disabled={isReadOnly}>
                         <SelectTrigger id="import-format">
                           <SelectValue placeholder="Select format" />
                         </SelectTrigger>
@@ -168,7 +267,7 @@ export default function SettingsPage() {
 
                     <div className="space-y-2">
                       <Label htmlFor="export-format">Default Export Format</Label>
-                      <Select defaultValue="csv" disabled={isReadOnly}>
+                      <Select value={settings.exportFormat} onValueChange={(v) => set('exportFormat', v)} disabled={isReadOnly}>
                         <SelectTrigger id="export-format">
                           <SelectValue placeholder="Select format" />
                         </SelectTrigger>
@@ -226,7 +325,7 @@ export default function SettingsPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <Label htmlFor="map-provider">Map Provider</Label>
-                      <Select defaultValue="leaflet" disabled={isReadOnly}>
+                      <Select value={settings.mapProvider} onValueChange={(v) => set('mapProvider', v)} disabled={isReadOnly}>
                         <SelectTrigger id="map-provider">
                           <SelectValue placeholder="Select provider" />
                         </SelectTrigger>
@@ -240,7 +339,7 @@ export default function SettingsPage() {
 
                     <div className="space-y-2">
                       <Label htmlFor="default-view">Default Map View</Label>
-                      <Select defaultValue="global" disabled={isReadOnly}>
+                      <Select value={settings.defaultView} onValueChange={(v) => set('defaultView', v)} disabled={isReadOnly}>
                         <SelectTrigger id="default-view">
                           <SelectValue placeholder="Select view" />
                         </SelectTrigger>
@@ -256,7 +355,7 @@ export default function SettingsPage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="api-key">Map API Key (if applicable)</Label>
-                    <Input id="api-key" type="password" placeholder="Enter your API key" disabled={isReadOnly} />
+                    <Input id="api-key" type="password" placeholder="Enter your API key" value={settings.mapApiKey} onChange={(e) => set('mapApiKey', e.target.value)} disabled={isReadOnly} />
                     <p className="text-xs text-muted-foreground">
                       Required for some map providers like Mapbox or Google Maps
                     </p>
@@ -267,9 +366,15 @@ export default function SettingsPage() {
                       <Label htmlFor="cluster-events" className="text-base">
                         Cluster Nearby Events
                       </Label>
-                      <Switch id="cluster-events" defaultChecked disabled={isReadOnly} />
+                      <Switch
+                        id="cluster-events"
+                        checked={settings.clusterEvents}
+                        onCheckedChange={(v) => set('clusterEvents', v)}
+                        disabled={isReadOnly}
+                        aria-describedby="cluster-events-desc"
+                      />
                     </div>
-                    <p className="text-sm text-muted-foreground">
+                    <p id="cluster-events-desc" className="text-sm text-muted-foreground">
                       Group nearby earthquake events when zoomed out
                     </p>
                   </div>
@@ -303,7 +408,7 @@ export default function SettingsPage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="depth-scale">Depth Visualization Scale</Label>
-                    <Select defaultValue="rainbow" disabled={isReadOnly}>
+                    <Select value={settings.depthScale} onValueChange={(v) => set('depthScale', v)} disabled={isReadOnly}>
                       <SelectTrigger id="depth-scale">
                         <SelectValue placeholder="Select scale" />
                       </SelectTrigger>
@@ -317,7 +422,7 @@ export default function SettingsPage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="symbol-size">Symbol Size Based On</Label>
-                    <Select defaultValue="magnitude" disabled={isReadOnly}>
+                    <Select value={settings.symbolSize} onValueChange={(v) => set('symbolSize', v)} disabled={isReadOnly}>
                       <SelectTrigger id="symbol-size">
                         <SelectValue placeholder="Select property" />
                       </SelectTrigger>
@@ -354,7 +459,7 @@ export default function SettingsPage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="batch-size">Processing Batch Size</Label>
-                    <Select defaultValue="1000" disabled={isReadOnly}>
+                    <Select value={settings.batchSize} onValueChange={(v) => set('batchSize', v)} disabled={isReadOnly}>
                       <SelectTrigger id="batch-size">
                         <SelectValue placeholder="Select batch size" />
                       </SelectTrigger>
@@ -372,7 +477,7 @@ export default function SettingsPage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="cache-limit">Cache Limit</Label>
-                    <Select defaultValue="256" disabled={isReadOnly}>
+                    <Select value={settings.cacheLimit} onValueChange={(v) => set('cacheLimit', v)} disabled={isReadOnly}>
                       <SelectTrigger id="cache-limit">
                         <SelectValue placeholder="Select cache limit" />
                       </SelectTrigger>
@@ -393,9 +498,15 @@ export default function SettingsPage() {
                       <Label htmlFor="parallel-processing" className="text-base">
                         Parallel Processing
                       </Label>
-                      <Switch id="parallel-processing" defaultChecked disabled={isReadOnly} />
+                      <Switch
+                        id="parallel-processing"
+                        checked={settings.parallelProcessing}
+                        onCheckedChange={(v) => set('parallelProcessing', v)}
+                        disabled={isReadOnly}
+                        aria-describedby="parallel-processing-desc"
+                      />
                     </div>
-                    <p className="text-sm text-muted-foreground">
+                    <p id="parallel-processing-desc" className="text-sm text-muted-foreground">
                       Enable multi-threaded processing for faster catalogue operations
                     </p>
                   </div>
@@ -410,7 +521,8 @@ export default function SettingsPage() {
                     <Label htmlFor="api-endpoint">API Endpoint URL</Label>
                     <Input
                       id="api-endpoint"
-                      defaultValue="https://api.example.com/earthquake-service"
+                      value={settings.apiEndpoint}
+                      onChange={(e) => set('apiEndpoint', e.target.value)}
                       disabled={isReadOnly}
                     />
                     <p className="text-xs text-muted-foreground">
@@ -420,7 +532,7 @@ export default function SettingsPage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="external-fetch">External Data Fetch Interval</Label>
-                    <Select defaultValue="12" disabled={isReadOnly}>
+                    <Select value={settings.externalFetch} onValueChange={(v) => set('externalFetch', v)} disabled={isReadOnly}>
                       <SelectTrigger id="external-fetch">
                         <SelectValue placeholder="Select interval" />
                       </SelectTrigger>
@@ -449,6 +561,8 @@ export default function SettingsPage() {
                       id="custom-script"
                       placeholder="Enter custom processing script (Python)"
                       className="font-mono h-32"
+                      value={settings.customScript}
+                      onChange={(e) => set('customScript', e.target.value)}
                       disabled={isReadOnly}
                     />
                     <p className="text-xs text-muted-foreground">

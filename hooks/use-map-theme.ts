@@ -3,7 +3,7 @@
  * Provides appropriate tile layer URLs and styles for different themes
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 export interface MapThemeConfig {
   tileLayerUrl: string;
@@ -114,25 +114,28 @@ export function useMapTheme(): MapThemeConfig {
 export function useMapColors() {
   const { isDark } = useMapTheme();
 
-  return {
+  // Memoize so the returned object keeps a stable identity between renders. Map
+  // components depend on this in marker useMemo() deps; a fresh object each render
+  // would rebuild every plotted marker on every parent re-render.
+  return useMemo(() => ({
     isDark,
 
     // Consistent opacity for depth-gradient visualization
     markerOpacity: 0.75,
     lineOpacity: isDark ? 0.8 : 0.6,
-    
+
     // Fault line colors (adjusted for dark mode)
     faultColors: {
       alpine: isDark ? '#FF6B6B' : '#FF0000',
       subduction: isDark ? '#C92A2A' : '#8B0000',
       wellington: isDark ? '#FF8C42' : '#FF4500',
     },
-    
+
     // Station marker colors
     stationColor: isDark ? '#4DABF7' : '#1E88E5',
-    
+
     // Uncertainty ellipse color
     uncertaintyColor: isDark ? '#FFA94D' : '#FF9800',
-  };
+  }), [isDark]);
 }
 

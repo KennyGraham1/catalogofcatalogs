@@ -47,7 +47,7 @@ export function MergeProgressIndicator({
           {progress < 100 ? 'Processing merge operation...' : 'Merge complete!'}
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-6" role="status" aria-live="polite">
         {/* Overall Progress Bar */}
         <div className="space-y-2">
           <div className="flex justify-between text-sm">

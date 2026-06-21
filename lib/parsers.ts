@@ -335,13 +335,10 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
   let actualDateFormat = dateFormat;
   if (!actualDateFormat || actualDateFormat === 'Unknown') {
     // Find time column
-    const timeColumnIndex = headers.findIndex(h =>
-      h.toLowerCase() === 'time' ||
-      h.toLowerCase() === 'datetime' ||
-      h.toLowerCase() === 'date' ||
-      h.toLowerCase() === 'origin_time' ||
-      h.toLowerCase() === 'origintime'
-    );
+    const timeAliases = new Set([
+      'time', 'datetime', 'date', 'origin_time', 'origintime', 'timestamp', 'ot', 'otime', 'origin',
+    ]);
+    const timeColumnIndex = headers.findIndex((h) => timeAliases.has(h.toLowerCase()));
 
     if (timeColumnIndex >= 0) {
       // Extract date strings from time column
@@ -1239,8 +1236,13 @@ function mapCommonFields(event: any, dateFormat?: DateFormat, includeMappingRepo
       if (NUMERIC_FIELDS.has(targetField)) {
         const numValue = safeParseFloat(value);
         const hasValue = value !== undefined && value !== null && String(value).trim() !== '';
-        // Always set numeric fields (null if invalid) to ensure proper validation
-        mapped[targetField] = numValue;
+        // Always set numeric fields (null if invalid) to ensure proper validation.
+        // Normalize 0-360 longitude to -180..180 so valid Pacific/NZ events near 180 deg
+        // are not rejected by the [-180,180] validation bound.
+        mapped[targetField] =
+          targetField === 'longitude' && typeof numValue === 'number' && numValue > 180 && numValue <= 360
+            ? numValue - 360
+            : numValue;
         setTargetFields.add(targetField);
         if (includeMappingReport && hasValue) {
           mappingReport.push({ targetField, sourceField: sourceKey, matchType: isExact ? 'exact' : 'alias' });

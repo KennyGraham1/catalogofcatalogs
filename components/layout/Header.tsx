@@ -27,7 +27,7 @@ import { cn } from '@/lib/utils';
 import { ThemeToggle } from '../theme/ThemeToggle';
 import { useAuth } from '@/lib/auth/hooks';
 import { signOut } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -49,6 +49,14 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { user, isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const isActive = (href: string) =>
+    href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(`${href}/`);
+
+  // Close the mobile menu whenever the route changes.
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [pathname]);
 
   const handleSignOut = async () => {
     await signOut({ redirect: false });
@@ -107,11 +115,17 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
             <Link
               key={item.href}
               href={item.href}
-              className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
+              className={cn(
+                'flex items-center gap-1.5 transition-colors',
+                isActive(item.href)
+                  ? 'text-foreground font-medium'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
               aria-label={item.ariaLabel || item.label}
+              aria-current={isActive(item.href) ? 'page' : undefined}
               title={item.ariaLabel || item.label}
             >
-              <item.icon className="h-4 w-4" />
+              <item.icon className="h-4 w-4" aria-hidden="true" />
               {item.label && item.showLabel !== false && <span>{item.label}</span>}
             </Link>
           ))}
@@ -278,6 +292,8 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
             size="icon"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             aria-label="Toggle menu"
+            aria-expanded={mobileMenuOpen}
+            aria-controls="mobile-nav"
           >
             {mobileMenuOpen ? (
               <X className="h-5 w-5" />
@@ -290,19 +306,25 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
 
       {/* Mobile Menu */}
       {mobileMenuOpen && (
-        <div className="md:hidden bg-background border-b">
+        <div id="mobile-nav" className="md:hidden bg-background border-b">
           <div className="container py-4">
             <nav className="flex flex-col gap-4">
               {navItems.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className="flex items-center gap-3 p-2 hover:bg-muted rounded-md transition-colors"
+                  className={cn(
+                    'flex items-center gap-3 p-2 rounded-md transition-colors',
+                    isActive(item.href)
+                      ? 'bg-muted font-medium text-foreground'
+                      : 'hover:bg-muted'
+                  )}
                   onClick={() => setMobileMenuOpen(false)}
                   aria-label={item.ariaLabel || item.label}
+                  aria-current={isActive(item.href) ? 'page' : undefined}
                   title={item.ariaLabel || item.label}
                 >
-                  <item.icon className="h-5 w-5 text-primary" />
+                  <item.icon className="h-5 w-5 text-primary" aria-hidden="true" />
                   {item.label && item.showLabel !== false && <span>{item.label}</span>}
                 </Link>
               ))}

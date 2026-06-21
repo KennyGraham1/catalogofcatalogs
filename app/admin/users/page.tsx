@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { useAuth } from '@/lib/auth/hooks';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -27,6 +28,16 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { SafeUser, UserRole } from '@/lib/auth/types';
 
 export default function AdminUsersPage() {
@@ -35,6 +46,7 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+  const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (user?.role === UserRole.ADMIN) {
@@ -115,10 +127,6 @@ export default function AdminUsersPage() {
   };
 
   const handleDeleteUser = async (userId: string) => {
-    if (!confirm('Are you sure you want to delete this user? This action cannot be undone.')) {
-      return;
-    }
-    
     try {
       setUpdatingUserId(userId);
       setError('');
@@ -143,8 +151,8 @@ export default function AdminUsersPage() {
 
   if (isLoading || loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p>Loading...</p>
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <LoadingSpinner size="lg" text="Loading…" />
       </div>
     );
   }
@@ -245,7 +253,7 @@ export default function AdminUsersPage() {
                       <Button
                         size="sm"
                         variant="destructive"
-                        onClick={() => handleDeleteUser(account.id)}
+                        onClick={() => setDeleteUserId(account.id)}
                         disabled={updatingUserId === account.id || account.id === user.id}
                       >
                         Delete
@@ -258,8 +266,37 @@ export default function AdminUsersPage() {
           </Table>
 
           {users.length === 0 && (
-            <p className="py-8 text-center text-gray-500">No users found</p>
+            <p className="py-8 text-center text-muted-foreground">No users found</p>
           )}
+
+          <AlertDialog open={!!deleteUserId} onOpenChange={(open) => { if (!open) setDeleteUserId(null); }}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete user?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This permanently deletes{' '}
+                  <strong>{users.find((u) => u.id === deleteUserId)?.name ?? 'this user'}</strong>
+                  {users.find((u) => u.id === deleteUserId)?.email
+                    ? ` (${users.find((u) => u.id === deleteUserId)?.email})`
+                    : ''}
+                  . This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={() => {
+                    const id = deleteUserId;
+                    setDeleteUserId(null);
+                    if (id) handleDeleteUser(id);
+                  }}
+                >
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </CardContent>
       </Card>
     </div>

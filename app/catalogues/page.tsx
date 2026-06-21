@@ -1104,16 +1104,17 @@ export default function CataloguesPage() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8"
+                      className="h-9 w-9"
+                      aria-label={`View ${catalogue.name} on map`}
                       onClick={() => handleViewMap(catalogue)}
                     >
-                      <Map className="h-4 w-4" />
+                      <Map className="h-4 w-4" aria-hidden="true" />
                     </Button>
                     {canExportCatalogues ? (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <Download className="h-4 w-4" />
+                          <Button variant="ghost" size="icon" className="h-9 w-9" aria-label="Export catalogue">
+                            <Download className="h-4 w-4" aria-hidden="true" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-56">
@@ -1143,8 +1144,8 @@ export default function CataloguesPage() {
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" disabled>
-                              <Download className="h-4 w-4" />
+                            <Button variant="ghost" size="icon" className="h-9 w-9" aria-label="Export catalogue" disabled>
+                              <Download className="h-4 w-4" aria-hidden="true" />
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -1155,8 +1156,8 @@ export default function CataloguesPage() {
                     )}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreVertical className="h-4 w-4" />
+                        <Button variant="ghost" size="icon" className="h-9 w-9" aria-label="More actions">
+                          <MoreVertical className="h-4 w-4" aria-hidden="true" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">

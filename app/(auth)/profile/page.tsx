@@ -188,17 +188,17 @@ export default function ProfilePage() {
         <CardContent className="space-y-6">
           <div className="space-y-4">
             <div>
-              <h3 className="text-sm font-medium text-gray-500">Name</h3>
+              <h3 className="text-sm font-medium text-muted-foreground">Name</h3>
               <p className="mt-1 text-lg">{user.name}</p>
             </div>
             
             <div>
-              <h3 className="text-sm font-medium text-gray-500">Email</h3>
+              <h3 className="text-sm font-medium text-muted-foreground">Email</h3>
               <p className="mt-1 text-lg">{user.email}</p>
             </div>
             
             <div>
-              <h3 className="text-sm font-medium text-gray-500">Role</h3>
+              <h3 className="text-sm font-medium text-muted-foreground">Role</h3>
               <div className="mt-1">
                 <Badge variant={getRoleBadgeVariant(user.role)}>
                   {user.role.toUpperCase()}
@@ -207,8 +207,8 @@ export default function ProfilePage() {
             </div>
             
             <div>
-              <h3 className="text-sm font-medium text-gray-500">User ID</h3>
-              <p className="mt-1 font-mono text-sm text-gray-600">{user.id}</p>
+              <h3 className="text-sm font-medium text-muted-foreground">User ID</h3>
+              <p className="mt-1 font-mono text-sm text-muted-foreground">{user.id}</p>
             </div>
           </div>
           

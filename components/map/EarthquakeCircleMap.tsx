@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, memo } from 'react';
+import { useEffect, useMemo, useRef, useState, memo } from 'react';
 import { dedupeById } from '@/lib/utils';
 import L from 'leaflet';
-import { MapContainer, Circle, Popup } from 'react-leaflet';
+import { MapContainer, CircleMarker, Popup } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Activity, Calendar, Ruler, MapPin, Info } from 'lucide-react';
 import { TechnicalTermTooltip } from '@/components/ui/info-tooltip';
-import { getMagnitudeRadius, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
+import { getMagnitudePixelRadius, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 import { useMapColors } from '@/hooks/use-map-theme';
 import 'leaflet/dist/leaflet.css';
 
@@ -45,6 +45,50 @@ function getMagnitudeLabel(magnitude: number): string {
   return 'Micro';
 }
 
+function EventPopupContent({ event }: { event: CircleMapEvent }) {
+  return (
+    <div className="p-2 min-w-[200px]">
+      <div className="flex items-center justify-between mb-2">
+        <Badge variant="outline" className="text-xs">
+          {getMagnitudeLabel(event.magnitude)}
+        </Badge>
+        <span className="text-sm font-semibold">M {event.magnitude.toFixed(1)}</span>
+      </div>
+      <div className="space-y-1 text-sm">
+        <div className="flex items-center gap-2">
+          <Calendar className="h-3 w-3 text-muted-foreground" />
+          <span>{new Date(event.time).toLocaleString('en-GB', {
+            day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+          })}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <MapPin className="h-3 w-3 text-muted-foreground" />
+          <span>{event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°</span>
+        </div>
+        {event.depth != null && (
+          <div className="flex items-center gap-2">
+            <Ruler className="h-3 w-3 text-muted-foreground" />
+            <span>{event.depth.toFixed(1)} km depth</span>
+          </div>
+        )}
+        {event.magnitude_type && (
+          <div className="flex items-center gap-2">
+            <Activity className="h-3 w-3 text-muted-foreground" />
+            <span>Type: {event.magnitude_type}</span>
+          </div>
+        )}
+        {event.region && (
+          <div className="flex items-center gap-2">
+            <MapPin className="h-3 w-3 text-muted-foreground" />
+            <span className="truncate max-w-[160px]">{event.region}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
   events,
   sampleSize,
@@ -70,61 +114,28 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
     });
   }, []);
 
+  const clickSeqRef = useRef(0);
+  const [activePopup, setActivePopup] = useState<{ event: CircleMapEvent; seq: number } | null>(null);
+
   const eventMarkers = useMemo(() => {
     return dedupeById(sampledEvents).sort((a, b) => a.magnitude - b.magnitude).map((event) => (
-      <Circle
+      <CircleMarker
         key={event.id}
         center={[event.latitude, event.longitude]}
-        radius={getMagnitudeRadius(event.magnitude)}
+        radius={getMagnitudePixelRadius(event.magnitude)}
         pathOptions={{
           fillColor: getEarthquakeColor(event.depth ?? 0, mapColors.isDark),
           fillOpacity: mapColors.markerOpacity,
           color: getEarthquakeColor(event.depth ?? 0, mapColors.isDark),
           weight: 1,
         }}
-      >
-        <Popup>
-          <div className="p-2 min-w-[200px]">
-            <div className="flex items-center justify-between mb-2">
-              <Badge variant="outline" className="text-xs">
-                {getMagnitudeLabel(event.magnitude)}
-              </Badge>
-              <span className="text-sm font-semibold">M {event.magnitude.toFixed(1)}</span>
-            </div>
-            <div className="space-y-1 text-sm">
-              <div className="flex items-center gap-2">
-                <Calendar className="h-3 w-3 text-muted-foreground" />
-                <span>{new Date(event.time).toLocaleString('en-GB', {
-                  day: '2-digit', month: '2-digit', year: 'numeric',
-                  hour: '2-digit', minute: '2-digit', second: '2-digit',
-                })}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <MapPin className="h-3 w-3 text-muted-foreground" />
-                <span>{event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°</span>
-              </div>
-              {event.depth != null && (
-                <div className="flex items-center gap-2">
-                  <Ruler className="h-3 w-3 text-muted-foreground" />
-                  <span>{event.depth.toFixed(1)} km depth</span>
-                </div>
-              )}
-              {event.magnitude_type && (
-                <div className="flex items-center gap-2">
-                  <Activity className="h-3 w-3 text-muted-foreground" />
-                  <span>Type: {event.magnitude_type}</span>
-                </div>
-              )}
-              {event.region && (
-                <div className="flex items-center gap-2">
-                  <MapPin className="h-3 w-3 text-muted-foreground" />
-                  <span className="truncate max-w-[160px]">{event.region}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </Popup>
-      </Circle>
+        eventHandlers={{
+          click: () => {
+            clickSeqRef.current += 1;
+            setActivePopup({ event, seq: clickSeqRef.current });
+          },
+        }}
+      />
     ));
   }, [sampledEvents, mapColors]);
 
@@ -154,6 +165,14 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
       >
         <MapLayerControl position="topright" />
         {eventMarkers}
+        {activePopup && (
+          <Popup
+            key={activePopup.seq}
+            position={[activePopup.event.latitude, activePopup.event.longitude]}
+          >
+            <EventPopupContent event={activePopup.event} />
+          </Popup>
+        )}
       </MapContainer>
 
       {/* Legend */}

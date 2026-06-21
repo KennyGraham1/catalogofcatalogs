@@ -254,6 +254,7 @@ export interface DbQueries {
   updateCatalogueName: (name: string, id: string) => Promise<void>;
 
   updateCatalogueEventCount: (id: string, eventCount: number, session?: ClientSession) => Promise<void>;
+  countEventsByCatalogue: (id: string) => Promise<number>;
 
   updateCatalogueGeoBounds: (id: string, minLat: number, maxLat: number, minLon: number, maxLon: number, session?: ClientSession) => Promise<void>;
 
@@ -378,6 +379,17 @@ export const ALLOWED_EVENT_TYPE = new Set([
 ]);
 
 export const ALLOWED_EVENT_TYPE_CERTAINTY = new Set(['suspected', 'known']);
+
+/**
+ * Normalize an arbitrary source event-type string to a valid QuakeML BED type, or null.
+ * Feeds like GeoNet emit non-QuakeML values ("outside of network interest", "duplicate"),
+ * which would otherwise throw in validateMergedEvent and abort a whole insert batch.
+ */
+export function normalizeEventType(raw: unknown): string | null {
+  if (raw == null) return null;
+  const v = String(raw).toLowerCase().trim();
+  return v && ALLOWED_EVENT_TYPE.has(v) ? v : null;
+}
 
 /**
  * Validate a single MergedEvent record: required fields (coordinates, magnitude,
@@ -677,13 +689,35 @@ if (typeof window === 'undefined') {
       const collection = await getCollection(COLLECTIONS.EVENTS);
       const now = new Date().toISOString();
 
-      const docs = events.map(event => ({
+      // De-duplicate within this batch by source_id (a single feed window or file can
+      // repeat the same record) so one call never inserts the same event twice.
+      const seenSourceIds = new Set<string>();
+      const deduped = events.filter((e) => {
+        const sid = (e as { source_id?: string | null }).source_id;
+        if (sid == null) return true;
+        if (seenSourceIds.has(sid)) return false;
+        seenSourceIds.add(sid);
+        return true;
+      });
+
+      const docs = deduped.map(event => ({
         ...event,
         created_at: now,
       })) as any[];
 
-      const options = session ? { session } : undefined;
-      await collection.insertMany(docs, options);
+      // ordered:false so a duplicate-key (E11000) from the partial-unique
+      // (catalogue_id, source_id) index skips that row rather than aborting the batch,
+      // making re-imports idempotent. Any non-duplicate write error is re-thrown.
+      try {
+        await collection.insertMany(docs, { ...(session ? { session } : {}), ordered: false });
+      } catch (err) {
+        const e = err as { code?: number; writeErrors?: Array<{ code?: number; err?: { code?: number } }> };
+        const writeErrors = e?.writeErrors ?? [];
+        const onlyDuplicates =
+          e?.code === 11000 ||
+          (writeErrors.length > 0 && writeErrors.every((w) => (w?.code ?? w?.err?.code) === 11000));
+        if (!onlyDuplicates) throw err;
+      }
 
       // Invalidate caches
       const catalogueIds = new Set(events.map(e => e.catalogue_id));
@@ -850,6 +884,11 @@ if (typeof window === 'undefined') {
       const collection = await getCollection(COLLECTIONS.CATALOGUES);
       const options = session ? { session } : undefined;
       await collection.updateOne({ id }, { $set: { event_count: eventCount } }, options);
+    },
+
+    countEventsByCatalogue: async (id: string): Promise<number> => {
+      const collection = await getCollection(COLLECTIONS.EVENTS);
+      return collection.countDocuments({ catalogue_id: id });
     },
 
     updateCatalogueGeoBounds: async (id: string, minLat: number, maxLat: number, minLon: number, maxLon: number, session?: ClientSession): Promise<void> => {

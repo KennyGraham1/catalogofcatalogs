@@ -82,7 +82,7 @@ function ResetPasswordContent() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12 sm:px-6 lg:px-8">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
           <div className="flex items-center gap-2">
@@ -171,9 +171,9 @@ function ResetPasswordContent() {
               {isSubmitting ? 'Resetting...' : 'Reset password'}
             </Button>
 
-            <p className="text-center text-sm text-gray-600">
+            <p className="text-center text-sm text-muted-foreground">
               Need a new link?{' '}
-              <Link href="/forgot-password" className="font-medium text-blue-600 hover:text-blue-500">
+              <Link href="/forgot-password" className="font-medium text-primary hover:text-primary/80">
                 Request another
               </Link>
             </p>

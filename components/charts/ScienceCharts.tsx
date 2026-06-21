@@ -366,7 +366,7 @@ export const MFDComparisonChart = memo(function MFDComparisonChart({
         },
       }),
       xAxis: {
-        ...axis(c, { name: 'Magnitude (ML)', nameGap: 30 }),
+        ...axis(c, { name: 'Magnitude (M)', nameGap: 30 }),
         min: Math.floor(magnitudeRange.min),
         max: Math.ceil(magnitudeRange.max),
         axisLabel: { ...axis(c).axisLabel, formatter: (v: number) => `M${v}` },

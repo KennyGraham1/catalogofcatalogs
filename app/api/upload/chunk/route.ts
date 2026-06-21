@@ -54,6 +54,12 @@ export async function POST(request: NextRequest) {
         { status: 404 },
       );
     }
+    if (chunkIndex >= session.total_chunks) {
+      return NextResponse.json(
+        { error: `chunkIndex ${chunkIndex} is out of range for this upload (expected 0..${session.total_chunks - 1})` },
+        { status: 400 },
+      );
+    }
 
     const arrayBuffer = await chunkBlob.arrayBuffer();
     const buffer      = Buffer.from(arrayBuffer);

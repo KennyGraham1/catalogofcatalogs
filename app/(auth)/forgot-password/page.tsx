@@ -54,7 +54,7 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12 sm:px-6 lg:px-8">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold">Forgot password</CardTitle>
@@ -97,9 +97,9 @@ export default function ForgotPasswordPage() {
               {isSubmitting ? 'Sending link...' : 'Send reset link'}
             </Button>
 
-            <p className="text-center text-sm text-gray-600">
+            <p className="text-center text-sm text-muted-foreground">
               Remembered your password?{' '}
-              <Link href="/login" className="font-medium text-blue-600 hover:text-blue-500">
+              <Link href="/login" className="font-medium text-primary hover:text-primary/80">
                 Back to login
               </Link>
             </p>
