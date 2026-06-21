@@ -3,8 +3,6 @@
  * Provides consistent theming, colors, and styling across all charts
  */
 
-import type { ChartConfig } from '@/components/ui/chart';
-
 // Professional seismology color palette
 // Based on scientific visualization best practices and accessibility guidelines
 export const SEISMIC_COLORS = {
@@ -107,186 +105,6 @@ export const DEPTH_COLOR_SCALE = [
   { threshold: 700, color: '#7f1d1d' },  // Very deep - Dark red
 ] as const;
 
-// Chart styling constants
-export const CHART_STYLES = {
-  // Responsive font sizes
-  fontSize: {
-    tick: 11,
-    label: 12,
-    title: 14,
-    axis: 12,
-  },
-
-  // Spacing and margins
-  margin: {
-    compact: { top: 10, right: 10, left: 10, bottom: 10 },
-    default: { top: 20, right: 30, left: 20, bottom: 20 },
-    withLabels: { top: 20, right: 30, left: 60, bottom: 60 },
-  },
-
-  // Bar chart styling
-  bar: {
-    radius: [4, 4, 0, 0] as [number, number, number, number],
-    radiusHorizontal: [0, 4, 4, 0] as [number, number, number, number],
-  },
-
-  // Line chart styling
-  line: {
-    strokeWidth: 2,
-    activeDotRadius: 6,
-    dotRadius: 3,
-  },
-
-  // Scatter chart styling
-  scatter: {
-    opacity: 0.7,
-    strokeWidth: 1,
-  },
-
-  // Grid styling
-  grid: {
-    strokeDasharray: '3 3',
-    opacity: 0.6,
-  },
-
-  // Animation
-  animation: {
-    duration: 300,
-    easing: 'ease-out',
-  },
-} as const;
-
-// Pre-defined chart configurations for common use cases
-export const CHART_CONFIGS = {
-  magnitudeDistribution: {
-    count: {
-      label: 'Event Count',
-      theme: {
-        light: SEISMIC_COLORS.magnitude.light,
-        dark: SEISMIC_COLORS.magnitude.dark,
-      },
-    },
-  } satisfies ChartConfig,
-
-  depthDistribution: {
-    count: {
-      label: 'Event Count',
-      theme: {
-        light: SEISMIC_COLORS.depth.light,
-        dark: SEISMIC_COLORS.depth.dark,
-      },
-    },
-  } satisfies ChartConfig,
-
-  gutenbergRichter: {
-    observed: {
-      label: 'Observed',
-      theme: {
-        light: SEISMIC_COLORS.magnitude.light,
-        dark: SEISMIC_COLORS.magnitude.dark,
-      },
-    },
-    fitted: {
-      label: 'G-R Fit',
-      theme: {
-        light: SEISMIC_COLORS.fit.light,
-        dark: SEISMIC_COLORS.fit.dark,
-      },
-    },
-  } satisfies ChartConfig,
-
-  completeness: {
-    count: {
-      label: 'Event Count',
-      theme: {
-        light: SEISMIC_COLORS.frequency.light,
-        dark: SEISMIC_COLORS.frequency.dark,
-      },
-    },
-  } satisfies ChartConfig,
-
-  temporal: {
-    cumulativeCount: {
-      label: 'Cumulative Events',
-      theme: {
-        light: SEISMIC_COLORS.time.light,
-        dark: SEISMIC_COLORS.time.dark,
-      },
-    },
-    dailyCount: {
-      label: 'Daily Events',
-      theme: {
-        light: SEISMIC_COLORS.secondary.light,
-        dark: SEISMIC_COLORS.secondary.dark,
-      },
-    },
-  } satisfies ChartConfig,
-
-  moment: {
-    moment: {
-      label: 'Seismic Moment',
-      theme: {
-        light: SEISMIC_COLORS.energy.light,
-        dark: SEISMIC_COLORS.energy.dark,
-      },
-    },
-    cumulativeMoment: {
-      label: 'Cumulative Moment',
-      theme: {
-        light: SEISMIC_COLORS.energy.light,
-        dark: SEISMIC_COLORS.energy.dark,
-      },
-    },
-  } satisfies ChartConfig,
-
-  magnitudeDepth: {
-    events: {
-      label: 'Earthquakes',
-      theme: {
-        light: SEISMIC_COLORS.frequency.light,
-        dark: SEISMIC_COLORS.frequency.dark,
-      },
-    },
-  } satisfies ChartConfig,
-
-  timeline: {
-    count: {
-      label: 'Events',
-      theme: {
-        light: SEISMIC_COLORS.time.light,
-        dark: SEISMIC_COLORS.time.dark,
-      },
-    },
-  } satisfies ChartConfig,
-
-  region: {
-    count: {
-      label: 'Events',
-      theme: {
-        light: SEISMIC_COLORS.secondary.light,
-        dark: SEISMIC_COLORS.secondary.dark,
-      },
-    },
-  } satisfies ChartConfig,
-
-  mfd: {
-    count: {
-      label: 'Number of Events',
-      theme: {
-        light: SEISMIC_COLORS.frequency.light,
-        dark: SEISMIC_COLORS.frequency.dark,
-      },
-    },
-    cumulative: {
-      label: 'Cumulative Count (N≥M)',
-      theme: {
-        light: SEISMIC_COLORS.magnitude.light,
-        dark: SEISMIC_COLORS.magnitude.dark,
-      },
-    },
-  } satisfies ChartConfig,
-} as const;
-
 // Extended color palette for multiple catalogues in MFD comparison
 export const MFD_CATALOGUE_COLORS = [
   '#2563eb', // Blue
@@ -302,28 +120,6 @@ export const MFD_CATALOGUE_COLORS = [
   '#14b8a6', // Teal
   '#a855f7', // Purple
 ] as const;
-
-// Tooltip formatters
-export const TOOLTIP_FORMATTERS = {
-  magnitude: (value: number) => `M${value.toFixed(1)}`,
-  depth: (value: number) => `${value.toFixed(1)} km`,
-  count: (value: number) => value.toLocaleString(),
-  percentage: (value: number) => `${value.toFixed(1)}%`,
-  moment: (value: number) => `${value.toExponential(2)} N·m`,
-  date: (value: string) => new Date(value).toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  }),
-  dateTime: (value: string) => new Date(value).toLocaleString('en-GB', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }),
-};
 
 // Axis label formatters
 export const AXIS_FORMATTERS = {
@@ -342,6 +138,24 @@ export const AXIS_FORMATTERS = {
   }),
 };
 
+// Descriptive magnitude class (Richter-style bands) for tooltips/labels.
+export function magnitudeClass(m: number): string {
+  if (m < 2) return 'Micro';
+  if (m < 4) return 'Minor';
+  if (m < 5) return 'Light';
+  if (m < 6) return 'Moderate';
+  if (m < 7) return 'Strong';
+  if (m < 8) return 'Major';
+  return 'Great';
+}
+
+// Depth class per standard seismology (shallow < 70 km, intermediate 70-300, deep > 300).
+export function depthClass(km: number): string {
+  if (km < 70) return 'Shallow-focus';
+  if (km <= 300) return 'Intermediate-focus';
+  return 'Deep-focus';
+}
+
 // Get color for magnitude value
 export function getMagnitudeColor(magnitude: number): string {
   for (const { threshold, color } of MAGNITUDE_COLOR_SCALE) {
@@ -357,25 +171,6 @@ export function getDepthColor(depth: number): string {
   }
   return DEPTH_COLOR_SCALE[DEPTH_COLOR_SCALE.length - 1].color;
 }
-
-// Get color for quality grade
-export function getGradeColor(grade: string): string {
-  return SEISMIC_COLORS.grades[grade as keyof typeof SEISMIC_COLORS.grades] || '#6b7280';
-}
-
-// Custom tick component for professional styling
-export const customTickStyle = {
-  fontSize: CHART_STYLES.fontSize.tick,
-  fill: 'currentColor',
-  fontFamily: 'inherit',
-};
-
-// Professional axis label style
-export const axisLabelStyle = {
-  fontSize: CHART_STYLES.fontSize.label,
-  fill: 'currentColor',
-  fontWeight: 500,
-};
 
 // Chart export utilities
 export async function exportChartAsSVG(chartElement: HTMLElement, filename: string): Promise<void> {
@@ -433,6 +228,58 @@ export async function exportChartAsPNG(chartElement: HTMLElement, filename: stri
     };
     img.src = url;
   });
+}
+
+/**
+ * Export the chart's <svg> rasterised to a JPEG (white background, scaled for crispness).
+ */
+export async function exportChartAsJPEG(chartElement: HTMLElement, filename: string, scale = 2): Promise<void> {
+  const svgElement = chartElement.querySelector('svg');
+  if (!svgElement) return;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const svgData = new XMLSerializer().serializeToString(svgElement);
+  const img = new window.Image();
+  const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(svgBlob);
+  return new Promise((resolve) => {
+    img.onload = () => {
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob((blob) => {
+        if (blob) downloadBlob(blob, `${filename}.jpeg`);
+        URL.revokeObjectURL(url);
+        resolve();
+      }, 'image/jpeg', 0.95);
+    };
+    img.src = url;
+  });
+}
+
+/**
+ * Open the chart's <svg> in a new window and trigger the browser print dialog
+ * (which also covers "save as PDF" via the OS print-to-PDF option).
+ */
+export function printChartElement(chartElement: HTMLElement, title = 'Chart'): void {
+  const svgElement = chartElement.querySelector('svg');
+  if (!svgElement) return;
+  const svgData = new XMLSerializer().serializeToString(svgElement);
+  const win = window.open('', '_blank', 'width=1000,height=700');
+  if (!win) return;
+  win.document.write(
+    `<!DOCTYPE html><html><head><title>${title}</title>` +
+    `<style>html,body{margin:0;height:100%}body{display:flex;align-items:center;justify-content:center;background:#fff}svg{max-width:100%;height:auto}</style>` +
+    `</head><body>${svgData}</body></html>`
+  );
+  win.document.close();
+  win.focus();
+  // Give the new document a tick to lay out the SVG before printing.
+  setTimeout(() => { win.print(); }, 300);
 }
 
 export function exportDataAsJSON<T>(data: T, filename: string): void {

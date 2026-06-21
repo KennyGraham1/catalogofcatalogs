@@ -57,7 +57,7 @@ function setCache(key: string, result: any): void {
 
 // Gutenberg-Richter calculation
 function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: number, binWidth = 0.1) {
-  const filteredEvents = minMagnitude 
+  const filteredEvents = minMagnitude != null
     ? events.filter(e => e.magnitude >= minMagnitude)
     : events;
 
@@ -70,8 +70,10 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
   const maxMag = Math.ceil(Math.max(...magnitudes) / binWidth) * binWidth;
 
   const bins = new Map<number, number>();
-  for (let mag = minMag; mag <= maxMag; mag += binWidth) {
-    bins.set(Number(mag.toFixed(2)), 0);
+  // Index-based iteration so floating-point drift cannot drop the top bin.
+  const nBins = Math.round((maxMag - minMag) / binWidth) + 1;
+  for (let i = 0; i < nBins; i++) {
+    bins.set(Number((minMag + i * binWidth).toFixed(2)), 0);
   }
 
   filteredEvents.forEach(event => {
@@ -98,13 +100,34 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
   const n = cumulativeCounts.length;
   if (n < 3) return { error: 'Insufficient magnitude bins' };
 
-  // Maximum-likelihood b-value (Aki, 1965) with the Utsu binning correction;
-  // see the paper (Eq. 9). OLS on the cumulative FMD is biased and not used.
-  const mc = minMagnitude ?? minMag;
-  const meanMag = magnitudes.reduce((sum, m) => sum + m, 0) / magnitudes.length;
+  // Completeness magnitude Mc (MAXC; Wiemer & Wyss 2000, with the +0.2 correction
+  // of Woessner & Wiemer 2005) when no explicit cut-off is supplied. The Aki-Utsu
+  // MLE is only valid above Mc and the mean MUST be taken over events with M >= Mc;
+  // the previous code averaged the FULL (incomplete) magnitude array, biasing b.
+  // Uses the same +0.2 correction as lib/seismological-analysis.ts (was +0.05 here).
+  const MAXC_CORRECTION = 0.2;
+  let mc: number;
+  if (minMagnitude != null) {
+    mc = minMagnitude;
+  } else {
+    let peakMag = minMag;
+    let peakCount = -1;
+    for (const [mag, count] of sortedBins) {
+      if (count > peakCount) { peakCount = count; peakMag = mag; }
+    }
+    mc = Number((peakMag + MAXC_CORRECTION).toFixed(2));
+  }
+  let magsAboveMc = magnitudes.filter(m => m >= mc);
+  if (magsAboveMc.length < 10) {
+    mc = minMag;
+    magsAboveMc = magnitudes.filter(m => m >= mc);
+  }
+
+  // Maximum-likelihood b-value (Aki, 1965) with the Utsu binning correction.
+  const meanMag = magsAboveMc.reduce((sum, m) => sum + m, 0) / magsAboveMc.length;
   const bValue = Math.LOG10E / (meanMag - (mc - binWidth / 2));
-  const bUncertainty = bValue / Math.sqrt(magnitudes.length);
-  const aValue = Math.log10(magnitudes.length) + bValue * mc;
+  const bUncertainty = bValue / Math.sqrt(magsAboveMc.length);
+  const aValue = Math.log10(magsAboveMc.length) + bValue * mc;
 
   const meanY = cumulativeCounts.reduce((sum, p) => sum + p.logCount, 0) / n;
   const ssTotal = cumulativeCounts.reduce((sum, p) => sum + Math.pow(p.logCount - meanY, 2), 0);
@@ -114,15 +137,8 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
   }, 0);
   const rSquared = ssTotal > 0 ? 1 - (ssResidual / ssTotal) : 0;
 
-  // Estimate completeness magnitude (max curvature)
-  let maxCount = 0;
-  let completeness = minMag;
-  sortedBins.forEach(([mag, count]) => {
-    if (count > maxCount) {
-      maxCount = count;
-      completeness = mag;
-    }
-  });
+  // Completeness magnitude actually used for the b-value.
+  const completeness = mc;
 
   const fittedLine = cumulativeCounts.map(p => ({
     magnitude: p.magnitude,
@@ -132,7 +148,7 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
   return {
     bValue, // positive by construction (MLE)
     aValue,
-    completeness: completeness + binWidth * 0.5,
+    completeness,
     rSquared,
     bUncertainty,
     dataPoints: cumulativeCounts,
@@ -152,14 +168,16 @@ function estimateCompleteness(events: EarthquakeEvent[]) {
   const maxMag = Math.ceil(Math.max(...magnitudes) / binWidth) * binWidth;
 
   const distribution: { magnitude: number; count: number }[] = [];
-  for (let mag = minMag; mag <= maxMag; mag += binWidth) {
+  const nBins = Math.round((maxMag - minMag) / binWidth) + 1;
+  for (let i = 0; i < nBins; i++) {
+    const mag = Number((minMag + i * binWidth).toFixed(2));
     const count = events.filter(e =>
       e.magnitude >= mag && e.magnitude < mag + binWidth
     ).length;
-    distribution.push({ magnitude: Number(mag.toFixed(2)), count });
+    distribution.push({ magnitude: mag, count });
   }
 
-  // Find Mc using maximum curvature method
+  // Find Mc using the maximum-curvature method (peak of the non-cumulative FMD).
   let maxCount = 0;
   let mc = minMag;
   distribution.forEach(({ magnitude, count }) => {
@@ -169,7 +187,9 @@ function estimateCompleteness(events: EarthquakeEvent[]) {
     }
   });
 
-  mc += binWidth * 0.5; // Center of bin
+  // Standard MAXC correction (Woessner & Wiemer 2005), matching
+  // lib/seismological-analysis.ts (was a +0.05 half-bin shift here).
+  mc = Number((mc + 0.2).toFixed(2));
 
   const eventsAboveMc = events.filter(e => e.magnitude >= mc).length;
   const confidence = eventsAboveMc / events.length;
@@ -187,10 +207,12 @@ function estimateCompleteness(events: EarthquakeEvent[]) {
  * as compiled in Table 1 of van Stiphout et al. (2012).
  */
 function getGardnerKnopoffWindow(magnitude: number): { timeWindowDays: number; distanceWindowKm: number } {
-  // Two-branch Gardner-Knopoff time window: M >= 6.5 vs smaller events
+  // Two-branch Gardner-Knopoff time window (days): T = 10^(0.032*M + 2.7389) for
+  // M >= 6.5, otherwise T = 10^(0.5409*M - 0.547). Matches van Stiphout et al.
+  // (2012) Table 1 / OpenQuake hmtk. (Branches were previously swapped.)
   const timeWindowDays = magnitude >= 6.5
-    ? Math.pow(10, 0.5409 * magnitude - 0.547)
-    : Math.pow(10, 0.032 * magnitude + 2.7389);
+    ? Math.pow(10, 0.032 * magnitude + 2.7389)
+    : Math.pow(10, 0.5409 * magnitude - 0.547);
   // Gardner & Knopoff (1974) distance relation
   const distanceWindowKm = Math.pow(10, 0.1238 * magnitude + 0.983);
   return { timeWindowDays, distanceWindowKm };

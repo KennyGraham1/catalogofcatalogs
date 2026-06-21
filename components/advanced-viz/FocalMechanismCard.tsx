@@ -5,11 +5,12 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Compass, Layers, TrendingDown } from 'lucide-react';
 import { TechnicalTermTooltip } from '@/components/ui/info-tooltip';
-import { 
-  FocalMechanism, 
-  generateBeachBallDiagram,
-  getFaultType 
+import {
+  FocalMechanism,
+  getFaultType,
+  computeBeachball,
 } from '@/lib/focal-mechanism-utils';
+import { Beachball } from './Beachball';
 
 interface FocalMechanismCardProps {
   mechanism: FocalMechanism;
@@ -28,7 +29,7 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
   }
 
   const faultType = getFaultType(mechanism.nodalPlane1.rake);
-  const beachBallDiagram = generateBeachBallDiagram(mechanism, 200);
+  const beachball = computeBeachball(mechanism, 200);
 
   return (
     <Card>
@@ -40,38 +41,16 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
         <CardDescription>{faultType.description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Beach Ball Diagram */}
-        <div className="flex justify-center p-4 bg-muted rounded-lg">
-          {beachBallDiagram && (
-            <svg
-              width={beachBallDiagram.size}
-              height={beachBallDiagram.size}
-              viewBox={`0 0 ${beachBallDiagram.size} ${beachBallDiagram.size}`}
-              xmlns="http://www.w3.org/2000/svg"
-              aria-label="Focal mechanism beach ball diagram"
-              role="img"
-            >
-              <circle
-                cx={beachBallDiagram.center}
-                cy={beachBallDiagram.center}
-                r={beachBallDiagram.radius * 0.95}
-                fill="white"
-                stroke="black"
-                strokeWidth="2"
-              />
-              {beachBallDiagram.compressionalPaths.map((path, index) => (
-                <path key={index} d={path} fill="black" />
-              ))}
-              <circle
-                cx={beachBallDiagram.center}
-                cy={beachBallDiagram.center}
-                r={beachBallDiagram.radius * 0.95}
-                fill="none"
-                stroke="black"
-                strokeWidth="2"
-              />
-            </svg>
+        {/* Beach Ball Diagram (lower-hemisphere equal-area, compressional shaded) */}
+        <div className="flex flex-col items-center gap-2 p-4 bg-muted rounded-lg">
+          <Beachball mechanism={mechanism} size={200} showAxes />
+          {beachball && (
+            <div className="flex gap-6 text-xs text-muted-foreground font-mono">
+              <span title="Pressure axis azimuth/plunge">P {beachball.pAxis.azimuth.toFixed(0)}°/{beachball.pAxis.plunge.toFixed(0)}°</span>
+              <span title="Tension axis azimuth/plunge">T {beachball.tAxis.azimuth.toFixed(0)}°/{beachball.tAxis.plunge.toFixed(0)}°</span>
+            </div>
           )}
+          <p className="text-[10px] text-muted-foreground">Blue = compressional · lines = nodal planes</p>
         </div>
 
         {/* Nodal Planes */}

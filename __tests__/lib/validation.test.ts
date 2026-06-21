@@ -319,16 +319,18 @@ describe('Data Quality Assessment', () => {
       expect(checks.some(c => c.severity === 'error' && c.field === 'latitude_bounds')).toBe(true);
     });
 
-    it('should detect inverted longitude bounds', () => {
+    it('should accept an antimeridian-crossing box (minLon > maxLon) as valid', () => {
+      // RFC 7946 §5.2: a box from 178°E east across 180° to -178° (i.e. 182°E) is a
+      // tight ~4°-wide box, not an "inverted" error. NZ offshore catalogues need this.
       const bounds = {
-        minLat: -47,
-        maxLat: -34,
-        minLon: 179,
-        maxLon: 166, // Inverted
+        minLat: -32,
+        maxLat: -28,
+        minLon: 178,
+        maxLon: -178,
       };
 
       const checks = validateGeographicBounds(bounds);
-      expect(checks.some(c => c.severity === 'error' && c.field === 'longitude_bounds')).toBe(true);
+      expect(checks.filter(c => c.severity === 'error')).toHaveLength(0);
     });
 
     it('should detect unusually large bounds', () => {

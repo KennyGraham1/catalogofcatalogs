@@ -496,12 +496,12 @@ describe('Weighted Location Averaging', () => {
         quakeml: {
           origins: [{
             uncertainty: {
-              horizontalUncertainty: 2.0, // 2 km
+              horizontalUncertainty: 2000, // 2 km — QuakeML horizontalUncertainty is in METRES
             },
           }],
         },
       });
-      // Weight should be 1/2 = 0.5
+      // 2000 m = 2 km -> weight 1/2 = 0.5
       expect(getLocationWeight(event)).toBeCloseTo(0.5, 2);
     });
 
@@ -1094,7 +1094,7 @@ describe('Magnitude Conversion', () => {
   });
 
   describe('convertMLtoMw', () => {
-    it('should convert ML to Mw using Scordilis relationship', () => {
+    it('should convert ML to Mw using the approximate generic relation', () => {
       const result = convertMLtoMw(5.0);
       // Mw = 0.67 * 5.0 + 1.17 = 4.52
       expect(result.value).toBeCloseTo(4.52, 1);

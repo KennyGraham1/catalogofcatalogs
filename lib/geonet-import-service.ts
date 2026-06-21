@@ -9,9 +9,10 @@
  */
 
 import { geonetClient, GeoNetEventText } from './geonet-client';
+import { fetchTimeWindowChunked } from './geonet-chunking';
 import { dbQueries, MergedEvent } from './db';
 import { createId } from './id';
-import { extractBoundsFromMergedEvents } from './geo-bounds-utils';
+import { extractBoundsFromMergedEvents, boundsFromLatLon, unionBounds } from './geo-bounds-utils';
 import pLimit from 'p-limit';
 import { Builder } from 'xml2js';
 
@@ -223,13 +224,20 @@ export class GeoNetImportService {
           const importedEventsBounds = this.calculateBoundsFromGeoNetEvents(events);
 
           if (importedEventsBounds && catalogue) {
-            // Merge imported bounds with existing catalogue bounds
-            const mergedBounds = {
-              minLatitude: Math.min(importedEventsBounds.minLatitude, catalogue.min_latitude ?? 90),
-              maxLatitude: Math.max(importedEventsBounds.maxLatitude, catalogue.max_latitude ?? -90),
-              minLongitude: Math.min(importedEventsBounds.minLongitude, catalogue.min_longitude ?? 180),
-              maxLongitude: Math.max(importedEventsBounds.maxLongitude, catalogue.max_longitude ?? -180),
-            };
+            // Merge imported bounds with existing catalogue bounds. Use an
+            // antimeridian-aware union — plain Math.min/Math.max on longitude would
+            // destroy the west>east crossing convention and store a globe-spanning box.
+            const hasExisting =
+              catalogue.min_latitude != null && catalogue.max_latitude != null &&
+              catalogue.min_longitude != null && catalogue.max_longitude != null;
+            const mergedBounds = hasExisting
+              ? unionBounds(importedEventsBounds, {
+                  minLatitude: catalogue.min_latitude as number,
+                  maxLatitude: catalogue.max_latitude as number,
+                  minLongitude: catalogue.min_longitude as number,
+                  maxLongitude: catalogue.max_longitude as number,
+                })
+              : importedEventsBounds;
 
             await getDbQueries().updateCatalogueGeoBounds(
               catalogueId,
@@ -320,10 +328,8 @@ export class GeoNetImportService {
       startDate = new Date(endDate.getTime() - 24 * 60 * 60 * 1000);
     }
 
-    // Fetch events
-    const events = await geonetClient.fetchEventsText({
-      starttime: startDate.toISOString(),
-      endtime: endDate.toISOString(),
+    // Non-time query parameters (the time window is supplied per chunk below).
+    const baseParams = {
       minmagnitude: options.minMagnitude,
       maxmagnitude: options.maxMagnitude,
       mindepth: options.minDepth,
@@ -332,10 +338,24 @@ export class GeoNetImportService {
       maxlatitude: options.maxLatitude,
       minlongitude: options.minLongitude,
       maxlongitude: options.maxLongitude,
-      orderby: 'time',
-    });
+      orderby: 'time' as const,
+    };
 
-    return events;
+    // GeoNet's FDSN event service caps a result set at 10,000 events and returns
+    // HTTP 413 for any query that would exceed it, so broad imports must be split
+    // into smaller time windows (NZ produces well over 10k located events/year).
+    return fetchTimeWindowChunked(
+      (starttime, endtime) => geonetClient.fetchEventsText({ ...baseParams, starttime, endtime }),
+      (ev) => ev.EventID,
+      startDate,
+      endDate,
+      {
+        onSplit: (s, e) =>
+          console.warn(
+            `[GeoNetImport] 10k-event cap hit for ${s.toISOString()}..${e.toISOString()}; subdividing time window.`
+          ),
+      }
+    );
   }
 
   /**
@@ -352,24 +372,9 @@ export class GeoNetImportService {
       return null;
     }
 
-    let minLat = 90;
-    let maxLat = -90;
-    let minLon = 180;
-    let maxLon = -180;
-
-    for (const event of events) {
-      if (event.Latitude < minLat) minLat = event.Latitude;
-      if (event.Latitude > maxLat) maxLat = event.Latitude;
-      if (event.Longitude < minLon) minLon = event.Longitude;
-      if (event.Longitude > maxLon) maxLon = event.Longitude;
-    }
-
-    return {
-      minLatitude: minLat,
-      maxLatitude: maxLat,
-      minLongitude: minLon,
-      maxLongitude: maxLon,
-    };
+    // Antimeridian-aware (NZ Kermadec events straddle 180): a tight crossing box
+    // uses minLongitude > maxLongitude rather than a globe-spanning naive min/max.
+    return boundsFromLatLon(events.map((e) => ({ lat: e.Latitude, lon: e.Longitude })));
   }
 
   /**

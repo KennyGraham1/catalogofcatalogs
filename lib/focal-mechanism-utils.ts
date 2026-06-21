@@ -15,19 +15,6 @@ export interface FocalMechanism {
   preferredPlane?: 1 | 2;
 }
 
-export interface BeachBallPoint {
-  x: number;
-  y: number;
-  isCompressional: boolean;
-}
-
-export interface BeachBallDiagram {
-  size: number;
-  center: number;
-  radius: number;
-  compressionalPaths: string[];
-}
-
 function finiteNumber(value: unknown, fallback: number = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
@@ -88,153 +75,248 @@ export function parseFocalMechanism(focalMechanismsJson: string | null | undefin
   }
 }
 
-/**
- * Convert strike, dip, rake to SVG path for beach ball diagram
- * Uses lower-hemisphere equal-area projection
- */
-export function generateBeachBallSVG(
-  mechanism: FocalMechanism,
-  size: number = 100
-): string {
-  const diagram = generateBeachBallDiagram(mechanism, size);
-  if (!diagram) return '';
+// ===========================================================================
+// Correct double-couple beach ball (Aki & Richards, 1980)
+//
+// We build the unit moment tensor in (North, East, Down) coordinates from
+// (strike, dip, rake), then shade the focal sphere by the sign of the P-wave
+// first motion f(r) = r·M·r in a lower-hemisphere EQUAL-AREA (Schmidt)
+// projection. Compressional (f > 0, first motion "up") area is filled and
+// contains the T (tension) axis; the two nodal planes are drawn as great
+// circles. This matches obspy.imaging.beachball / GMT psmeca conventions.
+// ===========================================================================
 
-  const { center, radius, compressionalPaths } = diagram;
-  const pathElements = compressionalPaths.map(path => `<path d="${path}" fill="black"/>`).join('');
-  return `<svg width="${diagram.size}" height="${diagram.size}" viewBox="0 0 ${diagram.size} ${diagram.size}" xmlns="http://www.w3.org/2000/svg"><circle cx="${center}" cy="${center}" r="${radius * 0.95}" fill="white" stroke="black" stroke-width="2"/>${pathElements}<circle cx="${center}" cy="${center}" r="${radius * 0.95}" fill="none" stroke="black" stroke-width="2"/></svg>`;
+type V3 = [number, number, number];
+const DEG = Math.PI / 180;
+const cross3 = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const normalize3 = (a: V3): V3 => {
+  const n = Math.hypot(a[0], a[1], a[2]) || 1;
+  return [a[0] / n, a[1] / n, a[2] / n];
+};
+
+export interface AxisProjection { x: number; y: number; azimuth: number; plunge: number }
+
+export interface BeachballGeometry {
+  size: number;
+  center: number;
+  radius: number;
+  /** Single filled SVG path covering all compressional (first-motion up) area. */
+  compressionalPath: string;
+  /** The two nodal-plane great-circle traces (lower hemisphere) as polyline paths. */
+  nodalPaths: string[];
+  pAxis: AxisProjection; // pressure axis (in dilatational area)
+  tAxis: AxisProjection; // tension axis (in compressional area)
 }
 
-export function generateBeachBallDiagram(
-  mechanism: FocalMechanism,
-  size: number = 100
-): BeachBallDiagram | null {
-  if (!mechanism.nodalPlane1) return null;
-  
-  const strike = finiteNumber(mechanism.nodalPlane1.strike);
-  const dip = finiteNumber(mechanism.nodalPlane1.dip);
-  const rake = finiteNumber(mechanism.nodalPlane1.rake);
-  const normalizedSize = Math.max(1, finiteNumber(size, 100));
-  const radius = normalizedSize / 2;
-  const center = radius;
-  
-  // Convert to radians
-  const strikeRad = (strike * Math.PI) / 180;
-  const dipRad = (dip * Math.PI) / 180;
-  const rakeRad = (rake * Math.PI) / 180;
-  
-  // Calculate nodal plane positions
-  const points: BeachBallPoint[] = [];
-  const numPoints = 360;
-  
-  for (let i = 0; i < numPoints; i++) {
-    const azimuth = (i * 2 * Math.PI) / numPoints;
-    
-    // Project point onto lower hemisphere
-    const x = Math.sin(azimuth);
-    const y = Math.cos(azimuth);
-    
-    // Determine if point is in compressional (black) or tensional (white) quadrant
-    const isCompressional = isPointCompressional(azimuth, strikeRad, dipRad, rakeRad);
-    
-    points.push({
-      x: center + x * radius * 0.95,
-      y: center + y * radius * 0.95,
-      isCompressional
-    });
+/** Unit moment tensor in (N, E, Down) from strike/dip/rake (Aki & Richards 1980, eq. 4.29). */
+function momentTensorNED(strike: number, dip: number, rake: number): number[][] {
+  const s = strike * DEG, d = dip * DEG, r = rake * DEG;
+  const sind = Math.sin(d), cosd = Math.cos(d), sin2d = Math.sin(2 * d), cos2d = Math.cos(2 * d);
+  const sinr = Math.sin(r), cosr = Math.cos(r);
+  const sins = Math.sin(s), coss = Math.cos(s), sin2s = Math.sin(2 * s), cos2s = Math.cos(2 * s);
+  const Mnn = -(sind * cosr * sin2s + sin2d * sinr * sins * sins);
+  const Mee = sind * cosr * sin2s - sin2d * sinr * coss * coss;
+  const Mdd = sin2d * sinr;
+  const Mne = sind * cosr * cos2s + 0.5 * sin2d * sinr * sin2s;
+  const Mnd = -(cosd * cosr * coss + cos2d * sinr * sins);
+  const Med = -(cosd * cosr * sins - cos2d * sinr * coss);
+  return [
+    [Mnn, Mne, Mnd],
+    [Mne, Mee, Med],
+    [Mnd, Med, Mdd],
+  ];
+}
+
+/** P-wave first-motion amplitude r·M·r. */
+function radiation(M: number[][], v: V3): number {
+  return (
+    v[0] * (M[0][0] * v[0] + M[0][1] * v[1] + M[0][2] * v[2]) +
+    v[1] * (M[1][0] * v[0] + M[1][1] * v[1] + M[1][2] * v[2]) +
+    v[2] * (M[2][0] * v[0] + M[2][1] * v[1] + M[2][2] * v[2])
+  );
+}
+
+/** Fault normal n and slip u in (N, E, Down). */
+function normalAndSlip(strike: number, dip: number, rake: number): { n: V3; u: V3 } {
+  const s = strike * DEG, d = dip * DEG, r = rake * DEG;
+  const n: V3 = [-Math.sin(d) * Math.sin(s), Math.sin(d) * Math.cos(s), -Math.cos(d)];
+  const u: V3 = [
+    Math.cos(r) * Math.cos(s) + Math.sin(r) * Math.cos(d) * Math.sin(s),
+    Math.cos(r) * Math.sin(s) - Math.sin(r) * Math.cos(d) * Math.cos(s),
+    -Math.sin(r) * Math.sin(d),
+  ];
+  return { n: normalize3(n), u: normalize3(u) };
+}
+
+/** Equal-area projection of a unit vector to the lower hemisphere (flips up vectors when allowed). */
+function projectLower(v: V3, cx: number, cy: number, R: number, allowFlip = false): { x: number; y: number } | null {
+  let [vn, ve, vd] = v;
+  if (vd < 0) {
+    if (!allowFlip) return null;
+    vn = -vn; ve = -ve; vd = -vd;
   }
-  
-  // Generate SVG paths for compressional quadrants
-  const compressionalPaths: string[] = [];
-  let currentPath: BeachBallPoint[] = [];
-  let inCompressionalZone = false;
-  
-  for (let i = 0; i <= numPoints; i++) {
-    const point = points[i % numPoints];
-    
-    if (point.isCompressional) {
-      if (!inCompressionalZone) {
-        currentPath = [point];
-        inCompressionalZone = true;
-      } else {
-        currentPath.push(point);
-      }
-    } else {
-      if (inCompressionalZone && currentPath.length > 0) {
-        compressionalPaths.push(pointsToPath(currentPath, center, radius));
-        currentPath = [];
-        inCompressionalZone = false;
+  const theta = Math.acos(Math.min(1, Math.max(-1, vd))); // angle from nadir
+  const rho = Math.SQRT2 * Math.sin(theta / 2); // Schmidt radius (0 at nadir, 1 at horizontal)
+  const az = Math.atan2(ve, vn);
+  return { x: cx + R * rho * Math.sin(az), y: cy - R * rho * Math.cos(az) };
+}
+
+/** azimuth (deg from N, clockwise) and plunge (deg below horizontal) of an axis. */
+function axisInfo(v: V3): { azimuth: number; plunge: number } {
+  let d = v;
+  if (d[2] < 0) d = [-d[0], -d[1], -d[2]];
+  const plunge = Math.asin(Math.min(1, Math.max(-1, d[2]))) / DEG;
+  let az = Math.atan2(d[1], d[0]) / DEG;
+  if (az < 0) az += 360;
+  return { azimuth: az, plunge };
+}
+
+/** Filled compressional region, sampled by radiation sign and merged into one path. */
+function buildCompressionalPath(M: number[][], cx: number, cy: number, R: number): string {
+  const azStep = 2 * DEG;
+  const rSteps = 48;
+  const proj = (rho: number, ang: number) =>
+    `${(cx + R * rho * Math.sin(ang)).toFixed(2)} ${(cy - R * rho * Math.cos(ang)).toFixed(2)}`;
+  let d = '';
+  for (let a = 0; a < 2 * Math.PI - 1e-9; a += azStep) {
+    const amid = a + azStep / 2;
+    const intervals: [number, number][] = [];
+    let start = -1;
+    for (let k = 0; k <= rSteps; k++) {
+      const rho = k / rSteps;
+      const theta = 2 * Math.asin(Math.min(1, rho / Math.SQRT2));
+      const sinT = Math.sin(theta), cosT = Math.cos(theta);
+      const v: V3 = [sinT * Math.cos(amid), sinT * Math.sin(amid), cosT];
+      const compressional = radiation(M, v) > 0;
+      if (compressional && start < 0) start = Math.max(0, (k - 0.5) / rSteps);
+      if (!compressional && start >= 0) {
+        intervals.push([start, (k - 0.5) / rSteps]);
+        start = -1;
       }
     }
+    if (start >= 0) intervals.push([start, 1]);
+    for (const [r1, r2] of intervals) {
+      d += `M ${proj(r1, a)} L ${proj(r2, a)} L ${proj(r2, a + azStep)} L ${proj(r1, a + azStep)} Z `;
+    }
   }
-  
-  if (currentPath.length > 0) {
-    compressionalPaths.push(pointsToPath(currentPath, center, radius));
+  return d.trim();
+}
+
+/** Great-circle trace of the plane whose pole is `pole`, clipped to the lower hemisphere. */
+function nodalPath(pole: V3, cx: number, cy: number, R: number): string {
+  const ref: V3 = Math.abs(pole[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+  const e1 = normalize3(cross3(pole, ref));
+  const e2 = normalize3(cross3(pole, e1));
+  const N = 240;
+  let d = '';
+  let pen = false;
+  for (let i = 0; i <= N; i++) {
+    const t = (i / N) * 2 * Math.PI;
+    const ct = Math.cos(t), st = Math.sin(t);
+    const v: V3 = [ct * e1[0] + st * e2[0], ct * e1[1] + st * e2[1], ct * e1[2] + st * e2[2]];
+    const pt = projectLower(v, cx, cy, R);
+    if (!pt) { pen = false; continue; }
+    d += `${pen ? 'L' : 'M'} ${pt.x.toFixed(2)} ${pt.y.toFixed(2)} `;
+    pen = true;
   }
-  
+  return d.trim();
+}
+
+/** Compute the full beach-ball geometry for the preferred nodal plane. */
+export function computeBeachball(mechanism: FocalMechanism, size: number = 100): BeachballGeometry | null {
+  // The double-couple beach ball is identical for either nodal plane; honour the
+  // preferred plane when set, and fall back to whichever plane is available.
+  const plane =
+    mechanism.preferredPlane === 2 && mechanism.nodalPlane2
+      ? mechanism.nodalPlane2
+      : mechanism.nodalPlane1 ?? mechanism.nodalPlane2;
+  if (!plane) return null;
+  const strike = finiteNumber(plane.strike);
+  const dip = finiteNumber(plane.dip);
+  const rake = finiteNumber(plane.rake);
+  const s = Math.max(8, finiteNumber(size, 100));
+  const center = s / 2;
+  const R = center - Math.max(2, s * 0.04);
+
+  const M = momentTensorNED(strike, dip, rake);
+  const { n, u } = normalAndSlip(strike, dip, rake);
+  const T = normalize3([n[0] + u[0], n[1] + u[1], n[2] + u[2]]); // tension
+  const P = normalize3([n[0] - u[0], n[1] - u[1], n[2] - u[2]]); // pressure
+  const tPt = projectLower(T, center, center, R, true)!;
+  const pPt = projectLower(P, center, center, R, true)!;
+
   return {
-    size: normalizedSize,
+    size: s,
     center,
-    radius,
-    compressionalPaths,
+    radius: R,
+    compressionalPath: buildCompressionalPath(M, center, center, R),
+    nodalPaths: [nodalPath(n, center, center, R), nodalPath(u, center, center, R)],
+    tAxis: { ...tPt, ...axisInfo(T) },
+    pAxis: { ...pPt, ...axisInfo(P) },
   };
 }
 
-/**
- * Determine if a point is in a compressional quadrant
- */
-function isPointCompressional(
-  azimuth: number,
-  strike: number,
-  dip: number,
-  rake: number
-): boolean {
-  // Simplified calculation for double-couple mechanism
-  // This is a basic implementation - a full implementation would use
-  // proper seismological transformations
-  
-  // Calculate the angle relative to the strike
-  let relativeAngle = azimuth - strike;
-  while (relativeAngle < 0) relativeAngle += 2 * Math.PI;
-  while (relativeAngle >= 2 * Math.PI) relativeAngle -= 2 * Math.PI;
-  
-  // Determine quadrant based on rake
-  // Rake > 0: reverse fault, Rake < 0: normal fault, Rake ≈ 0 or ±180: strike-slip
-  const isReverse = rake > 45 && rake < 135;
-  const isNormal = rake < -45 && rake > -135;
-  const isStrikeSlip = Math.abs(rake) < 45 || Math.abs(rake) > 135;
-  
-  if (isStrikeSlip) {
-    // Strike-slip: alternating quadrants
-    return (relativeAngle > Math.PI / 2 && relativeAngle < 3 * Math.PI / 2);
-  } else if (isReverse) {
-    // Reverse fault: compressional in center
-    return (relativeAngle < Math.PI / 2 || relativeAngle > 3 * Math.PI / 2);
-  } else if (isNormal) {
-    // Normal fault: tensional in center
-    return (relativeAngle > Math.PI / 2 && relativeAngle < 3 * Math.PI / 2);
-  }
-  
-  // Default pattern
-  return (relativeAngle > Math.PI / 2 && relativeAngle < 3 * Math.PI / 2);
+export interface BeachballStyle {
+  fill?: string;        // compressional fill
+  background?: string;  // dilatational background
+  stroke?: string;      // outline + nodal planes
+  showAxes?: boolean;   // draw P/T markers
 }
 
 /**
- * Convert array of points to SVG path
+ * Render a correct double-couple beach ball as a standalone SVG string
+ * (used for Leaflet markers and anywhere a string is needed).
  */
-function pointsToPath(points: BeachBallPoint[], center: number, radius: number): string {
-  if (points.length === 0) return '';
-  
-  let path = `M ${points[0].x} ${points[0].y}`;
-  
-  for (let i = 1; i < points.length; i++) {
-    path += ` L ${points[i].x} ${points[i].y}`;
+// Bounded memo cache: map markers re-render the same mechanisms on every pan/zoom.
+const beachballSvgCache = new Map<string, string>();
+const BEACHBALL_CACHE_MAX = 500;
+
+export function generateBeachBallSVG(
+  mechanism: FocalMechanism,
+  size: number = 100,
+  style: BeachballStyle = {}
+): string {
+  const np =
+    mechanism.preferredPlane === 2 && mechanism.nodalPlane2
+      ? mechanism.nodalPlane2
+      : mechanism.nodalPlane1 ?? mechanism.nodalPlane2;
+  const cacheKey = np
+    ? `${np.strike}|${np.dip}|${np.rake}|${size}|${style.fill ?? ''}|${style.background ?? ''}|${style.stroke ?? ''}|${style.showAxes ? 1 : 0}`
+    : '';
+  if (cacheKey) {
+    const hit = beachballSvgCache.get(cacheKey);
+    if (hit !== undefined) return hit;
   }
-  
-  // Close the path by connecting to the arc on the circle
-  path += ` A ${radius * 0.95} ${radius * 0.95} 0 0 1 ${points[0].x} ${points[0].y}`;
-  path += ' Z';
-  
-  return path;
+  const g = computeBeachball(mechanism, size);
+  if (!g) return '';
+  const fill = style.fill ?? '#1f2937';
+  const background = style.background ?? '#ffffff';
+  const stroke = style.stroke ?? '#111827';
+  const clip = `bbclip${Math.round(g.radius)}`;
+  const axes = style.showAxes
+    ? `<circle cx="${g.tAxis.x.toFixed(1)}" cy="${g.tAxis.y.toFixed(1)}" r="${(g.radius * 0.07).toFixed(1)}" fill="${background}" stroke="${stroke}"/>` +
+      `<text x="${g.tAxis.x.toFixed(1)}" y="${(g.tAxis.y + g.radius * 0.045).toFixed(1)}" font-size="${(g.radius * 0.13).toFixed(1)}" text-anchor="middle" fill="${stroke}" font-family="sans-serif">T</text>` +
+      `<circle cx="${g.pAxis.x.toFixed(1)}" cy="${g.pAxis.y.toFixed(1)}" r="${(g.radius * 0.07).toFixed(1)}" fill="${fill}" stroke="${stroke}"/>` +
+      `<text x="${g.pAxis.x.toFixed(1)}" y="${(g.pAxis.y + g.radius * 0.045).toFixed(1)}" font-size="${(g.radius * 0.13).toFixed(1)}" text-anchor="middle" fill="${background}" font-family="sans-serif">P</text>`
+    : '';
+  const svg =
+    `<svg width="${g.size}" height="${g.size}" viewBox="0 0 ${g.size} ${g.size}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Focal mechanism beach ball">` +
+    `<defs><clipPath id="${clip}"><circle cx="${g.center}" cy="${g.center}" r="${g.radius}"/></clipPath></defs>` +
+    `<circle cx="${g.center}" cy="${g.center}" r="${g.radius}" fill="${background}"/>` +
+    `<g clip-path="url(#${clip})"><path d="${g.compressionalPath}" fill="${fill}"/>` +
+    g.nodalPaths.map((p) => `<path d="${p}" fill="none" stroke="${stroke}" stroke-width="${Math.max(1, g.radius * 0.02).toFixed(1)}"/>`).join('') +
+    `</g>` +
+    `<circle cx="${g.center}" cy="${g.center}" r="${g.radius}" fill="none" stroke="${stroke}" stroke-width="${Math.max(1.5, g.radius * 0.025).toFixed(1)}"/>` +
+    axes +
+    `</svg>`;
+  if (cacheKey) {
+    if (beachballSvgCache.size >= BEACHBALL_CACHE_MAX) {
+      const oldest = beachballSvgCache.keys().next().value;
+      if (oldest !== undefined) beachballSvgCache.delete(oldest);
+    }
+    beachballSvgCache.set(cacheKey, svg);
+  }
+  return svg;
 }
 
 /**

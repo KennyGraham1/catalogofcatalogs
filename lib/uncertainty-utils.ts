@@ -39,18 +39,25 @@ export function calculateUncertaintyEllipse(data: UncertaintyData): UncertaintyE
   const latUncertaintyMeters = (latitude_uncertainty || 0) * 111000;
   const lonUncertaintyMeters = (longitude_uncertainty || 0) * 111000 * Math.cos(latitude * Math.PI / 180);
 
-  // Use the larger uncertainty as semi-major axis, smaller as semi-minor
+  // APPROXIMATION: this builds an axis-aligned ellipse from the independent
+  // latitude/longitude uncertainties. It is NOT a true error ellipse — that would
+  // require the lat/lon covariance (or the QuakeML OriginUncertainty confidence
+  // ellipse: semiMajor/semiMinor axes + majorAxisAzimuth) and an eigen-decomposition.
+  // Without the covariance term the true major-axis azimuth is generally not 0/90.
   const semiMajorAxis = Math.max(latUncertaintyMeters, lonUncertaintyMeters);
   const semiMinorAxis = Math.min(latUncertaintyMeters, lonUncertaintyMeters);
 
-  // Calculate rotation (0 if uncertainties are equal)
-  const rotation = latUncertaintyMeters > lonUncertaintyMeters ? 0 : 90;
+  // Orientation must match the renderer (generateEllipsePoints), where rotation=0
+  // puts the semi-major axis along EAST-WEST (longitude). So when LATITUDE (N-S)
+  // uncertainty dominates, rotate the major axis to N-S (90 deg); otherwise 0.
+  // (This was previously inverted, drawing N-S-uncertain locations elongated E-W.)
+  const rotation = latUncertaintyMeters > lonUncertaintyMeters ? 90 : 0;
 
-  // Calculate confidence based on azimuthal gap (if available)
-  let confidence = 0.68; // Default to 1-sigma (68% confidence)
+  // HEURISTIC "confidence": this is NOT a statistical confidence level. It is a
+  // 0-1 display heuristic derived from the azimuthal gap (better gap -> higher
+  // value). It does not correspond to a 68%/95% confidence region.
+  let confidence = 0.68;
   if (data.azimuthal_gap !== null && data.azimuthal_gap !== undefined) {
-    // Better azimuthal gap = higher confidence
-    // Gap < 90° = high confidence, Gap > 270° = low confidence
     confidence = Math.max(0.3, Math.min(0.95, 1 - (data.azimuthal_gap / 360)));
   }
 

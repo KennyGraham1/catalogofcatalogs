@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { dedupeById } from '@/lib/utils';
 import { MapContainer, Circle, Popup, GeoJSON } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { Card } from '@/components/ui/card';
@@ -14,7 +15,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
 import { useMapColors } from '@/hooks/use-map-theme';
-import { calculateQualityScore, QualityMetrics, getQualityColor } from '@/lib/quality-scoring';
+import { calculateQualityScore, getQualityColor, metricsFromEvent } from '@/lib/quality-scoring';
 import { getMagnitudeRadius, getMagnitudeColor, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 import { useNearbyFaults } from '@/hooks/use-nearby-faults';
 import { loadFaultData, getFaultsInBounds, simplifyFaultsForZoom, FaultCollection, FaultFeature } from '@/lib/fault-data';
@@ -121,7 +122,7 @@ export default function UnifiedEarthquakeMap({
   const qualityScores = useMemo(() => {
     return sampledEarthquakes.map(event => ({
       eventId: event.id,
-      score: calculateQualityScore(event as QualityMetrics)
+      score: calculateQualityScore(metricsFromEvent(event))
     }));
   }, [sampledEarthquakes]);
 
@@ -283,8 +284,12 @@ export default function UnifiedEarthquakeMap({
           )}
 
           {/* Earthquake markers - using intelligent sampling for performance */}
-          {/* Sort by magnitude (small to large) so larger events render on top */}
-          {[...sampledEarthquakes].sort((a, b) => a.magnitude - b.magnitude).map((eq) => {
+          {/* De-duplicate by event id (the source may contain repeated records, which
+              would otherwise draw overlapping markers and break React's unique-key rule),
+              then sort by magnitude (small to large) so larger events render on top. */}
+          {dedupeById(sampledEarthquakes)
+            .sort((a, b) => a.magnitude - b.magnitude)
+            .map((eq, index) => {
             const eventDate = new Date(eq.time).toLocaleDateString('en-GB', {
               day: '2-digit',
               month: '2-digit',
@@ -294,7 +299,7 @@ export default function UnifiedEarthquakeMap({
 
             return (
               <Circle
-                key={eq.id}
+                key={eq.id ?? `eq-${index}`}
                 center={[eq.latitude, eq.longitude]}
                 radius={getMagnitudeRadius(eq.magnitude)}
                 pathOptions={{

@@ -244,14 +244,35 @@ function parseGeoJSONFeature(
     return null;
   }
 
-  const [longitude, latitude, depth] = feature.geometry.coordinates;
+  const [longitude, latitude, thirdCoord] = feature.geometry.coordinates;
   const props = feature.properties || {};
+
+  // Resolve depth (km, positive down). The GeoJSON third coordinate is ambiguous across producers:
+  //   * RFC 7946 §3.1.1 (and this app's own GeoJSON exporter): elevation in METRES, positive up —
+  //     so a hypocentre at depth d km is encoded as -d*1000.
+  //   * USGS/ComCat & GeoNet feeds: depth in KM, positive down.
+  // Disambiguate by sign/magnitude: a value that is negative or |z| > 1000 cannot be a km depth
+  // (deepest events are ~700 km), so treat it as elevation-in-metres and convert; otherwise treat it
+  // as km depth. An explicit properties.depth/dep (km) always wins when present.
+  let depth: number | null = null;
+  const propDepth = props.depth ?? props.dep;
+  if (propDepth !== undefined && propDepth !== null && propDepth !== '') {
+    depth = Number(propDepth);
+  } else if (thirdCoord !== undefined && thirdCoord !== null) {
+    const z = Number(thirdCoord);
+    if (Number.isFinite(z)) {
+      // |z| > 1000 cannot be a km depth (deepest events ~700 km) -> elevation-in-metres,
+      // convert to km. Small negatives (e.g. USGS events above the WGS84 reference) are
+      // kept as km depth, matching normalizeOptionalDepth in lib/parsers.ts.
+      depth = Math.abs(z) > 1000 ? -z / 1000 : z;
+    }
+  }
 
   // Build event from GeoJSON properties
   const event: ParsedEvent = {
     longitude,
     latitude,
-    depth: depth !== undefined ? depth : (props.depth || props.dep || null),
+    depth,
     time: props.time || props.datetime || props.date || props.origin_time || props.origintime,
     magnitude: props.magnitude || props.mag || props.m,
   };

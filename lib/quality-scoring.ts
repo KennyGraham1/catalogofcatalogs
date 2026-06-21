@@ -26,6 +26,45 @@ export interface QualityMetrics {
   evaluationStatus?: string | null;
 }
 
+/**
+ * Build QualityMetrics (camelCase) from a raw snake_case DB event row.
+ *
+ * Callers must NOT do `calculateQualityScore(event as QualityMetrics)` on a raw DB
+ * event: the DB uses snake_case (horizontal_uncertainty, azimuthal_gap, ...), so the
+ * camelCase metric lookups would all read undefined and the score would always take
+ * the "no data" penalty branch. Use this adapter instead. Horizontal uncertainty is
+ * resolved from the km column when present, else derived from the lat/lon degree
+ * uncertainties (km). All length values are km, angles degrees, time seconds.
+ */
+export function metricsFromEvent(event: unknown): QualityMetrics {
+  if (!event || typeof event !== 'object') return {};
+  const ev = event as Record<string, unknown>;
+  const num = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isFinite(v) ? v : null;
+  const latUnc = num(ev.latitude_uncertainty);
+  const lonUnc = num(ev.longitude_uncertainty);
+  let horizontalUncertainty = num(ev.horizontal_uncertainty); // km
+  if (horizontalUncertainty == null && latUnc != null && lonUnc != null) {
+    const lat = num(ev.latitude) ?? 0;
+    const latKm = latUnc * 111;
+    const lonKm = lonUnc * 111 * Math.cos((lat * Math.PI) / 180);
+    horizontalUncertainty = Math.max(latKm, lonKm);
+  }
+  return {
+    horizontalUncertainty,
+    depthUncertainty: num(ev.depth_uncertainty),
+    timeUncertainty: num(ev.time_uncertainty),
+    azimuthalGap: num(ev.azimuthal_gap),
+    usedStationCount: num(ev.used_station_count),
+    usedPhaseCount: num(ev.used_phase_count),
+    standardError: num(ev.standard_error),
+    magnitudeUncertainty: num(ev.magnitude_uncertainty),
+    magnitudeStationCount: num(ev.magnitude_station_count),
+    evaluationMode: (ev.evaluation_mode as string) ?? null,
+    evaluationStatus: (ev.evaluation_status as string) ?? null,
+  };
+}
+
 export type QualityGrade = 'A+' | 'A' | 'B+' | 'B' | 'C' | 'D' | 'F';
 
 export interface QualityScore {
@@ -131,8 +170,9 @@ function calculateLocationScore(metrics: QualityMetrics): { score: number; weigh
     0
   );
   if (horizUncertainty > 0) {
-    // Excellent: < 1km (0.009°), Poor: > 10km (0.09°)
-    score -= Math.min(40, horizUncertainty * 444);
+    // Input is in km (QualityMetrics.horizontalUncertainty). Excellent: < 1 km, Poor: >= 10 km.
+    // Linear penalty reaching the -40 cap at 10 km (40 / 10 = 4 points per km).
+    score -= Math.min(40, horizUncertainty * 4);
   } else {
     score -= 20; // No data penalty
   }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { dedupeById } from '@/lib/utils';
 import { MapContainer, Circle, Popup, GeoJSON } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { Card } from '@/components/ui/card';
@@ -13,7 +14,7 @@ import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip'
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useMapColors } from '@/hooks/use-map-theme';
-import { calculateQualityScore, QualityMetrics, getQualityColor } from '@/lib/quality-scoring';
+import { calculateQualityScore, getQualityColor, metricsFromEvent } from '@/lib/quality-scoring';
 import { getMagnitudeRadius, getMagnitudeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 import { loadFaultData, FaultCollection } from '@/lib/fault-data';
 import type { PathOptions } from 'leaflet';
@@ -70,7 +71,7 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
   const qualityScores = useMemo(() => {
     return sampledEarthquakes.map(event => ({
       eventId: event.id,
-      score: calculateQualityScore(event as QualityMetrics)
+      score: calculateQualityScore(metricsFromEvent(event))
     }));
   }, [sampledEarthquakes]);
 
@@ -248,7 +249,7 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
           )}
 
           {/* Earthquake markers - using intelligent sampling for performance */}
-          {sampledEarthquakes.map((eq) => {
+          {dedupeById(sampledEarthquakes).map((eq) => {
             const eventDate = new Date(eq.time).toLocaleDateString('en-GB', {
               day: '2-digit',
               month: '2-digit',

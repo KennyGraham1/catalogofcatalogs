@@ -104,6 +104,13 @@ export class GeoNetClient {
         if (error.status === 404 || error.status === 204) {
           return false;
         }
+        // 413 (result set too large) is an EXPECTED, self-correcting condition that
+        // the time-window chunking handles by subdividing — not a service-health signal,
+        // so it must not trip the breaker (a broad import intentionally provokes many
+        // 413s and would otherwise abort itself). See lib/geonet-chunking.ts.
+        if (error.status === 413) {
+          return false;
+        }
         // Count 5xx errors and network errors as failures
         return true;
       },

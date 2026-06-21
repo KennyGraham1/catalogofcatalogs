@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // react-leaflet 4.x is not compatible with React 18 StrictMode's dev-only
+  // double mount/unmount, which throws "Map container is already initialized".
+  // StrictMode double-invocation does not run in production builds, so this only
+  // affects the dev experience; disable it so the Leaflet maps mount cleanly.
+  reactStrictMode: false,
   eslint: {
     // Enable ESLint during builds to catch issues early
     ignoreDuringBuilds: false,

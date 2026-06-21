@@ -36,15 +36,19 @@ export function quakemlEventToDbFields(quakeml: QuakeMLEvent): DbEventFields {
   if (preferredOrigin) {
     fields.preferred_origin_id = preferredOrigin.publicID;
 
-    // Location uncertainties
+    // Location uncertainties.
+    // QuakeML BED units: time.uncertainty = seconds, latitude/longitude.uncertainty = degrees,
+    // depth.uncertainty = metres, OriginUncertainty.horizontalUncertainty = metres.
+    // DB convention: lengths in km (matching depth.value /1000 in parsers.ts and *1000 on export),
+    // angular uncertainties in degrees, time in seconds. Convert the two metre quantities to km.
     if (preferredOrigin.time.uncertainty       != null) fields.time_uncertainty      = preferredOrigin.time.uncertainty;
     if (preferredOrigin.latitude.uncertainty   != null) fields.latitude_uncertainty  = preferredOrigin.latitude.uncertainty;
     if (preferredOrigin.longitude.uncertainty  != null) fields.longitude_uncertainty = preferredOrigin.longitude.uncertainty;
-    if (preferredOrigin.depth?.uncertainty     != null) fields.depth_uncertainty     = preferredOrigin.depth.uncertainty;
+    if (preferredOrigin.depth?.uncertainty     != null) fields.depth_uncertainty     = preferredOrigin.depth.uncertainty / 1000;
 
-    // Horizontal uncertainty (from OriginUncertainty sub-object)
+    // Horizontal uncertainty (from OriginUncertainty sub-object) — metres in QuakeML, store as km
     if (preferredOrigin.uncertainty?.horizontalUncertainty != null) {
-      fields.horizontal_uncertainty = preferredOrigin.uncertainty.horizontalUncertainty;
+      fields.horizontal_uncertainty = preferredOrigin.uncertainty.horizontalUncertainty / 1000;
     }
 
     // Origin metadata

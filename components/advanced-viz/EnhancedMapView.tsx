@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { dedupeById } from '@/lib/utils';
 import { MapContainer, Circle, Popup, Polyline } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { Card } from '@/components/ui/card';
@@ -19,7 +20,7 @@ import { useMapColors } from '@/hooks/use-map-theme';
 import { calculateUncertaintyEllipse, UncertaintyData } from '@/lib/uncertainty-utils';
 import { parseFocalMechanism } from '@/lib/focal-mechanism-utils';
 import { calculateDistance } from '@/lib/station-coverage-utils';
-import { calculateQualityScore, QualityMetrics, getQualityColor } from '@/lib/quality-scoring';
+import { calculateQualityScore, getQualityColor, metricsFromEvent } from '@/lib/quality-scoring';
 import { getMagnitudeColor, getMagnitudeRadius, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 
 interface EnhancedEvent {
@@ -134,7 +135,7 @@ export function EnhancedMapView({
   const qualityScores = useMemo(() => {
     return sampledEvents.map(event => ({
       eventId: event.id,
-      score: calculateQualityScore(event as QualityMetrics)
+      score: calculateQualityScore(metricsFromEvent(event))
     }));
   }, [sampledEvents]);
 
@@ -266,7 +267,7 @@ export function EnhancedMapView({
 
           {/* Earthquake markers - using intelligent sampling for performance */}
           {/* Sort by magnitude (small to large) so larger events render on top */}
-          {[...sampledEvents].sort((a, b) => a.magnitude - b.magnitude).map((event) => {
+          {dedupeById(sampledEvents).sort((a, b) => a.magnitude - b.magnitude).map((event) => {
             const eventDate = new Date(event.time).toLocaleDateString('en-GB', {
               day: '2-digit',
               month: '2-digit',

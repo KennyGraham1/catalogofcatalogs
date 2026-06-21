@@ -1,12 +1,24 @@
 /**
- * GeoNet Quality Score (QS) System
- * 
- * Implements the Quality Score system from:
- * "A quantitative assessment of GeoNet earthquake location quality in Aotearoa New Zealand"
- * DOI: 10.1080/00288306.2024.2421309
- * 
- * Quality Score ranges from QS0 (unconstrained) to QS6 (best constrained)
- * based on multiple location quality criteria.
+ * Location Quality Score (heuristic, QS0-QS6)
+ *
+ * A six-level location-quality heuristic for earthquake hypocentres, scored from
+ * QS0 (unconstrained) to QS6 (best constrained) as the MINIMUM across several
+ * criteria (azimuthal gap, station count, RMS residual, horizontal/depth
+ * uncertainty, nearest-station distance).
+ *
+ * PROVENANCE / IMPORTANT: this is an IN-HOUSE heuristic, inspired by the goal of
+ * the GeoNet location-quality study (Warren-Smith et al., 2025, NZJGG,
+ * doi:10.1080/00288306.2024.2421309) but NOT a reproduction of its method, and the
+ * results are NOT comparable to the published QS. The published QS is the SUM of
+ * up to six binary criteria (a QS5 variant applies when depth-fixing is not used) —
+ * azimuthal gap <= 180 deg, >= 8 arrivals, >= 1 P pick,
+ * >= 1 S pick, nearest-station distance <= hypocentral depth, and a fixed-depth
+ * flag — none of which are computed here (this codebase lacks phase-level and
+ * fixed-depth inputs). It instead uses RMS residual and horizontal/depth
+ * uncertainty, which are not paper inputs, with project-chosen thresholds. Do not
+ * label this output as "the GeoNet QS" or claim conformance to the DOI. To
+ * reproduce the paper, implement the binary-sum criteria from the authors'
+ * reference code (github.com/calum-chamberlain/EQ_catalog_location_quality).
  */
 
 export interface GeoNetQSCriteria {
@@ -167,6 +179,11 @@ function scoreDepthUncertainty(uncert?: number | null): { score: number; label: 
  * Closer station = better constraint
  */
 function scoreMinimumDistance(dist?: number | null): { score: number; label: string } {
+  // NOTE: missing data defaults to 3 ("fair") here, whereas every other criterion
+  // defaults to 0 ("no data") and therefore caps the min()-aggregated QS at 0.
+  // This inconsistency is deliberate-but-debatable and depends on product intent
+  // for how to treat missing nearest-station distance; left unchanged pending that
+  // decision (see CODEBASE_LOGIC_AUDIT.md).
   if (dist === null || dist === undefined) return { score: 3, label: 'Unknown (assume fair)' };
   
   if (dist <= 30) return { score: 6, label: 'Excellent (≤30km)' };

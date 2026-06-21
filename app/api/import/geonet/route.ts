@@ -151,12 +151,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (minLongitude !== undefined && maxLongitude !== undefined && minLongitude > maxLongitude) {
-      return NextResponse.json(
-        { error: 'Minimum longitude cannot be greater than maximum longitude' },
-        { status: 400 }
-      );
-    }
+    // NOTE: minLongitude > maxLongitude is intentionally NOT rejected — it is the
+    // RFC 7946 section 5.2 convention for a bounding box crossing the antimeridian
+    // (180 degrees), which NZ offshore (Kermadec) catalogues require.
 
     // Validate date order
     if (parsedStartDate && parsedEndDate && parsedStartDate > parsedEndDate) {

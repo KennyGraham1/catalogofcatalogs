@@ -1,0 +1,595 @@
+This is the outcome and some meeting and discussions on the framework workiging group and this is what I wnat to a paper see what can be added:  
+
+CatofCat workshop outcomes
+
+Aggregated comments
+MIRO BOARD: https://miro.com/app/board/uXjVLDpLGko=/ 
+
+Q1 Liked
+Great idea
+Systematic
+Catalogues findable
+Easy minimum requirements
+Simple/easy to read and fill in form
+Straight forward
+Covers main requirements for a catalogue
+Promotes further usage of existing catalogues
+
+
+Q2 Uses
+Overview of available catalogues & where to find them
+For a specific region
+Ability to merge multiple catalogues
+Ability to compare catalogues
+Knowing which catalogues have necessary requirements for analysis (e.g. picks, not just hypocentres)
+
+Q3 Improvements
+
+Suggestion
+Thoughts?
+Decision: catofcat, documentation, or doi
+Uncertainty information - in catofcat
+
+
+Ask: Does it contain quality information? [have a Tick box] [under Content]
+Actual listing of quality information out of scope (doi)
+Input catalogue detail/references:
+Other catalogues starting point, instruments, newspapers
+Out of scope - for doi
+doi
+Possibility of more than one contact person? Minimum of two? 
+People can just put multiple in the text box if needed?
+Write “at least one person” separate by semicolon
+Optional notes/keywords field
+I can see utility of additional key detail box, but it’ll also become a dumping ground maybe
+Not required, doesn’t hurt. Make sure it’s at the end.
+Velocity model used 
+Is it 1D vs 3D?
+Velocity model naming will be inconsistent - tickboxes? 
+Issue is keeping up with every possible velocity model is an impossible task
+Ask for DOI of velocity model?
+doi
+Fault geometry information - 2D/3D (e.g. non point source) info like fault plane solutions
+
+
+Tickbox: fault geometry [Content]
+Tickbox for amplitudes, magnitudes
+ye?
+Tickbox: amplitudes
+[Content]
+Tickboxes for if location quality and pick quality data is included (explicitly separated). Quality fields available.
+
+
+Just quality tickbox (as above)
+Tickbox for focal mechanisms
+DC vs NDC? Too much detail?
+Already got
+Tickbox for phase picks: more than just P and S? Phase reversals? 
+ye?
+Already got Phase arrival time picks tickbox
+ Magnitude range
+Good but not required (thinking MMI, no magnitude catalogues). 
+But how did they calculate those magnitudes?
+Too complicated - how do they calculated
+Magnitude of completeness: are these just big earthquakes? Or microseismicity?
+
+
+Too complicated - how do they calculated
+Historic catalogues: what do we do about MMI & locations?
+
+
+Historical Observations [Content]
+Waveform information:1 vs 3 component? Where did you get it from, is it available?
+doi
+doi
+Metadata of catalogue processing/generation/history
+doi
+doi
+Type of catalogue: synthetic catalogues, historical, instrumental, compilations, frankenstein! what do if instrumental and historical in same catalogue?
+Synthetic no, historical yes.
+
+Perhaps have a tickbox where people label types of information? 
+How do we define historical? Where is the line?
+No
+Catalogue type: background, aftershocks, induced.
+Local, regional etc.
+Large EQs vs microseismcity
+
+
+CONVERSATION:
+Could we have a whole question about this?
+How do we word it?
+Detection method: manual, template matching, machine learning
+(seen twice)
+Doi
+OR 
+Detection method
+Manual
+Automatic
+Template matching
+Machine Learning
+Felt reports
+Other
+Methods used to produce catalogue (e.g. NLLoc)
+
+
+doi
+Dataset availability
+Require dataset to be available?
+
+
+Embargoed commercially sensitive catalogues
+Might want to know that they exist, even if we have to ask for them?
+Available (DOI)
+Available upon request
+Not available
+Location searching ability
+Covered by bounding box implementation? 
+Bounding box LAT/LON
+
+Depths!?
+Time searching ability
+Covered by time implementation existing
+Already done
+Synthetic seismicity catalogues
+
+
+Out of scope!!
+(framework could be copied for them)
+Drop down menus
+
+
+Already
+Providing station information
+doi
+doi
+Phase picks, stations, event data
+Not in the cat of cat itself - only referred to in what it contains tickboxes
+doi
+Unpublished catalogues
+Discussed if not published online, it doesn’t count?
+Available (DOI)
+Available upon request
+Not available
+List of regions for consistency/searchability
+Issue is everyone’s regions are different
+Too many options
+Region of interest - what does this refer to? Total extent? Focus of study?
+Link to bounding box website for lat lon/searchability?
+Have descriptive “region of interest/focus” 
+Region of Interest  
+Are earthquakes linked to geonet event IDs? (checkbox)
+
+
+No
+Quality control details - all earthquakes even those poorly located? 
+
+
+Quality info tickbox [content]
+People will be inconsistent with how they fill things in so pre-assigned categories is better
+Agreed - though interpretation of those categories might still be an issue
+yep
+More specific - fewer free text field so it’s more searchable 
+
+
+yep
+Where is raw data?
+Info in doi
+doi
+Stability, homogeneity, consistency across time/space
+
+
+publication/doi
+Original locations required if relocations are presented
+Doi I think
+doi
+What was the intent of the catalogue? Parameter testing, particular event type, geographical focus.
+
+
+Extra question above - what methods, why
+Sub catalogues allowed?
+
+
+
+
+Parameters used, where did parameters come from?
+Doi - out of scope
+doi
+Associated publications’ abstract
+Out of scope - there’s a doi box? Though would help searching key words? 
+Doi for publication. 
+Could put it in additional notes if they really want to
+Similar to GNS media database: polygon on a map
+GUI - for the future
+
+
+CSV format - can’t filter entries (?)
+Download and search it?
+Search it on github
+
+
+Useful to have a way to search/sort through catalogues
+GUI - for the future. For now: it’s in a CSV - search it yourself
+
+
+Semi-permanent data access point from GeoNet?
+
+
+Not actually GeoNet - GNS Science VUW etc working group
+Which fields are optional?
+Could be how we deal with open-ended catalogues? End date is optional
+Tick continuous/ not ended
+Papers that use the catalogue.
+See also list - showing other catalogues started from it. 
+V. difficult to keep updated - out of scope? Could have an optional box?
+- online tools are useful in finding publications that cite the catalogue
+Out of scope
+readme/documentation with a doi to cite would be good
+White paper/documentation on form/github
+
+
+User beware warnings
+Need to write
+Caveat that we haven’t checked 
+Clear statement of database’s intentions at the top. What does it mean to have your catalogue included in the CoC.
+
+
+
+
+Clear policy for citations and sharing of catalogue sources: what are the IP implications of sharing data here? Can you guarantee the right papers/people are included on any resulting projects
+Notes encouraging people to cite catalogues they are using, contact & collaborate with authors
+Just showing catalogue exists
+Generic statement about reference it appropriately, contact authors if relevant/ possible
+How do we edit/update/withdraw existing entries? How do we label/submit depreciation or superceding catalogue versions?
+Doi of publications might need to be updated? Or do we ask people not to put it in until the catalogue is published & paper associated published with doi?!
+E.g. until it is “completed”
+That’s going to introduce a significant time lag
+Contact person for the catalogue
+Who will that person be? 
+The person who is looking after it.
+Version control/multiple versions of the same catalogues?
+Catalogues without an end date?
+Version control for catofcat is dealt with by github.
+How do we deal with multiple versions of the same catalogue as input? 
+
+
+Who has 'authority' to register a catalog?   - thinking of loading past studies where may not be author led etc.    -> how will duplicate registers of a catalogue be identified/handled? What will be used as 'author' in this context
+
+
+
+
+
+
+
+
+Outcomes of all meeting December 2024
+
+All to transcribe photo words to Miro board. 
+All to add any additional suggestions to this catofcat outcomes document
+El & Kenny to sort through all these suggestions and have a first pass decisions/implement by end January
+Next meeting to discuss decisions - 3rd Feb afternoon
+Complete form etc. by end of Feb
+
+Kenny to create document for white paper (aim to have completed/submitted end-June… first draft by end april?)
+White paper associated with it - make notes while we make decisions
+Documenting our decisions
+Use cases
+What we would like for catalogues coming into it
+Examples - expected stuff, food for thought/suggestion stuff
+What metadata is vitally important
+Details of what make a good catalogue?
+Details of back-filling through time
+What is out of scope and why
+How do we release/publish it? See where we get to it. Journal? GNS report? Citeable/recognition. NZJGG?
+Workshop outputs (tidied up)
+
+GSNZ abstract submitted to present
+
+Calum, El, Flo - half day meeting where we sort through stuff around the pipeline. In last couple of weeks of January
+
+Very future: GUI - online searchable (non-csv) way of accessing the data. Map people can use?
+
+Logo: a cat in a cat bus
+
+Outcomes of Kenny & El meeting 2025-01-16
+
+ADD TO FORM  TO DISCUSS in red DECIDED ON in blue
+
+“At least one person” - Multiple contact people allowed (semi-colon)
+
+End date is optional/you tick “continuous”
+
+Content tickboxes
+Hypocentral locations
+Relative relocations
+Phase arrival time picks
+Fault geometry information (non point source)
+Amplitude picks
+Historical observations (using felt reports/observations) macroseismic intensities
+Quality information
+Other
+
+Data source? 
+
+Quality tickbox question? Quality details - picks quality, location quality etc.
+
+
+Availability: (this means we don’t require the dataset to be available)
+Available (DOI)
+Available upon request
+Not available
+
+Bounding box: lat/lon (NSEW)
+Depth range information
+
+Region of interest (descriptive)
+
+Any additional information (at the end)
+
+Methods used to produce the catalogue (might be too much detail?)
+E.g. Detection method question: DOI
+Manual
+Automatic
+Template matching
+Machine learning
+Felt reports
+Other
+
+
+Has this catalogue been manually reviewed?
+Non-reviewed
+Partially reviewed
+Reviewed
+
+
+Catalogue type question:
+Background, aftershocks, induced, historical, compilations (frankenstein), just large EQs
+
+Focus of catalogue (pretty non specific):
+Geographical 
+Parameter testing
+Particular event type
+
+Brief description of the catalogue: 
+(character limit? Put it after other questions so people know what they have already entered!)
+Why was this catalogue produced? 
+What was the focus of this study?
+
+
+
+Magnitude information - magnitude range, magnitude of completeness
+Very complicated, how was it calculated?
+But large EQs vs microseismicity is an important distinctions
+
+Magnitude range - not required though! (with depth & location bounding box)
+
+OUT OF SCOPE 
+(put it in the publication/dataset description linked to with doi)
+
+Metadata of catalogue processings/generation/history
+Parameter details - what are they and where did they come from
+Velocity model details
+Station information
+Picks information
+Event data
+Events linked to GeoNet event IDs
+Raw data information
+Waveform details (1vs3 component, where did it come from)
+Input catalogue/event details
+Focal mechanism details
+Stability, homogeneity, consistency across time/space
+Abstract of associated publication (guess they could put it in additional notes if they really wanted to)
+List of papers that use that catalogue & other catalogues that derive from this one (NIGHTMARE)
+
+
+FOR DOCUMENTATION
+
+User beware warnings: we haven’t checked this information is correct
+We’re just showing what catalogues exist
+Encourage correct referencing & contacting the authors for collaboration where appropriate
+
+Need a person for the catalogue who is in charge of adding entries to the catalogue
+Can be contacted (email listed) for editing/updating/withdrawing existing entries. BUT (as above) encourage people not
+
+
+FOR THE FUTURE
+
+GUI/web app where people can search/sort through catalogues
+Polygons on a map
+Way for people to edit their entries
+
+
+FOR PAPER
+
+Prioritised dropdowns not searchable otherwise
+
+NOTES ON PAPER MADE PREVIOUSLY
+White paper associated with it - make notes while we make decisions
+Documenting our decisions
+Use cases
+What we would like for catalogues coming into it
+Examples - expected stuff, food for thought/suggestion stuff
+What metadata is vitally important
+Details of what make a good catalogue?
+Details of back-filling through time
+What is out of scope and why
+How do we release/publish it? See where we get to it. Journal? GNS report? Citeable/recognition. NZJGG?
+Workshop outputs (tidied up)
+
+
+Feature / Capability	New Zealand Catalogues	USGS / ComCat	Swiss SED / ECOS / EPOS	Comments & Gaps
+Core event parameters	NZ catalogues (GeoNet, integrated catalog efforts) include origin time, latitude/longitude, depth, magnitude, and in many cases metadata like phase picks, station counts, gaps, etc.	ComCat includes hypocenter, magnitudes, phase picks and amplitudes from contributing networks, along with other products (moment tensors, macroseismic data) (USGS)	SED’s ECOS catalog includes historical + instrumental events, uniform Mw conversions, uncertainties, macroseismic intensities; integrates with EPOS standards (ResearchGate)	NZ matches many core capabilities but sometimes lacks full uncertainty propagation or detailed metadata for all events.
+Metadata & documentation / processing provenance	Some catalogues document processing pipelines, velocity model references, and quality metrics; but in many cases, metadata and methods are incomplete or inconsistent across catalogs.	USGS maintains metadata standards and data dictionaries, requiring documentation of methods, accuracy/precision, field definitions (USGS)	SED (Switzerland) adheres to international standards (FDSN, StationXML, QuakeML) and robust metadata / dissemination practices (NHESS)	NZ should aim for consistent, centralised metadata policies across all catalogues.
+Versioning, updates, and review	GeoNet catalog supports rapid + review workflows. Some catalogues are relocated or reprocessed (e.g. research relocations).	ComCat supports versioned updates, multiple origins per event, and revisions over time.	SED / EPOS structure supports unified access to evolving datasets, harmonization across Europe.	Full version control (DOIs, changelogs) is an area where NZ can formalize practice more consistently.
+Access & searchability / APIs	GeoNet offers web search (Quake Search), FDSN event service (QuakeML), CSV/GeoJSON export.	USGS supports FDSN event API, feeds (GeoJSON, CSV), search interfaces (USGS Earthquakes)	EPOS provides integrated access to seismic products (waveform, parametric data) via standardized services (Epos EU)	NZ is well-aligned technically; enhancements could focus on federated discovery, cross-catalog querying.
+Historical / pre-instrumental integration	NZ includes some pre-instrumental events (via historical catalogs) but with greater uncertainty and lower detail.	USGS / ISC / historical datasets often include large historic events, though with variable completeness.	SED’s ECOS compiles historical catalogs back many centuries, including macroseismic fields and uncertainty estimates (ResearchGate)	NZ’s historical catalogs need stronger integration, improved metadata, and uncertainty modeling.
+Uncertainty and quality metrics	Many modern NZ catalogues provide uncertainty estimates (horizontal/vertical errors, magnitude error) but not universally.	ComCat includes quality metrics (e.g. RMS, number of stations, azimuthal gap) (USGS Earthquakes)	SED strongly emphasizes uncertainty and solution quality, linked to EPOS standards (NHESS)	Full uncertainty reporting in every catalog entry is still a gap to be filled across NZ datasets.
+Multi-catalog / federated linking	NZ catalogs are mostly produced separately; limited linking or mapping across catalogues.	ComCat aggregates from many networks, linking multiple origins under one event.	EPOS aims for harmonized, interoperable catalogs across Europe; SED participates in cross-border data exchange. (Epos EU)	NZ could build an “Event ID mapping service” and federated portal to link catalogues.
+Special-purpose catalogs (mechanisms, slip, etc.)	NZ has research catalogs for focal mechanisms, moment tensors, slow slip, but often as standalone datasets with limited integration.	USGS/ComCat hosts moment tensor solutions and additional products tied to events.	EPOS integrates fault, slip, seismological products with seismic catalogs.	NZ can better integrate special-purpose catalogs into the main framework.
+Compliance with standards (QuakeML, FDSN, etc.)	GeoNet supports FDSN/QuakeML, though not all catalogues may fully adhere.	USGS supports FDSN and QuakeML formats in APIs and exports.	SED / EPOS adhere to QuakeML, StationXML, FDSN, metadata standards. (NHESS)	NZ is on the right track; ensuring full compliance across catalogs is a key goal.
+Sustainability / governance / community	Catalog maintenance is mostly under GNS / GeoNet or individual researchers; less formal cross-catalog governance exists.	USGS / ANSS / NEIC have formal governance, funding, and institutional roles.	EPOS / SED have robust institutional backing and cross-national coordination.	NZ would benefit from a formal governance structure, roles, and funding for federated cataloging.
+
+Summary of Workshop Outcomes on Earthquake Catalogues in Aotearoa New Zealand
+Catalogue Types and Examples
+Participants identified a broad spectrum of catalogue types across New Zealand:
+Volcano-specific microseismic catalogues (Taupō, Whakaari, Ruapehu, geothermal areas)
+
+
+Historical compilations (pre-1940 events, oral/written records, NSHM inputs)
+
+
+National-scale catalogues (GeoNet rapid/review, GeoNet CMT, strong motion datasets)
+
+
+Local/regional deployments (Alpine Fault OBS, Hikurangi experiments, Kaikōura/Cook Strait aftershock sequences, TVZ experiments)
+
+
+Moment tensor, focal mechanism, finite-fault and stress-drop catalogues (Ristau, GCMT, IRIS, research-specific inversions)
+
+
+Slow slip, paleoseismic, and geodetic-derived catalogues (e.g., Litchfield palaeoseismic, offshore geodetic detections)
+
+
+Temporary/field deployments (SAMBA, COSA, HOBITSS, PTANGO, etc.)
+
+
+Rapid response/emergency catalogues (GeoNet, response teams, template-matching)
+
+
+Research-focused or method-specific catalogues (machine learning, relocations, waveform inversions, strong motion derived)
+
+
+International combined catalogues (ISC, COMCAT, EMSC).
+
+
+Common Strengths
+Local studies: completeness, precise depths, uniform methodology within regions.
+
+
+National products: consistency, continuity, accessibility, manual checks.
+
+
+Temporary deployments: high-quality velocity models, good event location/depth precision.
+
+
+Moment tensor/source catalogues: provide critical kinematic and stress information for hazard and tectonics.
+
+
+Research relocations: improved depths and completeness, well documented methods.
+
+
+Rapid response catalogues: fast availability, crucial for emergency and tsunami response.
+
+
+Common Weaknesses
+Fragmentation and ad hoc coverage: many catalogues exist but are poorly documented or hard to find.
+
+
+Variable completeness: in time and space, especially for small events or during evolving network deployments.
+
+
+Inconsistent processing: differences in magnitude scales, velocity models, and methods limit comparability.
+
+
+Metadata gaps: missing pick uncertainties, processing history, or clear description of methods.
+
+
+Limited access: especially for legacy data, temporary deployments, or research-specific catalogues.
+
+
+Rapid response limitations: automated catalogues often incomplete or inaccurate prior to expert review.
+
+
+Historical data: large uncertainties, poor depth/location quality, lack of small events.
+
+
+Geodetic/paleoseismic: sparse coverage, limited precision in timing.
+
+
+Value to Unlock
+Key opportunities for improvement include:
+Centralised data hub: a federated portal that hosts or links all NZ catalogues.
+
+
+Standardised formats and lexicon: CSV, QuakeML, ObsPy-compatible; consistent metadata and naming.
+
+
+Version control and DOIs: citable releases, clear provenance, explicit uncertainties.
+
+
+Improved metadata: include station information, velocity models, methodology, uncertainties.
+
+
+Legacy data integration: digitisation, reconciliation, and metadata improvement.
+
+
+National community velocity model: multi-resolution (1D and 3D) model agreed upon.
+
+
+Regular updates: a “catalogue of catalogues” revised ~every 5 years.
+
+
+Openness and accessibility: open APIs, FAIR compliance, minimal barriers to access.
+
+
+Community governance: defined roles, responsibilities, and sustainability planning.
+
+
+
+Next Steps
+Develop a preliminary framework: minimum metadata, standard formats, clear governance.
+
+
+Pilot projects: prototype portal, ingestion of legacy datasets, integration of temporary deployments.
+
+
+Define roles and responsibilities: who curates, reviews, and maintains catalogue releases.
+
+
+Establish metrics of FAIRness: findability, accessibility, interoperability, reusability.
+
+
+Promote interoperability with global systems (USGS ComCat, ISC, EMSC, EPOS).
+
+
+Support modern methodologies (template matching, ML, DAS, dense arrays) with transparency and uncertainty reporting.
+
+
+Developing a Framework for Creating Earthquake Catalogue 
+Introduction 
+Earthquake catalog are essential for understanding seismic activity, assessing hazards, and improving earthquake forecasting models. A comprehensive and standardised framework for creating and maintaining earthquake catalogs is crucial to ensure consistency, accuracy, and usability. This paper outlines key principles, components, and recommendations for developing such a framework.
+Objectives of the Framework
+To standardise the collection and classification of earthquake data.
+To ensure compatibility and interoperability between catalogs.
+…
+Core Components of the Framework
+Data Standards and Format
+Metadata Requirements: Include event ID, location, depth, magnitude, time, and source information.
+Standardised Formats: Use established formats such as QuakeML or CSV to facilitate data sharing.
+ Data Quality Control
+…
+
+
+Tools and Technologies
+Automation Tools: Implement automated pipelines for data ingestion, processing, and updates
+Database Management Systems: Use scalable databases (e.g., PostgreSQL) to store and manage large datasets.
+
+
+Interoperability and Integration
+Global Compatibility: Ensure the catalog can integrate with other international catalogs (e.g., ISC, USGS).
+Data Sharing Protocols:
+….
+Use Cases and Applications
+Seismic Hazard Assessment: Supporting national and regional hazard models.
+Earthquake Forecasting: Providing input data for statistical and machine learning models.
+…..
+Recommendations
+Adopt Common Standards: Use globally recognised standards for data collection and reporting.
+Collaborate Across Organisations: Foster partnerships to ensure comprehensive data coverage.
+Technology: Develop and maintain infrastructure to support scalable and reliable catalogs.
+Regular Updates and Reviews: Periodically review and improve the framework based on new research and technological advancements.
+…
+Conclusion
+Creating a standardised framework for earthquake catalogs is critical for advancing seismic research and improving public safety. By adopting best practices in data collection, quality control, and integration, researchers and stakeholders can ensure that earthquake data remains a reliable foundation for scientific research.
+
+Suggest that the motivation for this collection is to do a lit review of NZ catalogs to (1) compare and contrast; (2) come up with common set of minimum attributes for future catalog creation (benchmarked against what is being done overseas, e.g., Switz was mentioned); and (3) GAP analysis of what is missing and potential near-term community efforts to achieve a world-renowned federated/harmonised catalog for the purpose of use in earthquake science and engineering. 

@@ -226,8 +226,9 @@ invalid,100,200,-1,2000`;
       expect(event.time_uncertainty).toBe(0.2);
       expect(event.latitude_uncertainty).toBe(0.01);
       expect(event.longitude_uncertainty).toBe(0.01);
-      expect(event.depth_uncertainty).toBe(500);
-      expect(event.horizontal_uncertainty).toBe(850);
+      // QuakeML depth/horizontal uncertainty are in metres (500 m, 850 m); DB stores km.
+      expect(event.depth_uncertainty).toBe(0.5);
+      expect(event.horizontal_uncertainty).toBe(0.85);
       expect(event.depth_type).toBe('from location');
       expect(event.earth_model_id).toBe('iasp91');
       expect(event.method_id).toBe('method:origin');
@@ -405,20 +406,22 @@ invalid,100,200,-1,2000`;
       expect(result.events[0].azimuthal_gap).toBe(45);
     });
 
-    it('should map QuakeML 1.2 uncertainty fields', () => {
+    it('maps generic JSON uncertainty aliases AS-IS in DB units (km/seconds, no conversion)', () => {
+      // Unlike the QuakeML importer (metres -> km), generic JSON/CSV values are taken in
+      // the field's canonical DB unit: horizontal/depth uncertainty in km, time in seconds.
       const json = JSON.stringify([{
         latitude: -41.2865,
         longitude: 174.7762,
         time: '2024-01-01T00:00:00Z',
         magnitude: 5.0,
-        horiz_unc: 1500,
-        depth_error: 2.5,
-        time_error: 0.3
+        horiz_unc: 1.5,    // km (already in DB units)
+        depth_error: 2.5,  // km
+        time_error: 0.3    // seconds
       }]);
 
       const result = parseJSON(json);
       expect(result.success).toBe(true);
-      expect(result.events[0].horizontal_uncertainty).toBe(1500);
+      expect(result.events[0].horizontal_uncertainty).toBe(1.5);
       expect(result.events[0].depth_uncertainty).toBe(2.5);
       expect(result.events[0].time_uncertainty).toBe(0.3);
     });

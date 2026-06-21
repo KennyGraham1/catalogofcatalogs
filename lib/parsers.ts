@@ -464,8 +464,15 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
   };
 }
 /**
- * Parse JSON format earthquake catalogue
- * Automatically detects and handles GeoJSON format
+ * Parse JSON format earthquake catalogue. Automatically detects and handles GeoJSON.
+ *
+ * UNITS: generic JSON/CSV field values are taken AS-IS in each field's canonical DB
+ * unit (see lib/field-definitions.ts): depth and horizontal/depth uncertainty in
+ * KILOMETRES, latitude/longitude (and their uncertainties) in DEGREES, time
+ * uncertainty in SECONDS. No unit conversion is applied here — unlike the QuakeML
+ * importer (lib/quakeml-to-db.ts), which converts depth/horizontal uncertainty from
+ * the QuakeML metre convention to km. Providers exporting metres should pre-convert.
+ *
  * @param content - The JSON content to parse
  * @param dateFormat - Optional date format hint for ambiguous dates
  */

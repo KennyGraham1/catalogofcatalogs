@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useMemo, memo, useCallback } from 'react';
+import { dedupeById } from '@/lib/utils';
 import L from 'leaflet';
 import { MapContainer, GeoJSON, FeatureGroup, Circle, Popup, Marker } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
@@ -16,7 +17,7 @@ import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip'
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
 import { useNearbyFaults } from '@/hooks/use-nearby-faults';
 import { useMapColors } from '@/hooks/use-map-theme';
-import { calculateQualityScore, QualityMetrics, getQualityColor } from '@/lib/quality-scoring';
+import { calculateQualityScore, getQualityColor, metricsFromEvent } from '@/lib/quality-scoring';
 import { getMagnitudeRadius, getMagnitudeColor, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
 import { loadFaultData, FaultCollection } from '@/lib/fault-data';
 import type { PathOptions } from 'leaflet';
@@ -91,7 +92,7 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
   const qualityScores = useMemo(() => {
     return sampledEvents.map(event => ({
       eventId: event.id,
-      score: calculateQualityScore(event as QualityMetrics)
+      score: calculateQualityScore(metricsFromEvent(event))
     }));
   }, [sampledEvents]);
 
@@ -301,7 +302,7 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
 
         {/* Earthquake markers - using intelligent sampling for performance */}
         {/* Sort by magnitude (small to large) so larger events render on top */}
-        {[...sampledEvents].sort((a, b) => a.magnitude - b.magnitude).map((event) => {
+        {dedupeById(sampledEvents).sort((a, b) => a.magnitude - b.magnitude).map((event) => {
           const eventDate = new Date(event.time).toLocaleDateString('en-GB', {
             day: '2-digit',
             month: '2-digit',

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { longitudeExtent } from './geo-bounds-utils';
 import { validateDepth, validateMagnitude, validateTimestamp } from './earthquake-utils';
 
 /**
@@ -809,12 +810,14 @@ export function assessDataQuality(events: any[]): DataQualityReport {
   } : null;
 
   const latBounds = getMinMax(lats);
-  const lonBounds = getMinMax(lons);
-  const spatialExtent = latBounds && lonBounds ? {
+  // Longitude extent is antimeridian-aware (minLon > maxLon denotes a box crossing 180),
+  // so NZ offshore (Kermadec) catalogues are not reported as globe-spanning.
+  const lonExtent = lons.length > 0 ? longitudeExtent(lons) : null;
+  const spatialExtent = latBounds && lonExtent ? {
     minLat: latBounds.min,
     maxLat: latBounds.max,
-    minLon: lonBounds.min,
-    maxLon: lonBounds.max,
+    minLon: lonExtent.west,
+    maxLon: lonExtent.east,
   } : null;
 
   // Completeness checks
@@ -976,17 +979,12 @@ export function validateGeographicBounds(bounds: {
     });
   }
 
-  if (bounds.minLon >= bounds.maxLon) {
-    checks.push({
-      passed: false,
-      severity: 'error',
-      message: 'Minimum longitude must be less than maximum longitude',
-      field: 'longitude_bounds'
-    });
-  }
-
+  // Note: minLon > maxLon is NOT an error — it is the RFC 7946 §5.2 convention for
+  // a box crossing the antimeridian (180°), which NZ offshore catalogues require.
   const latRange = bounds.maxLat - bounds.minLat;
-  const lonRange = bounds.maxLon - bounds.minLon;
+  const lonRange = bounds.maxLon >= bounds.minLon
+    ? bounds.maxLon - bounds.minLon
+    : bounds.maxLon + 360 - bounds.minLon;
 
   if (latRange > 180 || lonRange > 360) {
     checks.push({

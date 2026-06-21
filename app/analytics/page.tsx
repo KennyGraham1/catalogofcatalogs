@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useDeferredValue, useTransition, memo, useRef } from 'react';
+import { dedupeById } from '@/lib/utils';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -47,7 +48,7 @@ import { QualityScoreCard } from '@/components/advanced-viz/QualityScoreCard';
 import { UncertaintyVisualization } from '@/components/advanced-viz/UncertaintyVisualization';
 import { FocalMechanismCard } from '@/components/advanced-viz/FocalMechanismCard';
 import { StationCoverageCard } from '@/components/advanced-viz/StationCoverageCard';
-import { calculateQualityScore, QualityMetrics } from '@/lib/quality-scoring';
+import { calculateQualityScore, metricsFromEvent } from '@/lib/quality-scoring';
 import { parseFocalMechanism } from '@/lib/focal-mechanism-utils';
 import { parseStationData } from '@/lib/station-coverage-utils';
 import { EventTable } from '@/components/events/EventTable';
@@ -57,49 +58,19 @@ import { type MergedCatalogue, type MergedEvent } from '@/lib/db';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
 import { useSeismologicalAnalyses } from '@/hooks/use-seismological-worker';
 import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  ScatterChart,
-  Scatter,
-  AreaChart,
-  Area,
-  ComposedChart,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  ReferenceLine,
-  ZAxis,
-  Brush
-} from 'recharts';
+  MagnitudeDistributionChart,
+  DepthDistributionChart,
+  RegionDistributionChart,
+  CatalogueDistributionChart,
+  MagnitudeDepthScatter,
+  EventTimelineChart,
+  GutenbergRichterChart,
+  CompletenessChart,
+  TemporalSeriesChart,
+  MomentReleaseChart,
+  MFDComparisonChart,
+} from '@/components/charts';
 import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  ChartLegend,
-  ChartLegendContent,
-} from '@/components/ui/chart';
-import {
-  SEISMIC_COLORS,
-  CATEGORICAL_COLORS,
-  CHART_STYLES,
-  CHART_CONFIGS,
-  TOOLTIP_FORMATTERS,
-  AXIS_FORMATTERS,
-  getMagnitudeColor,
-  getDepthColor,
-  getGradeColor,
-  exportChartAsPNG,
-  exportChartAsSVG,
-  exportDataAsJSON,
-  exportDataAsCSV,
   MFD_CATALOGUE_COLORS,
 } from '@/lib/chart-config';
 import {
@@ -119,6 +90,7 @@ const UnifiedEarthquakeMap = dynamic(() => import('@/components/visualize/Unifie
 // Performance constants
 const MAX_CHART_DATA_POINTS = 500; // Limit for scatter plots
 const MAX_TIMELINE_POINTS = 365; // Max days for timeline chart
+
 const FILTER_DEBOUNCE_MS = 150; // Debounce delay for filter changes
 
 // Extended event type with catalogue info added during mapping
@@ -144,77 +116,6 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue;
 }
 
-// Chart export button component
-const ChartExportButton = memo(function ChartExportButton({
-  chartRef,
-  data,
-  filename,
-  className = ''
-}: {
-  chartRef: React.RefObject<HTMLDivElement | null>;
-  data?: Record<string, unknown>[];
-  filename: string;
-  className?: string;
-}) {
-  const handleExportPNG = async () => {
-    if (chartRef.current) {
-      await exportChartAsPNG(chartRef.current, filename);
-    }
-  };
-
-  const handleExportSVG = async () => {
-    if (chartRef.current) {
-      await exportChartAsSVG(chartRef.current, filename);
-    }
-  };
-
-  const handleExportJSON = () => {
-    if (data) {
-      exportDataAsJSON(data, filename);
-    }
-  };
-
-  const handleExportCSV = () => {
-    if (data) {
-      exportDataAsCSV(data, filename);
-    }
-  };
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className={className}>
-          <Download className="h-4 w-4 mr-2" />
-          Export
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={handleExportPNG}>
-          <ImageIcon className="h-4 w-4 mr-2" />
-          Export as PNG
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={handleExportSVG}>
-          <ImageIcon className="h-4 w-4 mr-2" />
-          Export as SVG
-        </DropdownMenuItem>
-        {data && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={handleExportJSON}>
-              <FileJson className="h-4 w-4 mr-2" />
-              Export Data (JSON)
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleExportCSV}>
-              <FileJson className="h-4 w-4 mr-2" />
-              Export Data (CSV)
-            </DropdownMenuItem>
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-});
-
 const AxisLegendHints = memo(function AxisLegendHints({
   axes,
   legend,
@@ -238,294 +139,6 @@ const AxisLegendHints = memo(function AxisLegendHints({
   );
 });
 
-// Custom tooltip component for professional styling
-const CustomTooltip = memo(function CustomTooltip({
-  active,
-  payload,
-  label,
-  formatter,
-  labelFormatter
-}: {
-  active?: boolean;
-  payload?: Array<{ value: number; name: string; color: string; dataKey: string }>;
-  label?: string;
-  formatter?: (value: number) => string;
-  labelFormatter?: (label: string) => string;
-}) {
-  if (!active || !payload?.length) return null;
-
-  return (
-    <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg p-3 min-w-[140px]">
-      <p className="font-medium text-sm text-foreground mb-2 border-b pb-1">
-        {labelFormatter ? labelFormatter(label || '') : label}
-      </p>
-      {payload.map((entry, index) => (
-        <div key={index} className="flex items-center justify-between gap-4 text-sm">
-          <div className="flex items-center gap-2">
-            <div
-              className="w-3 h-3 rounded-sm"
-              style={{ backgroundColor: entry.color }}
-            />
-            <span className="text-muted-foreground">{entry.name}</span>
-          </div>
-          <span className="font-mono font-medium tabular-nums">
-            {formatter ? formatter(entry.value) : entry.value.toLocaleString()}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-});
-
-// Memoized chart components with professional styling
-const MagnitudeDistributionChart = memo(function MagnitudeDistributionChart({
-  data
-}: {
-  data: { range: string; count: number }[]
-}) {
-  // Color bars based on magnitude range
-  const getBarColor = (range: string) => {
-    if (range.includes('5.0')) return SEISMIC_COLORS.energy.dark;
-    if (range.includes('4.5') || range.includes('4.0')) return '#f97316';
-    if (range.includes('3.5') || range.includes('3.0')) return '#eab308';
-    return SEISMIC_COLORS.magnitude.dark;
-  };
-
-  return (
-    <ChartContainer config={CHART_CONFIGS.magnitudeDistribution} className="h-[300px] w-full">
-      <BarChart data={data} margin={CHART_STYLES.margin.default}>
-        <defs>
-          <linearGradient id="magnitudeGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={SEISMIC_COLORS.magnitude.dark} stopOpacity={1} />
-            <stop offset="100%" stopColor={SEISMIC_COLORS.magnitude.dark} stopOpacity={0.6} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid
-          strokeDasharray={CHART_STYLES.grid.strokeDasharray}
-          className="stroke-muted"
-          opacity={CHART_STYLES.grid.opacity}
-          vertical={false}
-        />
-        <XAxis
-          dataKey="range"
-          tick={{ fontSize: CHART_STYLES.fontSize.tick }}
-          tickLine={false}
-          axisLine={{ className: 'stroke-muted' }}
-          label={{
-            value: 'Magnitude Range',
-            position: 'insideBottom',
-            offset: -10,
-            fontSize: CHART_STYLES.fontSize.label,
-            className: 'fill-muted-foreground'
-          }}
-        />
-        <YAxis
-          tick={{ fontSize: CHART_STYLES.fontSize.tick }}
-          tickLine={false}
-          axisLine={false}
-          tickFormatter={AXIS_FORMATTERS.compact}
-          label={{
-            value: 'Event Count',
-            angle: -90,
-            position: 'insideLeft',
-            fontSize: CHART_STYLES.fontSize.label,
-            className: 'fill-muted-foreground'
-          }}
-        />
-        <ChartTooltip
-          content={<ChartTooltipContent formatter={(value) => [value.toLocaleString(), 'Events']} />}
-          cursor={{ fill: 'hsl(var(--muted))', opacity: 0.3 }}
-        />
-        <Bar
-          dataKey="count"
-          fill="url(#magnitudeGradient)"
-          radius={CHART_STYLES.bar.radius}
-          maxBarSize={60}
-        >
-          {data.map((entry, index) => (
-            <Cell key={`cell-${index}`} fill={getBarColor(entry.range)} />
-          ))}
-        </Bar>
-      </BarChart>
-    </ChartContainer>
-  );
-});
-
-const DepthDistributionChart = memo(function DepthDistributionChart({
-  data
-}: {
-  data: { range: string; count: number }[]
-}) {
-  return (
-    <ChartContainer config={CHART_CONFIGS.depthDistribution} className="h-[300px] w-full">
-      <BarChart data={data} margin={CHART_STYLES.margin.default}>
-        <defs>
-          <linearGradient id="depthGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={SEISMIC_COLORS.depth.dark} stopOpacity={1} />
-            <stop offset="100%" stopColor={SEISMIC_COLORS.depth.dark} stopOpacity={0.6} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid
-          strokeDasharray={CHART_STYLES.grid.strokeDasharray}
-          className="stroke-muted"
-          opacity={CHART_STYLES.grid.opacity}
-          vertical={false}
-        />
-        <XAxis
-          dataKey="range"
-          tick={{ fontSize: CHART_STYLES.fontSize.tick }}
-          tickLine={false}
-          axisLine={{ className: 'stroke-muted' }}
-          label={{
-            value: 'Depth Range',
-            position: 'insideBottom',
-            offset: -10,
-            fontSize: CHART_STYLES.fontSize.label,
-            className: 'fill-muted-foreground'
-          }}
-        />
-        <YAxis
-          tick={{ fontSize: CHART_STYLES.fontSize.tick }}
-          tickLine={false}
-          axisLine={false}
-          tickFormatter={AXIS_FORMATTERS.compact}
-          label={{
-            value: 'Event Count',
-            angle: -90,
-            position: 'insideLeft',
-            fontSize: CHART_STYLES.fontSize.label,
-            className: 'fill-muted-foreground'
-          }}
-        />
-        <ChartTooltip
-          content={<ChartTooltipContent formatter={(value) => [value.toLocaleString(), 'Events']} />}
-          cursor={{ fill: 'hsl(var(--muted))', opacity: 0.3 }}
-        />
-        <Bar
-          dataKey="count"
-          fill="url(#depthGradient)"
-          radius={CHART_STYLES.bar.radius}
-          maxBarSize={60}
-        />
-      </BarChart>
-    </ChartContainer>
-  );
-});
-
-const RegionDistributionChart = memo(function RegionDistributionChart({
-  data
-}: {
-  data: { region: string; count: number }[]
-}) {
-  return (
-    <ChartContainer config={CHART_CONFIGS.region} className="h-[300px] w-full">
-      <BarChart data={data} layout="vertical" margin={{ ...CHART_STYLES.margin.default, left: 100 }}>
-        <defs>
-          <linearGradient id="regionGradient" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor={SEISMIC_COLORS.secondary.dark} stopOpacity={0.6} />
-            <stop offset="100%" stopColor={SEISMIC_COLORS.secondary.dark} stopOpacity={1} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid
-          strokeDasharray={CHART_STYLES.grid.strokeDasharray}
-          className="stroke-muted"
-          opacity={CHART_STYLES.grid.opacity}
-          horizontal={false}
-        />
-        <XAxis
-          type="number"
-          tick={{ fontSize: CHART_STYLES.fontSize.tick }}
-          tickLine={false}
-          axisLine={{ className: 'stroke-muted' }}
-          tickFormatter={AXIS_FORMATTERS.compact}
-        />
-        <YAxis
-          dataKey="region"
-          type="category"
-          width={95}
-          tick={{ fontSize: CHART_STYLES.fontSize.tick }}
-          tickLine={false}
-          axisLine={false}
-        />
-        <ChartTooltip
-          content={<ChartTooltipContent formatter={(value) => [value.toLocaleString(), 'Events']} />}
-          cursor={{ fill: 'hsl(var(--muted))', opacity: 0.3 }}
-        />
-        <Bar
-          dataKey="count"
-          fill="url(#regionGradient)"
-          radius={CHART_STYLES.bar.radiusHorizontal}
-          maxBarSize={24}
-        />
-      </BarChart>
-    </ChartContainer>
-  );
-});
-
-const CatalogueDistributionChart = memo(function CatalogueDistributionChart({
-  data
-}: {
-  data: { catalogue: string; count: number }[]
-}) {
-  const total = useMemo(() => data.reduce((sum, item) => sum + item.count, 0), [data]);
-
-  return (
-    <ChartContainer config={{}} className="h-[300px] w-full">
-      <PieChart margin={CHART_STYLES.margin.compact}>
-        <defs>
-          {CATEGORICAL_COLORS.map((color, index) => (
-            <linearGradient key={`gradient-${index}`} id={`pieGradient${index}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity={1} />
-              <stop offset="100%" stopColor={color} stopOpacity={0.7} />
-            </linearGradient>
-          ))}
-        </defs>
-        <Pie
-          data={data}
-          dataKey="count"
-          nameKey="catalogue"
-          cx="50%"
-          cy="50%"
-          innerRadius={45}
-          outerRadius={85}
-          paddingAngle={2}
-          label={({ catalogue, percent }) =>
-            percent > 0.05 ? `${catalogue.slice(0, 12)}${catalogue.length > 12 ? '...' : ''} (${(percent * 100).toFixed(0)}%)` : ''
-          }
-          labelLine={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1 }}
-        >
-          {data.map((_, index) => (
-            <Cell
-              key={`cell-${index}`}
-              fill={`url(#pieGradient${index % CATEGORICAL_COLORS.length})`}
-              stroke="hsl(var(--background))"
-              strokeWidth={2}
-            />
-          ))}
-        </Pie>
-        <ChartTooltip
-          content={({ active, payload }) => {
-            if (!active || !payload?.length) return null;
-            const item = payload[0];
-            return (
-              <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg p-3">
-                <p className="font-medium text-sm">{item.name}</p>
-                <p className="text-muted-foreground text-sm">
-                  {item.value?.toLocaleString()} events ({((item.value as number / total) * 100).toFixed(1)}%)
-                </p>
-              </div>
-            );
-          }}
-        />
-        <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle" className="fill-foreground">
-          <tspan x="50%" dy="-0.5em" fontSize="20" fontWeight="bold">{total.toLocaleString()}</tspan>
-          <tspan x="50%" dy="1.4em" fontSize="11" className="fill-muted-foreground">Total Events</tspan>
-        </text>
-      </PieChart>
-    </ChartContainer>
-  );
-});
-
 // Loading skeleton for statistics cards
 const StatisticsCardSkeleton = memo(function StatisticsCardSkeleton() {
   return (
@@ -539,29 +152,6 @@ const StatisticsCardSkeleton = memo(function StatisticsCardSkeleton() {
         <Skeleton className="h-3 w-32" />
       </CardContent>
     </Card>
-  );
-});
-
-// Loading skeleton for charts
-const ChartSkeleton = memo(function ChartSkeleton({
-  height = 280,
-  message,
-  children
-}: {
-  height?: number;
-  message?: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="w-full animate-pulse" style={{ height }}>
-      <div className="h-full bg-muted rounded-lg flex flex-col items-center justify-center gap-2">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        {message && (
-          <p className="text-sm text-muted-foreground">{message}</p>
-        )}
-        {children}
-      </div>
-    </div>
   );
 });
 
@@ -596,7 +186,6 @@ export default function AnalyticsPage() {
   const [mfdBinWidth, setMfdBinWidth] = useState<number>(0.1);
   const [mfdMinMagnitude, setMfdMinMagnitude] = useState<number | undefined>(undefined);
   const [mfdCumulativeStyle, setMfdCumulativeStyle] = useState<'solid' | 'dotted'>('solid');
-  const mfdChartRef = useRef<HTMLDivElement>(null);
 
   // Debounced filter values for expensive operations
   const debouncedMagnitudeRange = useDebounce(magnitudeRange, FILTER_DEBOUNCE_MS);
@@ -659,11 +248,12 @@ export default function AnalyticsPage() {
           region: event.region || 'Unknown'
         }));
 
+        const uniqueEvents = dedupeById(mappedEvents);
         if (mountedRef.current) {
-          setEvents(mappedEvents);
+          setEvents(uniqueEvents);
           setEventsLoaded(true);
-          if (mappedEvents.length > 0) {
-            setSelectedEvent(mappedEvents[0]);
+          if (uniqueEvents.length > 0) {
+            setSelectedEvent(uniqueEvents[0]);
           }
           setLoadingProgress(100);
           setLoadingMessage(`Loaded ${mappedEvents.length.toLocaleString()} events`);
@@ -728,11 +318,12 @@ export default function AnalyticsPage() {
         }
       });
 
+      const uniqueEvents = dedupeById(allEvents);
       if (mountedRef.current) {
-        setEvents(allEvents);
+        setEvents(uniqueEvents);
         setEventsLoaded(true);
-        if (allEvents.length > 0) {
-          setSelectedEvent(allEvents[0]);
+        if (uniqueEvents.length > 0) {
+          setSelectedEvent(uniqueEvents[0]);
         }
       }
     } catch (error) {
@@ -1020,7 +611,7 @@ export default function AnalyticsPage() {
     }
 
     // Calculate quality scores only for sampled events
-    const qualityScores = sampledEvents.map(e => calculateQualityScore(e as QualityMetrics));
+    const qualityScores = sampledEvents.map(e => calculateQualityScore(metricsFromEvent(e)));
     const avgQuality = qualityScores.length > 0
       ? qualityScores.reduce((sum, s) => sum + s.overall, 0) / qualityScores.length
       : 0;
@@ -1838,17 +1429,7 @@ export default function AnalyticsPage() {
                 />
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={350}>
-                  <ScatterChart>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis dataKey="magnitude" name="Magnitude" tick={{ fontSize: 12 }} />
-                    <YAxis dataKey="depth" name="Depth (km)" reversed tick={{ fontSize: 12 }} />
-                    <ZAxis range={[50, 400]} />
-                    <Tooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{ fontSize: 12 }} />
-                    <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <Scatter name="Events" data={magnitudeDepthScatter} fill="#8b5cf6" />
-                  </ScatterChart>
-                </ResponsiveContainer>
+                <MagnitudeDepthScatter data={magnitudeDepthScatter} height={350} />
               </CardContent>
             </Card>
           </div>
@@ -1874,24 +1455,7 @@ export default function AnalyticsPage() {
               />
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={400}>
-                <LineChart data={timeSeriesData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip contentStyle={{ fontSize: 12 }} />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Line
-                    type="monotone"
-                    dataKey="count"
-                    stroke="#3b82f6"
-                    strokeWidth={2}
-                    name="Events per Day"
-                    dot={timeSeriesData.length < 100 ? { r: 3 } : false}
-                    activeDot={{ r: 5 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              <EventTimelineChart data={timeSeriesData} height={400} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -1988,7 +1552,7 @@ export default function AnalyticsPage() {
 
               {/* Event Analysis Cards */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <QualityScoreCard score={calculateQualityScore(selectedEvent as QualityMetrics)} />
+                <QualityScoreCard score={calculateQualityScore(metricsFromEvent(selectedEvent))} />
                 <UncertaintyVisualization data={selectedEvent} />
               </div>
 
@@ -2233,108 +1797,7 @@ export default function AnalyticsPage() {
                       />
                     </CardHeader>
                     <CardContent>
-                      <ChartContainer config={CHART_CONFIGS.gutenbergRichter} className="h-[420px] w-full">
-                        <ScatterChart margin={{ top: 20, right: 30, left: 60, bottom: 60 }}>
-                          <defs>
-                            <linearGradient id="grObservedGradient" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor={SEISMIC_COLORS.magnitude.dark} stopOpacity={0.9} />
-                              <stop offset="100%" stopColor={SEISMIC_COLORS.magnitude.dark} stopOpacity={0.5} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid
-                            strokeDasharray={CHART_STYLES.grid.strokeDasharray}
-                            className="stroke-muted"
-                            opacity={CHART_STYLES.grid.opacity}
-                          />
-                          <XAxis
-                            dataKey="magnitude"
-                            type="number"
-                            tick={{ fontSize: CHART_STYLES.fontSize.tick }}
-                            tickLine={false}
-                            axisLine={{ className: 'stroke-muted' }}
-                            label={{
-                              value: 'Magnitude (M)',
-                              position: 'insideBottom',
-                              offset: -10,
-                              fontSize: CHART_STYLES.fontSize.label,
-                              className: 'fill-muted-foreground font-medium'
-                            }}
-                          />
-                          <YAxis
-                            dataKey="logCount"
-                            type="number"
-                            tick={{ fontSize: CHART_STYLES.fontSize.tick }}
-                            tickLine={false}
-                            axisLine={false}
-                            label={{
-                              value: 'log₁₀(N) - Cumulative Number',
-                              angle: -90,
-                              position: 'insideLeft',
-                              offset: 10,
-                              fontSize: CHART_STYLES.fontSize.label,
-                              className: 'fill-muted-foreground font-medium'
-                            }}
-                          />
-                          <ChartTooltip
-                            content={({ active, payload }) => {
-                              if (!active || !payload?.length) return null;
-                              const data = payload[0].payload;
-                              return (
-                                <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg p-3">
-                                  <p className="font-medium text-sm">M{data.magnitude?.toFixed(1)}</p>
-                                  <p className="text-muted-foreground text-sm">
-                                    log₁₀(N) = {data.logCount?.toFixed(2)}
-                                  </p>
-                                  <p className="text-muted-foreground text-sm">
-                                    N = {Math.pow(10, data.logCount)?.toFixed(0)} events
-                                  </p>
-                                </div>
-                              );
-                            }}
-                          />
-                          <Legend
-                            verticalAlign="top"
-                            align="right"
-                            wrapperStyle={{ paddingBottom: 10 }}
-                          />
-                          <Scatter
-                            name="Observed Data"
-                            data={grAnalysis.dataPoints}
-                            fill={SEISMIC_COLORS.magnitude.dark}
-                            fillOpacity={0.8}
-                          >
-                            {grAnalysis.dataPoints.map((_: unknown, index: number) => (
-                              <Cell
-                                key={`cell-${index}`}
-                                fill={SEISMIC_COLORS.magnitude.dark}
-                                strokeWidth={2}
-                                stroke="hsl(var(--background))"
-                              />
-                            ))}
-                          </Scatter>
-                          <Scatter
-                            name="G-R Linear Fit"
-                            data={grAnalysis.fittedLine}
-                            fill={SEISMIC_COLORS.fit.dark}
-                            line={{ stroke: SEISMIC_COLORS.fit.dark, strokeWidth: 2 }}
-                            shape="diamond"
-                            legendType="line"
-                          />
-                          <ReferenceLine
-                            x={grAnalysis.completeness}
-                            stroke={SEISMIC_COLORS.reference.dark}
-                            strokeWidth={2}
-                            strokeDasharray="8 4"
-                            label={{
-                              value: `Mc = ${grAnalysis.completeness.toFixed(1)}`,
-                              position: 'top',
-                              fill: SEISMIC_COLORS.reference.dark,
-                              fontSize: 12,
-                              fontWeight: 600
-                            }}
-                          />
-                        </ScatterChart>
-                      </ChartContainer>
+                      <GutenbergRichterChart result={grAnalysis} height={420} />
                     </CardContent>
                   </Card>
 
@@ -2509,97 +1972,7 @@ export default function AnalyticsPage() {
                       />
                     </CardHeader>
                     <CardContent>
-                      <ChartContainer config={CHART_CONFIGS.completeness} className="h-[420px] w-full">
-                        <BarChart data={completeness.magnitudeDistribution} margin={{ top: 20, right: 30, left: 60, bottom: 60 }}>
-                          <defs>
-                            <linearGradient id="completenessGradient" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor={SEISMIC_COLORS.frequency.dark} stopOpacity={1} />
-                              <stop offset="100%" stopColor={SEISMIC_COLORS.frequency.dark} stopOpacity={0.5} />
-                            </linearGradient>
-                            <linearGradient id="incompleteGradient" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor="#94a3b8" stopOpacity={0.6} />
-                              <stop offset="100%" stopColor="#94a3b8" stopOpacity={0.3} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid
-                            strokeDasharray={CHART_STYLES.grid.strokeDasharray}
-                            className="stroke-muted"
-                            opacity={CHART_STYLES.grid.opacity}
-                            vertical={false}
-                          />
-                          <XAxis
-                            dataKey="magnitude"
-                            tick={{ fontSize: CHART_STYLES.fontSize.tick }}
-                            tickLine={false}
-                            axisLine={{ className: 'stroke-muted' }}
-                            label={{
-                              value: 'Magnitude (M)',
-                              position: 'insideBottom',
-                              offset: -10,
-                              fontSize: CHART_STYLES.fontSize.label,
-                              className: 'fill-muted-foreground font-medium'
-                            }}
-                          />
-                          <YAxis
-                            tick={{ fontSize: CHART_STYLES.fontSize.tick }}
-                            tickLine={false}
-                            axisLine={false}
-                            tickFormatter={AXIS_FORMATTERS.compact}
-                            label={{
-                              value: 'Number of Events',
-                              angle: -90,
-                              position: 'insideLeft',
-                              offset: 10,
-                              fontSize: CHART_STYLES.fontSize.label,
-                              className: 'fill-muted-foreground font-medium'
-                            }}
-                          />
-                          <ChartTooltip
-                            content={({ active, payload }) => {
-                              if (!active || !payload?.length) return null;
-                              const data = payload[0].payload;
-                              const isComplete = data.magnitude >= completeness.mc;
-                              return (
-                                <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg p-3">
-                                  <p className="font-medium text-sm">M{data.magnitude?.toFixed(1)}</p>
-                                  <p className="text-muted-foreground text-sm">
-                                    {data.count?.toLocaleString()} events
-                                  </p>
-                                  <Badge variant={isComplete ? 'default' : 'secondary'} className="mt-1 text-xs">
-                                    {isComplete ? 'Complete' : 'Incomplete'}
-                                  </Badge>
-                                </div>
-                              );
-                            }}
-                          />
-                          <Bar
-                            dataKey="count"
-                            radius={CHART_STYLES.bar.radius}
-                            maxBarSize={50}
-                          >
-                            {completeness.magnitudeDistribution.map((entry: { magnitude: number; count: number }, index: number) => (
-                              <Cell
-                                key={`cell-${index}`}
-                                fill={entry.magnitude >= completeness.mc ? SEISMIC_COLORS.frequency.dark : '#94a3b8'}
-                                fillOpacity={entry.magnitude >= completeness.mc ? 1 : 0.5}
-                              />
-                            ))}
-                          </Bar>
-                          <ReferenceLine
-                            x={completeness.mc}
-                            stroke={SEISMIC_COLORS.reference.dark}
-                            strokeWidth={2}
-                            strokeDasharray="8 4"
-                            label={{
-                              value: `Mc = ${completeness.mc.toFixed(1)}`,
-                              position: 'top',
-                              fill: SEISMIC_COLORS.reference.dark,
-                              fontSize: 12,
-                              fontWeight: 600
-                            }}
-                          />
-                        </BarChart>
-                      </ChartContainer>
+                      <CompletenessChart distribution={completeness.magnitudeDistribution} mc={completeness.mc} height={420} />
                     </CardContent>
                   </Card>
 
@@ -2751,83 +2124,7 @@ export default function AnalyticsPage() {
                       <AxisLegendHints axes="X: date. Y: cumulative events." />
                     </CardHeader>
                     <CardContent>
-                      <ChartContainer config={CHART_CONFIGS.temporal} className="h-[420px] w-full">
-                        <AreaChart data={temporalAnalysis.timeSeries} margin={{ top: 20, right: 30, left: 60, bottom: 60 }}>
-                          <defs>
-                            <linearGradient id="temporalGradient" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor={SEISMIC_COLORS.time.dark} stopOpacity={0.4} />
-                              <stop offset="95%" stopColor={SEISMIC_COLORS.time.dark} stopOpacity={0.05} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid
-                            strokeDasharray={CHART_STYLES.grid.strokeDasharray}
-                            className="stroke-muted"
-                            opacity={CHART_STYLES.grid.opacity}
-                          />
-                          <XAxis
-                            dataKey="date"
-                            tick={{ fontSize: CHART_STYLES.fontSize.tick }}
-                            tickLine={false}
-                            axisLine={{ className: 'stroke-muted' }}
-                            tickFormatter={(value) => {
-                              const date = new Date(value);
-                              return `${date.getMonth() + 1}/${date.getFullYear().toString().slice(-2)}`;
-                            }}
-                            label={{
-                              value: 'Date',
-                              position: 'insideBottom',
-                              offset: -10,
-                              fontSize: CHART_STYLES.fontSize.label,
-                              className: 'fill-muted-foreground font-medium'
-                            }}
-                          />
-                          <YAxis
-                            tick={{ fontSize: CHART_STYLES.fontSize.tick }}
-                            tickLine={false}
-                            axisLine={false}
-                            tickFormatter={AXIS_FORMATTERS.compact}
-                            label={{
-                              value: 'Cumulative Events',
-                              angle: -90,
-                              position: 'insideLeft',
-                              offset: 10,
-                              fontSize: CHART_STYLES.fontSize.label,
-                              className: 'fill-muted-foreground font-medium'
-                            }}
-                          />
-                          <ChartTooltip
-                            content={({ active, payload }) => {
-                              if (!active || !payload?.length) return null;
-                              const data = payload[0].payload;
-                              return (
-                                <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg p-3">
-                                  <p className="font-medium text-sm">{new Date(data.date).toLocaleDateString('en-GB', {
-                                    day: '2-digit',
-                                    month: '2-digit',
-                                    year: 'numeric',
-                                  })}</p>
-                                  <p className="text-muted-foreground text-sm">
-                                    {data.cumulativeCount?.toLocaleString()} cumulative events
-                                  </p>
-                                  {data.dailyCount !== undefined && (
-                                    <p className="text-muted-foreground text-sm">
-                                      {data.dailyCount?.toLocaleString()} events this period
-                                    </p>
-                                  )}
-                                </div>
-                              );
-                            }}
-                          />
-                          <Area
-                            type="monotone"
-                            dataKey="cumulativeCount"
-                            stroke={SEISMIC_COLORS.time.dark}
-                            strokeWidth={2}
-                            fill="url(#temporalGradient)"
-                            name="Cumulative Events"
-                          />
-                        </AreaChart>
-                      </ChartContainer>
+                      <TemporalSeriesChart data={temporalAnalysis.timeSeries} height={420} />
                     </CardContent>
                   </Card>
 
@@ -3096,87 +2393,7 @@ export default function AnalyticsPage() {
                       <AxisLegendHints axes="X: magnitude bin. Y: seismic moment (log scale)." />
                     </CardHeader>
                     <CardContent>
-                      <ChartContainer config={CHART_CONFIGS.moment} className="h-[420px] w-full">
-                        <BarChart data={momentAnalysis.momentByMagnitude} margin={{ top: 20, right: 30, left: 80, bottom: 60 }}>
-                          <defs>
-                            <linearGradient id="momentGradient" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor={SEISMIC_COLORS.energy.dark} stopOpacity={1} />
-                              <stop offset="100%" stopColor={SEISMIC_COLORS.energy.dark} stopOpacity={0.5} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid
-                            strokeDasharray={CHART_STYLES.grid.strokeDasharray}
-                            className="stroke-muted"
-                            opacity={CHART_STYLES.grid.opacity}
-                            vertical={false}
-                          />
-                          <XAxis
-                            dataKey="magnitude"
-                            tick={{ fontSize: CHART_STYLES.fontSize.tick }}
-                            tickLine={false}
-                            axisLine={{ className: 'stroke-muted' }}
-                            label={{
-                              value: 'Magnitude (M)',
-                              position: 'insideBottom',
-                              offset: -10,
-                              fontSize: CHART_STYLES.fontSize.label,
-                              className: 'fill-muted-foreground font-medium'
-                            }}
-                          />
-                          <YAxis
-                            scale="log"
-                            domain={['auto', 'auto']}
-                            tick={{ fontSize: CHART_STYLES.fontSize.tick }}
-                            tickLine={false}
-                            axisLine={false}
-                            tickFormatter={(value) => value.toExponential(0)}
-                            label={{
-                              value: 'Seismic Moment (N·m)',
-                              angle: -90,
-                              position: 'insideLeft',
-                              offset: 0,
-                              fontSize: CHART_STYLES.fontSize.label,
-                              className: 'fill-muted-foreground font-medium'
-                            }}
-                          />
-                          <ChartTooltip
-                            content={({ active, payload }) => {
-                              if (!active || !payload?.length) return null;
-                              const data = payload[0].payload;
-                              const percentOfTotal = (data.moment / momentAnalysis.totalMoment * 100).toFixed(1);
-                              return (
-                                <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg p-3">
-                                  <p className="font-medium text-sm">M{data.magnitude?.toFixed(1)}</p>
-                                  <p className="text-muted-foreground text-sm">
-                                    {data.moment?.toExponential(2)} N·m
-                                  </p>
-                                  <p className="text-muted-foreground text-sm">
-                                    {percentOfTotal}% of total moment
-                                  </p>
-                                  {data.eventCount && (
-                                    <p className="text-muted-foreground text-sm">
-                                      {data.eventCount} events
-                                    </p>
-                                  )}
-                                </div>
-                              );
-                            }}
-                          />
-                          <Bar
-                            dataKey="moment"
-                            fill="url(#momentGradient)"
-                            radius={CHART_STYLES.bar.radius}
-                            maxBarSize={50}
-                          >
-                            {momentAnalysis.momentByMagnitude.map((_: unknown, index: number) => (
-                              <Cell
-                                key={`cell-${index}`}
-                                fill={getMagnitudeColor(momentAnalysis.momentByMagnitude[index].magnitude)}
-                              />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ChartContainer>
+                      <MomentReleaseChart data={momentAnalysis.momentByMagnitude} totalMoment={momentAnalysis.totalMoment} height={420} />
                     </CardContent>
                   </Card>
 
@@ -3474,20 +2691,6 @@ export default function AnalyticsPage() {
                             legend="Colors map to catalogues; lines are cumulative and bars are incremental when enabled."
                           />
                         </div>
-                        {mfdComparison && (
-                          <ChartExportButton
-                            chartRef={mfdChartRef}
-                            data={mfdComparison.catalogues.flatMap(cat =>
-                              cat.cumulative.map(d => ({
-                                catalogue: cat.catalogueName,
-                                magnitude: d.magnitude,
-                                count: d.count,
-                                logCount: d.logCount,
-                              }))
-                            )}
-                            filename="mfd_comparison"
-                          />
-                        )}
                       </div>
                     </CardHeader>
                     <CardContent>
@@ -3500,130 +2703,8 @@ export default function AnalyticsPage() {
                           </p>
                         </div>
                       ) : mfdComparison ? (
-                        <div ref={mfdChartRef}>
-                          <ChartContainer config={CHART_CONFIGS.mfd} className="h-[500px] w-full">
-                            <ComposedChart margin={{ top: 20, right: 30, left: 60, bottom: 60 }}>
-                              <defs>
-                                {mfdComparison.catalogues.map((cat, index) => (
-                                  <linearGradient key={`gradient-${index}`} id={`mfdGradient-${index}`} x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stopColor={cat.color} stopOpacity={0.8} />
-                                    <stop offset="100%" stopColor={cat.color} stopOpacity={0.3} />
-                                  </linearGradient>
-                                ))}
-                              </defs>
-                              <CartesianGrid
-                                strokeDasharray={CHART_STYLES.grid.strokeDasharray}
-                                className="stroke-muted"
-                                opacity={CHART_STYLES.grid.opacity}
-                              />
-                              <XAxis
-                                dataKey="magnitude"
-                                type="number"
-                                domain={[
-                                  Math.floor(mfdComparison.magnitudeRange.min),
-                                  Math.ceil(mfdComparison.magnitudeRange.max)
-                                ]}
-                                tick={{ fontSize: CHART_STYLES.fontSize.tick }}
-                                tickLine={false}
-                                axisLine={{ className: 'stroke-muted' }}
-                                tickFormatter={(v) => `M${v}`}
-                                label={{
-                                  value: 'Magnitude (ML)',
-                                  position: 'insideBottom',
-                                  offset: -10,
-                                  fontSize: CHART_STYLES.fontSize.label,
-                                  className: 'fill-muted-foreground font-medium'
-                                }}
-                              />
-                              <YAxis
-                                scale={mfdLogScale ? 'log' : 'linear'}
-                                domain={mfdLogScale ? [1, 'auto'] : [0, 'auto']}
-                                tick={{ fontSize: CHART_STYLES.fontSize.tick }}
-                                tickLine={false}
-                                axisLine={false}
-                                tickFormatter={(v) => {
-                                  if (mfdLogScale) {
-                                    if (v >= 1000000) return `${v / 1000000}M`;
-                                    if (v >= 1000) return `${v / 1000}K`;
-                                    return v.toString();
-                                  }
-                                  return AXIS_FORMATTERS.compact(v);
-                                }}
-                                label={{
-                                  value: 'Number of events',
-                                  angle: -90,
-                                  position: 'insideLeft',
-                                  offset: 10,
-                                  fontSize: CHART_STYLES.fontSize.label,
-                                  className: 'fill-muted-foreground font-medium'
-                                }}
-                              />
-                              <ChartTooltip
-                                content={({ active, payload, label }) => {
-                                  if (!active || !payload?.length) return null;
-                                  return (
-                                    <div className="bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg p-3 min-w-[180px]">
-                                      <p className="font-medium text-sm border-b pb-1 mb-2">
-                                        M{typeof label === 'number' ? label.toFixed(1) : label}
-                                      </p>
-                                      {payload.map((entry: any, index: number) => (
-                                        <div key={index} className="flex items-center justify-between gap-4 text-sm">
-                                          <div className="flex items-center gap-2">
-                                            <div
-                                              className="w-3 h-3 rounded-sm"
-                                              style={{ backgroundColor: entry.color }}
-                                            />
-                                            <span className="text-muted-foreground truncate max-w-[120px]">
-                                              {entry.name}
-                                            </span>
-                                          </div>
-                                          <span className="font-mono font-medium tabular-nums">
-                                            {entry.value?.toLocaleString()}
-                                          </span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  );
-                                }}
-                              />
-                              <Legend
-                                verticalAlign="top"
-                                align="right"
-                                wrapperStyle={{ paddingBottom: 10 }}
-                              />
-                              {/* Render histogram as filled stepped area (render first so cumulative overlays on top) */}
-                              {mfdShowHistogram && mfdComparison.catalogues.map((cat, index) => (
-                                <Area
-                                  key={`histogram-${cat.catalogueId}`}
-                                  data={cat.histogram}
-                                  dataKey="count"
-                                  name={cat.catalogueName}
-                                  type="stepAfter"
-                                  stroke={cat.color}
-                                  fill={`url(#mfdGradient-${index})`}
-                                  strokeWidth={1}
-                                  fillOpacity={0.4}
-                                  legendType={mfdShowCumulative ? 'none' : 'square'}
-                                />
-                              ))}
-                              {/* Render cumulative lines (overlays on top of histogram) */}
-                              {mfdShowCumulative && mfdComparison.catalogues.map((cat, index) => (
-                                <Line
-                                  key={`cumulative-${cat.catalogueId}`}
-                                  data={cat.cumulative}
-                                  dataKey="count"
-                                  name={cat.catalogueName}
-                                  type="stepAfter"
-                                  stroke={cat.color}
-                                  strokeWidth={2}
-                                  strokeDasharray={mfdCumulativeStyle === 'dotted' ? '5 5' : undefined}
-                                  dot={{ r: 3, fill: cat.color }}
-                                  activeDot={{ r: 5, strokeWidth: 2 }}
-                                  connectNulls
-                                />
-                              ))}
-                            </ComposedChart>
-                          </ChartContainer>
+                        <div>
+                          <MFDComparisonChart catalogues={mfdComparison.catalogues} magnitudeRange={mfdComparison.magnitudeRange} logScale={mfdLogScale} showHistogram={mfdShowHistogram} showCumulative={mfdShowCumulative} cumulativeStyle={mfdCumulativeStyle} height={500} />
                         </div>
                       ) : (
                         <div className="text-center py-20 text-muted-foreground">

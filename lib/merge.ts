@@ -276,13 +276,16 @@ function buildMergedEventFields(
     fields.event_type_certainty = quakeml.typeCertainty;
 
     if (preferredOrigin) {
-      // Uncertainties
+      // Uncertainties. QuakeML BED: depth.uncertainty and horizontalUncertainty are in metres;
+      // DB stores lengths in km (see lib/quakeml-to-db.ts), angular uncertainties in degrees, time in seconds.
       fields.time_uncertainty = preferredOrigin.time.uncertainty;
       fields.latitude_uncertainty = preferredOrigin.latitude.uncertainty;
       fields.longitude_uncertainty = preferredOrigin.longitude.uncertainty;
-      fields.depth_uncertainty = preferredOrigin.depth?.uncertainty;
+      fields.depth_uncertainty = preferredOrigin.depth?.uncertainty != null
+        ? preferredOrigin.depth.uncertainty / 1000
+        : undefined;
       if (preferredOrigin.uncertainty?.horizontalUncertainty) {
-        fields.horizontal_uncertainty = preferredOrigin.uncertainty.horizontalUncertainty;
+        fields.horizontal_uncertainty = preferredOrigin.uncertainty.horizontalUncertainty / 1000;
       }
 
       // Origin metadata
@@ -1895,26 +1898,26 @@ interface MagnitudeConversionResult {
 }
 
 /**
- * Convert ML (local magnitude) to Mw (moment magnitude)
+ * Convert ML (local magnitude) to Mw (moment magnitude) — APPROXIMATE.
  *
- * Based on empirical relationships from:
- * - Hanks & Kanamori (1979) for general relationship
- * - Regional calibrations for specific areas
+ * Uses the generic linear relation Mw = 0.67*ML + 1.17 with ~0.3 m.u. scatter.
  *
- * General relationship: Mw = 0.67 * ML + 1.17 (for ML < 6.5)
- * Uncertainty: ~0.3 magnitude units
+ * IMPORTANT: this is NOT from Scordilis (2006). That study calibrated Ms->Mw and
+ * mb->Mw only — it does not provide an ML->Mw relation — so the previous
+ * attribution was incorrect. There is no single universal ML->Mw conversion; for
+ * moderate events ML ~= Mw, and a regional calibration (e.g. an NZ-specific
+ * GeoNet / Ristau et al. relation) should be preferred where available. Converted
+ * values are approximate and flagged isExact: false.
  *
  * @param ml - Local magnitude value
  * @returns Converted Mw value with uncertainty
  */
 function convertMLtoMw(ml: number): MagnitudeConversionResult {
-  // Scordilis (2006) relationship for global data
-  // Mw = 0.67(±0.05) * ML + 1.17(±0.26) for 3.0 ≤ ML ≤ 6.5
   const mw = 0.67 * ml + 1.17;
   return {
     value: Math.round(mw * 100) / 100,
     uncertainty: 0.3,
-    method: 'Scordilis (2006): Mw = 0.67*ML + 1.17',
+    method: 'Approximate ML->Mw: Mw = 0.67*ML + 1.17 (generic, not Scordilis 2006)',
     isExact: false,
   };
 }
@@ -2476,13 +2479,16 @@ function getLocationWeight(event: EventData): number {
   // Get horizontal uncertainty (prefer combined, fall back to lat/lon)
   let horizontalUncertainty: number | null = null;
 
+  // Normalize everything to KILOMETRES before weighting: QuakeML horizontalUncertainty
+  // is in metres, and lat/lon uncertainties are in degrees (~111 km/deg). Mixing units
+  // here gave identical-quality events wildly different merge weights.
   if (origin?.uncertainty?.horizontalUncertainty != null) {
-    horizontalUncertainty = origin.uncertainty.horizontalUncertainty;
+    horizontalUncertainty = origin.uncertainty.horizontalUncertainty / 1000; // m -> km
   } else if (origin?.latitude?.uncertainty != null && origin?.longitude?.uncertainty != null) {
-    // Combine lat/lon uncertainties (geometric mean)
+    // Geometric mean of lat/lon uncertainty (degrees) converted to km
     horizontalUncertainty = Math.sqrt(
       origin.latitude.uncertainty * origin.longitude.uncertainty
-    );
+    ) * 111;
   }
 
   // Also check for top-level event uncertainty fields (from CSV/simple formats)
@@ -2490,9 +2496,10 @@ function getLocationWeight(event: EventData): number {
     if (event.horizontal_uncertainty != null) {
       horizontalUncertainty = event.horizontal_uncertainty;
     } else if (event.latitude_uncertainty != null && event.longitude_uncertainty != null) {
+      // degrees -> km
       horizontalUncertainty = Math.sqrt(
         event.latitude_uncertainty * event.longitude_uncertainty
-      );
+      ) * 111;
     }
   }
 

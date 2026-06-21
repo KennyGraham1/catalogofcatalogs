@@ -271,7 +271,7 @@ export function calculateGutenbergRichter(
   binWidth: number = 0.1
 ): GutenbergRichterResult {
   // Filter events by minimum magnitude if specified
-  const filteredEvents = minMagnitude
+  const filteredEvents = minMagnitude != null
     ? events.filter(e => e.magnitude >= minMagnitude)
     : events;
 
@@ -284,8 +284,11 @@ export function calculateGutenbergRichter(
   const maxMag = Math.ceil(Math.max(...filteredEvents.map(e => e.magnitude)) / binWidth) * binWidth;
 
   const bins: Map<number, number> = new Map();
-  for (let mag = minMag; mag <= maxMag; mag += binWidth) {
-    bins.set(Number(mag.toFixed(2)), 0);
+  // Index-based iteration so floating-point drift in `mag += binWidth` cannot drop
+  // the maximum-magnitude bin (the previous `mag <= maxMag` loop could).
+  const nBins = Math.round((maxMag - minMag) / binWidth) + 1;
+  for (let i = 0; i < nBins; i++) {
+    bins.set(Number((minMag + i * binWidth).toFixed(2)), 0);
   }
 
   // Count events in each bin
@@ -316,16 +319,35 @@ export function calculateGutenbergRichter(
     throw new Error('Insufficient magnitude bins for regression');
   }
 
+  // Completeness magnitude Mc. The Aki-Utsu MLE below is only valid for a sample
+  // that is complete above Mc, so when the caller does not supply an explicit
+  // cut-off we ESTIMATE Mc by maximum curvature (MAXC; Wiemer & Wyss, 2000) — the
+  // magnitude bin with the most events — plus the standard +0.2 correction
+  // (Woessner & Wiemer, 2005). Using the catalogue floor here (the old behaviour)
+  // biased b low because the incomplete low-magnitude tail was included.
+  const MAXC_CORRECTION = 0.2;
+  let mc: number;
+  if (minMagnitude != null) {
+    mc = minMagnitude;
+  } else {
+    let peakMag = minMag;
+    let peakCount = -1;
+    for (const [mag, count] of sortedBins) {
+      if (count > peakCount) { peakCount = count; peakMag = mag; }
+    }
+    mc = Number((peakMag + MAXC_CORRECTION).toFixed(2));
+  }
+  let magsAboveMc = filteredEvents.map(e => e.magnitude).filter(m => m >= mc);
+  // Guard: if the estimated Mc leaves too few events for a stable estimate, fall
+  // back to the catalogue floor rather than producing a degenerate b-value.
+  if (magsAboveMc.length < 10) {
+    mc = minMag;
+    magsAboveMc = filteredEvents.map(e => e.magnitude).filter(m => m >= mc);
+  }
+
   // Maximum-likelihood b-value (Aki, 1965) with the Utsu binning correction:
   //   b = log10(e) / (meanMag - (Mc - binWidth/2))
-  // Mc is the lower magnitude cut-off (the supplied minMagnitude, else the
-  // smallest binned magnitude). This is the estimator documented in the paper
-  // (Eq. 9); ordinary least-squares on the cumulative FMD is biased and is not
-  // used.
-  const mc = minMagnitude ?? minMag;
-  const magsAboveMc = filteredEvents
-    .map(e => e.magnitude)
-    .filter(m => m >= mc);
+  // (ordinary least-squares on the cumulative FMD is biased and is not used).
   const meanMag = magsAboveMc.reduce((sum, m) => sum + m, 0) / magsAboveMc.length;
   const bValue = Math.LOG10E / (meanMag - (mc - binWidth / 2));
   // Formal Aki (1965) standard error of the MLE b-value: sigma_b = b / sqrt(N).
@@ -340,7 +362,7 @@ export function calculateGutenbergRichter(
     const predicted = aValue - bValue * p.magnitude;
     return sum + Math.pow(p.logCount - predicted, 2);
   }, 0);
-  const rSquared = 1 - (ssResidual / ssTotal);
+  const rSquared = ssTotal > 0 ? 1 - (ssResidual / ssTotal) : 0;
 
   // Generate fitted line
   const fittedLine = cumulativeCounts.map(p => ({
@@ -348,16 +370,10 @@ export function calculateGutenbergRichter(
     logCount: aValue - bValue * p.magnitude
   }));
 
-  // Estimate completeness magnitude (where data deviates from the GR fit)
-  let completeness = mc;
-  for (let i = 0; i < cumulativeCounts.length - 1; i++) {
-    const predicted = aValue - bValue * cumulativeCounts[i].magnitude;
-    const residual = Math.abs(cumulativeCounts[i].logCount - predicted);
-    if (residual < 0.2) {
-      completeness = cumulativeCounts[i].magnitude;
-      break;
-    }
-  }
+  // Completeness magnitude actually used for the b-value (the MAXC estimate, or
+  // the caller-supplied cut-off). The previous "first cumulative residual < 0.2"
+  // rule was not a recognised Mc method and has been removed.
+  const completeness = mc;
 
   return {
     bValue,
@@ -388,8 +404,9 @@ export function estimateCompletenessMagnitude(
   const maxMag = Math.ceil(Math.max(...events.map(e => e.magnitude)) / binWidth) * binWidth;
 
   const bins: Map<number, number> = new Map();
-  for (let mag = minMag; mag <= maxMag; mag += binWidth) {
-    bins.set(Number(mag.toFixed(2)), 0);
+  const nBins = Math.round((maxMag - minMag) / binWidth) + 1;
+  for (let i = 0; i < nBins; i++) {
+    bins.set(Number((minMag + i * binWidth).toFixed(2)), 0);
   }
 
   events.forEach(event => {
@@ -415,7 +432,7 @@ export function estimateCompletenessMagnitude(
 
   // Apply the standard MAXC correction (default +0.2; configurable) so that
   // the returned Mc matches the value documented in the paper.
-  mc = mc + correction;
+  mc = Number((mc + correction).toFixed(2)); // round to bin precision (matches worker)
 
   // Calculate confidence based on data quality
   const totalEvents = events.length;
@@ -434,15 +451,19 @@ export function estimateCompletenessMagnitude(
  * Gardner-Knopoff (1974) space-time window parameters
  * These are the standard parameters used for earthquake declustering
  *
- * Two-branch time window (days): T = 10^(0.5409*M - 0.547) for M >= 6.5,
- *   otherwise T = 10^(0.032*M + 2.7389)  (Gardner & Knopoff, 1974)
+ * Two-branch time window (days): T = 10^(0.032*M + 2.7389) for M >= 6.5,
+ *   otherwise T = 10^(0.5409*M - 0.547)  (Gardner & Knopoff, 1974)
  * Distance window (km): L = 10^(0.1238*M + 0.983)  (Gardner & Knopoff, 1974)
- * (Table 1 of van Stiphout et al., 2012)
+ * (Table 1 of van Stiphout et al., 2012; OpenQuake hmtk GardnerKnopoffWindow)
+ *
+ * Sanity check of the (correct) assignment: M4 -> ~41 days, M8 -> ~989 days.
+ * The previous code had the two branches swapped, giving M4 -> ~736 days and
+ * M8 -> ~6026 days, grossly over-clustering small events.
  */
-function getGardnerKnopoffWindow(magnitude: number): { timeWindowDays: number; distanceWindowKm: number } {
+export function getGardnerKnopoffWindow(magnitude: number): { timeWindowDays: number; distanceWindowKm: number } {
   const timeWindowDays = magnitude >= 6.5
-    ? Math.pow(10, 0.5409 * magnitude - 0.547)
-    : Math.pow(10, 0.032 * magnitude + 2.7389);
+    ? Math.pow(10, 0.032 * magnitude + 2.7389)
+    : Math.pow(10, 0.5409 * magnitude - 0.547);
   const distanceWindowKm = Math.pow(10, 0.1238 * magnitude + 0.983);
 
   return { timeWindowDays, distanceWindowKm };

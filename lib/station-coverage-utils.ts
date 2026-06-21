@@ -127,7 +127,13 @@ export function calculateAzimuthalGap(azimuths: number[]): number {
 }
 
 /**
- * Determine coverage quality based on azimuthal gap and station count
+ * Determine coverage quality based on azimuthal gap and station count.
+ *
+ * NOTE: the 90/180/270-degree thresholds below are project HEURISTICS, not the
+ * formal network-quality criteria of Bondar et al. (2004) (whose ground-truth
+ * criteria combine primary AND secondary azimuthal gap, nearest-station distance,
+ * and station count). Treat the returned label as an indicative coverage class,
+ * not a Bondar-conformant location-quality grade.
  */
 export function determineCoverageQuality(
   azimuthalGap: number,

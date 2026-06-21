@@ -10,6 +10,7 @@ import './check-node-version';
 import { getDb, getCollection, COLLECTIONS, withTransaction, ClientSession } from './mongodb';
 import { Db, WithId, Document } from 'mongodb';
 import { invalidateCatalogueCache } from './cache';
+import { boundsOverlap, type GeographicBounds } from './geo-bounds-utils';
 
 export interface MergedCatalogue {
   id: string;
@@ -864,9 +865,9 @@ if (typeof window === 'undefined') {
       if (minLat > maxLat) {
         throw new Error('Minimum latitude cannot be greater than maximum latitude');
       }
-      if (minLon > maxLon) {
-        throw new Error('Minimum longitude cannot be greater than maximum longitude');
-      }
+      // NOTE: minLon > maxLon is allowed and meaningful — it denotes a bounding box
+      // that crosses the antimeridian (180°), per RFC 7946 §5.2. NZ offshore
+      // territory (Kermadec) crosses 180°, so rejecting it corrupted real bounds.
 
       const collection = await getCollection(COLLECTIONS.CATALOGUES);
       const options = session ? { session } : undefined;
@@ -910,6 +911,12 @@ if (typeof window === 'undefined') {
       await collection.updateOne({ id }, { $set: updates });
     },
 
+    // Region query: filter by latitude overlap in MongoDB (index-friendly), then
+    // filter longitude precisely in JS. Longitude is done in JS because either the
+    // query box OR a stored box may cross the antimeridian (180), which a single
+    // Mongo range predicate cannot express for all four crossing combinations. The
+    // catalogues collection is small (tens-to-hundreds of rows), so the post-filter
+    // is cheap; if it grows very large, add a 2dsphere/geo strategy here.
     getCataloguesByRegion: async (minLat: number, maxLat: number, minLon: number, maxLon: number): Promise<MergedCatalogue[]> => {
       if (minLat < -90 || minLat > 90 || maxLat < -90 || maxLat > 90) {
         throw new Error('Latitude must be between -90 and 90');
@@ -918,34 +925,33 @@ if (typeof window === 'undefined') {
         throw new Error('Longitude must be between -180 and 180');
       }
 
-      const crossesDateline = minLon > maxLon;
-
+      // Latitude overlap is index-friendly and handled in the query. Longitude
+      // overlap is computed precisely in JS afterwards, because either the query
+      // box OR a stored catalogue box may cross the antimeridian (180°) — a case
+      // a single Mongo range predicate cannot express correctly for all four
+      // crossing combinations. Catalogue counts are small, so this is cheap.
       const collection = await getCollection(COLLECTIONS.CATALOGUES);
       const docs = await collection.find({
-        min_latitude: { $ne: null },
-        max_latitude: { $ne: null },
+        min_latitude: { $ne: null, $lte: maxLat },
+        max_latitude: { $ne: null, $gte: minLat },
         min_longitude: { $ne: null },
         max_longitude: { $ne: null },
-        $and: [
-          { max_latitude: { $gte: minLat } },
-          { min_latitude: { $lte: maxLat } },
-          crossesDateline
-            ? {
-              $or: [
-                { max_longitude: { $gte: minLon } },
-                { min_longitude: { $lte: maxLon } }
-              ]
-            }
-            : {
-              $and: [
-                { max_longitude: { $gte: minLon } },
-                { min_longitude: { $lte: maxLon } }
-              ]
-            }
-        ]
       }).sort({ created_at: -1 }).toArray();
 
-      return toPlainArray<MergedCatalogue>(docs);
+      const queryBounds: GeographicBounds = {
+        minLatitude: minLat, maxLatitude: maxLat,
+        minLongitude: minLon, maxLongitude: maxLon,
+      };
+      const matched = (toPlainArray<MergedCatalogue>(docs)).filter(c =>
+        c.min_latitude != null && c.max_latitude != null &&
+        c.min_longitude != null && c.max_longitude != null &&
+        boundsOverlap(queryBounds, {
+          minLatitude: c.min_latitude, maxLatitude: c.max_latitude,
+          minLongitude: c.min_longitude, maxLongitude: c.max_longitude,
+        })
+      );
+
+      return matched;
     },
 
     deleteCatalogue: async (id: string): Promise<void> => {

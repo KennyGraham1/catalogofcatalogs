@@ -54,9 +54,11 @@ export function assessEventQuality(event: any): IntegratedQualityAssessment {
     azimuthalGap: event.azimuthal_gap ?? null,
     usedStationCount: event.used_station_count ?? null,
     rmsResidual: event.standard_error ?? null,
-    horizontalUncertainty: calculateHorizontalUncertainty(event),
-    depthUncertainty: event.depth_uncertainty ?? null,
-    minimumDistance: event.minimum_distance ?? null,
+    horizontalUncertainty: calculateHorizontalUncertainty(event), // km
+    depthUncertainty: event.depth_uncertainty ?? null, // km (DB convention)
+    // minimum_distance is stored in degrees (QuakeML/FDSN OriginQuality.minimumDistance);
+    // the GeoNet QS scorer expects km, so convert here (~111.19 km per degree).
+    minimumDistance: event.minimum_distance != null ? event.minimum_distance * 111.19 : null,
   };
 
   // Calculate both scores

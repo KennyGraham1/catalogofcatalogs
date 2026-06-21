@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, memo } from 'react';
+import { dedupeById } from '@/lib/utils';
 import L from 'leaflet';
 import { MapContainer, Circle, Popup } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
@@ -70,7 +71,7 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
   }, []);
 
   const eventMarkers = useMemo(() => {
-    return [...sampledEvents].sort((a, b) => a.magnitude - b.magnitude).map((event) => (
+    return dedupeById(sampledEvents).sort((a, b) => a.magnitude - b.magnitude).map((event) => (
       <Circle
         key={event.id}
         center={[event.latitude, event.longitude]}
