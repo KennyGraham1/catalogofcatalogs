@@ -1,0 +1,4 @@
+# Dependencies for paper/figures/generate_figures.py (Python 3.10+)
+numpy>=1.24
+matplotlib>=3.7
+cartopy>=0.22

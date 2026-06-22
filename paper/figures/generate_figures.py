@@ -133,6 +133,9 @@ def _basemap(ax, ext):
     gl = ax.gridlines(draw_labels=True, linewidth=0.3, color='white', alpha=0.6)
     gl.top_labels = gl.right_labels = False
     gl.xlabel_style = gl.ylabel_style = {'size': 7}
+    # Rasterize the dense basemap + event scatter (zorder < 5) so the saved PDF
+    # is a compact image layer rather than tens of thousands of vector paths.
+    ax.set_rasterization_zorder(5)
 
 
 def _msize(m):
@@ -170,10 +173,10 @@ def make_map():
     ab_mag = np.concatenate([agb_mag, dup_mag])
     axA.scatter(gn_lon, gn_lat, s=_msize(gn_mag), c=BLUE, alpha=0.55, marker='o',
                 edgecolors='white', linewidths=0.2, transform=proj, zorder=3,
-                label='GeoNet (120,000)')
+                rasterized=True, label='GeoNet (120,000)')
     axA.scatter(ab_lon, ab_lat, s=_msize(ab_mag), c=ORANGE, alpha=0.55, marker='^',
                 edgecolors='white', linewidths=0.2, transform=proj, zorder=3,
-                label='Agency B (98,000)')
+                rasterized=True, label='Agency B (98,000)')
     axA.set_title('(a) Two input catalogues')
     axA.legend(loc='lower left', fontsize=7, framealpha=0.92, edgecolor=GRAY, markerscale=1.2)
 
@@ -195,7 +198,7 @@ def make_map():
     axI.set_xticks([]); axI.set_yticks([])
     for s in axI.spines.values():
         s.set_edgecolor('black')
-    axI.text(0.5, -0.10, r'paired if $|\Delta t|\leq 60$ s, $d\leq 50$ km, $|\Delta M|\leq 0.5$',
+    axI.text(0.5, -0.10, r'paired if $|\Delta t|\leq 60$ s and $d\leq 50$ km',
              transform=axI.transAxes, ha='center', va='top', fontsize=6)
 
     # ---- panel (b): merged catalogue coloured by provenance ----
@@ -203,13 +206,13 @@ def make_map():
     _basemap(axB, ext)
     axB.scatter(geo_lon, geo_lat, s=_msize(geo_mag), c=BLUE, alpha=0.6,
                 edgecolors='white', linewidths=0.2, transform=proj, zorder=3,
-                label='GeoNet only (71,000)')
+                rasterized=True, label='GeoNet only (71,000)')
     axB.scatter(dgeo_lon, dgeo_lat, s=_msize(dup_mag), c=GREEN, alpha=0.65,
                 edgecolors='white', linewidths=0.2, transform=proj, zorder=4,
-                label='Resolved duplicate (49,000)')
+                rasterized=True, label='Resolved duplicate (49,000)')
     axB.scatter(agb_lon, agb_lat, s=_msize(agb_mag), c=ORANGE, alpha=0.6, marker='^',
                 edgecolors='white', linewidths=0.2, transform=proj, zorder=3,
-                label='Agency B only (49,000)')
+                rasterized=True, label='Agency B only (49,000)')
     axB.set_title('(b) Merged catalogue by provenance')
     axB.legend(loc='lower left', fontsize=6.6, framealpha=0.92, edgecolor=GRAY)
     axB.text(0.97, 0.04, 'offshore Agency-B-only events\ncarry high azimuthal gap',
@@ -219,7 +222,7 @@ def make_map():
     fig.text(0.5, 0.005, 'Synthetic data for illustration; marker size $\\propto$ magnitude '
              '(see Section 5).', ha='center', fontsize=7, color=GRAY, style='italic')
     fig.tight_layout(rect=[0, 0.02, 1, 1])
-    fig.savefig(OUT / 'fig1_map.pdf', bbox_inches='tight')
+    fig.savefig(OUT / 'fig1_map.pdf', bbox_inches='tight', dpi=150)
     fig.savefig(OUT / 'fig1_map.png', dpi=300, bbox_inches='tight')
     plt.close(fig)
     print('Figure 1 (merge map) saved.')

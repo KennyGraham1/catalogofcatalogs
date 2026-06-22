@@ -656,9 +656,248 @@ export function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): {
 }
 
 /**
+ * Build SeismicCluster summaries from a map of clusters (mainshock = largest-magnitude
+ * event in each cluster). Shared by the window (Gardner-Knopoff) and link-based
+ * (Reasenberg) declusterers.
+ */
+function buildClusterInfo(
+  clusters: Map<number | string, EarthquakeEvent[]>
+): SeismicCluster[] {
+  const clusterInfo: SeismicCluster[] = [];
+  let clusterId = 0;
+
+  clusters.forEach((clusterEvents) => {
+    const sortedCluster = [...clusterEvents].sort(
+      (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
+    );
+    const mainshock = clusterEvents.reduce(
+      (m, e) => (e.magnitude > m.magnitude ? e : m),
+      clusterEvents[0]
+    );
+    const mainshockTime = new Date(mainshock.time).getTime();
+    const foreshocks = sortedCluster.filter(
+      (e) => e.id !== mainshock.id && new Date(e.time).getTime() < mainshockTime
+    );
+    const aftershocks = sortedCluster.filter(
+      (e) => e.id !== mainshock.id && new Date(e.time).getTime() >= mainshockTime
+    );
+
+    let maxDistance = 0;
+    let sumLat = 0;
+    let sumLon = 0;
+    clusterEvents.forEach((e) => {
+      const dist = haversineDistance(
+        mainshock.latitude, mainshock.longitude, e.latitude, e.longitude
+      );
+      if (dist > maxDistance) maxDistance = dist;
+      sumLat += e.latitude;
+      sumLon += e.longitude;
+    });
+
+    const startTime = new Date(sortedCluster[0].time);
+    const endTime = new Date(sortedCluster[sortedCluster.length - 1].time);
+    const durationDays = (endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60 * 24);
+
+    const magnitudes = clusterEvents.map((e) => e.magnitude).sort((a, b) => b - a);
+    const magDiff = magnitudes.length > 1 ? magnitudes[0] - magnitudes[1] : 999;
+
+    let clusterType: 'mainshock-aftershock' | 'swarm' | 'burst';
+    if (durationDays < 1 && clusterEvents.length >= 3) {
+      clusterType = 'burst';
+    } else if (magDiff < 0.5 && clusterEvents.length >= 5) {
+      clusterType = 'swarm';
+    } else {
+      clusterType = 'mainshock-aftershock';
+    }
+
+    let bValue: number | undefined;
+    if (clusterEvents.length >= 10) {
+      try {
+        bValue = calculateGutenbergRichter(clusterEvents).bValue;
+      } catch {
+        // Not enough data for b-value calculation
+      }
+    }
+
+    clusterInfo.push({
+      id: clusterId++,
+      startDate: sortedCluster[0].time,
+      endDate: sortedCluster[sortedCluster.length - 1].time,
+      eventCount: clusterEvents.length,
+      maxMagnitude: mainshock.magnitude,
+      mainshock: {
+        id: mainshock.id,
+        time: mainshock.time,
+        magnitude: mainshock.magnitude,
+        latitude: mainshock.latitude,
+        longitude: mainshock.longitude,
+        depth: mainshock.depth,
+      },
+      aftershockCount: aftershocks.length,
+      foreshockCount: foreshocks.length,
+      durationDays,
+      spatialExtentKm: maxDistance,
+      centerLatitude: sumLat / clusterEvents.length,
+      centerLongitude: sumLon / clusterEvents.length,
+      clusterType,
+      bValue,
+    });
+  });
+
+  clusterInfo.sort((a, b) => b.maxMagnitude - a.maxMagnitude);
+  return clusterInfo;
+}
+
+export interface ReasenbergParams {
+  /** Interaction-radius factor (number of crack radii); Reasenberg default 10. */
+  rfact?: number;
+  /** Minimum look-ahead time, days (default 1). */
+  taumin?: number;
+  /** Maximum look-ahead time, days (default 10). */
+  taumax?: number;
+  /** Confidence for the look-ahead time (default 0.95). */
+  p1?: number;
+  /** Effective completeness magnitude; defaults to the catalogue minimum. */
+  xmeff?: number;
+  /** Factor raising the effective magnitude within a cluster (default 0.5). */
+  xk?: number;
+}
+
+/**
+ * Reasenberg (1985) link-based declustering.
+ *
+ * Reference:
+ * - Reasenberg, P. (1985). "Second-order moment of central California seismicity,
+ *   1969-1982." JGR, 90(B7), 5479-5495.
+ * - Omori (1894); Utsu (1961) for the modified-Omori look-ahead.
+ *
+ * Events are linked into clusters when a later event falls within both an
+ * Omori-Utsu temporal look-ahead window (tau, bounded by [taumin, taumax]) and a
+ * spatial interaction zone of rfact crack radii, r(M) = 0.011 x 10^(0.4 M) km
+ * (Kanamori & Anderson 1975 source-dimension scaling). The look-ahead grows after
+ * the largest event of a cluster and shrinks with elapsed time. Returns the same
+ * shape as {@link gardnerKnopoffDeclustering}: independent events (cluster heads +
+ * singletons) as mainshocks, plus per-cluster summaries.
+ */
+export function reasenbergDeclustering(
+  events: EarthquakeEvent[],
+  params: ReasenbergParams = {}
+): {
+  mainshocks: EarthquakeEvent[];
+  clusters: Map<number | string, EarthquakeEvent[]>;
+  clusterInfo: SeismicCluster[];
+} {
+  if (events.length === 0) {
+    return { mainshocks: [], clusters: new Map(), clusterInfo: [] };
+  }
+
+  const rfact = params.rfact ?? 10;
+  const taumin = params.taumin ?? 1;
+  const taumax = params.taumax ?? 10;
+  const p1 = params.p1 ?? 0.95;
+  const xk = params.xk ?? 0.5;
+
+  const sorted = [...events].sort(
+    (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
+  );
+  const xmeff = params.xmeff ?? Math.min(...sorted.map((e) => e.magnitude));
+
+  const DAY = 1000 * 60 * 60 * 24;
+  const tms = (e: EarthquakeEvent) => new Date(e.time).getTime();
+  const crackRadiusKm = (m: number) => 0.011 * Math.pow(10, 0.4 * m);
+
+  // clusterIdOf[i] = 0 means event i is not (yet) in a cluster.
+  const clusterIdOf = new Array<number>(sorted.length).fill(0);
+  let nextCluster = 1;
+
+  for (let i = 0; i < sorted.length; i++) {
+    const ei = sorted[i];
+
+    // Reference event + look-ahead time tau for event i.
+    let mref = ei.magnitude;
+    let refLat = ei.latitude;
+    let refLon = ei.longitude;
+    let tau: number;
+
+    if (clusterIdOf[i] === 0) {
+      tau = taumin;
+    } else {
+      const cid = clusterIdOf[i];
+      let big = ei;
+      for (let j = 0; j <= i; j++) {
+        if (clusterIdOf[j] === cid && sorted[j].magnitude > big.magnitude) big = sorted[j];
+      }
+      mref = big.magnitude;
+      refLat = big.latitude;
+      refLon = big.longitude;
+      const tdiff = Math.max((tms(ei) - tms(big)) / DAY, 0);
+      const deltam = (1 - xk) * mref - xmeff;
+      const denom = Math.pow(10, ((deltam - 1) * 2) / 3);
+      const tauP = denom > 0 ? (-Math.log(1 - p1) * tdiff) / denom : taumax;
+      tau = Math.min(taumax, Math.max(taumin, tauP));
+    }
+
+    const r = rfact * Math.max(crackRadiusKm(mref), crackRadiusKm(ei.magnitude));
+
+    for (let j = i + 1; j < sorted.length; j++) {
+      const ej = sorted[j];
+      const dtDays = (tms(ej) - tms(ei)) / DAY;
+      if (dtDays > tau) break; // time-sorted: no later event can be within tau
+      if (haversineDistance(refLat, refLon, ej.latitude, ej.longitude) > r) continue;
+
+      const ci = clusterIdOf[i];
+      const cj = clusterIdOf[j];
+      if (ci === 0 && cj === 0) {
+        clusterIdOf[i] = nextCluster;
+        clusterIdOf[j] = nextCluster;
+        nextCluster++;
+      } else if (ci !== 0 && cj === 0) {
+        clusterIdOf[j] = ci;
+      } else if (ci === 0 && cj !== 0) {
+        clusterIdOf[i] = cj;
+      } else if (ci !== cj) {
+        const keep = Math.min(ci, cj);
+        const drop = Math.max(ci, cj);
+        for (let k = 0; k < sorted.length; k++) {
+          if (clusterIdOf[k] === drop) clusterIdOf[k] = keep;
+        }
+      }
+    }
+  }
+
+  const byCluster = new Map<number, number[]>();
+  clusterIdOf.forEach((cid, idx) => {
+    if (cid !== 0) {
+      if (!byCluster.has(cid)) byCluster.set(cid, []);
+      byCluster.get(cid)!.push(idx);
+    }
+  });
+
+  const clusters = new Map<number | string, EarthquakeEvent[]>();
+  const dependentIds = new Set<number | string>();
+  byCluster.forEach((idxs) => {
+    const evs = idxs.map((k) => sorted[k]);
+    const big = evs.reduce((m, e) => (e.magnitude > m.magnitude ? e : m), evs[0]);
+    clusters.set(big.id, evs);
+    evs.forEach((e) => {
+      if (e.id !== big.id) dependentIds.add(e.id);
+    });
+  });
+
+  const mainshocks = sorted.filter((e) => !dependentIds.has(e.id));
+  const clusterInfo = buildClusterInfo(clusters);
+  return { mainshocks, clusters, clusterInfo };
+}
+
+/**
  * Perform temporal analysis of seismicity with proper Gardner-Knopoff declustering
  */
-export function analyzeTemporalPattern(events: EarthquakeEvent[]): TemporalAnalysisResult {
+export type DeclusterMethod = 'gardner-knopoff' | 'reasenberg';
+
+export function analyzeTemporalPattern(
+  events: EarthquakeEvent[],
+  declusterMethod: DeclusterMethod = 'gardner-knopoff'
+): TemporalAnalysisResult {
   if (events.length === 0) {
     throw new Error('No events provided for temporal analysis');
   }
@@ -716,7 +955,10 @@ export function analyzeTemporalPattern(events: EarthquakeEvent[]): TemporalAnaly
 
   if (eventsWithLocation.length >= 10) {
     try {
-      const declusteringResult = gardnerKnopoffDeclustering(eventsWithLocation);
+      const declusteringResult =
+        declusterMethod === 'reasenberg'
+          ? reasenbergDeclustering(eventsWithLocation)
+          : gardnerKnopoffDeclustering(eventsWithLocation);
       // Only include significant clusters (3+ events)
       clusters = declusteringResult.clusterInfo.filter(c => c.eventCount >= 3);
     } catch {

@@ -282,6 +282,7 @@ export default function MergePage() {
       };
 
       if (process.env.NODE_ENV !== 'production') {
+        // eslint-disable-next-line no-console
         console.log('Sending preview request:', requestBody);
       }
 
@@ -1012,6 +1013,7 @@ export default function MergePage() {
 
       return normalizeSearchValue(fields[fieldKey]).includes(value);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const baseCatalogues = filteredCatalogues;

@@ -623,6 +623,7 @@ export default function CataloguesPage() {
 
       return normalizeSearchValue(searchFields[fieldKey]).includes(value);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const searchTokens = useMemo(

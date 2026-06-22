@@ -107,7 +107,7 @@ export default function CatalogueDetailPage() {
 
   const handleEventClick = (event: Event) => {
     // Could navigate to event detail page or show modal
-    console.log('Event clicked:', event);
+    // console.log('Event clicked:', event);
   };
 
   const handleExport = async (format: 'csv' | 'json' | 'geojson' | 'kml' | 'quakeml') => {

@@ -403,11 +403,13 @@ function generateQualityDetails(
  * Get quality color for visualization
  */
 export function getQualityColor(score: number): string {
-  if (score >= 90) return '#22c55e'; // Green
-  if (score >= 80) return '#84cc16'; // Light green
-  if (score >= 70) return '#eab308'; // Yellow
-  if (score >= 60) return '#f97316'; // Orange
-  return '#ef4444'; // Red
+  // Boundaries aligned with the letter-grade thresholds in scoreToGrade()/Table 3
+  // so the map colour and the grade badge never disagree.
+  if (score >= 85) return '#22c55e'; // A / A+  green
+  if (score >= 75) return '#84cc16'; // B+      lime
+  if (score >= 65) return '#eab308'; // B       yellow
+  if (score >= 45) return '#f97316'; // C       orange
+  return '#ef4444';                  // D / F   red
 }
 
 /**
