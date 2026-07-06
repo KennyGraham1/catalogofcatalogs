@@ -1,6 +1,6 @@
 # NZ Earthquake Catalogues 1960–2026 — LaTeX report
 
-A reviewed inventory of **81 distinct earthquake catalogues** developed for /
+A reviewed inventory of **93 distinct earthquake catalogues** developed for /
 covering Aotearoa New Zealand (1960–2026, with emphasis on temporary deployments), each profiled to the
 *Catalogue Submission Profile* schema from the white paper (`../publication/main.tex`, Table `tab:profile`).
 
@@ -8,9 +8,9 @@ covering Aotearoa New Zealand (1960–2026, with emphasis on temporary deploymen
 
 | File | Description |
 |---|---|
-| `nz_earthquake_catalogues_1960-2026.pdf` | Compiled report (62 pp): abstract, scope, overview, timeline, statistics, master index (with reference + DOI per catalogue), a spatial-coverage map, 81 detailed entries across 9 categories (with cross-reference notes on related catalogues), references. |
+| `nz_earthquake_catalogues_1960-2026.pdf` | Compiled report (68 pp): abstract, scope, overview, timeline, statistics, master index (with reference + DOI per catalogue), a spatial-coverage map, 93 detailed entries across 9 categories (with cross-reference notes on related catalogues), references. |
 | `nz_earthquake_catalogues_1960-2026.tex` | LaTeX source (article class, `natbib` numeric, `xurl`, `graphicx`). |
-| `nz_catalogues.bib` | BibTeX database (128 references; `@article`/`@misc`/`@techreport`). |
+| `nz_catalogues.bib` | BibTeX database (142 references; `@article`/`@misc`/`@techreport`). |
 | `build_report.js` | Build script: renders `inventory_data.json` into the `.tex` + `.bib`. |
 | `inventory_data.json` | The inventory data behind the report. |
 | `make_map.py` | Builds the spatial-coverage figure (cartopy + matplotlib + the active-fault GeoJSON); geocodes each catalogue to a representative footprint and dumps `map/footprints.json`. |

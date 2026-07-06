@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Highcharts-style export menu shown on every chart: print, raster/vector image
+ * Export menu shown on every chart: print, raster/vector image
  * downloads (PNG/JPEG/SVG), and the chart's underlying data (CSV/JSON).
  * Rendered as a small overlay button in the chart's top-right corner by <EChart>.
  */

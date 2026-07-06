@@ -27,14 +27,6 @@ export function Footer() {
           <Link href="/analytics" className="transition-colors hover:text-foreground">
             Analytics
           </Link>
-          <a
-            href="https://www.geonet.org.nz"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="transition-colors hover:text-foreground"
-          >
-            Data: GeoNet / GNS Science
-          </a>
         </nav>
       </div>
     </footer>

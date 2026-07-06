@@ -7,7 +7,7 @@
  * - Applies the shared base option (font colour, palette, animation) from echarts-theme.
  * - Re-themes automatically on light/dark switch (colours are baked into the option).
  * - Resizes with its container via echarts-for-react's built-in size-sensor.
- * - Renders a Highcharts-style export menu (print / PNG / JPEG / SVG / data CSV+JSON)
+ * - Renders an export menu (print / PNG / JPEG / SVG / data CSV+JSON)
  *   in the top-right corner; pass `exportData` to enable the data downloads.
  */
 

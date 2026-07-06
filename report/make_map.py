@@ -98,28 +98,22 @@ def base(ax, faint_faults=True):
 # gather regional footprints
 regional = []   # (W,E,S,N,category)
 nat_count = 0; offN = []
-for i, e in enumerate(entries, start=1):
-    g = GEO.get(i); cat = e["profile"]["category"]
-    if not g: continue
-    if g[0]=="nat": nat_count += 1
-    elif g[0]=="offN": offN.append(e["profile"]["name"])
-    else:
-        W,E,S,N,_ = g; regional.append((W,E,S,N,cat))
+for e in entries:
+    g = e["profile"].get("geo") or {"scope":"nat"}; cat = e["profile"]["category"]; sc = g.get("scope")
+    if sc=="nat": nat_count += 1
+    elif sc=="offN": offN.append(e["profile"]["name"])
+    elif g.get("bbox"):
+        W,E,S,N = g["bbox"]; regional.append((W,E,S,N,cat))
 
 # ---- dump geocoded footprints (feeds the interactive Leaflet map) ----
 import os, re
 def _cf(s):
     s=(s or "").strip()
     return "" if (not s or s.lower().startswith("unknown") or "not documented" in s.lower()) else s
-OFFPT={"Kermadec 2021":[-29.7,-177.8],"Monowai":[-25.9,177.2]}
 feats=[]
 for i,e in enumerate(entries,start=1):
-    p=e["profile"]; g=GEO.get(i,("nat",)); sc=g[0]
-    bbox=[g[0],g[1],g[2],g[3]] if sc not in ("nat","offN") else None
-    pt=None
-    if sc=="offN":
-        for k,v in OFFPT.items():
-            if k.lower() in p["name"].lower(): pt=v
+    p=e["profile"]; g=p.get("geo") or {"scope":"nat"}; sc=g.get("scope")
+    bbox=g.get("bbox"); pt=g.get("point")
     feats.append({"i":i,"name":p["name"],"category":p.get("category",""),"scope":sc,
         "bbox":bbox,"point":pt,"start":_cf(p.get("start_date")),"end":_cf(p.get("end_date")),
         "doi":(p.get("doi") or "").strip(),"type":_cf(p.get("catalogue_type")),
@@ -182,7 +176,7 @@ cb.ax.tick_params(labelsize=8)
 axB.text(0.066, 0.86, "regional\ncatalogues\nper cell", transform=axB.transAxes,
          fontsize=7.6, va="bottom", ha="left", color="#333", zorder=9)
 
-fig.suptitle("Spatial coverage of the Aotearoa New Zealand earthquake-catalogue inventory (81 catalogues, 1960–2026)",
+fig.suptitle(f"Spatial coverage of the Aotearoa New Zealand earthquake-catalogue inventory ({len(entries)} catalogues, 1960-2026)",
              fontsize=14, y=0.975)
 import os
 os.makedirs("report/figures", exist_ok=True)

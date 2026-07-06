@@ -101,7 +101,7 @@ export function grid(extra: Record<string, unknown> = {}) {
  * smooth animation, and the shared categorical palette.
  */
 export function baseOption(c: ChartColors): EChartsOption {
-  // Image/data export is provided by the shared <EChart> export menu (Highcharts-style),
+  // Image/data export is provided by the shared <EChart> export menu,
   // not the in-chart ECharts toolbox, so no toolbox is configured here.
   return {
     color: c.series, // default categorical palette for multi-series charts

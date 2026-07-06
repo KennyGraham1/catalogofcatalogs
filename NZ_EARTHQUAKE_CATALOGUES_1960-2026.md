@@ -5,28 +5,28 @@
 
 > **Compiled:** 2026-06-18 · **Scope:** earthquake catalogues developed for / covering New Zealand and its offshore margins whose coverage overlaps 1960–2026 (catalogues that begin earlier and extend into the period, and historical/derived catalogues used for NZ, are included). · **Special emphasis:** temporary seismic deployments (passive-seismic experiments, ocean-bottom deployments, aftershock rapid-response arrays).
 
-This curated inventory profiles **81 distinct catalogues** against the *Catalogue Submission Profile* (minimum-attributes schema) defined in the white paper *“Towards a FAIR Framework for Earthquake Catalogues in Aotearoa New Zealand”* (`publication/main.tex`, Table `tab:profile`). It is intended as a working population of the proposed **Registry** layer: a discovery record, *not* a certification of scientific adequacy. Deeper detail is carried by each catalogue’s own dataset/DOI or publication.
+This curated inventory profiles **93 distinct catalogues** against the *Catalogue Submission Profile* (minimum-attributes schema) defined in the white paper *“Towards a FAIR Framework for Earthquake Catalogues in Aotearoa New Zealand”* (`publication/main.tex`, Table `tab:profile`). It is intended as a working population of the proposed **Registry** layer: a discovery record, *not* a certification of scientific adequacy. Deeper detail is carried by each catalogue’s own dataset/DOI or publication.
 
 ## Scope, sources, and compilation
 
 This inventory was curated from peer-reviewed publications, dataset repositories (e.g. Zenodo, IRIS/EarthScope, PANGAEA), FDSN network records, and the catalogues and reports of GeoNet / GNS Science and partner institutions. Each catalogue was profiled against the submission schema and reviewed against its defining publication or dataset; persistent identifiers and citations were checked against the original source, and fields that could not be established from the sources are left blank rather than inferred.
 
-The inventory is a discovery resource: each entry summarises what a catalogue contains and how to obtain it, and is not a certification of scientific adequacy; confirm details against the cited source before quantitative use. It is also not a census: earthquake-catalogue production in Aotearoa New Zealand is decentralised and continuous, so a residual long tail of specialised and thesis-derived catalogues remains (see *Coverage gaps*). Of the 81 catalogues listed, **73 of 81** carry a resolvable DOI or stable dataset identifier.
+The inventory is a discovery resource: each entry summarises what a catalogue contains and how to obtain it, and is not a certification of scientific adequacy; confirm details against the cited source before quantitative use. It is also not a census: earthquake-catalogue production in Aotearoa New Zealand is decentralised and continuous, so a residual long tail of specialised and thesis-derived catalogues remains (see *Coverage gaps*). Of the 93 catalogues listed, **78 of 93** carry a resolvable DOI or stable dataset identifier.
 
 ## Summary by category
 
 | Category | Count |
 |---|---:|
 | National operational & network catalogues | 1 |
-| Relocated & reprocessed catalogues | 11 |
+| Relocated & reprocessed catalogues | 16 |
 | Historical & macroseismic (felt-report) catalogues | 6 |
 | Aftershock-sequence rapid-response catalogues | 11 |
 | Temporary onshore passive-seismic deployments | 9 |
 | Temporary offshore / ocean-bottom (OBS) deployments | 4 |
-| Volcano-seismic, geothermal & induced catalogues | 20 |
-| Slow-slip, tremor, LFE & moment-tensor catalogues | 14 |
+| Volcano-seismic, geothermal & induced catalogues | 23 |
+| Slow-slip, tremor, LFE & moment-tensor catalogues | 18 |
 | Derived, homogenised & synthetic / hazard-model catalogues | 5 |
-| **Total** | **81** |
+| **Total** | **93** |
 
 ## Overview: the shape of New Zealand’s catalogue ecosystem
 
@@ -88,7 +88,7 @@ The authoritative national operational earthquake catalogue for Aotearoa New Zea
 
 ---
 
-## Relocated & reprocessed catalogues (11)
+## Relocated & reprocessed catalogues (16)
 
 ### 2. Eberhart-Phillips & Reyners 2001-2011 NZ-Wide 3-D Relocated Catalogue
 *type: background · focus: geographical · detection: manual · review: reviewed*
@@ -343,9 +343,121 @@ A modern, NZ-wide earthquake EVENT catalogue produced with a uniform automated w
 
 ---
 
+### 13. Central Alpine Fault Microseismicity Catalogue (CAIF array, 2006-2007; O'Keefe 2008)
+*type: background · focus: geographical · detection: manual · review: reviewed*
+
+- **Also known as:** CAIF
+- **Coverage:** 2006-09 → 2007-03
+- **Region:** Central Alpine Fault (Harihari-Fox Glacier)
+- **Bounding box:** Central Alpine Fault, Harihari to Fox Glacier, South Island, New Zealand
+- **Magnitude:** ML ~0-5; magnitude of completeness Mc ~1.6
+- **Events:** 411
+- **Content:** hypocentral locations; relative relocations; phase arrival-time picks; quality information
+- **Producer / contact:** B. C. O'Keefe (MSc thesis, Victoria University of Wellington)
+- **Data source:** New Zealand National Seismograph Network plus the temporary eight-station CAIF network
+- **Availability:** available (DOI) · DOI [10.26686/wgtn.16947271](https://doi.org/10.26686/wgtn.16947271)
+
+A microseismicity catalogue for the central Alpine Fault between Harihari and Fox Glacier. Hypocentres were located in SEISAN from manual phase picks and relocated with VELEST and hypoDD using a 1-D velocity model; a local-magnitude attenuation scale and Gutenberg-Richter a- and b-values were derived from the data.
+
+*Related:* One of several central Alpine Fault microseismicity catalogues; see also Boese et al. (2012), Bourguignon et al. (2015), and Michailos et al. (2019/2025).
+
+**Key references:**
+- O'Keefe, B. C. (2008). Microseismicity of the Central Alpine Fault region, New Zealand. MSc thesis, Victoria University of Wellington. https://doi.org/10.26686/wgtn.16947271
+
+---
+
+### 14. Central Alpine Fault Microseismicity and Stress Catalogue (SAMBA borehole array, 2008-2010; Boese et al. 2012)
+*type: background · focus: geographical · detection: manual · review: reviewed*
+
+- **Also known as:** SAMBA (Boese)
+- **Coverage:** 2008-11 → 2010-04
+- **Region:** Central Alpine Fault (Whataroa-Fox Glacier)
+- **Bounding box:** Central Alpine Fault, Whataroa to Fox Glacier, South Island, New Zealand
+- **Magnitude:** ML -0.3 to 4.2
+- **Events:** ~1,791 earthquakes
+- **Content:** hypocentral locations; phase arrival-time picks; focal mechanisms; quality information
+- **Producer / contact:** Boese, C.M., Townend, J., Smith, E. & Stern, T. (Victoria University of Wellington)
+- **Data source:** New Zealand National Seismograph Network plus the nine-station SAMBA borehole array
+- **Availability:** available (DOI) · DOI [10.1029/2011JB008460](https://doi.org/10.1029/2011JB008460)
+
+A microseismicity catalogue for the central Alpine Fault between Whataroa and Fox Glacier. Hypocentres were located with SEISAN and NonLinLoc from manual phase picks using a 1-D velocity model; a local-magnitude attenuation scale, focal mechanisms, and a stress inversion were also derived.
+
+*Related:* An earlier SAMBA-based catalogue; the central Alpine Fault is also catalogued by Bourguignon et al. (2015) and Michailos et al. (2019/2025).
+
+**Key references:**
+- Boese, C.M., Townend, J., Smith, E. & Stern, T. (2012). Microseismicity and stress in the vicinity of the Alpine Fault, central Southern Alps, New Zealand. Journal of Geophysical Research, 117, B02302. https://doi.org/10.1029/2011JB008460
+
+---
+
+### 15. Central Alpine Fault Subcrustal Earthquake Catalogue (2008-2012; Boese et al. 2013)
+*type: background · focus: particular-event-type · detection: manual · review: reviewed*
+
+- **Coverage:** 2008-12 → 2012-02
+- **Region:** Central Alpine Fault / Southern Alps (subcrustal)
+- **Bounding box:** Central Alpine Fault south of Aoraki / Mt Cook, South Island, New Zealand
+- **Depth range:** ~47-74 km
+- **Events:** 14 subcrustal events
+- **Content:** hypocentral locations; focal mechanisms
+- **Producer / contact:** Boese, C., Stern, T., Townend, J., Bourguignon, S., Sheehan, A. & Smith, E.
+- **Data source:** Temporary deployments SAMBA, ALFA08/09, WIZARD, and the MOANA ocean-bottom seismometers
+- **Availability:** available (DOI) · DOI [10.1016/j.epsl.2013.06.030](https://doi.org/10.1016/j.epsl.2013.06.030)
+
+A catalogue of rare subcrustal earthquakes beneath the central Alpine Fault south of Aoraki / Mt Cook. NonLinLoc hypocentres, focal mechanisms, and stress tensors were determined for events at unusually large (mantle) depths within the Australia-Pacific plate-boundary zone.
+
+*Related:* Uses the same Southern Alps deployments as the central Alpine Fault crustal microseismicity catalogues (Boese et al. 2012; Bourguignon et al. 2015).
+
+**Key references:**
+- Boese, C., Stern, T., Townend, J., Bourguignon, S., Sheehan, A. & Smith, E. (2013). Sub-crustal earthquakes within the Australia-Pacific plate boundary zone beneath the Southern Alps, New Zealand. Earth and Planetary Science Letters, 376, 212-219. https://doi.org/10.1016/j.epsl.2013.06.030
+
+---
+
+### 16. Central Alpine Fault Microseismicity and Tomography Catalogue (ALFA08/ALFA09, 2008-2010; Bourguignon et al. 2015)
+*type: background · focus: geographical · detection: manual · review: reviewed*
+
+- **Also known as:** ALFA08/ALFA09 (Bourguignon)
+- **Coverage:** 2008-10 → 2010-05
+- **Region:** Central Alpine Fault (Inchbonnie-Harihari / Ross-Harihari)
+- **Bounding box:** Central Alpine Fault, Inchbonnie to Ross/Harihari, Westland, South Island, New Zealand
+- **Magnitude:** ML ~0-3.6; magnitude of completeness Mc ~1.5
+- **Events:** 1,380 events; 148 focal mechanisms
+- **Content:** hypocentral locations; relative relocations; phase arrival-time picks; focal mechanisms; quality information
+- **Producer / contact:** Bourguignon, S. (Earth Sciences New Zealand)
+- **Data source:** Dense temporary deployments ALFA08 and ALFA09 (~5 km station spacing)
+- **Availability:** available (DOI) · DOI [10.5281/zenodo.15853335](https://doi.org/10.5281/zenodo.15853335)
+
+A microseismicity catalogue for the central Alpine Fault (Inchbonnie-Harihari, then Ross-Harihari) from manual phase picks on the ALFA08/ALFA09 deployments. A 3-D velocity model was derived by double-difference tomography and all hypocentres relocated against it, with Monte-Carlo location uncertainties; magnitudes were scaled to MLNZ and focal mechanisms determined with HASH.
+
+*Related:* Central Alpine Fault microseismicity is also catalogued by Boese et al. (2012), O'Keefe (2008), and Michailos et al. (2019/2025).
+
+**Key references:**
+- Bourguignon, S., Bannister, S., Henderson, C.M., Townend, J. & Zhang, H. (2015). Structural heterogeneity of the midcrust adjacent to the central Alpine Fault, New Zealand: inferences from seismic tomography and seismicity between Harihari and Ross. Geochemistry, Geophysics, Geosystems, 16(4), 1017-1043. https://doi.org/10.1002/2014GC005702
+
+---
+
+### 17. Central Alpine Fault Tomography Microseismicity Catalogue (WIZARD + SAMBA; Feenstra et al. 2016, Guo et al. 2017)
+*type: background · focus: geographical · detection: manual · review: reviewed*
+
+- **Coverage:** unknown → unknown
+- **Region:** Central Alpine Fault (Whataroa/Wanganui-Fox Glacier)
+- **Bounding box:** Central Alpine Fault, Whataroa/Wanganui to Fox Glacier, South Island, New Zealand
+- **Content:** hypocentral locations; relative relocations; phase arrival-time picks
+- **Producer / contact:** Feenstra, J.; Guo, B.; with C. Thurber, J. Townend, S. Roecker, S. Bannister
+- **Data source:** Manual P- and S-wave picks from the WIZARD and SAMBA deployments
+- **Availability:** available on request
+
+A microseismicity catalogue for the central Alpine Fault from Whataroa/Wanganui to Fox Glacier, with hypocentres located by double-difference tomography against a 3-D velocity model derived from the data. The two studies present the P-wave (Feenstra et al. 2016) and joint P- and S-wave (Guo et al. 2017) models and the associated relocated seismicity.
+
+*Related:* Shares deployments and region with the other central Alpine Fault catalogues (Boese et al. 2012; Bourguignon et al. 2015; Michailos et al. 2019/2025).
+
+**Key references:**
+- Feenstra, J., Thurber, C., Townend, J., Roecker, S., Bannister, S., Boese, C., Lord, N., Bourguignon, S. & Eberhart-Phillips, D. (2016). Microseismicity and P-wave tomography of the central Alpine Fault, New Zealand. New Zealand Journal of Geology and Geophysics, 59(4), 483-495. https://doi.org/10.1080/00288306.2016.1182561
+- Guo, B., Thurber, C., Roecker, S., Townend, J., Rawles, C., Chamberlain, C., Boese, C., Bannister, S., Feenstra, J. & Eccles, J. (2017). 3-D P- and S-wave velocity structure along the central Alpine Fault, South Island, New Zealand. Geophysical Journal International, 209(2), 935-947. https://doi.org/10.1093/gji/ggx059
+
+---
+
 ## Historical & macroseismic (felt-report) catalogues (6)
 
-### 13. Atlas of Isoseismal Maps of New Zealand Earthquakes (1st edition, Downes 1995)
+### 18. Atlas of Isoseismal Maps of New Zealand Earthquakes (1st edition, Downes 1995)
 *type: compilation · focus: geographical · detection: felt-reports · review: reviewed*
 
 - **Also known as:** Downes 1995; IGNS Monograph 11; EQC Paper 7 (EQC 91/40)
@@ -366,7 +478,7 @@ Foundational national atlas of isoseismal (felt-intensity) maps for New Zealand 
 
 ---
 
-### 14. Atlas of Isoseismal Maps of New Zealand Earthquakes 1843-2003 (2nd edition, Downes & Dowrick 2014)
+### 19. Atlas of Isoseismal Maps of New Zealand Earthquakes 1843-2003 (2nd edition, Downes & Dowrick 2014)
 *type: compilation · focus: geographical · detection: felt-reports · review: reviewed*
 
 - **Also known as:** Downes & Dowrick 2014; GNS Science Monograph 25; ISBN 978-0-478-19663-4
@@ -386,7 +498,7 @@ Revised and expanded national isoseismal atlas (797 pp.) covering NZ earthquakes
 
 ---
 
-### 15. A Descriptive Catalogue of New Zealand Earthquakes (Eiby 1968/1973)
+### 20. A Descriptive Catalogue of New Zealand Earthquakes (Eiby 1968/1973)
 *type: historical · focus: geographical · detection: felt-reports · review: reviewed*
 
 - **Also known as:** Eiby 1968 Part I; Eiby 1973 Part II
@@ -408,7 +520,7 @@ Foundational documentary chronological catalogue of pre-instrumental New Zealand
 
 ---
 
-### 16. An Annotated List of New Zealand Earthquakes, 1460-1965 (Eiby 1968)
+### 21. An Annotated List of New Zealand Earthquakes, 1460-1965 (Eiby 1968)
 *type: compilation · focus: geographical · detection: felt-reports · review: reviewed*
 
 - **Also known as:** Eiby 1968 annotated list
@@ -428,7 +540,7 @@ Long-span (1460-1965) annotated chronological list of New Zealand earthquakes th
 
 ---
 
-### 17. Magnitudes of New Zealand Earthquakes, 1901-1993 (Dowrick & Rhoades 1998)
+### 22. Magnitudes of New Zealand Earthquakes, 1901-1993 (Dowrick & Rhoades 1998)
 *type: large-events-only · focus: parameter-testing · detection: other · review: reviewed*
 
 - **Also known as:** Dowrick & Rhoades 1998 Ms/Mw catalogue
@@ -449,7 +561,7 @@ Reassessment catalogue of magnitudes for 202 larger New Zealand earthquakes over
 
 ---
 
-### 18. Pre-2010 Historical Seismicity near Christchurch (1869 Christchurch & 1870 Lake Ellesmere)
+### 23. Pre-2010 Historical Seismicity near Christchurch (1869 Christchurch & 1870 Lake Ellesmere)
 *type: historical · focus: geographical · detection: felt-reports · review: reviewed*
 
 - **Also known as:** Downes & Yetton 2012 Canterbury historical reassessment
@@ -472,7 +584,7 @@ Focused regional historical reassessment relocating and re-magnituding the 1869 
 
 ## Aftershock-sequence rapid-response catalogues (11)
 
-### 19. 1987 Edgecumbe Earthquake Sequence (ML 6.3, Bay of Plenty)
+### 24. 1987 Edgecumbe Earthquake Sequence (ML 6.3, Bay of Plenty)
 *type: aftershock · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** Edgecumbe aftershock sequence; 1987 Edgecumbe earthquake
@@ -494,7 +606,7 @@ Foreshock-mainshock-aftershock catalogue of the 2 March 1987 Edgecumbe earthquak
 
 ---
 
-### 20. 2003 Mw 7.2 Fiordland (Secretary Island) Aftershock Relocations
+### 25. 2003 Mw 7.2 Fiordland (Secretary Island) Aftershock Relocations
 *type: aftershock · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** 2003 Fiordland earthquake; Secretary Island / Te Anau 2003
@@ -515,7 +627,7 @@ Double-difference relocated aftershock catalogue of the 21 August 2003 Mw 7.2 (M
 
 ---
 
-### 21. 2010 Darfield (Canterbury) Mw 7.1 High-Resolution Aftershock Relocations
+### 26. 2010 Darfield (Canterbury) Mw 7.1 High-Resolution Aftershock Relocations
 *type: aftershock · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** Darfield aftershock relocations; Syracuse et al. 2013; D-RAD / FDSN 4A deployment
@@ -536,7 +648,7 @@ High-resolution double-difference tomography relocation of Darfield aftershocks 
 
 ---
 
-### 22. 2011 Christchurch (Mw 6.2) Fine-Scale Aftershock Relocations
+### 27. 2011 Christchurch (Mw 6.2) Fine-Scale Aftershock Relocations
 *type: aftershock · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** Christchurch 22 February 2011 aftershock relocations; Bannister et al. 2011
@@ -556,7 +668,7 @@ Fine-scale double-difference tomography relocation of aftershocks of the 22 Febr
 
 ---
 
-### 23. Pegasus Bay Aftershock Sequence (2011-2012, Canterbury)
+### 28. Pegasus Bay Aftershock Sequence (2011-2012, Canterbury)
 *type: aftershock · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** Pegasus Bay sequence; offshore Christchurch 2011-2012 aftershocks; Ristau et al. 2013
@@ -577,7 +689,7 @@ Relocated double-difference tomography catalogue of the offshore Pegasus Bay sub
 
 ---
 
-### 24. 2015 ML 6 Wanaka Aftershock Matched-Filter Catalogue
+### 29. 2015 ML 6 Wanaka Aftershock Matched-Filter Catalogue
 *type: aftershock · focus: geographical · detection: template-matching · review: reviewed*
 
 - **Also known as:** 4 May 2015 Wanaka earthquake aftershock catalogue; Warren-Smith et al. 2017
@@ -598,7 +710,7 @@ High-precision matched-filter detected and relocated aftershock catalogue of the
 
 ---
 
-### 25. 2016 Kaikoura (Mw 7.8) Aftershock Relocations (Lanza et al. 2019, STREWN + GeoNet)
+### 30. 2016 Kaikoura (Mw 7.8) Aftershock Relocations (Lanza et al. 2019, STREWN + GeoNet)
 *type: aftershock · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** Kaikoura aftershock relocations; Lanza et al. 2019; STREWN FDSN Z1 (2016-2017)
@@ -620,7 +732,7 @@ Relocated aftershock catalogue of the 14 November 2016 Mw 7.8 Kaikoura earthquak
 
 ---
 
-### 26. 2016 Kaikoura 10-Year Matched-Filter Seismicity Catalogue (Chamberlain et al. 2021)
+### 31. 2016 Kaikoura 10-Year Matched-Filter Seismicity Catalogue (Chamberlain et al. 2021)
 *type: background · focus: geographical · detection: template-matching · review: reviewed*
 
 - **Also known as:** Chamberlain et al. 2021 Kaikoura catalogue; pre/co/post-seismic Kaikoura catalogue
@@ -641,7 +753,7 @@ Dense matched-filter catalogue of 33,328 earthquakes (2009-2020) on and adjacent
 
 ---
 
-### 27. Kermadec 2021 Refined Earthquake Catalogue and Slip Models (Lythgoe et al.)
+### 32. Kermadec 2021 Refined Earthquake Catalogue and Slip Models (Lythgoe et al.)
 *type: aftershock · focus: particular-event-type · detection: manual · review: reviewed*
 
 - **Also known as:** Kermadec 2021 refined earthquake catalogue and slip models; Lythgoe et al. 2023 Kermadec doublet dataset; Edinburgh DataShare 10283/8556
@@ -661,7 +773,7 @@ A standalone dataset accompanying Lythgoe et al. (2023) that provides a refined 
 
 ---
 
-### 28. 2016 Mw 7.1 Te Araroa (East Cape) Matched-Filter Foreshock & Aftershock Catalogue (Warren-Smith et al. 2018)
+### 33. 2016 Mw 7.1 Te Araroa (East Cape) Matched-Filter Foreshock & Aftershock Catalogue (Warren-Smith et al. 2018)
 *type: aftershock · focus: particular-event-type · detection: template-matching · review: non-reviewed*
 
 - **Also known as:** Te Araroa 2016 matched-filter catalogue; East Cape 2 September 2016 Mw 7.1 foreshock/aftershock catalogue; Warren-Smith et al. 2018 EQcorrscan catalogue
@@ -681,7 +793,7 @@ A dense matched-filter foreshock and aftershock catalogue for the 2 September 20
 
 ---
 
-### 29. 1994 Mw 6.7 Arthur's Pass Earthquake Finely Relocated Aftershock Catalogue (Bannister et al. 2006)
+### 34. 1994 Mw 6.7 Arthur's Pass Earthquake Finely Relocated Aftershock Catalogue (Bannister et al. 2006)
 *type: aftershock · focus: particular-event-type · detection: manual · review: reviewed*
 
 - **Also known as:** Arthur's Pass 1994 finely relocated aftershocks; Bannister, Thurber & Louie 2006 double-difference tomography catalogue
@@ -704,7 +816,7 @@ A finely relocated aftershock catalogue for the 18 June 1994 Mw 6.7 Arthur's Pas
 
 ## Temporary onshore passive-seismic deployments (9)
 
-### 30. SAPSE, Southern Alps Passive Seismic Experiment (1995-96)
+### 35. SAPSE, Southern Alps Passive Seismic Experiment (1995-96)
 *type: background · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** SAPSE; FDSN XC (1995-1996); Cooperative Project on South Island New Zealand (NZ Passive)
@@ -727,7 +839,7 @@ A focused dense temporary deployment to image microseismicity, focal mechanisms 
 
 ---
 
-### 31. DFDP-2 Real-Time / Matched-Filter Earthquake Catalogue, Whataroa (2014-2015)
+### 36. DFDP-2 Real-Time / Matched-Filter Earthquake Catalogue, Whataroa (2014-2015)
 *type: background · focus: particular-event-type · detection: template-matching · review: reviewed*
 
 - **Also known as:** DFDP-2 monitoring catalogue; Deep Fault Drilling Project Phase 2
@@ -748,7 +860,7 @@ An earthquake catalogue produced from real-time seismic monitoring and a traffic
 
 ---
 
-### 32. SOSA, Southland Otago Seismic Array Catalogue (2022-2023)
+### 37. SOSA, Southland Otago Seismic Array Catalogue (2022-2023)
 *type: background · focus: geographical · detection: automatic · review: reviewed*
 
 - **Also known as:** SOSA; FDSN 6Y (2022-2023)
@@ -771,7 +883,7 @@ A temporary dense array deployed to image microseismicity of the low-coverage so
 
 ---
 
-### 33. CNIPSE / NIGHT Passive, Central North Island Passive Seismic Experiment (FDSN XQ)
+### 38. CNIPSE / NIGHT Passive, Central North Island Passive Seismic Experiment (FDSN XQ)
 *type: background · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** CNIPSE; NIGHT Passive; FDSN XQ (2001-2002); North Island Geophysical Transect Passive
@@ -794,7 +906,7 @@ A dense ~6-month passive deployment to produce a high-resolution snapshot of Hik
 
 ---
 
-### 34. Taranaki Dense Temporary Network Crustal Seismicity Catalogue (Sherburn & White 2005)
+### 39. Taranaki Dense Temporary Network Crustal Seismicity Catalogue (Sherburn & White 2005)
 *type: background · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** Taranaki dense network; Cape Egmont fault zone deployment
@@ -815,7 +927,7 @@ A dense temporary network deployed to obtain accurate hypocentres of crustal sei
 
 ---
 
-### 35. Local Earthquake and Focal Mechanism Catalogue for the Northern Hikurangi Margin, December 2017-October 2018 (NZ3D onshore network)
+### 40. Local Earthquake and Focal Mechanism Catalogue for the Northern Hikurangi Margin, December 2017-October 2018 (NZ3D onshore network)
 *type: background · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** NZ3D onshore earthquake/focal-mechanism catalogue; Woodward et al. (2026) Northern Hikurangi catalogue; FDSN network 3C (2017-2018) 'NZ3D FWI'
@@ -836,7 +948,7 @@ Produced to seismologically characterise the deeper (10-30 km) portion of the no
 
 ---
 
-### 36. Southern Lakes / Northern Fiordland High-Resolution Microseismicity Catalogue (Central Otago Seismic Array, COSA)
+### 41. Southern Lakes / Northern Fiordland High-Resolution Microseismicity Catalogue (Central Otago Seismic Array, COSA)
 *type: background · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** COSA microearthquake catalogue; Warren-Smith et al. (2017) Southern South Island microseismicity catalogue; FDSN network 6S (Central Otago Seismic Array)
@@ -856,7 +968,7 @@ Built to image diffuse crustal-to-mantle microseismicity in the Southern Lakes a
 
 ---
 
-### 37. Dunedin Region Short-Term Broadband Array Microseismicity Catalogue (Akatore Fault)
+### 42. Dunedin Region Short-Term Broadband Array Microseismicity Catalogue (Akatore Fault)
 *type: background · focus: geographical · detection: template-matching · review: reviewed*
 
 - **Also known as:** Todd et al. (2020) Dunedin microseismicity catalogue; Dunedin short-term broadband seismic array catalogue; Akatore Fault microseismicity cluster
@@ -874,7 +986,7 @@ Produced to characterise microseismicity in a low-seismicity region (Dunedin) wh
 
 ---
 
-### 38. Hawke's Bay Region Microearthquake Catalogue (Bannister 1988; subducting Pacific plate fine structure)
+### 43. Hawke's Bay Region Microearthquake Catalogue (Bannister 1988; subducting Pacific plate fine structure)
 *type: background · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** Bannister (1988) Hawke's Bay microseismicity catalogue; Hawke's Bay 11-station temporary network microearthquake dataset
@@ -894,7 +1006,7 @@ Produced to image the fine structure of the shallow subducting Pacific plate ben
 
 ## Temporary offshore / ocean-bottom (OBS) deployments (4)
 
-### 39. HOBITSS Microearthquake Catalogue (2014-2015, northern Hikurangi, manual)
+### 44. HOBITSS Microearthquake Catalogue (2014-2015, northern Hikurangi, manual)
 *type: background · focus: particular-event-type · detection: manual · review: reviewed*
 
 - **Also known as:** HOBITSS; Hikurangi Ocean Bottom Investigation of Tremor and Slow Slip; YH (2014); Yarce et al. 2019 catalogue
@@ -919,7 +1031,7 @@ Built to investigate whether a spatial/temporal relationship exists between micr
 
 ---
 
-### 40. HOBITSS Automatic-Detection Earthquake Catalogue (2014 SSE, REST detector)
+### 45. HOBITSS Automatic-Detection Earthquake Catalogue (2014 SSE, REST detector)
 *type: background · focus: particular-event-type · detection: automatic · review: non-reviewed*
 
 - **Also known as:** HOBITSS auto-detection catalogue; Yarce et al. 2023; REST (Regressive ESTimator) catalogue
@@ -945,7 +1057,7 @@ An automatically generated earthquake catalogue for the two months around the Se
 
 ---
 
-### 41. Brothers Volcano Ocean-Bottom Hydrophone Seismicity Catalogue (south Kermadec arc)
+### 46. Brothers Volcano Ocean-Bottom Hydrophone Seismicity Catalogue (south Kermadec arc)
 *type: background · focus: geographical · detection: other · review: reviewed*
 
 - **Also known as:** Brothers OBH array; Kermadec arc OBH T-wave catalogue
@@ -965,7 +1077,7 @@ A hydroacoustic (T-wave) catalogue produced to characterize regional and local s
 
 ---
 
-### 42. Dataset of Earthquakes in the Northern Hikurangi Subduction Zone During the 2019 Slow Slip Event (2018-2019 OBS deployment)
+### 47. Dataset of Earthquakes in the Northern Hikurangi Subduction Zone During the 2019 Slow Slip Event (2018-2019 OBS deployment)
 *type: background · focus: particular-event-type · detection: template-matching · review: reviewed*
 
 - **Also known as:** Iwasaki et al. (2025) northern Hikurangi 2019 SSE OBS catalogue; Zenodo 15713529
@@ -985,9 +1097,9 @@ An OBS earthquake catalogue from a deployment directly above the main slip regio
 
 ---
 
-## Volcano-seismic, geothermal & induced catalogues (20)
+## Volcano-seismic, geothermal & induced catalogues (23)
 
-### 43. Tongariro Volcanic Centre Local Earthquake Tomography Catalogue (Rowlands et al. 2005)
+### 48. Tongariro Volcanic Centre Local Earthquake Tomography Catalogue (Rowlands et al. 2005)
 *type: background · focus: particular-event-type · detection: manual · review: reviewed*
 
 - **Also known as:** TgVC tomography; Rowlands, White & Haines 2005
@@ -1008,7 +1120,7 @@ A temporary local network deployed to obtain accurate earthquake depths and 3-D 
 
 ---
 
-### 44. Okataina Volcanic Centre Double-Difference Relocated Catalogue (2010-2021)
+### 49. Okataina Volcanic Centre Double-Difference Relocated Catalogue (2010-2021)
 *type: background · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** OVC double-difference catalogue; Bannister et al. 2022 Okataina tomography catalogue
@@ -1029,7 +1141,7 @@ Produced to image sub-caldera structure and seismicity beneath the Okataina Volc
 
 ---
 
-### 45. Taupo Volcano Magmatic-Seismicity Catalogue (2019-2022 ECLIPSE temporary deployment)
+### 50. Taupo Volcano Magmatic-Seismicity Catalogue (2019-2022 ECLIPSE temporary deployment)
 *type: background · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** Mestel et al. 2025 Taupo catalogue; ECLIPSE Taupo deployment
@@ -1051,7 +1163,7 @@ Built from a dedicated temporary broadband deployment (ECLIPSE programme) to imp
 
 ---
 
-### 46. Taupo 2019 Volcanic Unrest Earthquake Catalogue (Illsley-Kemp et al. 2021)
+### 51. Taupo 2019 Volcanic Unrest Earthquake Catalogue (Illsley-Kemp et al. 2021)
 *type: background · focus: particular-event-type · detection: template-matching · review: reviewed*
 
 - **Also known as:** Illsley-Kemp et al. 2021 Taupo unrest catalogue
@@ -1074,7 +1186,7 @@ Catalogue of the first instrumentally recorded Taupo caldera unrest episode (201
 
 ---
 
-### 47. Taupo 2022-2023 Volcanic Unrest Seismicity Catalogue (Lamb et al. 2024)
+### 52. Taupo 2022-2023 Volcanic Unrest Seismicity Catalogue (Lamb et al. 2024)
 *type: background · focus: particular-event-type · detection: manual · review: reviewed*
 
 - **Also known as:** Lamb et al. 2024 Taupo unrest catalogue
@@ -1094,7 +1206,7 @@ Characterises the May 2022-May 2023 Taupo unrest episode, which produced the hig
 
 ---
 
-### 48. Cascading Earthquake Swarms, Northern Taupo Volcanic Zone (2019, Aber et al. 2025)
+### 53. Cascading Earthquake Swarms, Northern Taupo Volcanic Zone (2019, Aber et al. 2025)
 *type: background · focus: geographical · detection: other · review: reviewed*
 
 - **Also known as:** Aber et al. 2025 cascading swarms catalogue
@@ -1116,7 +1228,7 @@ Documents and analyses 10 spatio-temporal earthquake swarms cascading along ~175
 
 ---
 
-### 49. Tarawera 2019 Dyke-Intrusion Earthquake Catalogue (Puhipuhi, Okataina; Benson et al. 2021)
+### 54. Tarawera 2019 Dyke-Intrusion Earthquake Catalogue (Puhipuhi, Okataina; Benson et al. 2021)
 *type: background · focus: particular-event-type · detection: template-matching · review: reviewed*
 
 - **Also known as:** Benson et al. 2021 Tarawera/Puhipuhi swarm catalogue
@@ -1139,7 +1251,7 @@ Catalogue of a March 2019 earthquake swarm in the Puhipuhi embayment NE of Taraw
 
 ---
 
-### 50. Waimangu-Rotomahana-Mt Tarawera Geothermal Field Earthquake Swarm Catalogue (2004-2015)
+### 55. Waimangu-Rotomahana-Mt Tarawera Geothermal Field Earthquake Swarm Catalogue (2004-2015)
 *type: background · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** Bannister et al. 2016 WRT swarm catalogue
@@ -1159,7 +1271,7 @@ Catalogue of 582 relocated earthquakes (2004-2015) in the Waimangu-Rotomahana-Mt
 
 ---
 
-### 51. Mt Ruapehu Earthquake Swarm Catalogue (1990-2023)
+### 56. Mt Ruapehu Earthquake Swarm Catalogue (1990-2023)
 *type: background · focus: geographical · detection: machine-learning · review: reviewed*
 
 - **Also known as:** Mitchinson et al. 2024 Ruapehu ML catalogue
@@ -1180,7 +1292,7 @@ A derived catalogue isolating earthquake swarms at Mt Ruapehu from decades of Ge
 
 ---
 
-### 52. Whakaari/White Island Very-Long-Period (VLP) Earthquake Catalogue (2007-2019)
+### 57. Whakaari/White Island Very-Long-Period (VLP) Earthquake Catalogue (2007-2019)
 *type: background · focus: particular-event-type · detection: other · review: reviewed*
 
 - **Also known as:** Park et al. 2020 Whakaari VLP families F1/F2
@@ -1199,7 +1311,7 @@ A long-term classification catalogue of very-long-period (VLP) volcanic earthqua
 
 ---
 
-### 53. Ngatamariki Geothermal Injection-Induced Microseismicity Catalogue (2012-2015)
+### 58. Ngatamariki Geothermal Injection-Induced Microseismicity Catalogue (2012-2015)
 *type: induced · focus: particular-event-type · detection: template-matching · review: reviewed*
 
 - **Also known as:** Hopp et al. 2019 Ngatamariki matched-filter catalogue
@@ -1221,7 +1333,7 @@ Catalogue of injection/stimulation-induced microseismicity at the Ngatamariki ge
 
 ---
 
-### 54. Rotokawa Geothermal Field Induced Microseismicity Catalogue (2012-2015)
+### 59. Rotokawa Geothermal Field Induced Microseismicity Catalogue (2012-2015)
 *type: induced · focus: particular-event-type · detection: template-matching · review: reviewed*
 
 - **Also known as:** Hopp et al. 2020 Rotokawa matched-filter catalogue
@@ -1243,7 +1355,7 @@ A ~four-year matched-filter catalogue of induced/produced seismicity at the Roto
 
 ---
 
-### 55. Rotorua and Kawerau Geothermal Systems Relocated Seismicity Catalogue (1984-2004; Clarke et al. 2009)
+### 60. Rotorua and Kawerau Geothermal Systems Relocated Seismicity Catalogue (1984-2004; Clarke et al. 2009)
 *type: background · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** Clarke et al. 2009 Rotorua-Kawerau relocated seismicity; Rotorua and Kawerau geothermal seismicity (TVZ)
@@ -1265,7 +1377,7 @@ A dedicated double-difference (HypoDD) relocated earthquake catalogue for two Ta
 
 ---
 
-### 56. Rotokawa Geothermal Field Microseismicity Catalogue 2008-2012 (Sherburn et al. 2015)
+### 61. Rotokawa Geothermal Field Microseismicity Catalogue 2008-2012 (Sherburn et al. 2015)
 *type: induced · focus: geographical · detection: manual · review: reviewed*
 
 - **Also known as:** Sherburn et al. 2015 Rotokawa microseismicity; Microseismicity at Rotokawa geothermal field 2008-2012
@@ -1287,7 +1399,7 @@ A field-specific induced-microseismicity catalogue for the Rotokawa geothermal f
 
 ---
 
-### 57. Wairakei Geothermal Field Microseismicity Catalogue (Wairakei Seismic Network; Sepulveda et al. 2015)
+### 62. Wairakei Geothermal Field Microseismicity Catalogue (Wairakei Seismic Network; Sepulveda et al. 2015)
 *type: induced · focus: geographical · detection: manual · review: partially reviewed*
 
 - **Also known as:** Wairakei Seismic Network (WSN) microseismicity; Spatial-temporal Characteristics of Microseismicity (2009-2014) of the Wairakei Geothermal Field (Sepulveda et al. 2015, WGC); Wairakei-Tauhara downhole microseismic catalogue
@@ -1310,7 +1422,7 @@ A dedicated operator-run downhole borehole microseismic monitoring catalogue for
 
 ---
 
-### 58. Mt Ruapehu 2022 Volcanic Unrest Drumbeat / Tremor Seismicity Catalogue (Bramwell et al. 2025)
+### 63. Mt Ruapehu 2022 Volcanic Unrest Drumbeat / Tremor Seismicity Catalogue (Bramwell et al. 2025)
 *type: background · focus: particular-event-type · detection: manual · review: reviewed*
 
 - **Also known as:** Drumbeat and low frequency catalogue for 2022 unrest at Ruapehu volcano (Zenodo 13910455); Bramwell et al. 2025 Ruapehu drumbeat/tremor catalogue
@@ -1333,7 +1445,7 @@ A manually picked catalogue of low-frequency (LF) drumbeat earthquakes and volca
 
 ---
 
-### 59. Auckland Volcanic Field Matched-Filter Earthquake Catalogue (van Wijk et al. 2021, COVID-19 lockdown study)
+### 64. Auckland Volcanic Field Matched-Filter Earthquake Catalogue (van Wijk et al. 2021, COVID-19 lockdown study)
 *type: background · focus: geographical · detection: template-matching · review: reviewed*
 
 - **Also known as:** AVF COVID-19 lockdown matched-filter catalogue; van Wijk et al. 2021 Auckland Volcanic Field seismicity; Auckland Volcanic Seismic Network (AVSN) detections
@@ -1356,7 +1468,7 @@ A small but genuinely distinct local catalogue for the Auckland Volcanic Field (
 
 ---
 
-### 60. Monowai Submarine Volcano Long-Range Hydroacoustic (T-phase) Activity Catalogue
+### 65. Monowai Submarine Volcano Long-Range Hydroacoustic (T-phase) Activity Catalogue
 *type: induced · focus: particular-event-type · detection: other · review: reviewed*
 
 - **Also known as:** Metz et al. (2018) Monowai T-phase catalogue; Tracking Submarine Volcanic Activity at Monowai
@@ -1378,7 +1490,7 @@ A hydroacoustic event catalogue tracking eruptive/seismic activity at the Monowa
 
 ---
 
-### 61. Tongariro / Te Maari Relocated Microseismicity Catalogue 2010-2021 (Heise et al. 2024)
+### 66. Tongariro / Te Maari Relocated Microseismicity Catalogue 2010-2021 (Heise et al. 2024)
 *type: background · focus: geographical · detection: machine-learning · review: partially reviewed*
 
 - **Also known as:** Te Maari relocated seismicity; Mt Tongariro tomoDD relocated microseismicity 2010-2021
@@ -1400,7 +1512,7 @@ A relocated microseismicity catalogue for Mt Tongariro (Te Maari / Upper Te Maar
 
 ---
 
-### 62. Auckland Volcanic Field Self-Consistent Machine-Learning Earthquake Catalogue (Chamberlain et al. 2025; NHC report 114 'Sensing unrest in New Zealand's largest city')
+### 67. Auckland Volcanic Field Self-Consistent Machine-Learning Earthquake Catalogue (Chamberlain et al. 2025; NHC report 114 'Sensing unrest in New Zealand's largest city')
 *type: background · focus: geographical · detection: machine-learning · review: partially reviewed*
 
 - **Also known as:** Sensing unrest in New Zealand's largest city: detailed mapping of seismicity in Auckland; AVF machine-learning earthquake catalogue; O'Hagan (2025) AVF catalogue; NHC Toka Tu Ake report no. 114; Auckland Volcanic Field seismic catalogues (Zenodo 15825886)
@@ -1424,9 +1536,72 @@ First long-duration, self-consistent located-earthquake catalogue for the Auckla
 
 ---
 
-## Slow-slip, tremor, LFE & moment-tensor catalogues (14)
+### 68. Central Taupō Volcanic Zone Shallow Seismicity Catalogue (TVZ95 array; Bryan et al. 1999)
+*type: background · focus: geographical · detection: manual · review: reviewed*
 
-### 63. GeoNet New Zealand Earthquake Moment Tensor Solutions (MwNZ)
+- **Also known as:** TVZ95
+- **Coverage:** 1987 → 1995-06
+- **Region:** Taupō Volcanic Zone
+- **Bounding box:** Central Taupō Volcanic Zone, North Island, New Zealand
+- **Depth range:** 0-10 km
+- **Magnitude:** ML; complete for ML > 2.1 where the network was densest, with lower magnitudes also included
+- **Events:** 954 earthquakes (to ~10 km depth)
+- **Content:** hypocentral locations; phase arrival-time picks; quality information
+- **Producer / contact:** Bryan, C.J., Sherburn, S., Bibby, H.M., Bannister, S.C. & Hurst, A.W. (GNS Science)
+- **Data source:** National Seismograph Network (NSN) for 1987-1994; NSN plus 64 short-period and 23 broadband temporary stations (TVZ95 array) for January-June 1995
+- **Availability:** available on request
+
+A catalogue of shallow seismicity across the central Taupō Volcanic Zone, characterising its distribution and nature. Events were located with HYPOELLIPSE and a 1-D velocity model from manual phase picks, with location uncertainties reported.
+
+**Key references:**
+- Bryan, C.J., Sherburn, S., Bibby, H.M., Bannister, S.C. & Hurst, A.W. (1999). Shallow seismicity of the central Taupo Volcanic Zone, New Zealand: its distribution and nature. New Zealand Journal of Geology and Geophysics, 42(4), 533-542. https://doi.org/10.1080/00288306.1999.9514859
+
+---
+
+### 69. Waiouru Mid-Crustal Earthquake Swarm Catalogue (Hayes et al. 2004; Reyners et al. 2017)
+*type: background · focus: particular-event-type · detection: manual · review: reviewed*
+
+- **Coverage:** unknown → unknown
+- **Region:** Waiouru / southern Taupō Volcanic Zone
+- **Bounding box:** Waiouru, central North Island, New Zealand (near Mt Ruapehu)
+- **Depth range:** mid-crustal
+- **Content:** hypocentral locations; phase arrival-time picks
+- **Producer / contact:** Hayes, G., Reyners, M. & Stuart, G.; Reyners, M., Eberhart-Phillips, D., Upton, P. & Gubbins, D.
+- **Data source:** Temporary seismograph deployment plus the national network
+- **Availability:** available on request
+
+A microearthquake catalogue of the persistent mid-crustal Waiouru earthquake swarm near Mt Ruapehu, located by double-difference methods with a 1-D velocity model and later incorporated into 3-D tomographic imaging of the subduction zone.
+
+**Key references:**
+- Hayes, G., Reyners, M. & Stuart, G. (2004). The Waiouru, New Zealand, earthquake swarm: persistent mid crustal activity near an active volcano. Geophysical Research Letters, 31. https://doi.org/10.1029/2004GL020709
+- Reyners, M., Eberhart-Phillips, D., Upton, P. & Gubbins, D. (2017). Three-dimensional imaging of impact of a large igneous province with a subduction zone. Earth and Planetary Science Letters, 460, 143-151. https://doi.org/10.1016/j.epsl.2016.12.025
+
+---
+
+### 70. Southern-Central Taupō Volcanic Zone Microearthquake Catalogue (HADES, 2009-2021; Bannister et al. 2025)
+*type: background · focus: geographical · detection: machine-learning · review: reviewed*
+
+- **Also known as:** HADES (2009-2011)
+- **Coverage:** 2009-09 → 2021-05
+- **Region:** Southern-central Taupō Volcanic Zone (Taupō-Reporoa)
+- **Bounding box:** Southern-central Taupō Volcanic Zone (Taupō-Reporoa), North Island, New Zealand
+- **Magnitude:** ML <= 3.3 for GeoNet events; new detections include events likely below ML 0 (magnitudes not estimated)
+- **Events:** 9,148 earthquakes
+- **Content:** hypocentral locations; relative relocations; phase arrival-time picks
+- **Producer / contact:** Bannister, S. (Earth Sciences New Zealand)
+- **Data source:** New Zealand National Seismograph Network (2009-2021) plus the dense temporary HADES deployment (September 2009-May 2011, ~5 km station spacing)
+- **Availability:** available (DOI) · DOI [10.1016/j.jvolgeores.2025.108448](https://doi.org/10.1016/j.jvolgeores.2025.108448)
+
+A microearthquake catalogue for the southern-central Taupō Volcanic Zone (Taupō to Reporoa) built from EQTransformer machine-learning detections. A 3-D velocity model was derived by double-difference tomography and all hypocentres relocated with TOMODDSP, supporting seismic imaging of mid-crustal heterogeneity beneath the geothermal systems.
+
+**Key references:**
+- Bannister, S., Bertrand, E.A., Kilgour, G., Caldwell, T.G., Chambefort, I., Heise, W. & Bourguignon, S. (2025). Seismic imaging of mid-crustal heterogeneity beneath geothermal systems, central Taupo Volcanic Zone, New Zealand. Journal of Volcanology and Geothermal Research, 468, 108448. https://doi.org/10.1016/j.jvolgeores.2025.108448
+
+---
+
+## Slow-slip, tremor, LFE & moment-tensor catalogues (18)
+
+### 71. GeoNet New Zealand Earthquake Moment Tensor Solutions (MwNZ)
 *type: background · focus: geographical · detection: automatic · review: partially reviewed*
 
 - **Also known as:** MwNZ; GeoNet CMT; regional moment tensor (RMT) catalogue; Ristau RMT catalogue
@@ -1444,12 +1619,12 @@ National regional centroid moment tensor (focal mechanism) catalogue for New Zea
 
 **Key references:**
 - GNS Science (2006). GeoNet Aotearoa New Zealand Earthquake Moment Tensor solutions [Data set]. GNS Science, GeoNet. https://doi.org/10.21420/MMJ9-CZ67
-- Ristau, J. (2008). Implementation of routine regional moment tensor analysis in New Zealand. Seismological Research Letters, 79(3), 400-415.
+- Ristau, J. (2008). Implementation of routine regional moment tensor analysis in New Zealand. Seismological Research Letters, 79(3), 400-415. https://doi.org/10.1785/gssrl.79.3.400
 - Ristau, J. (2009). Comparison of magnitude estimates for New Zealand earthquakes: Moment magnitude, local magnitude, and teleseismic body-wave magnitude. Bulletin of the Seismological Society of America, 99(3), 1841-1852. https://doi.org/10.1785/0120080376
 
 ---
 
-### 64. Hikurangi Slow Slip Event Inventory (Wallace & Beavan 2010)
+### 72. Hikurangi Slow Slip Event Inventory (Wallace & Beavan 2010)
 *type: compilation · focus: particular-event-type · detection: other · review: reviewed*
 
 - **Also known as:** Hikurangi SSE catalogue; Hikurangi slow-slip inventory; Wallace & Beavan 2010
@@ -1471,7 +1646,7 @@ Foundational inventory of Hikurangi slow slip events documented with continuous 
 
 ---
 
-### 65. Northern Hikurangi Tectonic Tremor Catalogue 2010-2015 (Todd & Schwartz 2016)
+### 73. Northern Hikurangi Tectonic Tremor Catalogue 2010-2015 (Todd & Schwartz 2016)
 *type: compilation · focus: particular-event-type · detection: other · review: reviewed*
 
 - **Also known as:** Todd & Schwartz 2016 tremor catalogue; northern Hikurangi tremor catalogue
@@ -1490,7 +1665,7 @@ First systematic tectonic tremor catalogue for the northern Hikurangi margin (20
 
 ---
 
-### 66. Ambient Tectonic Tremor Catalogue: Manawatu, Cape Turnagain, Marlborough & Puysegur (Romanet & Ide 2019)
+### 74. Ambient Tectonic Tremor Catalogue: Manawatu, Cape Turnagain, Marlborough & Puysegur (Romanet & Ide 2019)
 *type: compilation · focus: particular-event-type · detection: other · review: reviewed*
 
 - **Also known as:** Romanet & Ide 2019 ambient tremor catalogue
@@ -1511,7 +1686,7 @@ Multi-region ambient tectonic tremor catalogue across four New Zealand areas (Ma
 
 ---
 
-### 67. Alpine Fault Low-Frequency Earthquake Catalogue (Chamberlain et al. 2014)
+### 75. Alpine Fault Low-Frequency Earthquake Catalogue (Chamberlain et al. 2014)
 *type: background · focus: particular-event-type · detection: template-matching · review: reviewed*
 
 - **Also known as:** Alpine Fault LFE catalogue 2014; Chamberlain et al. 2014
@@ -1534,7 +1709,7 @@ First low-frequency earthquake (LFE) catalogue for the deep Alpine Fault: approx
 
 ---
 
-### 68. Alpine Fault Low-Frequency Earthquake Catalogue with Focal Mechanisms (Baratin et al. 2018)
+### 76. Alpine Fault Low-Frequency Earthquake Catalogue with Focal Mechanisms (Baratin et al. 2018)
 *type: background · focus: particular-event-type · detection: template-matching · review: reviewed*
 
 - **Also known as:** Baratin et al. 2018 Alpine Fault LFE catalogue
@@ -1557,7 +1732,7 @@ Extended, longer-duration deep Alpine Fault LFE catalogue (2009-2017) that adds 
 
 ---
 
-### 69. Kaimanawa (Deep Hikurangi) Low-Frequency Earthquake Catalogue (Aden-Antoniow et al. 2024)
+### 77. Kaimanawa (Deep Hikurangi) Low-Frequency Earthquake Catalogue (Aden-Antoniow et al. 2024)
 *type: background · focus: particular-event-type · detection: template-matching · review: reviewed*
 
 - **Also known as:** Aden-Antoniow et al. 2024 Hikurangi LFE catalogue; Kaimanawa LFE catalogue
@@ -1578,7 +1753,7 @@ First low-frequency earthquake catalogue for the Hikurangi subduction zone prope
 
 ---
 
-### 70. Raukumara Peninsula Repeating Earthquake Catalogue 2003-2020 (Hughes et al. 2021)
+### 78. Raukumara Peninsula Repeating Earthquake Catalogue 2003-2020 (Hughes et al. 2021)
 *type: background · focus: particular-event-type · detection: template-matching · review: reviewed*
 
 - **Also known as:** Hughes et al. 2021 Raukumara repeating-earthquake catalogue
@@ -1598,7 +1773,7 @@ Catalogue of 61 repeating-earthquake families on the northern Hikurangi margin (
 
 ---
 
-### 71. New Zealand-Wide Earthquake Focal Mechanism Catalogue for Tectonic Stress (Townend et al. 2012)
+### 79. New Zealand-Wide Earthquake Focal Mechanism Catalogue for Tectonic Stress (Townend et al. 2012)
 *type: compilation · focus: geographical · detection: other · review: reviewed*
 
 - **Also known as:** Townend et al. (2012) NZ focal mechanism compilation; central NZ stress-field focal mechanism dataset
@@ -1617,7 +1792,7 @@ A New Zealand-wide compilation of ~3424 earthquake focal mechanisms assembled to
 
 ---
 
-### 72. Southeastern South Island / Otago Earthquake Focal Mechanism Catalogue (Williams et al. 2026)
+### 80. Southeastern South Island / Otago Earthquake Focal Mechanism Catalogue (Williams et al. 2026)
 *type: compilation · focus: geographical · detection: other · review: reviewed*
 
 - **Also known as:** Williams et al. (2026) southeastern South Island focal mechanisms; Otago/Southland focal-mechanism catalogue (OtagoNet + SOSA + COSA)
@@ -1638,7 +1813,7 @@ A regional focal-mechanism catalogue for the southeastern South Island (Otago/So
 
 ---
 
-### 73. HOBITSS Ocean-Bottom Focal-Mechanism / Stress-Tensor Cycling Catalogue, Northern Hikurangi (Warren-Smith et al. 2019)
+### 81. HOBITSS Ocean-Bottom Focal-Mechanism / Stress-Tensor Cycling Catalogue, Northern Hikurangi (Warren-Smith et al. 2019)
 *type: background · focus: particular-event-type · detection: other · review: reviewed*
 
 - **Also known as:** Warren-Smith et al. (2019) HOBITSS focal mechanisms; northern Hikurangi intraslab focal-mechanism / stress-ratio cycling dataset
@@ -1661,7 +1836,7 @@ A focal-mechanism catalogue for microearthquakes in the subducting Pacific ocean
 
 ---
 
-### 74. Hikurangi Trench Earthquake-Swarm Catalogue (ETAS-based, Nishikawa et al. 2021)
+### 82. Hikurangi Trench Earthquake-Swarm Catalogue (ETAS-based, Nishikawa et al. 2021)
 *type: compilation · focus: particular-event-type · detection: other · review: non-reviewed*
 
 - **Also known as:** Nishikawa Hikurangi swarm catalog; ETAS swarm catalogue, Hikurangi Trench (1997-2015)
@@ -1680,7 +1855,7 @@ A derived, declustering-type catalogue produced to study the spatiotemporal rela
 
 ---
 
-### 75. Manawatu Deep Short-Term Slow-Slip and Tremor Catalogue (Fasola et al. 2023)
+### 83. Manawatu Deep Short-Term Slow-Slip and Tremor Catalogue (Fasola et al. 2023)
 *type: background · focus: particular-event-type · detection: other · review: reviewed*
 
 - **Also known as:** Fasola et al. (2023) Manawatu deep tremor / short-term ETS-like SSE; Manawatu/Kaimanawa deep tremor-associated slip model
@@ -1702,7 +1877,7 @@ Investigates whether small, short-term ETS-like slow-slip events occur at the de
 
 ---
 
-### 76. Global Centroid Moment Tensor (GCMT) catalogue (New Zealand component)
+### 84. Global Centroid Moment Tensor (GCMT) catalogue (New Zealand component)
 *type: compilation · focus: particular-event-type · detection: other · review: reviewed*
 
 - **Also known as:** Global CMT; GCMT; formerly Harvard CMT (HRV) catalog
@@ -1724,9 +1899,86 @@ The GCMT (formerly Harvard CMT) Project systematically determines centroid momen
 
 ---
 
+### 85. Alpine Fault Tectonic Tremor and Deep Slow-Slip Catalogue (Wech et al. 2012)
+*type: background · focus: particular-event-type · detection: other · review: reviewed*
+
+- **Coverage:** unknown → unknown
+- **Region:** Central Alpine Fault / Southern Alps
+- **Bounding box:** Central Alpine Fault / Southern Alps, South Island, New Zealand
+- **Content:** other
+- **Producer / contact:** Wech, A.G., Boese, C.M., Stern, T.A. & Townend, J.
+- **Data source:** Central Southern Alps / Alpine Fault seismic deployments
+- **Availability:** available on request
+
+A catalogue of tectonic (non-volcanic) tremor on the deep extent of the Alpine Fault, providing early evidence of deep tremor and inferred slow slip beneath the central Southern Alps.
+
+*Related:* Complements the Alpine Fault low-frequency earthquake catalogues (Chamberlain et al. 2014; Baratin et al. 2018).
+
+**Key references:**
+- Wech, A.G., Boese, C.M., Stern, T.A. & Townend, J. (2012). Tectonic tremor and deep slow slip on the Alpine Fault. Geophysical Research Letters, 39. https://doi.org/10.1029/2012GL051751
+
+---
+
+### 86. Gisborne 2010 Slow-Slip Non-Volcanic Tremor Catalogue (Kim et al. 2011)
+*type: background · focus: particular-event-type · detection: other · review: reviewed*
+
+- **Coverage:** 2010 → 2010
+- **Region:** Northern Hikurangi margin (Gisborne)
+- **Bounding box:** Northern Hikurangi margin, offshore Gisborne, North Island, New Zealand
+- **Content:** other
+- **Producer / contact:** Kim, M.J., Schwartz, S.Y. & Bannister, S.
+- **Data source:** Northern Hikurangi margin seismic network
+- **Availability:** available on request
+
+A catalogue of non-volcanic (tectonic) tremor associated with the March 2010 Gisborne slow-slip event at the northern Hikurangi subduction margin.
+
+*Related:* Northern Hikurangi tremor is also catalogued by Todd & Schwartz (2016).
+
+**Key references:**
+- Kim, M.J., Schwartz, S.Y. & Bannister, S. (2011). Non-volcanic tremor associated with the March 2010 Gisborne slow slip event at the Hikurangi subduction margin, New Zealand. Geophysical Research Letters, 38. https://doi.org/10.1029/2011GL048400
+
+---
+
+### 87. North Island Large-Earthquake Focal-Mechanism Catalogue (Webb & Anderson 1998)
+*type: large-events-only · focus: particular-event-type · detection: manual · review: reviewed*
+
+- **Coverage:** unknown → unknown
+- **Region:** North Island (Hikurangi margin)
+- **Bounding box:** North Island, New Zealand
+- **Magnitude:** large earthquakes
+- **Content:** focal mechanisms
+- **Producer / contact:** Webb, T.H. & Anderson, H.
+- **Data source:** Regional and teleseismic waveform / first-motion data
+- **Availability:** available on request
+
+A catalogue of focal mechanisms for large earthquakes of the North Island, used to characterise slip partitioning along the obliquely convergent Hikurangi margin.
+
+**Key references:**
+- Webb, T.H. & Anderson, H. (1998). Focal mechanisms of large earthquakes in the North Island of New Zealand: slip partitioning at an oblique active margin. Geophysical Journal International, 134(1), 40-86. https://doi.org/10.1046/j.1365-246x.1998.00531.x
+
+---
+
+### 88. Fiordland Focal-Mechanism and Stress Catalogue (Reyners et al. 2002)
+*type: background · focus: particular-event-type · detection: manual · review: reviewed*
+
+- **Coverage:** unknown → unknown
+- **Region:** Fiordland
+- **Bounding box:** Fiordland, southwest South Island, New Zealand
+- **Content:** focal mechanisms
+- **Producer / contact:** Reyners, M., Robinson, R., Pancha, A. & McGinty, P.
+- **Data source:** Regional seismic network
+- **Availability:** available on request
+
+A catalogue of earthquake focal mechanisms used to map stresses and strains in the obliquely subducting Fiordland region of southwest New Zealand.
+
+**Key references:**
+- Reyners, M., Robinson, R., Pancha, A. & McGinty, P. (2002). Stresses and strains in a twisted subduction zone - Fiordland, New Zealand. Geophysical Journal International, 148(3), 637-648. https://doi.org/10.1046/j.1365-246x.2002.01611.x
+
+---
+
 ## Derived, homogenised & synthetic / hazard-model catalogues (5)
 
-### 77. NSHM 2010 Earthquake Catalogue (Stirling et al. 2012)
+### 89. NSHM 2010 Earthquake Catalogue (Stirling et al. 2012)
 *type: background · focus: geographical · detection: other · review: reviewed*
 
 - **Also known as:** NSHM 2010 catalogue; Stirling et al. 2012 catalogue
@@ -1745,7 +1997,7 @@ Homogenised (Mw), declustered backbone earthquake catalogue underpinning the dis
 
 ---
 
-### 78. Mw-Homogenised NZ Earthquake Catalogue for NSHM 2022 (Christophersen et al. 2022)
+### 90. Mw-Homogenised NZ Earthquake Catalogue for NSHM 2022 (Christophersen et al. 2022)
 *type: compilation · focus: parameter-testing · detection: other · review: reviewed*
 
 - **Also known as:** Christophersen et al. 2022 'consistent magnitudes' catalogue; GNS Science report 2021/42
@@ -1769,7 +2021,7 @@ A GNS Science reprocessing that recomputes earthquake magnitudes for the NZ cata
 
 ---
 
-### 79. Integrated / Augmented Earthquake Catalogue for Aotearoa New Zealand (NSHM 2022; Rollins et al.)
+### 91. Integrated / Augmented Earthquake Catalogue for Aotearoa New Zealand (NSHM 2022; Rollins et al.)
 *type: compilation · focus: geographical · detection: other · review: reviewed*
 
 - **Also known as:** Augmented NZ earthquake catalogue; Rollins et al. catalogue; GNS Science report 2021/58; Integrated Earthquake Catalog Version 1; NSHM22 Mw-standardized catalogue
@@ -1793,7 +2045,7 @@ An augmented, integrated NZ earthquake catalogue built for the 2022 National Sei
 
 ---
 
-### 80. RSQSim Synthetic Earthquake Catalogue for New Zealand (NSHM2012 fault system, 276 kyr)
+### 92. RSQSim Synthetic Earthquake Catalogue for New Zealand (NSHM2012 fault system, 276 kyr)
 *type: background · focus: parameter-testing · detection: other · review: non-reviewed*
 
 - **Also known as:** RSQSim Simulated Earthquake Catalog 5091; rundir5091; Shaw et al. 2022
@@ -1814,7 +2066,7 @@ A ~276,000-year synthetic earthquake catalogue produced by the RSQSim rate-and-s
 
 ---
 
-### 81. RSQSim Synthetic Earthquake Catalogue + Ground Motions for New Zealand (NZNSHM22 fault system)
+### 93. RSQSim Synthetic Earthquake Catalogue + Ground Motions for New Zealand (NZNSHM22 fault system)
 *type: background · focus: parameter-testing · detection: other · review: non-reviewed*
 
 - **Also known as:** RSQSim rundir5566; Shaw & Milner 2025 NZ catalog
@@ -1837,12 +2089,13 @@ An updated physics-based synthetic earthquake catalogue with rupture slip-time h
 
 ## Appendix A: Consolidated references
 
-128 unique references cited across the inventory:
+142 unique references cited across the inventory:
 
 - Aber, S., Ebinger, C.J., Gase, A.C., Kalugana, C., Illsley-Kemp, F., Hamling, I., Sabir, S., Savage, M.K., Eccles, J., Hreinsdottir, S., Ristau, J., & James-Le, J. (2025). Cascading Earthquake Swarms in the Northern Taupō Volcanic Zone, New Zealand. Geochemistry, Geophysics, Geosystems, 26, e2024GC012079. https://doi.org/10.1029/2024GC012079
 - Aden-Antoniow, F., Frank, W. B., Chamberlain, C. J., Townend, J., Wallace, L. M., & Bannister, S. (2024). Low-Frequency Earthquakes Downdip of Deep Slow Slip Beneath the North Island of New Zealand. Journal of Geophysical Research: Solid Earth, 129, e2023JB027971. https://doi.org/10.1029/2023JB027971
 - Aziz Zanjani, F., Lin, G. & Thurber, C.H. (2021). Nested regional-global seismic tomography and precise earthquake relocation along the Hikurangi subduction zone, New Zealand. Geophysical Journal International, 227(3), 1567-1590. https://doi.org/10.1093/gji/ggab294
 - Bannister, S., Bertrand, E.A., Heimann, S., Bourguignon, S., Asher, C., Shanks, J., & Harvison, A. (2022). Imaging sub-caldera structure with local seismicity, Okataina Volcanic Centre, Taupo Volcanic Zone, using double-difference seismic tomography. Journal of Volcanology and Geothermal Research, 431, 107653. https://doi.org/10.1016/j.jvolgeores.2022.107653
+- Bannister, S., Bertrand, E.A., Kilgour, G., Caldwell, T.G., Chambefort, I., Heise, W. & Bourguignon, S. (2025). Seismic imaging of mid-crustal heterogeneity beneath geothermal systems, central Taupo Volcanic Zone, New Zealand. Journal of Volcanology and Geothermal Research, 468, 108448. https://doi.org/10.1016/j.jvolgeores.2025.108448
 - Bannister, S., Fry, B., Reyners, M., Ristau, J., & Zhang, H. (2011). Fine-scale relocation of aftershocks of the 22 February Mw 6.2 Christchurch earthquake using double-difference tomography. Seismological Research Letters, 82(6), 839-845. doi:10.1785/gssrl.82.6.839
 - Bannister, S., Sherburn, S., & Bourguignon, S. (2016). Earthquake swarm activity highlights crustal faulting associated with the Waimangu-Rotomahana-Mt Tarawera geothermal field, Taupo Volcanic Zone. Journal of Volcanology and Geothermal Research, 314, 49-56. https://doi.org/10.1016/j.jvolgeores.2015.07.024
 - Bannister, S., Thurber, C., & Louie, J. (2006). Detailed fault structure highlighted by finely relocated aftershocks, Arthur's Pass, New Zealand. Geophysical Research Letters, 33(18), L18315. https://doi.org/10.1029/2006GL027462
@@ -1850,9 +2103,13 @@ An updated physics-based synthetic earthquake catalogue with rupture slip-time h
 - Baratin, L.-M., Chamberlain, C. J., Townend, J., & Savage, M. K. (2018). Focal mechanisms and inter-event times of low-frequency earthquakes reveal quasi-continuous deformation and triggered slow slip on the deep Alpine Fault. Earth and Planetary Science Letters, 484, 111-123. https://doi.org/10.1016/j.epsl.2017.12.021
 - Benson, T.W., Illsley-Kemp, F., Elms, H.C., Hamling, I.J., Savage, M.K., Wilson, C.J.N., Mestel, E.R.H., & Barker, S.J. (2020). Earthquake catalogue for Tarawera region, New Zealand, March 2019 [Data set, QuakeML]. Zenodo. https://doi.org/10.5281/zenodo.4035171
 - Benson, T.W., Illsley-Kemp, F., Elms, H.C., Hamling, I.J., Savage, M.K., Wilson, C.J.N., Mestel, E.R.H., & Barker, S.J. (2021). Earthquake Analysis Suggests Dyke Intrusion in 2019 Near Tarawera Volcano, New Zealand. Frontiers in Earth Science, 8, 606992. https://doi.org/10.3389/feart.2020.606992
+- Boese, C., Stern, T., Townend, J., Bourguignon, S., Sheehan, A. & Smith, E. (2013). Sub-crustal earthquakes within the Australia-Pacific plate boundary zone beneath the Southern Alps, New Zealand. Earth and Planetary Science Letters, 376, 212-219. https://doi.org/10.1016/j.epsl.2013.06.030
+- Boese, C.M., Townend, J., Smith, E. & Stern, T. (2012). Microseismicity and stress in the vicinity of the Alpine Fault, central Southern Alps, New Zealand. Journal of Geophysical Research, 117, B02302. https://doi.org/10.1029/2011JB008460
 - Bondár, I. and Storchak, D.A. (2011). Improved location procedures at the International Seismological Centre. Geophysical Journal International, 186, 1220-1244. https://doi.org/10.1111/j.1365-246X.2011.05107.x
+- Bourguignon, S., Bannister, S., Henderson, C.M., Townend, J. & Zhang, H. (2015). Structural heterogeneity of the midcrust adjacent to the central Alpine Fault, New Zealand: inferences from seismic tomography and seismicity between Harihari and Ross. Geochemistry, Geophysics, Geosystems, 16(4), 1017-1043. https://doi.org/10.1002/2014GC005702
 - Bramwell, L., Illsley-Kemp, F., Hughes, E. (2024). Drumbeat and low frequency catalogue for 2022 unrest at Ruapehu volcano, New Zealand [Data set]. Zenodo. https://doi.org/10.5281/zenodo.13910455
 - Bramwell, L.A., Illsley-Kemp, F., Hughes, E.C., Butcher, S., Lamb, O.D., Behr, Y. (2025). Source dynamics of Ruapehu's 2022 volcanic unrest: insights from drumbeat seismicity, tremor, and crater lake signals. Bulletin of Volcanology, 87(6), 44. https://doi.org/10.1007/s00445-025-01823-2
+- Bryan, C.J., Sherburn, S., Bibby, H.M., Bannister, S.C. & Hurst, A.W. (1999). Shallow seismicity of the central Taupo Volcanic Zone, New Zealand: its distribution and nature. New Zealand Journal of Geology and Geophysics, 42(4), 533-542. https://doi.org/10.1080/00288306.1999.9514859
 - Chamberlain, C. J., Boese, C. M., Eccles, J. D., Savage, M. K., Baratin, L.-M., Townend, J., Gulley, A. K., Jacobs, K. M., Benson, A., Taylor-Offord, S., Thurber, C., Guo, B., Okada, T., Takagi, R., Yoshida, K., Sutherland, R., & Toy, V. G. (2017). Real-Time Earthquake Monitoring during the Second Phase of the Deep Fault Drilling Project, Alpine Fault, New Zealand. Seismological Research Letters, 88(6), 1443-1454. https://doi.org/10.1785/0220170095
 - Chamberlain, C. J., Frank, W. B., Lanza, F., Townend, J., & Warren-Smith, E. (2021). Illuminating the Pre-, Co-, and Post-Seismic Phases of the 2016 M7.8 Kaikoura Earthquake With 10 Years of Seismicity. Journal of Geophysical Research: Solid Earth, 126(8), e2021JB022304. doi:10.1029/2021JB022304
 - Chamberlain, C. J., Shelly, D. R., Townend, J., & Stern, T. A. (2014). Low-frequency earthquakes reveal punctuated slow slip on the deep extent of the Alpine Fault, New Zealand. Geochemistry, Geophysics, Geosystems, 15, 2984-2999. https://doi.org/10.1002/2014GC005436
@@ -1879,9 +2136,12 @@ An updated physics-based synthetic earthquake catalogue with rupture slip-time h
 - Ekström, G., Nettles, M., & Dziewoński, A. M. (2012). The global CMT project 2004-2010: Centroid-moment tensors for 13,017 earthquakes. Physics of the Earth and Planetary Interiors, 200-201, 1-9. https://doi.org/10.1016/j.pepi.2012.04.002
 - Engdahl, E.R., Di Giacomo, D., Sakarya, B., Gkarlaouni, C.G., Harris, J. & Storchak, D.A. (2020). ISC-EHB 1964-2016, an Improved Data Set for Studies of Earth Structure and Global Seismicity. Earth and Space Science, 7(1), e2019EA000897. https://doi.org/10.1029/2019EA000897
 - Fasola, S. L., Jackson, N. M., & Williams, C. A. (2023). Deep Short-Term Slow Slip and Tremor in the Manawatu Region, New Zealand. Geophysical Research Letters, 50(21), e2023GL105428. https://doi.org/10.1029/2023GL105428
+- Feenstra, J., Thurber, C., Townend, J., Roecker, S., Bannister, S., Boese, C., Lord, N., Bourguignon, S. & Eberhart-Phillips, D. (2016). Microseismicity and P-wave tomography of the central Alpine Fault, New Zealand. New Zealand Journal of Geology and Geophysics, 59(4), 483-495. https://doi.org/10.1080/00288306.2016.1182561
 - GNS Science (1970). New Zealand Earthquake Catalogue [Data set]. GNS Science, GeoNet. https://doi.org/10.21420/0S8P-TZ38
 - GNS Science (2006). GeoNet Aotearoa New Zealand Earthquake Moment Tensor solutions [Data set]. GNS Science, GeoNet. https://doi.org/10.21420/MMJ9-CZ67
 - GNS Science (2019). Dense Westland Arrays Researching Fault Segmentation (DWARFS), FDSN network 7S (2019-2021). doi:10.7914/SN/8N_2019
+- Guo, B., Thurber, C., Roecker, S., Townend, J., Rawles, C., Chamberlain, C., Boese, C., Bannister, S., Feenstra, J. & Eccles, J. (2017). 3-D P- and S-wave velocity structure along the central Alpine Fault, South Island, New Zealand. Geophysical Journal International, 209(2), 935-947. https://doi.org/10.1093/gji/ggx059
+- Hayes, G., Reyners, M. & Stuart, G. (2004). The Waiouru, New Zealand, earthquake swarm: persistent mid crustal activity near an active volcano. Geophysical Research Letters, 31. https://doi.org/10.1029/2004GL020709
 - Heise, W., Bannister, S., Williams, C.A., McGavin, P., Caldwell, T.G., Bertrand, E.A., Usui, Y., Kilgour, G. (2024). Magmatic priming of a phreatic eruption sequence: the 2012 Te Maari eruptions at Mt Tongariro (New Zealand) imaged by magnetotellurics and seismicity. Geophysical Journal International, 236(3), 1848-1862. https://doi.org/10.1093/gji/ggae022
 - Hopp, C., Sewell, S., Mroczek, S., Savage, M., & Townend, J. (2019). Seismic Response to Injection Well Stimulation in a High-Temperature, High-Permeability Reservoir. Geochemistry, Geophysics, Geosystems, 20, 2848-2871. https://doi.org/10.1029/2019GC008243
 - Hopp, C., Sewell, S., Mroczek, S., Savage, M., & Townend, J. (2020). Seismic response to evolving injection at the Rotokawa geothermal field, New Zealand. Geothermics, 85, 101750. https://doi.org/10.1016/j.geothermics.2019.101750
@@ -1896,6 +2156,7 @@ An updated physics-based synthetic earthquake catalogue with rupture slip-time h
 - International Seismological Centre (2026). On-line Bulletin. International Seismological Centre, Thatcham, United Kingdom. https://doi.org/10.31905/D808B830
 - Iwasaki, Y., Schwartz, S., Mochizuki, K., Crume, H., Bassett, D., Yamada, T., & Morad, D. (2025). Dataset of earthquakes in the northern Hikurangi subduction zone, New Zealand, during the 2019 slow slip event [Data set]. Zenodo. https://doi.org/10.5281/zenodo.15713529
 - Iwasaki, Y., Schwartz, S., Mochizuki, K., Crume, H., Bassett, D., Yamada, T., & Morad, D. (2025). Intraslab Seismicity Near Subducted Seamounts Induced by the 2019 Large Slow Slip Event Offshore the Northern Hikurangi Subduction Zone, New Zealand. Journal of Geophysical Research: Solid Earth, 130(12). https://doi.org/10.1029/2025JB031751
+- Kim, M.J., Schwartz, S.Y. & Bannister, S. (2011). Non-volcanic tremor associated with the March 2010 Gisborne slow slip event at the Hikurangi subduction margin, New Zealand. Geophysical Research Letters, 38. https://doi.org/10.1029/2011GL048400
 - Lamb, O., Bannister, S., Ristau, J., Miller, C., Sherburn, S., Jacobs, K., Hanson, J., D'Anastasio, E., Hreinsdóttir, S., Snee, E., Ross, M., Mestel, E., & Illsley-Kemp, F. (2024). Seismic characteristics of the 2022-2023 unrest episode at Taupō volcano, Aotearoa New Zealand. Seismica, 3(2). https://doi.org/10.26443/seismica.v3i2.1125
 - Lanza, F., Chamberlain, C. J., Jacobs, K., Warren-Smith, E., Godfrey, H. J., Kortink, M., Thurber, C. H., Savage, M. K., Townend, J., Roecker, S., & Eberhart-Phillips, D. (2019). Crustal fault connectivity of the Mw 7.8 2016 Kaikoura earthquake constrained by aftershock relocations. Geophysical Research Letters, 46(12), 6487-6496. doi:10.1029/2019GL082780
 - Leitner, B., Eberhart-Phillips, D., Anderson, H., & Nabelek, J. L. (2001). A focused look at the Alpine fault, New Zealand: Seismicity, focal mechanisms, and stress observations. Journal of Geophysical Research, 106(B2), 2193-2220. https://doi.org/10.1029/2000JB900303
@@ -1913,9 +2174,12 @@ An updated physics-based synthetic earthquake catalogue with rupture slip-time h
 - Nishikawa, T., Nishimura, T., & Okada, Y. (2021). Earthquake Swarm Detection Along the Hikurangi Trench, New Zealand: Insights Into the Relationship Between Seismicity and Slow Slip Events. Journal of Geophysical Research: Solid Earth, 126(4), e2020JB020618. https://doi.org/10.1029/2020JB020618
 - O'Hagan, S. & Chamberlain, C.J. (2025). Auckland Volcanic Field seismic catalogues [Data set]. Zenodo. https://doi.org/10.5281/zenodo.15825886
 - O'Hagan, S. (2025). Constraining earthquake rates at the Auckland Volcanic Field 2011-2022. VUW MSc thesis (supervised by C.J. Chamberlain).
+- O'Keefe, B. C. (2008). Microseismicity of the Central Alpine Fault region, New Zealand. MSc thesis, Victoria University of Wellington. https://doi.org/10.26686/wgtn.16947271
 - Park, I., Jolly, A., Lokmer, I., & Kennedy, B. (2020). Classification of long-term very long period (VLP) volcanic earthquakes at Whakaari/White Island volcano, New Zealand. Earth, Planets and Space, 72, 92. https://doi.org/10.1186/s40623-020-01224-z
 - Reyners, M., Eberhart-Phillips, D., Stuart, G., & Nishimura, Y. (2006). Imaging subduction from the trench to 300 km depth beneath the central North Island, New Zealand, with Vp and Vp/Vs. Geophysical Journal International, 165(2), 565-583. https://doi.org/10.1111/j.1365-246X.2006.02897.x
-- Ristau, J. (2008). Implementation of routine regional moment tensor analysis in New Zealand. Seismological Research Letters, 79(3), 400-415.
+- Reyners, M., Eberhart-Phillips, D., Upton, P. & Gubbins, D. (2017). Three-dimensional imaging of impact of a large igneous province with a subduction zone. Earth and Planetary Science Letters, 460, 143-151. https://doi.org/10.1016/j.epsl.2016.12.025
+- Reyners, M., Robinson, R., Pancha, A. & McGinty, P. (2002). Stresses and strains in a twisted subduction zone - Fiordland, New Zealand. Geophysical Journal International, 148(3), 637-648. https://doi.org/10.1046/j.1365-246x.2002.01611.x
+- Ristau, J. (2008). Implementation of routine regional moment tensor analysis in New Zealand. Seismological Research Letters, 79(3), 400-415. https://doi.org/10.1785/gssrl.79.3.400
 - Ristau, J. (2009). Comparison of magnitude estimates for New Zealand earthquakes: Moment magnitude, local magnitude, and teleseismic body-wave magnitude. Bulletin of the Seismological Society of America, 99(3), 1841-1852. https://doi.org/10.1785/0120080376
 - Ristau, J., Holden, C., Kaiser, A., Williams, C., Bannister, S., & Fry, B. (2013). The Pegasus Bay aftershock sequence of the Mw 7.1 Darfield (Canterbury), New Zealand earthquake. Geophysical Journal International, 195(1), 444-459. doi:10.1093/gji/ggt222
 - Rollins, C., Christophersen, A., Thingbaijam, K.K.S., Gerstenberger, M.C., Hutchinson, J., Eberhart-Phillips, D., Bannister, S., Van Dissen, R.J., Seebeck, H., & Ellis, S. (2025). An Integrated Earthquake Catalog for Aotearoa New Zealand (Version 1), Event-Type Classifications, and Regional Earthquake Depth Distributions. Bulletin of the Seismological Society of America, 115(4), 1703-1718. https://doi.org/10.1785/0120230179
@@ -1953,6 +2217,8 @@ An updated physics-based synthetic earthquake catalogue with rupture slip-time h
 - Warren-Smith, E., Lamb, S., & Stern, T.A. (2017). Stress field and kinematics for diffuse microseismicity in a zone of continental transpression, South Island, New Zealand. Journal of Geophysical Research: Solid Earth, 122(4), 2798-2811. https://doi.org/10.1002/2017JB013942
 - Warren-Smith, E., Lamb, S., Stern, T., Smith, E., Townend, J., Chamberlain, C., et al. (2022). Heterogeneity in Microseismicity and Stress Near Rupture-Limiting Section Boundaries Along the Late-Interseismic Alpine Fault. Journal of Geophysical Research: Solid Earth. doi:10.1029/2022JB025219
 - Warren-Smith, E., Lamb, S., Stern, T.A., & Smith, E. (2017). Microseismicity in Southern South Island, New Zealand: Implications for the Mechanism of Crustal Deformation Adjacent to a Major Continental Transform. Journal of Geophysical Research: Solid Earth, 122(11), 9208-9227. https://doi.org/10.1002/2017JB014732
+- Webb, T.H. & Anderson, H. (1998). Focal mechanisms of large earthquakes in the North Island of New Zealand: slip partitioning at an oblique active margin. Geophysical Journal International, 134(1), 40-86. https://doi.org/10.1046/j.1365-246x.1998.00531.x
+- Wech, A.G., Boese, C.M., Stern, T.A. & Townend, J. (2012). Tectonic tremor and deep slow slip on the Alpine Fault. Geophysical Research Letters, 39. https://doi.org/10.1029/2012GL051751
 - Weston, J., Engdahl, E.R., Harris, J., Di Giacomo, D. & Storchak, D.A. (2018). ISC-EHB: Reconstruction of a robust earthquake data set. Geophysical Journal International, 214(1), 474-484. https://doi.org/10.1093/gji/ggy155
 - Williams, C.-L., Chamberlain, C. J., & Townend, J. (2024). Building an Enhanced Earthquake Catalogue for Aotearoa New Zealand: Applying an Automated Workflow With Cutting-Edge Machine Learning Methods to Mine New Zealand's Seismic Data. Seismological Society of America 2024 Annual Meeting (poster). https://seismosoc.secure-platform.com/a/gallery/rounds/38/details/10641
 - Williams, C.-L., Chamberlain, C. J., & Townend, J. (2026). Consistent Earthquake Catalogue for New Zealand (Version 0.1) [Data set]. Zenodo. https://doi.org/10.5281/zenodo.18820779

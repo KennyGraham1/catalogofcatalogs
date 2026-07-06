@@ -110,7 +110,7 @@ function parseRef(raw) {
   else { const ym = raw.match(/\b(19|20)\d{2}\b/); if (ym) year = ym[0]; }
   let title = '', venue = '';
   if (rest) { const parts = rest.split(/\.\s+/); title = (parts.shift() || '').replace(/\.$/, '').trim(); venue = parts.join('. ').trim(); }
-  venue = venue.replace(/https?:\/\/[^\s]+/g, '').replace(/doi:\s*\S+/ig, '').replace(/\[[^\]]*\]/g, '').replace(/[\s.,]+$/, '').trim();
+  venue = venue.replace(/https?:\/\/[^\s]+/g, '').replace(/doi:\s*\S+/ig, '').replace(/\[[^\]]*\]/g, '').replace(/\(\s*no\s+doi[^)]*\)/ig, '').replace(/[\s.,]+$/, '').trim();
   // Robust author parse: tokenise on commas, then pair each surname with the
   // following initials group so every BibTeX name has at most one comma.
   let author = '';
@@ -131,6 +131,8 @@ function parseRef(raw) {
   if (/\[data set\]|data set|\bdataset\b|zenodo|fdsn|federation of digital|pangaea|figshare|geonet/i.test(raw) && /data set|dataset|fdsn|zenodo|federation of digital|pangaea|figshare/i.test(low)) type = 'dataset';
   else if (/thesis|dissertation|\bph\.?d\b|m\.?sc/i.test(low)) type = 'thesis';
   else if (/(\breport\b|technical report|\beqc\b|earthquake commission|natural hazards commission|gns science report|open[- ]file)/i.test(low) && !/seismological society/i.test(low)) type = 'report';
+  else if (/\bproceedings\b|world geothermal congress|geothermal workshop|\bconference\b|\bsymposium\b/i.test(low)) type = 'inproceedings';
+  else if (/\bmonograph\b|\bisbn\b|\batlas of\b/i.test(low)) type = 'book';
   else if (venue) type = 'article';
   if (type === 'article') {
     const vm = venue.match(/^(.*?),\s*(\d+)\s*(?:\(([^)]+)\))?\s*,\s*([A-Za-z]?\d+\s*[-–]\s*[A-Za-z]?\d+|\d+)\s*$/);
@@ -422,7 +424,7 @@ bib.push('% Bibliography for the inventory report; keys are cited from the repor
 bib.push('');
 const F = (name, val) => val ? `  ${name} = {${val}},` : null;
 for (const { key, p } of bibEntries) {
-  const typeMap = { article: 'article', report: 'techreport', thesis: 'phdthesis', dataset: 'misc', misc: 'misc' };
+  const typeMap = { article: 'article', report: 'techreport', thesis: 'phdthesis', dataset: 'misc', inproceedings: 'inproceedings', book: 'book', misc: 'misc' };
   const bt = typeMap[p.type] || 'misc';
   bib.push(`% source: ${p.raw.replace(/[\r\n]+/g, ' ')}`);
   const lines = [`@${bt}{${key},`];
@@ -431,6 +433,8 @@ for (const { key, p } of bibEntries) {
   push(F('title', p.title ? `{${bibEsc(p.title)}}` : ''));
   push(F('year', bibEsc(p.year)));
   if (bt === 'article') { push(F('journal', bibEsc(p.journal))); push(F('volume', bibEsc(p.volume))); push(F('number', bibEsc(p.number))); push(F('pages', bibEsc(p.pages))); }
+  else if (bt === 'inproceedings') { push(F('booktitle', bibEsc(p.venue))); }
+  else if (bt === 'book') { push(F('publisher', bibEsc(p.venue))); }
   else if (bt === 'techreport') { push(F('institution', bibEsc(p.venue))); }
   else if (bt === 'phdthesis') { push(F('school', bibEsc(p.venue))); }
   else { push(F('howpublished', bibEsc(p.venue))); }
