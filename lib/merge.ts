@@ -1194,11 +1194,12 @@ function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGro
   // A small/shallow anchor processed first would otherwise miss a large/deep duplicate
   // that eventsMatchAdaptive (which uses the pair's avg magnitude / max depth) accepts.
   // Also widen the longitude reach by 1/cos(lat): the grid cell is keyed to the tighter
-  // latitude axis, so one cell spans fewer km E-W than N-S. Computed once for the index.
-  const avgLatDeg = sortedEvents.length
-    ? sortedEvents.reduce((sum, e) => sum + Math.abs(e.latitude), 0) / sortedEvents.length
-    : 0;
-  const lonCoverageFactor = 1 / Math.max(Math.cos((avgLatDeg * Math.PI) / 180), 0.1);
+  // latitude axis, so one cell spans fewer km E-W than N-S. Use the MAXIMUM |latitude| in
+  // the set (not the average) so the neighbourhood is conservative for the highest-latitude
+  // events too — an event poleward of the average needs more E-W cells, and under-sizing
+  // here would silently drop its true duplicates.
+  const maxAbsLatDeg = sortedEvents.reduce((max, e) => Math.max(max, Math.abs(e.latitude)), 0);
+  const lonCoverageFactor = 1 / Math.max(Math.cos((maxAbsLatDeg * Math.PI) / 180), 0.1);
   const distCells = Math.max(
     1,
     Math.ceil(MAX_DISTANCE_MULTIPLIER * MAX_DEPTH_MULTIPLIER * lonCoverageFactor)
@@ -1638,11 +1639,19 @@ function unionMergeFields(base: MergedEventData, events: EventData[]): MergedEve
     }
   }
 
-  // Magnitude metadata: fill ONLY from the source event that actually supplied the merged
-  // magnitude value, so we never label the merged magnitude with a type/uncertainty from a
-  // different source (an ML value must not become 'Mw').
+  // Magnitude metadata: fill ONLY from a source reporting the SAME magnitude measurement —
+  // matching value AND type. Matching value alone is unsafe: a different, higher-quality
+  // source that merely happens to report the same numeric value (e.g. an Mw 5.0 vs the
+  // base's untyped 5.0) would otherwise graft its type onto the base's value and mislabel
+  // it. When the base has no type, only a same-value untyped source can enrich it.
+  const resultMagType = (result.magnitude_type ?? null) as string | null;
   const magSource = result.magnitude != null
-    ? ranked.find(src => src.magnitude != null && src.magnitude === result.magnitude)
+    ? ranked.find(
+        src =>
+          src.magnitude != null &&
+          src.magnitude === result.magnitude &&
+          ((src.magnitude_type ?? null) as string | null) === resultMagType
+      )
     : undefined;
   if (magSource) {
     for (const field of MAGNITUDE_META_FIELDS) {

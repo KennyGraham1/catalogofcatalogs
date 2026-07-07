@@ -254,10 +254,10 @@ export default function MergePage() {
       });
       return;
     }
-    if (selectedCatalogues.length < 2) {
+    if (getSelectedCatalogues.length < 2) {
       toast({
         title: "Not enough catalogues selected",
-        description: "Please select at least two catalogues to merge.",
+        description: "Please select at least two available catalogues to merge.",
         variant: "destructive"
       });
       return;
@@ -1453,7 +1453,7 @@ export default function MergePage() {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div>
                         <p className="text-sm text-muted-foreground">Catalogues</p>
-                        <p className="text-xl font-semibold">{selectedCatalogues.length}</p>
+                        <p className="text-xl font-semibold">{getSelectedCatalogues.length}</p>
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Total Events</p>
@@ -1856,10 +1856,10 @@ export default function MergePage() {
         <AlertDialog open={confirmMergeOpen} onOpenChange={setConfirmMergeOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Merge {selectedCatalogues.length} catalogues?</AlertDialogTitle>
+              <AlertDialogTitle>Merge {getSelectedCatalogues.length} catalogues?</AlertDialogTitle>
               <AlertDialogDescription>
                 This creates a new catalogue{mergedName.trim() ? <> named <strong>{mergedName.trim()}</strong></> : ''} from{' '}
-                {selectedCatalogues.length} sources (~{estimatedMergedEvents.toLocaleString()} events after de-duplication).
+                {getSelectedCatalogues.length} sources (~{estimatedMergedEvents.toLocaleString()} events after de-duplication).
                 {exportOnly
                   ? ' Export-only mode: nothing is written to the database.'
                   : ' The merged catalogue is written to the database and cannot be undone from here.'}

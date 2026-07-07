@@ -282,4 +282,20 @@ describe('unionMergeFields — magnitude metadata atomicity (regression, via mer
     expect(merged.magnitude).toBe(5.2);
     expect(merged.magnitude_type == null || merged.magnitude_type.toLowerCase() !== 'mw').toBe(true);
   });
+
+  it('does not mislabel when another source coincidentally reports the SAME value with a different type', () => {
+    // Base value 5.0 has no type; a higher-quality source reports 5.0 as 'Mw'. Matching on value
+    // alone would graft 'Mw' onto the base's untyped 5.0 — it must not.
+    const untypedBase = ev({
+      id: 'base', time: '2024-01-15T12:00:00.000Z', magnitude: 5.0, magnitude_type: null, longitude: 0, source: 'A',
+    });
+    const mwSameValue = ev({
+      id: 'mw', time: '2024-01-15T10:00:00.000Z', magnitude: 5.0, magnitude_type: 'Mw', longitude: 0.02, source: 'B',
+      // higher quality so it ranks first in unionMergeFields
+      quakeml: { preferredOriginID: 'o', origins: [{ publicID: 'o', evaluationStatus: 'reviewed', quality: { usedStationCount: 40, azimuthalGap: 80, standardError: 0.15 } }] },
+    });
+    const merged = mergeEventGroup([untypedBase, mwSameValue], { ...config, mergeStrategy: 'priority', priority: 'newest' } as any);
+    expect(merged.magnitude).toBe(5.0);
+    expect(merged.magnitude_type == null || merged.magnitude_type.toLowerCase() !== 'mw').toBe(true);
+  });
 });
