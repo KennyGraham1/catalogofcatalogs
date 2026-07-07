@@ -171,6 +171,12 @@ export default function MergePage() {
 
   // Ref to track progress interval for cleanup
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Guards against re-entrant / concurrent merge submissions (double-click, or the QC
+  // panel's Proceed button firing again during/after a merge).
+  const mergeInFlightRef = useRef(false);
+  // Monotonic request id so a slow in-flight preview response can't overwrite state that
+  // belongs to a newer request (config/selection changed while a preview was loading).
+  const previewRequestIdRef = useRef(0);
 
   // Initialize filtered catalogues with real data from context
   useEffect(() => {
@@ -179,13 +185,16 @@ export default function MergePage() {
     }
   }, [realCatalogues, geoSearchActive]);
 
-  // Clear preview data when configuration changes (prevents stale preview)
+  // Clear preview data when configuration changes (prevents stale preview). Bump the
+  // request id so any in-flight preview response is discarded instead of repopulating state.
   useEffect(() => {
+    previewRequestIdRef.current++;
     setPreviewData(null);
   }, [timeThreshold, distanceThreshold, mergeStrategy, priority]);
 
-  // Clear preview data when selected catalogues change
+  // Clear preview data when selected catalogues change (same in-flight invalidation).
   useEffect(() => {
+    previewRequestIdRef.current++;
     setPreviewData(null);
   }, [selectedCatalogues]);
 
@@ -254,6 +263,8 @@ export default function MergePage() {
       return;
     }
 
+    // Tag this request so a stale (slower) response can't clobber newer state.
+    const requestId = ++previewRequestIdRef.current;
     setIsLoadingPreview(true);
 
     try {
@@ -301,6 +312,12 @@ export default function MergePage() {
       }
 
       const result = await response.json();
+
+      // Drop the response if a newer preview request has since started (or a merge began),
+      // so we never repopulate previewData with results for stale config/selection.
+      if (requestId !== previewRequestIdRef.current) {
+        return;
+      }
       setPreviewData(result);
 
       toast({
@@ -308,6 +325,9 @@ export default function MergePage() {
         description: `Found ${result.statistics.duplicateGroupsCount} duplicate groups`,
       });
     } catch (error) {
+      if (requestId !== previewRequestIdRef.current) {
+        return; // superseded — suppress stale error too
+      }
       console.error('Preview generation error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       toast({
@@ -316,7 +336,10 @@ export default function MergePage() {
         variant: "destructive"
       });
     } finally {
-      setIsLoadingPreview(false);
+      // Only clear the loading flag if this is still the latest request.
+      if (requestId === previewRequestIdRef.current) {
+        setIsLoadingPreview(false);
+      }
     }
   };
 
@@ -329,10 +352,16 @@ export default function MergePage() {
       });
       return;
     }
-    if (selectedCatalogues.length < 2) {
+    // Block re-entry while a merge is running or already finished (the QC panel's Proceed
+    // button and the footer button both route here). Prevents duplicate/concurrent writes.
+    if (mergeStatus === 'merging' || mergeStatus === 'complete' || mergeInFlightRef.current) {
+      return;
+    }
+    // Guard against selection drifting out of sync with the catalogues actually available.
+    if (getSelectedCatalogues.length < 2) {
       toast({
         title: "Not enough catalogues selected",
-        description: "Please select at least two catalogues to merge.",
+        description: "Please select at least two available catalogues to merge.",
         variant: "destructive"
       });
       return;
@@ -353,8 +382,18 @@ export default function MergePage() {
   };
 
   const executeMerge = async () => {
+    // Hard guard against concurrent execution regardless of React state batching.
+    if (mergeInFlightRef.current) {
+      return;
+    }
+    mergeInFlightRef.current = true;
+
     setMergeStatus('merging');
     setMergeProgress(0);
+    // Clear the QC preview so its "Proceed with Merge" button cannot re-trigger a merge
+    // while this one runs or after it completes.
+    previewRequestIdRef.current++;
+    setPreviewData(null);
 
     // Reset all steps to pending
     setMergeSteps(steps => steps.map(s => ({ ...s, status: 'pending' as const })));
@@ -479,12 +518,13 @@ export default function MergePage() {
         invalidateCache();
       }
 
+      const mergedCount = getSelectedCatalogues.length;
       setMergeStatus('complete');
       toast({
         title: exportOnly ? "Merge Complete (Export Only)" : "Merge Complete",
         description: exportOnly
-          ? `Successfully merged ${selectedCatalogues.length} catalogues. Ready for export.`
-          : `Successfully merged ${selectedCatalogues.length} catalogues into "${mergedName}"`,
+          ? `Successfully merged ${mergedCount} catalogues. Ready for export.`
+          : `Successfully merged ${mergedCount} catalogues into "${mergedName}"`,
       });
     } catch (error) {
       // Clear progress interval using ref on error
@@ -505,6 +545,10 @@ export default function MergePage() {
         description: errorMessage,
         variant: "destructive"
       });
+    } finally {
+      // Release the re-entrancy guard so a fresh merge can be started (via Start New Merge,
+      // or a retry after an error).
+      mergeInFlightRef.current = false;
     }
   };
 
@@ -801,19 +845,36 @@ export default function MergePage() {
     return catalogue.event_count ?? catalogue.events ?? 0;
   };
 
+  // Parse each catalogue's source_catalogues JSON at most once per unique string. Sorting
+  // and filtering call getSourceType/getSourceNamesForSearch many times per catalogue per
+  // render; without this cache the same JSON was re-parsed O(n log n)+ times.
+  const sourceCataloguesCacheRef = useRef<Map<string, any[]>>(new Map());
+  const parseSourceCatalogues = useCallback((raw: string | null | undefined): any[] => {
+    const key = raw || '[]';
+    const cache = sourceCataloguesCacheRef.current;
+    const cached = cache.get(key);
+    if (cached) return cached;
+    let parsed: any[] = [];
+    try {
+      const value = JSON.parse(key);
+      parsed = Array.isArray(value) ? value : [];
+    } catch {
+      parsed = [];
+    }
+    cache.set(key, parsed);
+    return parsed;
+  }, []);
+
   const getSourceNamesForSearch = (catalogue: CatalogueItem): string[] => {
     const sources: string[] = [];
     if (catalogue.source) sources.push(catalogue.source);
 
-    try {
-      const sourceCatalogues = JSON.parse(catalogue.source_catalogues || '[]');
-      if (!Array.isArray(sourceCatalogues)) return sources;
+    const sourceCatalogues = parseSourceCatalogues(catalogue.source_catalogues);
+    {
       sourceCatalogues.forEach((source: any) => {
         const entries = [source.source, source.name, source.id];
         entries.filter(Boolean).forEach((entry) => sources.push(String(entry)));
       });
-    } catch {
-      return sources;
     }
 
     return sources;
@@ -821,7 +882,7 @@ export default function MergePage() {
 
   const getSourceType = (catalogue: CatalogueItem): 'merged' | 'imported' | 'uploaded' => {
     try {
-      const sources = JSON.parse(catalogue.source_catalogues || '[]');
+      const sources = parseSourceCatalogues(catalogue.source_catalogues);
 
       if (Array.isArray(sources) && sources.length > 1) {
         const hasMultipleSourceCatalogues = sources.some((s: any) => s.id && s.name && s.events !== undefined);
@@ -1118,6 +1179,12 @@ export default function MergePage() {
           setActiveTab('select');
           setMergeStatus('idle');
           setSelectedCatalogues([]);
+          // Reset the rest of the merge state so no stale preview/results/progress carry over.
+          previewRequestIdRef.current++;
+          setPreviewData(null);
+          setMergedEvents([]);
+          setMergeProgress(0);
+          setMergeSteps(steps => steps.map(s => ({ ...s, status: 'pending' as const })));
         }}>
           Start New Merge
         </Button>
@@ -1188,7 +1255,9 @@ export default function MergePage() {
                 </TabsTrigger>
                 <TabsTrigger
                   value="preview"
-                  disabled={selectedCatalogues.length < 2 || activeTab === 'select'}
+                  // Also require a non-empty name here so tab-header navigation enforces the
+                  // same rule as the footer "Preview Merge" button (handleNextStep).
+                  disabled={selectedCatalogues.length < 2 || activeTab === 'select' || !mergedName.trim()}
                 >
                   Preview & Merge
                 </TabsTrigger>
@@ -1463,6 +1532,8 @@ export default function MergePage() {
                           max={300}
                           step={5}
                           onValueChange={values => setTimeThreshold(values[0])}
+                          aria-label="Time window in seconds"
+                          aria-valuetext={`${timeThreshold} seconds`}
                         />
                         <p className="text-xs text-muted-foreground">
                           Events within {timeThreshold} seconds of each other may be considered the same event. Automatically adjusted by magnitude.
@@ -1483,6 +1554,8 @@ export default function MergePage() {
                           max={100}
                           step={1}
                           onValueChange={values => setDistanceThreshold(values[0])}
+                          aria-label="Distance threshold in kilometres"
+                          aria-valuetext={`${distanceThreshold} kilometres`}
                         />
                         <p className="text-xs text-muted-foreground">
                           Events within {distanceThreshold} km of each other may be considered the same event. Automatically adjusted by magnitude and depth.
@@ -1638,7 +1711,8 @@ export default function MergePage() {
               </TabsContent>
 
               <TabsContent value="preview" className="pt-6">
-                {!previewData ? (
+                {(mergeStatus === 'idle' || mergeStatus === 'error') && (
+                !previewData ? (
                   <div className="space-y-4">
                     <div className="bg-muted/30 p-4 rounded-md">
                       <h3 className="font-medium mb-3">Merge Summary</h3>
@@ -1654,7 +1728,7 @@ export default function MergePage() {
                         </div>
                         <div>
                           <p className="text-sm text-muted-foreground">Selected Catalogues</p>
-                          <p className="font-medium">{selectedCatalogues.length}</p>
+                          <p className="font-medium">{getSelectedCatalogues.length}</p>
                         </div>
                         <div>
                           <p className="text-sm text-muted-foreground">Merge Strategy</p>
@@ -1713,15 +1787,15 @@ export default function MergePage() {
                     onProceedWithMerge={handleStartMerge}
                     onCancel={() => setPreviewData(null)}
                   />
-                )}
+                ))}
 
-                {/* Progress Indicator */}
-                {mergeStatus === 'merging' && (
+                {/* Progress Indicator — also kept mounted on error so the failed step stays visible */}
+                {(mergeStatus === 'merging' || mergeStatus === 'error') && (
                   <MergeProgressIndicator
                     steps={mergeSteps}
                     currentStep={mergeSteps.findIndex(s => s.status === 'in-progress')}
                     progress={mergeProgress}
-                    estimatedTimeRemaining={mergeProgress < 100 ? ((100 - mergeProgress) / 5) * 0.3 : 0}
+                    estimatedTimeRemaining={mergeStatus === 'merging' && mergeProgress < 100 ? ((100 - mergeProgress) / 5) * 0.3 : 0}
                   />
                 )}
 

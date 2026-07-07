@@ -519,10 +519,12 @@ async function executeMergeOperation(
       originalEventCount: allEvents.length
     };
   } catch (error) {
-    // Only update status if not in export-only mode
-    if (!exportOnly) {
-      await dbQueries.updateCatalogueStatus('error', catalogueId);
-    }
+    // In the transactional (non-export) path this runs INSIDE the open transaction, and the
+    // catalogue row was inserted in that same uncommitted transaction. A non-session
+    // updateCatalogueStatus here would match zero rows (a silent no-op) and could itself
+    // throw and mask the original error, and the subsequent re-throw rolls the whole
+    // transaction back anyway — so a failed merge correctly leaves no partial catalogue.
+    // Just propagate the original error.
     throw error;
   }
 }
@@ -900,23 +902,38 @@ function getNearbyCells(lat: number, lon: number, cellSize: number, radiusCells:
   const centerLatCell = Math.floor(lat / cellSize);
   const centerLonCell = Math.floor(normalizedLon / cellSize);
 
+  // Storage keys are getGridKey(lon) = floor(normalizeLongitude(lon) / cellSize) for
+  // normLon in [-180, 180), so valid longitude-cell indices live in [minLonCell, maxLonCell].
+  const minLonCell = Math.floor(-180 / cellSize);
+  const maxLonCell = Math.floor((180 - 1e-9) / cellSize);
+  const lonCellCount = maxLonCell - minLonCell + 1; // # of storage lon cells over the full circle
+
+  // Collect the longitude-cell indices, wrapping across the ±180 antimeridian in
+  // storage-cell-index space (not by an integer 360/cellSize step, which is wrong
+  // whenever cellSize does not divide 360° evenly).
+  const lonKeys = new Set<number>();
+  for (let lonOffset = -radiusCells; lonOffset <= radiusCells; lonOffset++) {
+    let lonCell = centerLonCell + lonOffset;
+    while (lonCell > maxLonCell) lonCell -= lonCellCount;
+    while (lonCell < minLonCell) lonCell += lonCellCount;
+    lonKeys.add(lonCell);
+  }
+
+  // The discrete cell-index wrap above can skip the narrow "remainder" cell that
+  // straddles ±180 (its width is 360° mod cellSize, often << cellSize). When the
+  // neighbourhood reaches the seam, over-include both seam-edge cells; the exact
+  // distance re-check in eventsMatchAdaptive discards any false candidates. This is
+  // the fix for trans-antimeridian NZ duplicates (Kermadec/Chatham near ±180).
+  if (centerLonCell - radiusCells <= minLonCell || centerLonCell + radiusCells >= maxLonCell) {
+    lonKeys.add(minLonCell);
+    lonKeys.add(maxLonCell);
+  }
+
   const cells: string[] = [];
-
+  const lonKeyList = Array.from(lonKeys);
   for (let latOffset = -radiusCells; latOffset <= radiusCells; latOffset++) {
-    for (let lonOffset = -radiusCells; lonOffset <= radiusCells; lonOffset++) {
-      const latCell = centerLatCell + latOffset;
-      let lonCell = centerLonCell + lonOffset;
-
-      // Handle date line wrapping. Use Math.round so that the number of cells
-      // subtracted/added represents exactly 360° regardless of floating-point
-      // rounding in cellSize (Math.floor can be off by 1 for non-integer ratios).
-      const lonDegrees = lonCell * cellSize;
-      if (lonDegrees > 180) {
-        lonCell -= Math.round(360 / cellSize);
-      } else if (lonDegrees < -180) {
-        lonCell += Math.round(360 / cellSize);
-      }
-
+    const latCell = centerLatCell + latOffset;
+    for (const lonCell of lonKeyList) {
       cells.push(`${latCell},${lonCell}`);
     }
   }
@@ -936,7 +953,17 @@ function getNearbyCells(lat: number, lon: number, cellSize: number, radiusCells:
  * @param magnitude - Event magnitude
  * @returns Multiplier to apply to config distance threshold
  */
+// Upper bounds of the adaptive multipliers, used to size the spatial candidate
+// neighbourhood so it always covers the widest threshold eventsMatchAdaptive can accept.
+const MAX_DISTANCE_MULTIPLIER = 4.0;
+const MAX_DEPTH_MULTIPLIER = 1.5;
+
 function getDistanceMultiplier(magnitude: number): number {
+  // Guard non-finite magnitude (null coerces to 0, undefined to NaN): fall back to the
+  // base threshold rather than the max else-branch, which would over-widen matching.
+  if (!Number.isFinite(magnitude)) {
+    return 1.0;
+  }
   if (magnitude < 4.0) {
     return 1.0; // Use config value as-is for small events
   } else if (magnitude < 5.5) {
@@ -960,7 +987,7 @@ function getDistanceMultiplier(magnitude: number): number {
  * @returns Multiplier to apply to distance threshold
  */
 function getDepthMultiplier(depth: number | null | undefined): number {
-  if (depth == null) {
+  if (depth == null || !Number.isFinite(depth)) {
     return 1.0; // No adjustment if depth unknown
   }
   if (depth > 300) {
@@ -984,6 +1011,9 @@ function getDepthMultiplier(depth: number | null | undefined): number {
  * @returns Multiplier to apply to config time threshold
  */
 function getTimeMultiplier(magnitude: number): number {
+  if (!Number.isFinite(magnitude)) {
+    return 1.0; // Base threshold for unknown magnitude (avoid the max else-branch)
+  }
   if (magnitude < 4.0) {
     return 1.0; // Use config value as-is for small events
   } else if (magnitude < 5.5) {
@@ -1015,18 +1045,22 @@ function eventsMatchAdaptive(
   configTimeThreshold: number,
   configDistanceThreshold: number
 ): boolean {
-  // Use average magnitude for threshold calculation
-  const avgMagnitude = (event1.magnitude + event2.magnitude) / 2;
+  // Use average magnitude for threshold calculation. Only average over finite
+  // magnitudes: at runtime `magnitude` can be null (coerces to 0) or undefined
+  // (coerces to NaN), either of which would corrupt the adaptive widening — a null
+  // paired with a real M7 would deflate the average to 3.5 and defeat the widening,
+  // while an undefined would poison it to NaN. Falling back to the known magnitude
+  // (or 0 when neither is known) keeps the threshold conservative and finite.
+  const finiteMags = [event1.magnitude, event2.magnitude].filter(m => Number.isFinite(m));
+  const avgMagnitude = finiteMags.length > 0
+    ? finiteMags.reduce((sum, m) => sum + m, 0) / finiteMags.length
+    : 0;
 
-  // Use maximum depth for conservative threshold (if both have depth)
-  let maxDepth: number | null = null;
-  if (event1.depth != null && event2.depth != null) {
-    maxDepth = Math.max(event1.depth, event2.depth);
-  } else if (event1.depth != null) {
-    maxDepth = event1.depth;
-  } else if (event2.depth != null) {
-    maxDepth = event2.depth;
-  }
+  // Use maximum depth for conservative threshold (if both have finite depth)
+  const finiteDepths = [event1.depth, event2.depth].filter(
+    (d): d is number => d != null && Number.isFinite(d)
+  );
+  const maxDepth: number | null = finiteDepths.length > 0 ? Math.max(...finiteDepths) : null;
 
   // Calculate adaptive thresholds using config values as baselines
   // Apply magnitude and depth multipliers
@@ -1119,37 +1153,56 @@ function regroupFailedEvents(events: EventData[], config: MergeConfig): EventDat
 }
 
 /**
- * Core merge algorithm - matches events across catalogues
- *
- * Performance Optimization: Uses spatial indexing to reduce complexity from O(n²) to O(n log n)
- * for large datasets. The spatial grid limits the search space to nearby events only.
- *
- * IMPROVEMENTS:
- * - Issue #10: Pre-compute timestamps for efficient sorting
- * - Issue #1, #2: Use adaptive thresholds for matching
- * - Issue #7: Fix continue→break bug in time threshold check
+ * A group of events that will be merged into a single output event.
  */
-function performMerge(
-  events: EventData[],
-  config: MergeConfig
-): MergedEventData[] {
-  const mergedEvents: MergedEventData[] = [];
+interface MatchGroup {
+  events: EventData[];
+  // True when this group is the product of splitting a parent group that failed
+  // validateEventGroup (via regroupFailedEvents). Surfaced by the preview so the QC
+  // panel can flag salvaged/separated clusters.
+  regrouped: boolean;
+}
+
+/**
+ * Core matching + grouping shared by BOTH the persist path (performMerge) and the
+ * preview path (performMergeWithGroups). Extracting it guarantees the QC preview and
+ * the saved catalogue group events identically — previously the two were copy-pasted
+ * and had silently diverged (only the persist path split validation-failing groups).
+ *
+ * Algorithm: pre-compute timestamps, sort by time, build a spatial index, then for each
+ * unprocessed event gather nearby candidates, apply adaptive time/distance matching, and
+ * route any group that fails validateEventGroup through regroupFailedEvents (splitting it
+ * into valid sub-groups + singletons).
+ *
+ * Performance: spatial indexing keeps this ~O(n log n) instead of O(n²).
+ */
+function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGroup[] {
+  const groups: MatchGroup[] = [];
   const processedIndices = new Set<number>();
 
-  // IMPROVEMENT (Issue #10): Pre-compute timestamps for efficient sorting
-  // Avoids repeated date parsing during sort (O(n log n) operations)
+  // Pre-compute timestamps once to avoid repeated date parsing during sort.
   const eventsWithTimestamps = events.map(e => ({
     ...e,
-    _timestamp: new Date(e.time).getTime()
+    _timestamp: new Date(e.time).getTime(),
   }));
-
-  // Sort events by pre-computed timestamp
   const sortedEvents = eventsWithTimestamps.sort((a, b) => a._timestamp - b._timestamp);
 
-  // Performance Optimization: Create spatial index for fast geographic lookups
-  // This reduces the number of distance calculations from O(n²) to O(n log n)
   const spatialIndex = createSpatialIndex(sortedEvents, config.distanceThreshold);
-  console.log(`[Merge] Created spatial index with ${spatialIndex.grid.size} grid cells (cell size: ${spatialIndex.cellSize.toFixed(4)}°)`);
+
+  // Size the candidate neighbourhood to cover the widest effective distance threshold
+  // ANY pair can be accepted at — the GLOBAL max multipliers, not just the anchor's.
+  // A small/shallow anchor processed first would otherwise miss a large/deep duplicate
+  // that eventsMatchAdaptive (which uses the pair's avg magnitude / max depth) accepts.
+  // Also widen the longitude reach by 1/cos(lat): the grid cell is keyed to the tighter
+  // latitude axis, so one cell spans fewer km E-W than N-S. Computed once for the index.
+  const avgLatDeg = sortedEvents.length
+    ? sortedEvents.reduce((sum, e) => sum + Math.abs(e.latitude), 0) / sortedEvents.length
+    : 0;
+  const lonCoverageFactor = 1 / Math.max(Math.cos((avgLatDeg * Math.PI) / 180), 0.1);
+  const distCells = Math.max(
+    1,
+    Math.ceil(MAX_DISTANCE_MULTIPLIER * MAX_DEPTH_MULTIPLIER * lonCoverageFactor)
+  );
 
   for (let i = 0; i < sortedEvents.length; i++) {
     if (processedIndices.has(i)) continue;
@@ -1158,13 +1211,6 @@ function performMerge(
     const matchingEvents: EventData[] = [currentEvent];
     processedIndices.add(i);
 
-    // IMPROVEMENT (Issue #1): Widen the neighbourhood to cover the adaptive distance
-    // threshold.  The cell size was built for the base config threshold; large/deep events
-    // can have effective thresholds up to 4.0 × 1.5 = 6× larger, so we need more cells.
-    const distCells = Math.ceil(
-      getDistanceMultiplier(currentEvent.magnitude) *
-      getDepthMultiplier(currentEvent.depth ?? null)
-    );
     const nearbyCells = getNearbyCells(
       currentEvent.latitude,
       currentEvent.longitude,
@@ -1175,16 +1221,14 @@ function performMerge(
     const candidateIndices = new Set<number>();
     for (const cellKey of nearbyCells) {
       const cellIndices = spatialIndex.grid.get(cellKey) || [];
-      cellIndices.forEach(idx => {
+      for (const idx of cellIndices) {
         if (idx > i && !processedIndices.has(idx)) {
           candidateIndices.add(idx);
         }
-      });
+      }
     }
 
-    // Find all matching events within the candidate set
-    // Sort candidates by timestamp for efficient early termination
-    // (spatial grid returns unsorted indices)
+    // Sort candidates by timestamp so the early-termination break below is safe.
     const candidateArray = Array.from(candidateIndices).sort(
       (a, b) => sortedEvents[a]._timestamp - sortedEvents[b]._timestamp
     );
@@ -1193,43 +1237,51 @@ function performMerge(
       const j = candidateArray[k];
       const candidateEvent = sortedEvents[j];
 
-      // IMPROVEMENT (Issue #2): Early termination uses max(currentMagnitude,
-      // candidateMagnitude) so we never break before eventsMatchAdaptive (which uses
-      // the average) would accept a candidate with a higher magnitude than currentEvent.
+      // Early termination uses max magnitude (coerced finite) so we never break before
+      // eventsMatchAdaptive (which uses the average) would accept a higher-magnitude candidate.
       const timeDiff = Math.abs(currentEvent._timestamp - candidateEvent._timestamp) / 1000;
-      const maxMagnitude = Math.max(currentEvent.magnitude, candidateEvent.magnitude);
+      const maxMagnitude = Math.max(
+        Number.isFinite(currentEvent.magnitude) ? currentEvent.magnitude : 0,
+        Number.isFinite(candidateEvent.magnitude) ? candidateEvent.magnitude : 0
+      );
       if (timeDiff > config.timeThreshold * getTimeMultiplier(maxMagnitude)) {
         break; // Safe: candidates are time-sorted, so all remaining also exceed threshold
       }
 
-      // Use adaptive thresholds based on magnitude and depth
-      if (eventsMatchAdaptive(
-        currentEvent,
-        candidateEvent,
-        config.timeThreshold,
-        config.distanceThreshold
-      )) {
+      if (
+        eventsMatchAdaptive(currentEvent, candidateEvent, config.timeThreshold, config.distanceThreshold)
+      ) {
         matchingEvents.push(candidateEvent);
         processedIndices.add(j);
       }
     }
 
-    // IMPROVEMENT (Issue #9): Validate event group before merging.
-    // When validation fails, try to salvage valid sub-groups instead of making all singletons.
+    // Validate before merging; on failure salvage valid sub-groups instead of one big
+    // (or all-singleton) group. Done here so preview and persist behave identically.
     if (matchingEvents.length > 1 && !validateEventGroup(matchingEvents)) {
-      console.warn(`[Merge] Event group with ${matchingEvents.length} events failed validation — attempting sub-grouping`);
       for (const subGroup of regroupFailedEvents(matchingEvents, config)) {
-        mergedEvents.push(mergeEventGroup(subGroup, config));
+        groups.push({ events: subGroup, regrouped: true });
       }
-      continue;
+    } else {
+      groups.push({ events: matchingEvents, regrouped: false });
     }
-
-    // Merge the matching events based on strategy
-    const mergedEvent = mergeEventGroup(matchingEvents, config);
-    mergedEvents.push(mergedEvent);
   }
 
-  console.log(`[Merge] Processed ${sortedEvents.length} events into ${mergedEvents.length} merged events`);
+  return groups;
+}
+
+/**
+ * Core merge algorithm - matches events across catalogues and merges each group.
+ * Delegates grouping to groupMatchingEvents (shared with the preview path).
+ */
+function performMerge(
+  events: EventData[],
+  config: MergeConfig
+): MergedEventData[] {
+  const mergedEvents = groupMatchingEvents(events, config).map(g =>
+    mergeEventGroup(g.events, config)
+  );
+  console.log(`[Merge] Processed ${events.length} events into ${mergedEvents.length} merged events`);
   return mergedEvents;
 }
 
@@ -1476,21 +1528,12 @@ const UNION_SCALAR_FIELDS: ReadonlyArray<keyof MergedEvent> = [
   'event_type',
   'event_type_certainty',
   'time_uncertainty',
-  'latitude_uncertainty',
-  'longitude_uncertainty',
   'depth_uncertainty',
-  'horizontal_uncertainty',
   'depth_type',
   'earth_model_id',
   'method_id',
   'agency_id',
   'author',
-  'magnitude_type',
-  'magnitude_uncertainty',
-  'magnitude_station_count',
-  'magnitude_method_id',
-  'magnitude_evaluation_mode',
-  'magnitude_evaluation_status',
   'azimuthal_gap',
   'used_phase_count',
   'used_station_count',
@@ -1502,6 +1545,26 @@ const UNION_SCALAR_FIELDS: ReadonlyArray<keyof MergedEvent> = [
   'depth_phase_count',
   'evaluation_mode',
   'evaluation_status',
+] as const;
+
+// Magnitude-metadata fields that must travel atomically with the magnitude VALUE — never
+// grafted independently from a different (e.g. higher-quality) source, which would mislabel
+// the merged magnitude (an ML value stamped 'Mw', a mismatched uncertainty/station count).
+const MAGNITUDE_META_FIELDS: ReadonlyArray<keyof MergedEvent> = [
+  'magnitude_type',
+  'magnitude_uncertainty',
+  'magnitude_station_count',
+  'magnitude_method_id',
+  'magnitude_evaluation_mode',
+  'magnitude_evaluation_status',
+] as const;
+
+// Location-uncertainty fields that must travel with the LOCATION — not grafted from a
+// source whose coordinates differ from the merged (possibly averaged) location.
+const LOCATION_META_FIELDS: ReadonlyArray<keyof MergedEvent> = [
+  'latitude_uncertainty',
+  'longitude_uncertainty',
+  'horizontal_uncertainty',
 ] as const;
 
 /**
@@ -1575,23 +1638,56 @@ function unionMergeFields(base: MergedEventData, events: EventData[]): MergedEve
     }
   }
 
-  // Focal mechanism: promote from any source with quakeml focalMechanisms when
-  // the base event's quakeml lacks them.
-  if (!result.quakeml?.focalMechanisms?.length) {
-    for (const src of ranked) {
-      if (src.quakeml?.focalMechanisms?.length) {
-        if (!result.quakeml) {
-          (result as any).quakeml = { ...src.quakeml };
-        } else {
-          (result as any).quakeml = {
-            ...result.quakeml,
-            focalMechanisms: src.quakeml.focalMechanisms,
-            preferredFocalMechanismID: src.quakeml.preferredFocalMechanismID,
-          };
-        }
-        break;
+  // Magnitude metadata: fill ONLY from the source event that actually supplied the merged
+  // magnitude value, so we never label the merged magnitude with a type/uncertainty from a
+  // different source (an ML value must not become 'Mw').
+  const magSource = result.magnitude != null
+    ? ranked.find(src => src.magnitude != null && src.magnitude === result.magnitude)
+    : undefined;
+  if (magSource) {
+    for (const field of MAGNITUDE_META_FIELDS) {
+      if (result[field] == null && (magSource as any)[field] != null) {
+        (result as any)[field] = (magSource as any)[field];
       }
     }
+  }
+
+  // Location uncertainties: fill ONLY from the source whose coordinates match the merged
+  // location. For averaged locations no source matches, so these correctly stay unset
+  // rather than being attributed to a point no single source reported.
+  const locSource = ranked.find(
+    src => src.latitude === result.latitude && src.longitude === result.longitude
+  );
+  if (locSource) {
+    for (const field of LOCATION_META_FIELDS) {
+      if (result[field] == null && (locSource as any)[field] != null) {
+        (result as any)[field] = (locSource as any)[field];
+      }
+    }
+  }
+
+  // Focal mechanism: choose the single best mechanism across ALL sources by SOURCE
+  // AUTHORITY (GCMT > regional CMT > ...) then focal-mechanism quality — not the base
+  // event's general quality score. This also replaces an inferior mechanism already on
+  // the base when a higher-authority one exists elsewhere in the group (previously the
+  // promotion was skipped entirely whenever the base carried any mechanism, discarding a
+  // superior GCMT, and even the empty-base case picked by overall event quality).
+  const bestFm = selectBestFocalMechanism(events);
+  if (bestFm) {
+    // Preserve every mechanism across the group (lose none), but order the authority-
+    // selected best first and mark it preferred so downstream consumers use it.
+    const allFms: import('./types/quakeml').FocalMechanism[] = [];
+    for (const src of events) {
+      if (src.quakeml?.focalMechanisms?.length) {
+        allFms.push(...src.quakeml.focalMechanisms);
+      }
+    }
+    const orderedFms = [bestFm, ...allFms.filter(fm => fm !== bestFm)];
+    (result as any).quakeml = {
+      ...(result.quakeml ?? {}),
+      focalMechanisms: orderedFms,
+      preferredFocalMechanismID: bestFm.publicID,
+    };
   }
 
   return result;
@@ -1614,6 +1710,18 @@ function toSourceEventData(e: EventData): EventData {
 }
 
 /**
+ * Build the `sourceEvents` provenance array shared by every merge strategy. Centralised so
+ * the field that must stay consistent across all strategies cannot drift between them.
+ */
+function buildSourceEvents(events: EventData[]): MergedEventData['sourceEvents'] {
+  return events.map(e => ({
+    catalogueId: e.catalogueId ?? e.id ?? 'unknown',
+    source: e.source,
+    originalData: toSourceEventData(e),
+  }));
+}
+
+/**
  * Merge a group of matching events based on the selected strategy.
  * After the strategy selects the base record, a field-level union pass
  * fills in any optional fields that the base event lacks from other sources.
@@ -1625,11 +1733,7 @@ function mergeEventGroup(
   if (events.length === 1) {
     return {
       ...events[0],
-      sourceEvents: [{
-        catalogueId: events[0].catalogueId ?? events[0].id ?? 'unknown',
-        source: events[0].source,
-        originalData: toSourceEventData(events[0])
-      }]
+      sourceEvents: buildSourceEvents([events[0]])
     };
   }
 
@@ -1671,9 +1775,13 @@ function mergeEventGroup(
  * 3. First motion solutions with many polarities
  * 4. Automated solutions
  */
+// NOTE: iteration order matters. More specific / regional patterns must be tested BEFORE
+// the generic 'cmt' catch-all so a regional source like 'GeoNet CMT' is classified as
+// Regional CMT (priority 2), not Global CMT (priority 1) — the substring 'cmt' would
+// otherwise match it first.
 const FOCAL_MECHANISM_HIERARCHY: Array<{ patterns: string[]; priority: number; description: string }> = [
-  { patterns: ['gcmt', 'globalcmt', 'cmt'], priority: 1, description: 'Global CMT' },
   { patterns: ['geonet', 'gns'], priority: 2, description: 'Regional CMT' },
+  { patterns: ['gcmt', 'globalcmt', 'cmt'], priority: 1, description: 'Global CMT' },
   { patterns: ['usgs', 'neic'], priority: 3, description: 'USGS/NEIC' },
   { patterns: ['isc'], priority: 4, description: 'ISC' },
 ];
@@ -1703,11 +1811,9 @@ function getFocalMechanismPriority(source: string | undefined): number {
  */
 function calculateFocalMechanismQuality(fm: import('./types/quakeml').FocalMechanism): number {
   let score = 0;
-  let maxScore = 0;
 
   // Station polarity count (0-25 points)
   if (fm.stationPolarityCount != null) {
-    maxScore += 25;
     if (fm.stationPolarityCount >= 50) {
       score += 25;
     } else if (fm.stationPolarityCount >= 30) {
@@ -1723,7 +1829,6 @@ function calculateFocalMechanismQuality(fm: import('./types/quakeml').FocalMecha
 
   // Misfit (0-20 points, lower is better)
   if (fm.misfit != null) {
-    maxScore += 20;
     if (fm.misfit <= 0.1) {
       score += 20;
     } else if (fm.misfit <= 0.2) {
@@ -1737,7 +1842,6 @@ function calculateFocalMechanismQuality(fm: import('./types/quakeml').FocalMecha
 
   // Moment tensor presence (0-30 points)
   if (fm.momentTensor) {
-    maxScore += 30;
     score += 15; // Base points for having moment tensor
 
     // Variance reduction (0-15 additional points)
@@ -1754,7 +1858,6 @@ function calculateFocalMechanismQuality(fm: import('./types/quakeml').FocalMecha
 
   // Azimuthal gap (0-15 points, lower is better)
   if (fm.azimuthalGap != null) {
-    maxScore += 15;
     if (fm.azimuthalGap <= 90) {
       score += 15;
     } else if (fm.azimuthalGap <= 120) {
@@ -1768,7 +1871,6 @@ function calculateFocalMechanismQuality(fm: import('./types/quakeml').FocalMecha
 
   // Evaluation status (0-10 points)
   if (fm.evaluationStatus) {
-    maxScore += 10;
     if (fm.evaluationStatus === 'final' || fm.evaluationStatus === 'reviewed') {
       score += 10;
     } else if (fm.evaluationStatus === 'confirmed') {
@@ -1778,8 +1880,11 @@ function calculateFocalMechanismQuality(fm: import('./types/quakeml').FocalMecha
     }
   }
 
-  // Normalize to 0-100
-  return maxScore > 0 ? (score / maxScore) * 100 : 50;
+  // Normalize against the FIXED maximum budget (25 + 20 + 30 + 15 + 10 = 100) rather than
+  // only the metrics that happen to be present. Otherwise a mechanism reporting a single
+  // favourable field and nothing else would score ~100% and outrank an information-rich,
+  // better-constrained solution. `score` is already on a 0–100 scale.
+  return score;
 }
 
 /**
@@ -1806,11 +1911,15 @@ function selectBestFocalMechanism(
   for (const event of events) {
     if (!event.quakeml?.focalMechanisms) continue;
 
-    // Get preferred focal mechanism or first one
+    // Get preferred focal mechanism, falling back to the first one when the preferred
+    // ID is missing OR dangling (does not resolve to any mechanism). Previously a stale
+    // preferredFocalMechanismID caused find() to return undefined and the whole event's
+    // mechanism to be dropped even though a valid mechanism existed.
     const preferredId = event.quakeml.preferredFocalMechanismID;
-    const fm = preferredId
-      ? event.quakeml.focalMechanisms.find(f => f.publicID === preferredId)
-      : event.quakeml.focalMechanisms[0];
+    const fm =
+      (preferredId
+        ? event.quakeml.focalMechanisms.find(f => f.publicID === preferredId)
+        : undefined) ?? event.quakeml.focalMechanisms[0];
 
     if (fm) {
       focalMechanisms.push({
@@ -1913,11 +2022,19 @@ interface MagnitudeConversionResult {
  * @returns Converted Mw value with uncertainty
  */
 function convertMLtoMw(ml: number): MagnitudeConversionResult {
-  const mw = 0.67 * ml + 1.17;
+  // There is no universal ML->Mw relation; for moderate events ML ≈ Mw, so use identity
+  // as the generic approximation. The previous 0.67*ML+1.17 reused the Scordilis Ms->Mw
+  // slope and systematically deflated Mw by up to ~0.8 units across the moderate range
+  // (crossover at ML≈3.55), which is the wrong direction. Above ~6.5 ML saturates and
+  // true Mw exceeds ML, so widen the uncertainty there. Prefer a regional NZ/GeoNet
+  // (e.g. Ristau et al.) calibration where available.
+  const saturating = ml > 6.5;
   return {
-    value: Math.round(mw * 100) / 100,
-    uncertainty: 0.3,
-    method: 'Approximate ML->Mw: Mw = 0.67*ML + 1.17 (generic, not Scordilis 2006)',
+    value: Math.round(ml * 100) / 100,
+    uncertainty: saturating ? 0.5 : 0.3,
+    method: saturating
+      ? 'Approximate ML≈Mw (ML saturates above ~6.5; Mw likely underestimated — prefer a regional relation)'
+      : 'Approximate ML≈Mw (generic; prefer a regional NZ/GeoNet calibration)',
     isExact: false,
   };
 }
@@ -1934,12 +2051,18 @@ function convertMLtoMw(ml: number): MagnitudeConversionResult {
  */
 function convertMbtoMw(mb: number): MagnitudeConversionResult {
   // Scordilis (2006) relationship
-  // Mw = 0.85(±0.04) * mb + 1.03(±0.23) for 3.5 ≤ mb ≤ 6.2
+  // Mw = 0.85(±0.04) * mb + 1.03(±0.23), calibrated for 3.5 ≤ mb ≤ 6.2
   const mw = 0.85 * mb + 1.03;
+  // Above ~6.2 mb saturates and the linear relation underestimates Mw; below 3.5 it is
+  // uncalibrated. Flag out-of-range inputs with a larger uncertainty instead of reporting
+  // a falsely precise value.
+  const outOfRange = mb < 3.5 || mb > 6.2;
   return {
     value: Math.round(mw * 100) / 100,
-    uncertainty: mb >= 6.0 ? 0.5 : 0.3, // Higher uncertainty near saturation
-    method: 'Scordilis (2006): Mw = 0.85*mb + 1.03',
+    uncertainty: outOfRange ? 0.6 : mb >= 6.0 ? 0.5 : 0.3,
+    method: outOfRange
+      ? 'Scordilis (2006): Mw = 0.85*mb + 1.03 (EXTRAPOLATED beyond calibrated 3.5–6.2 range; mb saturates)'
+      : 'Scordilis (2006): Mw = 0.85*mb + 1.03',
     isExact: false,
   };
 }
@@ -2005,7 +2128,7 @@ function getMagnitudeTypeCategory(magType: string | undefined): MagnitudeType | 
 
   if (lower.startsWith('mw')) return 'Mw';
   if (lower.startsWith('ms')) return 'Ms';
-  if (lower === 'mb' || lower.startsWith('mb_') || lower === 'mbb') return 'mb';
+  if (lower.startsWith('mb')) return 'mb'; // mb, mb_lg, mbb, mblg, mB, ...
   if (lower.startsWith('ml')) return 'ML';
   if (lower === 'md' || lower === 'mc') return 'Md';
 
@@ -2198,7 +2321,9 @@ interface RegionalPriority {
 
 const REGIONAL_PRIORITIES: Record<string, RegionalPriority> = {
   NZ: {
-    bounds: { minLat: -48, maxLat: -34, minLon: 165, maxLon: 180 },
+    // minLon > maxLon marks a region that crosses the ±180 antimeridian, so NZ territory
+    // (Chatham Islands ~ -176.5, Kermadec arc) is detected as region NZ, not the global default.
+    bounds: { minLat: -50, maxLat: -34, minLon: 165, maxLon: -175 },
     hierarchy: [
       { patterns: ['geonet', 'gns', 'nz'], priority: 1 },
       { patterns: ['gcmt', 'cmt'], priority: 2 },
@@ -2240,11 +2365,16 @@ function getNetworkPriority(
   if (event) {
     for (const [, regionConfig] of Object.entries(REGIONAL_PRIORITIES)) {
       const { bounds, hierarchy: regionalHierarchy } = regionConfig;
+      // Longitude containment supports antimeridian-crossing regions (minLon > maxLon),
+      // so e.g. the NZ region includes both 165..180 and -180..-175.
+      const inLon =
+        bounds.minLon <= bounds.maxLon
+          ? event.longitude >= bounds.minLon && event.longitude <= bounds.maxLon
+          : event.longitude >= bounds.minLon || event.longitude <= bounds.maxLon;
       if (
         event.latitude >= bounds.minLat &&
         event.latitude <= bounds.maxLat &&
-        event.longitude >= bounds.minLon &&
-        event.longitude <= bounds.maxLon
+        inLon
       ) {
         // Use regional hierarchy
         for (const { patterns, priority } of regionalHierarchy) {
@@ -2313,12 +2443,25 @@ function getMagnitudePriority(magType: string | undefined): number {
   if (!magType) return 999;
   const lowerType = magType.toLowerCase();
 
+  // Fast path: exact match against the explicit variant whitelist.
   for (const group of MAGNITUDE_HIERARCHY) {
     if (group.patterns.includes(lowerType)) {
       return group.priority;
     }
   }
-  return 100; // Unknown type
+
+  // Fall back to prefix-based category classification so valid-but-unlisted labels
+  // (e.g. 'Mw(mB)', 'MLc', 'mbLg', 'Ms20') map to the correct tier instead of collapsing
+  // to 'unknown' (which would rank a real Mw below a coda Md). Keeps this consistent with
+  // getMagnitudeTypeCategory used by the conversion path.
+  switch (getMagnitudeTypeCategory(magType)) {
+    case 'Mw': return 1;
+    case 'Ms': return 2;
+    case 'mb': return 3;
+    case 'ML': return 4;
+    case 'Md': return 5;
+    default: return 100; // Genuinely unknown type
+  }
 }
 
 /**
@@ -2343,16 +2486,39 @@ function selectBestMagnitude(events: EventData[]): { value: number; type: string
   }> = [];
 
   for (const event of events) {
+    // Track the (value|type) pairs already added for this event so a top-level magnitude
+    // that duplicates a QuakeML entry is not double-counted.
+    const seen = new Set<string>();
+
     if (event.quakeml?.magnitudes && event.quakeml.magnitudes.length > 0) {
       for (const mag of event.quakeml.magnitudes) {
         if (mag.mag?.value != null) {
+          const type = mag.type || 'unknown';
+          seen.add(`${mag.mag.value}|${type.toLowerCase()}`);
           candidates.push({
             value: mag.mag.value,
-            type: mag.type || 'unknown',
+            type,
             priority: getMagnitudePriority(mag.type),
             uncertainty: mag.mag.uncertainty ?? 999,
           });
         }
+      }
+    }
+
+    // Always consider the top-level magnitude/magnitude_type too (CSV/simple imports, or
+    // events without a QuakeML magnitudes array). Previously these were ignored whenever
+    // ANY event in the group carried QuakeML magnitudes, which could drop a better Mw for
+    // a worse mb/ML.
+    if (event.magnitude != null && Number.isFinite(event.magnitude)) {
+      const type = event.magnitude_type || 'unknown';
+      const key = `${event.magnitude}|${type.toLowerCase()}`;
+      if (!seen.has(key)) {
+        candidates.push({
+          value: event.magnitude,
+          type,
+          priority: getMagnitudePriority(event.magnitude_type),
+          uncertainty: event.magnitude_uncertainty ?? 999,
+        });
       }
     }
   }
@@ -2615,11 +2781,7 @@ function mergeByAverage(events: EventData[]): MergedEventData {
     magnitude: bestMagnitude.value,
     magnitude_type: bestMagnitude.type !== 'unknown' ? bestMagnitude.type : bestQualityEvent.magnitude_type,
     source: 'merged',
-    sourceEvents: events.map(e => ({
-      catalogueId: e.catalogueId ?? e.id ?? 'unknown',
-      source: e.source,
-      originalData: toSourceEventData(e)
-    }))
+    sourceEvents: buildSourceEvents(events)
   };
 }
 
@@ -2636,11 +2798,7 @@ function mergeByNewest(events: EventData[]): MergedEventData {
 
   return {
     ...newestEvent,
-    sourceEvents: events.map(e => ({
-      catalogueId: e.catalogueId ?? e.id ?? 'unknown',
-      source: e.source,
-      originalData: toSourceEventData(e)
-    }))
+    sourceEvents: buildSourceEvents(events)
   };
 }
 
@@ -2675,11 +2833,7 @@ function mergeByCompleteness(events: EventData[]): MergedEventData {
 
   return {
     ...mostComplete,
-    sourceEvents: events.map(e => ({
-      catalogueId: e.catalogueId ?? e.id ?? 'unknown',
-      source: e.source,
-      originalData: toSourceEventData(e)
-    }))
+    sourceEvents: buildSourceEvents(events)
   };
 }
 
@@ -2812,10 +2966,8 @@ function calculateQualityScore(event: EventData): number {
     // rejected/unknown = 0 points
   }
 
-  // Normalize score to 0-100 if we have quality data
-  // If no quality data available, return 0 (will fall back to other criteria)
+  // If no quality metrics at all were available, fall back to basic completeness scoring.
   if (maxPossibleScore === 0) {
-    // No quality metrics available - use fallback scoring based on basic completeness
     let basicScore = 0;
     if (event.depth != null) basicScore += 10;
     if (event.magnitude != null) basicScore += 10;
@@ -2823,7 +2975,11 @@ function calculateQualityScore(event: EventData): number {
     return basicScore;
   }
 
-  return (score / maxPossibleScore) * 100;
+  // Normalize against the FIXED 100-point budget (25+20+15+15+15+10), NOT just the metrics
+  // that happen to be present. Otherwise an event reporting a single favourable metric and
+  // nothing else scores ~100% and outranks a fully-documented, better-constrained event.
+  // `score` is already on a 0–100 scale; maxPossibleScore is used only for the fallback above.
+  return score;
 }
 
 /**
@@ -2852,11 +3008,7 @@ function mergeByQuality(events: EventData[]): MergedEventData {
 
   return {
     ...bestEvent,
-    sourceEvents: events.map(e => ({
-      catalogueId: e.catalogueId ?? e.id ?? 'unknown',
-      source: e.source,
-      originalData: toSourceEventData(e)
-    }))
+    sourceEvents: buildSourceEvents(events)
   };
 }
 
@@ -2902,11 +3054,7 @@ function mergeByPriority(events: EventData[], priority: string): MergedEventData
 
   return {
     ...selectedEvent,
-    sourceEvents: events.map(e => ({
-      catalogueId: e.catalogueId ?? e.id ?? 'unknown',
-      source: e.source,
-      originalData: toSourceEventData(e)
-    }))
+    sourceEvents: buildSourceEvents(events)
   };
 }
 
@@ -3008,86 +3156,26 @@ function performMergeWithGroups(
   isSuspicious: boolean;
   validationWarnings: string[];
 }> {
-  const groups: Array<{
-    id: string;
-    events: EventData[];
-    selectedEventIndex: number;
-    isSuspicious: boolean;
-    validationWarnings: string[];
-  }> = [];
-  const processedIndices = new Set<number>();
+  // Use the SAME grouping the persist path uses so the preview stats, groups, and
+  // selected representative match exactly what mergeCatalogues will write. Each match
+  // group corresponds 1:1 to a merged output event.
+  const matchGroups = groupMatchingEvents(events, config);
 
-  // Pre-compute timestamps for efficient sorting
-  const eventsWithTimestamps = events.map(e => ({
-    ...e,
-    _timestamp: new Date(e.time).getTime()
-  }));
-
-  // Sort events by pre-computed timestamp
-  const sortedEvents = eventsWithTimestamps.sort((a, b) => a._timestamp - b._timestamp);
-
-  // Create spatial index
-  const spatialIndex = createSpatialIndex(sortedEvents, config.distanceThreshold);
-
-  for (let i = 0; i < sortedEvents.length; i++) {
-    if (processedIndices.has(i)) continue;
-
-    const currentEvent = sortedEvents[i];
-    const matchingEvents: EventData[] = [currentEvent];
-    processedIndices.add(i);
-
-    // IMPROVEMENT (Issue #1): Adaptive neighbourhood radius
-    const distCells = Math.ceil(
-      getDistanceMultiplier(currentEvent.magnitude) *
-      getDepthMultiplier(currentEvent.depth ?? null)
-    );
-    const nearbyCells = getNearbyCells(
-      currentEvent.latitude,
-      currentEvent.longitude,
-      spatialIndex.cellSize,
-      distCells
-    );
-
-    const candidateIndices = new Set<number>();
-    for (const cellKey of nearbyCells) {
-      const cellIndices = spatialIndex.grid.get(cellKey) || [];
-      cellIndices.forEach(idx => {
-        if (idx > i && !processedIndices.has(idx)) {
-          candidateIndices.add(idx);
-        }
-      });
-    }
-
-    // Sort candidates by timestamp for efficient early termination
-    const candidateArray = Array.from(candidateIndices).sort(
-      (a, b) => sortedEvents[a]._timestamp - sortedEvents[b]._timestamp
-    );
-
-    for (let k = 0; k < candidateArray.length; k++) {
-      const j = candidateArray[k];
-      const candidateEvent = sortedEvents[j];
-
-      // IMPROVEMENT (Issue #2): Use max magnitude for early termination
-      const timeDiff = Math.abs(currentEvent._timestamp - candidateEvent._timestamp) / 1000;
-      const maxMagnitude = Math.max(currentEvent.magnitude, candidateEvent.magnitude);
-      if (timeDiff > config.timeThreshold * getTimeMultiplier(maxMagnitude)) {
-        break;
-      }
-
-      if (eventsMatchAdaptive(
-        currentEvent,
-        candidateEvent,
-        config.timeThreshold,
-        config.distanceThreshold
-      )) {
-        matchingEvents.push(candidateEvent);
-        processedIndices.add(j);
-      }
-    }
-
-    // Validate group and collect warnings
-    const isSuspicious = matchingEvents.length > 1 && !validateEventGroup(matchingEvents);
+  return matchGroups.map((matchGroup, i) => {
+    const matchingEvents = matchGroup.events;
     const validationWarnings: string[] = [];
+
+    // A regrouped group was salvaged from a larger cluster that failed consistency
+    // validation (the same split the persist path performs). Flag it for the reviewer.
+    if (matchGroup.regrouped) {
+      validationWarnings.push(
+        'Salvaged from a larger matched cluster that failed consistency validation and was split.'
+      );
+    }
+
+    const isSuspicious =
+      matchGroup.regrouped ||
+      (matchingEvents.length > 1 && !validateEventGroup(matchingEvents));
 
     if (matchingEvents.length > 1) {
       // Use the same graduated thresholds as validateEventGroup so the preview
@@ -3135,16 +3223,14 @@ function performMergeWithGroups(
       );
     }
 
-    groups.push({
+    return {
       id: `group-${i}`,
       events: matchingEvents,
       selectedEventIndex: selectedEventIndex >= 0 ? selectedEventIndex : 0,
       isSuspicious,
       validationWarnings,
-    });
-  }
-
-  return groups;
+    };
+  });
 }
 
 export async function getMergedCatalogues() {
@@ -3174,6 +3260,9 @@ export {
   UNION_SCALAR_FIELDS,
   UNION_BLOB_FIELDS,
   regroupFailedEvents,
+  groupMatchingEvents,
+  performMergeWithGroups,
+  mergeEventGroup,
   normalizeLongitude,
   getDistanceMultiplier,
   getDepthMultiplier,

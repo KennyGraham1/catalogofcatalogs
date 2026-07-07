@@ -92,11 +92,40 @@ export const sourceCatalogueSchema = z.object({
 
 export type SourceCatalogue = z.infer<typeof sourceCatalogueSchema>;
 
+// Merge metadata schema — bounds the free-form metadata that is persisted with the merged
+// catalogue so an oversized/arbitrary payload cannot be JSON.stringify-ed straight into the DB.
+export const mergeMetadataSchema = z
+  .object({
+    merge_description: z.string().max(5000).optional(),
+    merge_use_case: z.string().max(5000).optional(),
+    merge_methodology: z.string().max(5000).optional(),
+    merge_quality_assessment: z.string().max(5000).optional(),
+    description: z.string().max(5000).optional(),
+    data_source: z.string().max(1000).optional(),
+    provider: z.string().max(255).optional(),
+    geographic_region: z.string().max(255).optional(),
+    data_quality: z.any().optional(),
+    quality_notes: z.string().max(5000).optional(),
+    keywords: z.array(z.string().max(200)).max(100).optional(),
+    reference_links: z.array(z.string().max(2000)).max(100).optional(),
+    notes: z.string().max(10000).optional(),
+  })
+  .strip() // drop unknown keys instead of persisting them
+  .refine((m) => JSON.stringify(m ?? {}).length <= 50_000, {
+    message: 'metadata exceeds the maximum allowed size (50KB)',
+  });
+
+export type MergeMetadata = z.infer<typeof mergeMetadataSchema>;
+
 // Merge request schema
 export const mergeRequestSchema = z.object({
   name: z.string().min(1).max(255),
-  sourceCatalogues: z.array(sourceCatalogueSchema).min(2),
+  // Cap the number of source catalogues to bound the sequential DB reads (and, for the
+  // persist path, the time the write transaction is held open) that a single request can trigger.
+  sourceCatalogues: z.array(sourceCatalogueSchema).min(2).max(50),
   config: mergeConfigSchema,
+  metadata: mergeMetadataSchema.optional(),
+  exportOnly: z.boolean().optional(),
 });
 
 export type MergeRequest = z.infer<typeof mergeRequestSchema>;

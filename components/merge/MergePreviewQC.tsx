@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -65,6 +65,14 @@ export function MergePreviewQC({ previewData, onProceedWithMerge, onCancel }: Me
   const [filterView, setFilterView] = useState<'all' | 'duplicates' | 'suspicious'>('duplicates');
 
   const { duplicateGroups, statistics, catalogueColors } = previewData;
+
+  // Precompute id -> original index once so per-row lookups are O(1) instead of
+  // duplicateGroups.indexOf(group) (O(n)) inside the render map, which was O(n²) overall.
+  const groupIndexById = useMemo(() => {
+    const map = new Map<string, number>();
+    duplicateGroups.forEach((g, i) => map.set(g.id, i));
+    return map;
+  }, [duplicateGroups]);
 
   // Filter groups based on view
   const filteredGroups = duplicateGroups.filter(group => {
@@ -172,7 +180,7 @@ export function MergePreviewQC({ previewData, onProceedWithMerge, onCancel }: Me
               <DuplicateGroupCard
                 key={group.id}
                 group={group}
-                groupIndex={duplicateGroups.indexOf(group)}
+                groupIndex={groupIndexById.get(group.id) ?? idx}
                 catalogueColors={catalogueColors}
                 onViewOnMap={(g) => setSelectedGroup(g)}
               />
@@ -186,7 +194,7 @@ export function MergePreviewQC({ previewData, onProceedWithMerge, onCancel }: Me
         <Card className="border-2 border-blue-500">
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>Map View - Group #{duplicateGroups.indexOf(selectedGroup) + 1}</CardTitle>
+              <CardTitle>Map View - Group #{(groupIndexById.get(selectedGroup.id) ?? 0) + 1}</CardTitle>
               <Button variant="outline" size="sm" onClick={() => setSelectedGroup(null)}>
                 Close Map
               </Button>

@@ -35,6 +35,9 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const layerControlRef = useRef<L.Control.Layers | null>(null);
+  const baseLayersRef = useRef<Record<string, L.TileLayer>>({});
+  const activeBaseLayerRef = useRef<L.TileLayer | null>(null);
+  const overlayLayerRef = useRef<L.LayerGroup | null>(null);
   const [isDark, setIsDark] = useState(false);
 
   // Guard against empty events array
@@ -58,59 +61,81 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
     return () => observer.disconnect();
   }, []);
 
+  // Initialize the map ONCE (mount) and destroy it only on unmount. Previously this whole
+  // effect depended on [group, catalogueColors, isDark, hasEvents] and its cleanup called
+  // map.remove() on every change, so a dark-mode toggle or prop change tore down and rebuilt
+  // the entire Leaflet map — losing zoom/pan/layer selection and flashing tiles.
   useEffect(() => {
-    if (!mapContainerRef.current) return;
+    if (!mapContainerRef.current || mapRef.current || !hasEvents) return;
 
-    // Guard against empty events array - can't initialize map without a center point
-    if (!hasEvents) {
-      console.warn('[DuplicateGroupMap] Cannot initialize map: no events in group');
-      return;
-    }
+    const map = L.map(mapContainerRef.current, {
+      center: [group.events[0].latitude, group.events[0].longitude],
+      zoom: 8,
+      zoomControl: true,
+    });
+    mapRef.current = map;
 
-    // Initialize map
-    if (!mapRef.current) {
-      mapRef.current = L.map(mapContainerRef.current, {
-        center: [group.events[0].latitude, group.events[0].longitude],
-        zoom: 8,
-        zoomControl: true,
+    // Create base layers + layer control once.
+    const baseLayers: Record<string, L.TileLayer> = {};
+    const defaultLayerName = getDefaultBaseLayer(isDark);
+    BASE_LAYERS.forEach((layer) => {
+      const tileLayer = L.tileLayer(layer.url, {
+        attribution: layer.attribution,
+        maxZoom: layer.maxZoom || 19,
       });
-
-      // Create base layer map for layer control
-      const baseLayers: Record<string, L.TileLayer> = {};
-      const defaultLayerName = getDefaultBaseLayer(isDark);
-
-      BASE_LAYERS.forEach((layer) => {
-        const tileLayer = L.tileLayer(layer.url, {
-          attribution: layer.attribution,
-          maxZoom: layer.maxZoom || 19,
-        });
-        baseLayers[layer.name] = tileLayer;
-
-        // Add the default layer to the map
-        if (layer.name === defaultLayerName) {
-          tileLayer.addTo(mapRef.current!);
-        }
-      });
-
-      // Add layer control
-      layerControlRef.current = L.control.layers(baseLayers, {}, { position: 'topright' });
-      layerControlRef.current.addTo(mapRef.current);
-    }
-
-    const map = mapRef.current;
-
-    // Clear existing layers
-    map.eachLayer((layer) => {
-      if (layer instanceof L.Marker || layer instanceof L.Polyline) {
-        map.removeLayer(layer);
+      baseLayers[layer.name] = tileLayer;
+      if (layer.name === defaultLayerName) {
+        tileLayer.addTo(map);
+        activeBaseLayerRef.current = tileLayer;
       }
     });
+    baseLayersRef.current = baseLayers;
+
+    layerControlRef.current = L.control.layers(baseLayers, {}, { position: 'topright' });
+    layerControlRef.current.addTo(map);
+
+    // Markers/polylines live in a dedicated overlay group so they can be swapped without
+    // touching the base layers.
+    overlayLayerRef.current = L.layerGroup().addTo(map);
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      layerControlRef.current = null;
+      overlayLayerRef.current = null;
+      activeBaseLayerRef.current = null;
+      baseLayersRef.current = {};
+    };
+    // Mount/unmount only — subsequent prop/theme changes are handled by the effects below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasEvents]);
+
+  // Swap the active base tile layer on theme change instead of recreating the map.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const targetName = getDefaultBaseLayer(isDark);
+    const target = baseLayersRef.current[targetName];
+    if (!target || target === activeBaseLayerRef.current) return;
+    if (activeBaseLayerRef.current) map.removeLayer(activeBaseLayerRef.current);
+    target.addTo(map);
+    activeBaseLayerRef.current = target;
+  }, [isDark]);
+
+  // Update markers/polylines when the group or colours change; the map itself is reused.
+  useEffect(() => {
+    const map = mapRef.current;
+    const overlay = overlayLayerRef.current;
+    if (!map || !overlay || !hasEvents) return;
+
+    // Clear previously drawn markers/polylines (base layers untouched).
+    overlay.clearLayers();
 
     // Add markers for each event
     const markers: L.Marker[] = [];
     group.events.forEach((event, idx) => {
       const isSelected = idx === group.selectedEventIndex;
-      const color = catalogueColors[event.catalogueId] || '#gray';
+      const color = catalogueColors[event.catalogueId] || '#6b7280';
 
       // Create custom icon
       const iconHtml = `
@@ -160,8 +185,8 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
               ${isSelected ? '<div style="color: green; font-weight: bold; margin-top: 4px;">✓ Selected Event</div>' : ''}
             </div>
           </div>
-        `)
-        .addTo(map);
+        `);
+      overlay.addLayer(marker);
 
       markers.push(marker);
     });
@@ -170,18 +195,20 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
     if (group.events.length > 1) {
       const referenceEvent = group.events[0];
       group.events.slice(1).forEach((event) => {
-        L.polyline(
-          [
-            [referenceEvent.latitude, referenceEvent.longitude],
-            [event.latitude, event.longitude],
-          ],
-          {
-            color: '#666',
-            weight: 1,
-            opacity: 0.5,
-            dashArray: '5, 5',
-          }
-        ).addTo(map);
+        overlay.addLayer(
+          L.polyline(
+            [
+              [referenceEvent.latitude, referenceEvent.longitude],
+              [event.latitude, event.longitude],
+            ],
+            {
+              color: '#666',
+              weight: 1,
+              opacity: 0.5,
+              dashArray: '5, 5',
+            }
+          )
+        );
       });
     }
 
@@ -190,16 +217,7 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
       const bounds = L.latLngBounds(markers.map(m => m.getLatLng()));
       map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
     }
-
-    return () => {
-      // Cleanup on unmount
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-        layerControlRef.current = null;
-      }
-    };
-  }, [group, catalogueColors, isDark, hasEvents]);
+  }, [group, catalogueColors, hasEvents]);
 
   // Fallback UI for empty groups
   if (!hasEvents) {

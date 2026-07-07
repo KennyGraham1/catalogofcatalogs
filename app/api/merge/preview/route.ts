@@ -36,7 +36,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { sourceCatalogues, config } = body;
+    // Use the Zod-validated/coerced output rather than the raw body.
+    const { sourceCatalogues, config } = validation.data!;
 
     // Validate minimum catalogue count
     if (!sourceCatalogues || sourceCatalogues.length < 2) {
@@ -54,17 +55,17 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(previewResult);
   } catch (error) {
+    // Log the real error server-side; return a generic client-facing message.
     console.error('Merge preview error:', error);
 
-    const errorMessage = error instanceof Error ? error.message : 'Failed to preview merge';
-    const errorCode = error instanceof Error && error.message.includes('not found')
-      ? 'CATALOGUE_NOT_FOUND'
-      : 'PREVIEW_FAILED';
+    const isNotFound = error instanceof Error && error.message.includes('not found');
 
     return NextResponse.json(
       {
-        error: errorMessage,
-        code: errorCode
+        error: isNotFound
+          ? 'One or more source catalogues were not found'
+          : 'Failed to preview merge',
+        code: isNotFound ? 'CATALOGUE_NOT_FOUND' : 'PREVIEW_FAILED'
       },
       { status: 500 }
     );

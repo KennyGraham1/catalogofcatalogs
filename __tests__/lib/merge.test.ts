@@ -1094,12 +1094,18 @@ describe('Magnitude Conversion', () => {
   });
 
   describe('convertMLtoMw', () => {
-    it('should convert ML to Mw using the approximate generic relation', () => {
+    it('should approximate ML ≈ Mw for moderate magnitudes (identity, no downward bias)', () => {
       const result = convertMLtoMw(5.0);
-      // Mw = 0.67 * 5.0 + 1.17 = 4.52
-      expect(result.value).toBeCloseTo(4.52, 1);
+      // ML ≈ Mw for moderate events (previous 0.67*ML+1.17 wrongly deflated to 4.52)
+      expect(result.value).toBeCloseTo(5.0, 2);
       expect(result.uncertainty).toBe(0.3);
       expect(result.isExact).toBe(false);
+    });
+
+    it('should widen uncertainty for saturating (ML > 6.5) magnitudes', () => {
+      const result = convertMLtoMw(7.0);
+      expect(result.value).toBeCloseTo(7.0, 2);
+      expect(result.uncertainty).toBeGreaterThan(0.3);
     });
   });
 

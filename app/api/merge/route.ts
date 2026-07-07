@@ -27,7 +27,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { name, sourceCatalogues, config, metadata, exportOnly } = body;
+    // Use the Zod-validated/coerced output, NOT the raw body, so unvalidated fields
+    // (e.g. oversized metadata) can never reach the database.
+    const { name, sourceCatalogues, config, metadata, exportOnly } = validation.data!;
 
     // Additional validation: require at least 2 catalogues
     if (!sourceCatalogues || sourceCatalogues.length < 2) {
@@ -60,17 +62,18 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error) {
+    // Log the real error server-side, but return a generic client-facing message so internal
+    // exception detail (DB driver errors, query internals, etc.) is not disclosed.
     console.error('Merge error:', error);
 
-    const errorMessage = error instanceof Error ? error.message : 'Failed to merge catalogues';
-    const errorCode = error instanceof Error && error.message.includes('not found')
-      ? 'CATALOGUE_NOT_FOUND'
-      : 'MERGE_FAILED';
+    const isNotFound = error instanceof Error && error.message.includes('not found');
 
     return NextResponse.json(
       {
-        error: errorMessage,
-        code: errorCode
+        error: isNotFound
+          ? 'One or more source catalogues were not found'
+          : 'Failed to merge catalogues',
+        code: isNotFound ? 'CATALOGUE_NOT_FOUND' : 'MERGE_FAILED'
       },
       { status: 500 }
     );

@@ -84,7 +84,10 @@ export default function MapComponent({ events }: MapComponentProps) {
 
           return (
             <Circle
-              key={event.id || index}
+              // A merge map deliberately shows duplicate events across catalogues, so the
+              // same event.id can appear more than once — append the array index (unique per
+              // render) so React keys never collide.
+              key={`${event.id ?? 'evt'}-${index}`}
               center={[event.latitude, event.longitude]}
               radius={getMagnitudeRadius(event.magnitude)}
               pathOptions={{
