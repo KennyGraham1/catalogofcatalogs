@@ -83,14 +83,14 @@ $^{3}$ University of Canterbury
 }
 
 
-\date{June 2026}
+\date{July 2026}
 \maketitle
 
 \newpage
 \begin{abstract}
 Earthquake catalogues underpin seismology, earthquake forecasting, and the seismic hazard models used in engineering and risk management. Aotearoa New Zealand produces many earthquake catalogues, but as a national collection they fall short of the FAIR principles: there is no common index, so they are hard to \emph{find}; they are built to different standards and conventions, so they are not readily \emph{interoperable}; few carry the persistent identifiers and versioning needed to \emph{access} and cite a specific release; and inconsistent documentation limits \emph{reuse}. The cost is concrete: the 2022 National Seismic Hazard Model had to re-standardise magnitudes across sources before it could use them \citep{NSHM2022BSSA, Christophersen2024}, and combining catalogues remains a manual, error-prone task. A companion inventory (1960--2026) documents 93 of these catalogues, across national, regional, temporary, historical, and derived categories.
 
-Two national workshops (2023 and 2024) brought together stakeholders from universities, agencies, and industry to identify needs and shape a practical framework guided by the FAIR principles (Findable, Accessible, Interoperable, Reusable). This white paper sets out the current landscape, the community-identified gaps, and a proposed national framework: a ``catalogue of catalogues'' that improves findability and encourages a minimum standard for easier interoperability. The framework makes catalogues findable through a common submission profile and provides FAIR services (quality assessment, merge, analytics, versioning, and programmatic access) for the catalogues it coordinates. It is accompanied by proposed governance following CARE principles, a roadmap, and an indicative resourcing envelope. A working prototype demonstrates the core workflows, from loading and merging catalogues to analysis and export in several formats. We ask New Zealand's earth-science community, its agencies, and its research-infrastructure funders to review and refine the standards proposed here and to help establish a sustained national capability.
+Two national workshops (2023 and 2024) brought together stakeholders from universities, agencies, and industry to identify needs and shape a practical framework guided by the FAIR principles (Findable, Accessible, Interoperable, Reusable). This white paper sets out the current landscape, the community-identified gaps, and a proposed national framework: a ``catalogue of catalogues'' that improves findability and encourages a minimum standard for easier interoperability. The framework makes catalogues findable through a common submission profile and provides FAIR services (quality assessment, merge, analytics, versioning, and programmatic access) for the catalogues it coordinates. It is accompanied by proposed governance following CARE principles, a roadmap, and an indicative resourcing envelope. A working prototype demonstrates the core workflows, from loading and merging catalogues to analysis and export in several formats. The standards proposed here are offered to New Zealand's earth-science community, its agencies, and its research-infrastructure funders for review and refinement toward a sustained national capability.
 \end{abstract}
 
 \bigskip
@@ -117,7 +117,7 @@ Two national workshops (2023 and 2024) brought together stakeholders from univer
 \section{Introduction: The Problem and the Opportunity}
 Earthquake catalogues are the cornerstone of seismology and the shared evidence base for hazard models, engineering design, rapid response, and fundamental research \citep{woessner2010instrumental}. Their value depends on being trustworthy, comparable, and reusable.
 
-In Aotearoa New Zealand that evidence base is fragmented. GeoNet curates the authoritative national catalogue, with broad coverage and open access through web and programmatic services \citep{GeoNetEqCatalogue, GeoNetFDSN, GeoNetAPI}; but its location quality and completeness vary markedly across the country with station density \citep{WarrenSmith2025}, and metadata conventions have evolved over time. Alongside it sit many high-value catalogues that are effectively invisible to the national system:
+In Aotearoa New Zealand that evidence base is fragmented. GeoNet curates the authoritative national catalogue, with broad coverage and open access through web and programmatic services \citep{GeoNetEqCatalogue, GeoNetFDSN, GeoNetAPI}; but its location quality and completeness vary markedly across the country with station density \citep{WarrenSmith2025}, and metadata conventions have evolved over time. Alongside it sit many catalogues that are not integrated with, and are often not discoverable through, the national system:
 \begin{itemize}
 \setlength{\itemsep}{1pt}
 \item regional and volcano-specific catalogues built with dense local networks;
@@ -127,11 +127,11 @@ In Aotearoa New Zealand that evidence base is fragmented. GeoNet curates the aut
 \item derived catalogues built for hazard and risk modelling, such as the magnitude-homogenised catalogue prepared for the 2022 National Seismic Hazard Model \citep{Christophersen2024}.
 \end{itemize}
 
-These are not isolated exceptions. A companion inventory covering 1960--2026 identifies 93 such catalogues, spanning regional and volcano-seismic networks, temporary onshore and offshore deployments, aftershock responses, historical compilations, and hazard-model datasets; the true number is higher still. Volcano-seismic, slow-slip, and temporary-deployment catalogues together make up a substantial share, yet temporary deployments in particular remain among the least discoverable through the national system (see Data and Code Availability).
+These are not isolated exceptions. A companion inventory covering 1960--2026 identifies 93 such catalogues, spanning regional and volcano-seismic networks, temporary onshore and offshore deployments, aftershock responses, historical compilations, and hazard-model datasets; this inventory is not exhaustive. Volcano-seismic, slow-slip and tremor, and temporary onshore and offshore deployment catalogues together account for over half of the inventory (54 of 93 entries), yet temporary deployments in particular remain among the least discoverable through the national system (see Data and Code Availability).
 
-Many of these catalogues are also simply hard to locate: those published before journals required FAIR data, or held on personal or ad-hoc platforms (for example GitHub or Zenodo), can become effectively lost once their authors move on or retire, a problem compounded by an ever-growing number of catalogues. Harmonising magnitudes is a further, distinct cost: because these catalogues use different formats, identifiers, and magnitude scales, combining them is manual and error-prone, and the 2022 National Seismic Hazard Model required a dedicated effort to re-standardise magnitudes across sources before they could be used \citep{NSHM2022BSSA, Christophersen2024}. The consequences of the status quo are lost researcher time, reduced reproducibility, and less transparent uncertainty in decisions that can affect public safety and major infrastructure.
+Many of these catalogues are also simply hard to locate: those published before journals required FAIR data, or held on personal or ad-hoc platforms (for example GitHub or Zenodo), can become effectively lost once their authors move on or retire, a problem compounded by an ever-growing number of catalogues. Harmonising magnitudes is a further, distinct cost: because these catalogues use different formats, identifiers, and magnitude scales, combining them is manual and error-prone, and the 2022 National Seismic Hazard Model required a dedicated effort to re-standardise magnitudes across sources before they could be used \citep{NSHM2022BSSA, Christophersen2024}. The consequences of the status quo can include lost researcher time, reduced reproducibility, and less transparent uncertainty in decisions that can affect public safety and major infrastructure.
 
-The opportunity is to add a thin coordinating layer (a ``catalogue of catalogues'') that makes these datasets findable, comparable, and citable. In practice it combines a common submission profile that makes catalogues findable with a set of richer FAIR services (comparison, merging, and citable versions) for the catalogues it coordinates. Internationally, initiatives such as the European Plate Observing System (EPOS) Seismology service show the value of standardised, FAIR data services and coordinated infrastructure \citep{EPOSSeisTCS, EPOSSeisDataServices}. This paper synthesises outcomes from two national workshops and intersession working-group activity to propose such a framework, tailored to New Zealand and governed under both FAIR and CARE (Collective benefit; Authority to control; Responsibility; Ethics) principles.
+A thin coordinating layer (a ``catalogue of catalogues'') can make these datasets findable, comparable, and citable. It combines a common submission profile that makes catalogues findable with a set of richer FAIR services (comparison, merging, and citable versions) for the catalogues it coordinates. Internationally, initiatives such as the European Plate Observing System (EPOS) Seismology service show the value of standardised, FAIR data services and coordinated infrastructure \citep{EPOSSeisTCS, EPOSSeisDataServices}. This paper synthesises outcomes from two national workshops and intersession working-group activity to propose such a framework, tailored to New Zealand and governed under both FAIR and CARE (Collective benefit; Authority to control; Responsibility; Ethics) principles.
 
 This paper has three aims: (i) to characterise the landscape of New Zealand's earthquake catalogues and benchmark it against mature international catalogues of catalogues; (ii) to propose a common set of minimum attributes for describing and creating catalogues; and (iii) to set out a gap analysis and near-term community steps toward a federated, harmonised national catalogue capability for earthquake science and engineering.
 
@@ -157,13 +157,13 @@ The framework is shaped by concrete user needs identified at the workshops: gain
   \node[grp] at (2.45,5.05) {Today: fragmented};
   % Tidy 2-column x 3-row grid: intentional, aligned, but UNconnected.
   \node[cat] at (1.0,4.30) {GeoNet (national)};
-  \node[cat] at (3.9,4.30) {Regional/volcano-specific};
+  \node[cat, text width=2.4cm] at (3.9,4.30) {Regional/\\volcano-specific};
   \node[cat] at (1.0,3.20) {Temporary};
   \node[cat] at (3.9,3.20) {Historical};
   \node[cat] at (1.0,2.10) {Derived / PSHA};
   \node[cat] at (3.9,2.10) {Global};
   \node[note, text width=4.6cm] at (2.45,0.75)
-       {Different formats, IDs, and magnitude scales; combined by hand};
+       {Different formats, IDs, and magnitude scales; combined manually};
 \end{scope}
 
 % ===================== Divider =====================
@@ -172,11 +172,11 @@ The framework is shaped by concrete user needs identified at the workshops: gain
 % ===================== RIGHT: unified =====================
 \begin{scope}[xshift=6.7cm]
   \node[grp] at (2.55,5.05) {Proposed: catalogue of catalogues};
-  \node[cat] (g) at (0.95,4.30) {GeoNet};
-  \node[cat] (t) at (0.95,3.50) {Regional/volcano-specific};
-  \node[cat] (a) at (0.95,2.70) {Temporary};
-  \node[cat] (h) at (0.95,1.90) {Historical};
-  \node[cat] (m) at (0.95,1.10) {Global};
+  \node[cat, text width=2.4cm] (g) at (0.95,4.30) {GeoNet};
+  \node[cat, text width=2.4cm] (t) at (0.95,3.50) {Regional/\\volcano-specific};
+  \node[cat, text width=2.4cm] (a) at (0.95,2.70) {Temporary};
+  \node[cat, text width=2.4cm] (h) at (0.95,1.90) {Historical};
+  \node[cat, text width=2.4cm] (m) at (0.95,1.10) {Global};
   \node[hub] (H) at (4.20,3.05) {FAIR portal \& API};
   % Clean feed: each box -> vertical bus (plain line); single arrow bus -> hub.
   \def\busx{2.45}
@@ -199,14 +199,14 @@ The framework is shaped by concrete user needs identified at the workshops: gain
 
 \section{The Current Landscape and International Benchmark}
 \label{sec:landscape}
-New Zealand's earthquake data ecosystem comprises several catalogue types that serve different purposes. The \textbf{national operational catalogue}, maintained through GeoNet by Earth Sciences New Zealand (ESNZ; formerly GNS Science), provides consistent coverage and open access since the 1930s \citep{GeoNetEqCatalogue, GeoNetFDSN, gns_neid}; its gaps are evolving conventions for documenting processing methods, mixed magnitude types, spatially variable location quality \citep{WarrenSmith2025}, and limited availability of detailed processing fields. Around it sit regional and volcano-specific catalogues offering high-resolution detail \citep{Illsley2025}, valuable but poorly discoverable temporary deployments, and historical, derived, and synthetic compilations that are difficult to reuse without formal versioning, identifiers, and processing documentation \citep{NSHM2022BSSA}. In short, the ecosystem's strengths lie in local precision and national consistency, while its gaps lie in completeness through time and space, processing consistency, magnitude and depth scales, metadata, transparency, and access to legacy and temporary data.
+New Zealand's earthquake data ecosystem comprises several catalogue types that serve different purposes. The \textbf{national operational catalogue}, maintained through GeoNet by Earth Sciences New Zealand (ESNZ; formerly GNS Science), provides continuous coverage and open access since the 1930s \citep{GeoNetEqCatalogue, GeoNetFDSN, gns_neid}; its gaps are evolving conventions for documenting processing methods, mixed magnitude types, spatially variable location quality \citep{WarrenSmith2025}, and limited availability of detailed processing fields. Around it sit regional and volcano-specific catalogues offering high-resolution detail \citep{Illsley2025}; often poorly discoverable temporary and aftershock deployments; specialised source-mechanism, slow-slip, palaeoseismic, and geodetic catalogues; relocated or otherwise method-specific research catalogues; and historical, derived, synthetic, and internationally aggregated compilations that are difficult to reuse without formal versioning, identifiers, and processing documentation \citep{NSHM2022BSSA}. These groupings correspond to the working classification in Table~\ref{tab:nztypes}. The ecosystem's strengths lie in local precision and national consistency, while its gaps lie in completeness through time and space, processing consistency, magnitude and depth scales, metadata, transparency, and access to legacy and temporary data.
 
 This ecosystem is large and heterogeneous. Table~\ref{tab:nztypes} sets out the working classification of catalogue types used in this paper, informed by the community workshops rather than a verbatim record of them, with representative examples and characteristic strengths and limitations.
 
 \begin{table}[H]
 \centering
 \small
-\caption{A working classification of earthquake-catalogue types in Aotearoa New Zealand used in this paper, informed by the community workshops, with examples and characteristic strengths and limitations.}
+\caption{A working classification of earthquake-catalogue types in Aotearoa New Zealand used in this paper, informed by the community workshops, with representative (non-exhaustive) examples and references and characteristic strengths and limitations. The classification is indicative rather than definitive and may be refined for consistency with the main text.}
 \label{tab:nztypes}
 \setlength{\tabcolsep}{5pt}
 \renewcommand{\arraystretch}{1.2}
@@ -243,7 +243,7 @@ The inventory is also spatially uneven (Figure~\ref{fig:coverage}). Panel~(a) sh
 \label{fig:coverage}
 \end{landscape}
 
-Mature international catalogues of catalogues provide useful reference points: the USGS Advanced National Seismic System Comprehensive Earthquake Catalog (ComCat) federates the regional and national networks of the ANSS \citep{usgs_comcat}; the Swiss Seismological Service couples a dense network with cross-border data \citep{sed_report}; the European-Mediterranean Seismological Centre (EMSC) and the International Seismological Centre (ISC) aggregate across many agencies \citep{emsc_webservices, isc_data_collection}; and EPOS provides standardised FAIR services across Europe \citep{EPOSSeisTCS}. These services share common standards, notably the International Federation of Digital Seismograph Networks (FDSN) web services and the QuakeML data format, which New Zealand already supports. Appendix~\ref{app:international} summarises each. The comparison is a qualitative synthesis from public documentation and expert judgement, not a scored audit; the New Zealand column reflects the authors' assessment across New Zealand's many catalogues, whereas the comparators are single national or federated catalogues of catalogues. Table~\ref{tab:catalog_comparison} compares these services across the rows shown; five recurring priorities stand out: (1)~consistent representation of uncertainty or confidence; (2)~formal version control with Digital Object Identifiers (DOIs) and changelogs for citable releases; (3)~a cross-agency event-identifier mapping service; (4)~integration of historical and pre-instrumental data; and (5)~formal governance with dedicated funding. These gaps motivate the framework components and key recommendations that follow.
+Mature international catalogues of catalogues provide useful reference points: the United States Geological Survey (USGS) Advanced National Seismic System (ANSS) Comprehensive Earthquake Catalog (ComCat) federates its regional and national networks \citep{usgs_comcat}; the Swiss Seismological Service (SED) couples a dense network with cross-border data \citep{sed_report}; the European-Mediterranean Seismological Centre (EMSC) and the International Seismological Centre (ISC) aggregate across many agencies \citep{emsc_webservices, isc_data_collection}; and EPOS provides standardised FAIR services across Europe \citep{EPOSSeisTCS}. These services share common standards, notably the International Federation of Digital Seismograph Networks (FDSN) web services and the QuakeML data format, which New Zealand already supports. Appendix~\ref{app:international} summarises each. The comparison is a qualitative synthesis from public documentation and expert judgement, not a scored audit; the New Zealand column reflects the authors' assessment across New Zealand's many catalogues, whereas the comparators are single national or federated catalogues of catalogues. Table~\ref{tab:catalog_comparison} compares these services across the rows shown; five recurring priorities stand out: (1)~consistent representation of uncertainty or confidence; (2)~formal version control with Digital Object Identifiers (DOIs) and changelogs for citable releases; (3)~a cross-agency event-identifier mapping service; (4)~integration of historical and pre-instrumental data; and (5)~formal governance with dedicated funding. These gaps motivate the framework components and key recommendations that follow.
 
 \begin{landscape}
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{3cm}>{\raggedright\arraybackslash}p{4cm}>{\raggedright\arraybackslash}p{3.5cm}>{\raggedright\arraybackslash}p{3.5cm}>{\raggedright\arraybackslash}p{3.5cm}@{}}
@@ -436,7 +436,7 @@ Curation services & Fully incorporated event-level catalogue data and its proces
 % ---------- Curation & services ----------
 \node[hdr] at (\xstore,4.95) {Curation \& services};
 \node[proc, text width=3.1cm, minimum height=1.15cm] (store) at (\xstore,3.05)
-  {Standardised versioned dataset (\\[1pt]{\scriptsize major.minor.patch), DOIs, lineage}};
+  {Standardised versioned dataset\\[1pt]{\scriptsize DOIs, lineage}};
 \node[proc, text width=3.1cm, minimum height=1.3cm] (svc) at (\xstore,0.85)
   {Core services\\[1pt]{\scriptsize quality scoring; merge; event-ID mapping; provenance}};
 
@@ -495,7 +495,7 @@ A core metadata profile aligned with QuakeML and FDSN conventions captures ident
 
 \subsection{Catalogue Submission Profile (Minimum Attributes)}
 \label{sec:profile}
-Every catalogue in the framework is described by a concise \emph{submission profile} (Table~\ref{tab:profile}), which includes the minimum set of attributes, which was prioritised at the 2024 community workshop. The profile records, consistently and searchably, \emph{what} a catalogue contains and \emph{how} to obtain it, so that users can discover catalogues and assess relevance before reading a catalogue's full documentation. Required fields are kept to a small core to lower the barrier to contribution, and controlled drop-downs are preferred over free text wherever possible to keep entries searchable and consistent. The profile complements the event-level metadata profile (Table~\ref{tab:metadata_fields}, Appendix~\ref{app:spec}): the profile describes a catalogue \emph{as a whole}, whereas the metadata profile describes the recommended internal structure of an incorporated catalogue. Table~\ref{tab:profile} lists the fields of the submission profile.
+Every catalogue in the framework is described by a concise \emph{submission profile} (Table~\ref{tab:profile}), which includes the minimum set of attributes, which was prioritised at the 2024 community workshop. The profile records, consistently and searchably, \emph{what} a catalogue contains and \emph{how} to obtain it, so that users can discover catalogues and assess relevance before reading a catalogue's full documentation. Required fields are kept to a small core to lower the barrier to contribution, and controlled drop-downs are preferred over free text wherever possible to keep entries searchable and consistent. Table~\ref{tab:profile} lists the fields of the submission profile.
 
 \begin{table}[H]
 \centering
@@ -552,7 +552,7 @@ A persistent interoperability challenge is that the same earthquake carries diff
 
 \subsection{Catalogue Merge}
 \label{sec:merge}
-Catalogue merging---reconciling the multiple solutions that different catalogues report for the \emph{same} earthquake into a single, unified view---is a central operation that builds on established cross-agency practice \citep{Si2024, NCEDCComCat}. We use \emph{merge} for this per-event reconciliation, as distinct from \emph{aggregation}: assembling many catalogues or agency bulletins into one collection, in the sense of the ISC and EMSC, without necessarily reducing the solutions held for each event.\footnote{A companion review of catalogue-merging strategies accompanies this paper in the project repository (see Data and Code Availability).} The framework specifies five merge strategies, all exercised by the prototype (Section~\ref{sec:prototype}); users choose by scientific objective:
+Catalogue merging, reconciling the multiple solutions that different catalogues report for the \emph{same} earthquake into a single, unified view, is a central operation that builds on established cross-agency practice \citep{Si2024, NCEDCComCat}. We use \emph{merge} for this per-event reconciliation, as distinct from \emph{aggregation}: assembling many catalogues or agency bulletins into one collection, in the sense of the ISC and EMSC, without necessarily reducing the solutions held for each event.\footnote{A companion review of catalogue-merging strategies accompanies this paper in the project repository (see Data and Code Availability).} The framework specifies five merge strategies, all exercised by the prototype (Section~\ref{sec:prototype}); users choose by scientific objective:
 \begin{itemize}
   \item \textbf{Quality-based} (default): the highest quality-scored solution (Section~\ref{sec:quality}) is retained.
   \item \textbf{Priority-based}: a nominated authoritative agency's solution is preferred; others are recorded as alternatives.
@@ -624,7 +624,7 @@ Magnitude ($M_w$) & $4.2 \pm 0.1$ & $4.3 \pm 0.2$ & $0.80:0.20$ & $4.22$ & $0.08
 \fill[black] (0.52-0.075,-0.09-0.075) rectangle (0.52+0.075,-0.09+0.075);
 \node[below=4pt,black] at (0.52,-0.09) {merged};
 \end{tikzpicture}
-\caption{The averaged merge of Table~\ref{tab:merge_example}, in a local East--North frame centred on Source~A. The inverse-variance weights ($0.80:0.20$ horizontally) pull the merged epicentre (black square) about one-fifth of the way from the better-constrained Source~A (blue) toward Source~B (red); the dashed circles are the $1\sigma$ horizontal uncertainties ($1.5$ and $3.0$\,km). Crucially, the merged uncertainty is \emph{not} allowed to shrink below the most precise input: the solid circle is the reported $\sigma=1.5$\,km, whereas the dotted circle is the smaller $\sigma_{\text{indep}}=1.34$\,km that the (invalid) independence assumption would give. Epicentre coordinates are plotted from the unrounded weighted mean.}
+\caption{The averaged merge of Table~\ref{tab:merge_example}, in a local East--North frame centred on Source~A. The inverse-variance weights ($0.80:0.20$ horizontally) pull the merged epicentre (black square) about one-fifth of the way from the better-constrained Source~A (blue) toward Source~B (red); the dashed circles are the $1\sigma$ horizontal uncertainties ($1.5$ and $3.0$\,km). The merged uncertainty is \emph{not} allowed to shrink below the most precise input: the solid circle is the reported $\sigma=1.5$\,km, whereas the dotted circle is the smaller $\sigma_{\text{indep}}=1.34$\,km that the (invalid) independence assumption would give. Epicentre coordinates are plotted from the unrounded weighted mean.}
 \label{fig:merge_example}
 \end{figure}
 
@@ -665,7 +665,7 @@ Every catalogue release carries a version, timestamp, and changelog, and all ver
 
 Persistent identifiers make those releases citable. The catalogue series carries a single concept DOI, and each major and minor release (the changes that affect citable content) receives its own version DOI \citep{DataCiteVersioning}; patch releases update the existing record without a new DOI, and frequent minor releases may be batched (for example, quarterly) to avoid identifier proliferation. A machine-readable changelog accompanies every release, so a researcher can cite the exact data state used in a study and a reviewer can see what changed between versions.
 
-Each processing step (detection, picking, location, velocity-model choice, magnitude calibration) is recorded as provenance following the W3C PROV model of entities, activities, and agents, with software version and execution date as minimum requirements \citep{PROVO}; this provenance is richer than the per-origin \texttt{agencyID} or a single source DOI, capturing how a solution was produced rather than only who produced it. Uncertainties for time, location, and magnitude are reported as standard deviations (with confidence-ellipse parameters where anisotropic) and always carry the magnitude type code; events without quantified uncertainties are flagged, and historical events may carry a qualitative confidence class (e.g.\ ``well-constrained'', ``felt-only''). Field-level representations are specified in Appendix~\ref{app:spec}.
+Provenance, the documented processing history of a solution, is recorded following the W3C PROV model of entities, activities, and agents: each processing step (detection, picking, location, velocity-model choice, magnitude calibration) is captured, with software version and execution date as minimum requirements \citep{PROVO}. This provenance is richer than the per-origin \texttt{agencyID} or a single source DOI, capturing how a solution was produced rather than only who produced it. Uncertainties for time, location, and magnitude are reported as standard deviations (with confidence-ellipse parameters where anisotropic) and always carry the magnitude type code; events without quantified uncertainties are flagged, and historical events may carry a qualitative confidence class (e.g.\ ``well-constrained'', ``felt-only''). Field-level representations are specified in Appendix~\ref{app:spec}.
 
 \subsection{Special Catalogue Types}
 Different catalogue types need adapted handling to preserve scientific value. Regional research catalogues, in particular, are incorporated as distinct, separately versioned catalogues and cross-referenced (not silently merged) with the national catalogue, because their differing processing assumptions can introduce systematic biases; temporary deployments, historical and pre-instrumental catalogues, and derived or synthetic catalogues (for example multi-hundred-thousand-year RSQSim synthetic catalogues \citep{Shaw2021}) likewise receive type-specific treatment, detailed in Appendix~\ref{app:spec}.
@@ -691,14 +691,14 @@ A Steering Committee provides strategic oversight and ensures community ownershi
 
 \subsubsection{Data Stewardship Team}
 \label{sec:steward}
-Day-to-day operation is led by Earth Sciences New Zealand and need not be large. At its simplest the framework is maintained by a part-time data steward (coordination, metadata curation, and quality review); resourcing and FTE scaling are set out in Section~\ref{sec:implementation} (Funding and Resourcing). External researchers may also submit catalogues through a defined contribution process (Section~\ref{sec:contribution}). These governance roles (contributor, reviewer, maintainer) are distinct from the portal's technical access roles defined in Appendix~\ref{app:spec}.
+Routine operation is led by Earth Sciences New Zealand and need not be large. In its minimal configuration, the framework is maintained by a part-time data steward (coordination, metadata curation, and quality review); resourcing and FTE scaling are set out in Section~\ref{sec:implementation} (Funding and Resourcing). External researchers may also submit catalogues through a defined contribution process (Section~\ref{sec:contribution}). These governance roles (contributor, reviewer, maintainer) are distinct from the portal's technical access roles defined in Appendix~\ref{app:spec}.
 
 \subsubsection{Catalogue Contribution Process}
 \label{sec:contribution}
 External researchers and institutions may submit catalogues for inclusion. Submissions require: catalogue name and description, responsible institution and contact, time period and geographic coverage, event count where known, format and metadata documentation, and a declared licence; magnitude range is required where instrumental magnitudes are part of the catalogue and otherwise recorded as not applicable. A two-stage review process applies: technical QC by the Data Stewardship Team (format validity, completeness score, duplicate check) followed by scientific peer review by a standing panel of subject-matter seismologists who are independent of the submitted catalogue where practical (methods assessment, comparison with existing catalogues). Because the Committee meets only quarterly, responsibility is divided to keep the contribution turnaround within a target of four to eight weeks: the Steering Committee sets incorporation policy and approves \emph{categories} of source, while the Team approves individual contributions against that policy. Only novel or contentious cases are escalated to the Committee. Written feedback is provided regardless of outcome, and approved catalogues are assigned a DOI and version record.
 
 \subsubsection{Catalogue Custody, Updates, and Use Conditions}
-Each catalogue entry names a custodian (the person responsible for it) with a listed contact for updates, corrections, or withdrawal. The custodian need not be the original author, so that past studies and legacy datasets can be entered by others; in such cases the entry clearly attributes the catalogue's authorship. Where the same catalogue might be entered more than once (for example, a legacy dataset entered independently), duplicate entries are identified and reconciled by the Data Stewardship Team. The catalogue index itself is version-controlled, with its release history maintained in a public Git repository, so that additions, edits, and deprecations are transparent and a superseding catalogue version can be linked to the entry it replaces.
+Each catalogue entry names a custodian (the person responsible for it) with a listed contact for updates, corrections, or withdrawal. The custodian need not be the original author, so that past studies and legacy datasets can be entered by others; in such cases the entry attributes the catalogue's authorship. Where the same catalogue might be entered more than once (for example, a legacy dataset entered independently), duplicate entries are identified and reconciled by the Data Stewardship Team. The catalogue index itself is version-controlled, with its release history maintained in a public Git repository, so that additions, edits, and deprecations are transparent and a superseding catalogue version can be linked to the entry it replaces.
 
 The catalogue index is a finding aid, not an endorsement (the submission profile itself is defined in Section~\ref{sec:profile}). A clear disclaimer states that entries are contributed and not independently verified, and that the index simply records which catalogues exist. Users are encouraged to reference catalogues appropriately and to contact and collaborate with the original authors where relevant, consistent with the intellectual-property and data-sharing expectations attached to each dataset.
 
@@ -760,25 +760,25 @@ A coordinated, FAIR-and-CARE catalogue capability delivers concrete, audience-sp
 \item \textbf{Engineering and insurance} users obtain traceable inputs with explicit licences and transparent quality scores, supporting more defensible design and risk decisions.
 \item \textbf{Emergency management and the public} benefit from clearer, better-documented event information and a single national point of discovery, while GeoNet remains the authoritative operational source.
 \item \textbf{Iwi and hap\=u} should be engaged as partners in governance, setting the access and attribution conditions for data of significance to them, which the framework then implements (Section~\ref{sec:care}).
-\item \textbf{The national system} preserves at-risk legacy and temporary datasets and aligns New Zealand with international best practice \citep{EPOSSeisTCS}.
-\item \textbf{Community infrastructure} gains a stepping-stone, in the shared catalogue of catalogues, toward broader community goals identified at the workshops: digitising and back-filling legacy catalogues, and converging on a national community velocity model (1D and 3D). The framework should accept routine updates, with its governance and schema reviewed on a regular cadence.
+\item \textbf{The national system} preserves legacy and temporary datasets that would otherwise be at risk of loss, and aligns New Zealand with international practice \citep{EPOSSeisTCS}.
+\item \textbf{Community infrastructure} gains shared infrastructure, the catalogue of catalogues, that supports broader community goals identified at the workshops: digitising and back-filling legacy catalogues, and converging on a national community velocity model (1D and 3D). The framework should accept routine updates, with its governance and schema reviewed on a regular cadence.
 \end{itemize}
 
-\section{Risks and Anticipated Questions}
-We anticipate, and address, the main objections to this proposal:
+\section{Risks and Limitations}
+The principal objections to the proposal are addressed below.
 \begin{itemize}
 \setlength{\itemsep}{2pt}
-\item \textbf{``Isn't this duplicating GeoNet?''} No. The framework is an aggregation and curation layer over GeoNet and the many catalogues outside it; GeoNet remains the authoritative operational source and a primary data provider (Figure~\ref{fig:architecture}).
-\item \textbf{``Who pays once the establishment funding ends?''} The service is designed as a standing national capability hosted on a core-function or research-infrastructure budget, not a project that ends with a grant. The indicative steady-state cost and a bounded-retention storage policy are given in Section~\ref{sec:implementation} (Funding).
-\item \textbf{``What if researchers don't contribute their catalogues?''} The contribution process is low-friction and offers tangible incentives (DOIs, citations, increased visibility, and quality feedback), and the system delivers value from GeoNet and pilot catalogues from day one.
-\item \textbf{``Why not just use EPOS, ISC, or ComCat?''} Those systems are complementary and the framework is designed to interoperate with them, but none curates New Zealand's regional, temporary, and historical catalogues or addresses CARE obligations; a national capability is still required.
-\item \textbf{``Will standardisation flatten legitimate scientific differences?''} No. Alternative solutions are preserved with lineage, regional catalogues are cross-referenced rather than silently merged, and merge strategies are explicit and reproducible.
+\item \textbf{Relationship to GeoNet.} The framework does not duplicate GeoNet; it is an aggregation and curation layer over GeoNet and the catalogues outside it, and GeoNet remains the authoritative operational source and a primary data provider (Figure~\ref{fig:architecture}).
+\item \textbf{Long-term funding.} The service is designed as a standing national capability hosted on a core-function or research-infrastructure budget rather than a fixed-term project. The indicative steady-state cost and a bounded-retention storage policy are given in Section~\ref{sec:implementation} (Funding).
+\item \textbf{Contribution incentives.} The contribution process is low-friction and offers tangible incentives (DOIs, citations, increased visibility, and quality feedback), and the system provides value from GeoNet and pilot catalogues from the outset.
+\item \textbf{Relation to existing international systems.} EPOS, ISC, and ComCat are complementary, and the framework is designed to interoperate with them; none, however, curates New Zealand's regional, temporary, and historical catalogues or addresses CARE obligations, so a national capability remains necessary.
+\item \textbf{Preservation of scientific differences.} Standardisation does not flatten legitimate scientific differences: alternative solutions are preserved with lineage, regional catalogues are cross-referenced rather than silently merged, and merge strategies are explicit and reproducible.
 \end{itemize}
 
 \section{Conclusion and Call to Action}
-New Zealand has the data, the expertise, and strong community interest in making its earthquake catalogues FAIR; what is missing is a coordinating framework and the governance to sustain it. This white paper has set out such a framework, compared it with international practice, and demonstrated its technical feasibility through a working prototype. The remaining step is collective review, partner agreement, and sustained implementation.
+New Zealand has the data and expertise required to make its earthquake catalogues FAIR; what is currently absent is a coordinating framework and the governance to sustain it. This white paper has set out such a framework, compared it with international practice, and demonstrated its technical feasibility through a working prototype. The remaining step is collective review, partner agreement, and sustained implementation.
 
-We invite GeoNet and Earth Sciences New Zealand, universities, government agencies, iwi and hap\=u partners, and the engineering and insurance sectors to:
+The following steps are proposed for GeoNet and Earth Sciences New Zealand, universities, government agencies, iwi and hap\=u partners, and the engineering and insurance sectors:
 \begin{enumerate}
 \setlength{\itemsep}{1pt}
 \item review, refine, and, where appropriate, endorse the metadata, lexicon, versioning, and quality-scoring standards proposed here as a shared national baseline;
@@ -786,7 +786,7 @@ We invite GeoNet and Earth Sciences New Zealand, universities, government agenci
 \item commit to establishing the Steering Committee and Data Stewardship Team (Sections~\ref{sec:steering} and~\ref{sec:steward}), with representation that operationalises both FAIR and CARE; and
 \item support a multi-year funding case to move from prototype to a sustained national service.
 \end{enumerate}
-We welcome feedback and expressions of interest in participating in the governance and catalogue-contribution processes described above. Comments may be directed to the corresponding author, Kenny Graham (Earth Sciences New Zealand).
+Feedback and expressions of interest in participating in the governance and catalogue-contribution processes described above may be directed to the corresponding author, Kenny Graham (Earth Sciences New Zealand).
 
 \section*{Data and Code Availability}
 \addcontentsline{toc}{section}{Data and Code Availability}
@@ -1138,7 +1138,7 @@ More metadata fields and filters; better uncertainty representation; link with 2
 \label{app:glossary}
 \begin{description}
 \setlength{\itemsep}{1pt}
-\item[ANSS / ComCat] Advanced National Seismic System; its Comprehensive Earthquake Catalog (USGS).
+\item[ANSS / ComCat] Advanced National Seismic System; its Comprehensive Earthquake Catalog (USGS). The National Earthquake Information Center (NEIC) is the USGS national hub within ANSS.
 \item[Azimuthal gap] the largest angle, seen from an epicentre, between adjacent recording stations; a smaller gap means a better-constrained location.
 \item[CARE] Collective benefit, Authority to control, Responsibility, Ethics: principles for Indigenous data governance.
 \item[CMT / GCMT] centroid moment tensor; GCMT is the Global CMT project's moment-tensor catalogue.
@@ -1146,8 +1146,9 @@ More metadata fields and filters; better uncertainty representation; link with 2
 \item[Aggregate] assembling many catalogues or agency bulletins into one collection (the ISC/EMSC sense), without necessarily reducing the solutions held for each event.
 \item[Lineage] the explicit record linking a merged or derived event to the specific source events and catalogue versions it was built from; narrower than provenance, which is the full processing history.
 \item[Declustering] separating mainshock--aftershock sequences from background seismicity (e.g.\ the Gardner--Knopoff method).
+\item[LFE] low-frequency earthquake: a small, emergent event associated with deep slow slip and tectonic tremor.
 \item[DOI] Digital Object Identifier: a persistent, citable identifier for a dataset or document.
-\item[EMSC / ISC] European-Mediterranean Seismological Centre; International Seismological Centre.
+\item[EMSC / ISC] European-Mediterranean Seismological Centre; International Seismological Centre. ISC-GEM is the ISC--Global Earthquake Model (GEM) instrumental reference catalogue.
 \item[EPOS] European Plate Observing System: a coordinated FAIR data infrastructure for solid-Earth science.
 \item[FAIR] Findable, Accessible, Interoperable, Reusable: principles for scientific data management.
 \item[FDSN] International Federation of Digital Seismograph Networks; its web services are a global standard for seismic data access.
@@ -1160,7 +1161,23 @@ More metadata fields and filters; better uncertainty representation; link with 2
 \item[Provenance] the documented origin and processing history of a dataset (inputs, methods, software, agents).
 \item[PSHA] probabilistic seismic hazard analysis.
 \item[QuakeML / StationXML] standard XML formats for exchanging earthquake parameters and station metadata.
-\item[WFS] Web Feature Service: an OGC standard for serving geographic features.
+\item[WFS] Web Feature Service: an Open Geospatial Consortium (OGC) standard for serving geographic features.
+\item[API] application programming interface: a machine-readable interface for programmatic data access.
+\item[CSV / JSON] comma-separated values; JavaScript Object Notation: plain-text interchange formats.
+\item[GeoJSON / KML / GML] open geospatial data formats (JSON-based GeoJSON; Keyhole Markup Language; Geography Markup Language).
+\item[EMS-98 / MMI] European Macroseismic Scale (1998); Modified Mercalli Intensity: macroseismic intensity scales.
+\item[FTE] full-time equivalent (of staff effort).
+\item[ISF] ISC Standard Format: a seismic-bulletin exchange format.
+\item[REST] representational state transfer: a common web-service architectural style.
+\item[RMS] root-mean-square (here, of arrival-time residuals): a measure of solution misfit.
+\item[QC] quality control.
+\item[SED] Swiss Seismological Service.
+\item[ECOS / ECOS-09] Earthquake Catalogue of Switzerland: the SED's homogenised historical and instrumental catalogue; ECOS-09 is the 2009 release.
+\item[TVZ] Taup\=o Volcanic Zone.
+\item[USGS] United States Geological Survey.
+\item[UTC] Coordinated Universal Time.
+\item[W3C] World Wide Web Consortium.
+\item[WGS84] World Geodetic System 1984: the standard geographic coordinate reference.
 \end{description}
 
 \bibliographystyle{apalike}

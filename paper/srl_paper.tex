@@ -287,7 +287,7 @@ task CofC is built for.
 \includegraphics[width=\linewidth,height=0.78\textheight,keepaspectratio]{figures/nz_catalogue_coverage.pdf}
 \par\medskip
 \captionof{figure}{Spatial coverage of a companion inventory of New Zealand
-earthquake catalogues (81 catalogues, 1960--2026).  (a)~Footprint of each
+earthquake catalogues (93 catalogues, 1960--2026).  (a)~Footprint of each
 regional catalogue (a representative bounding box) over the coastline and
 active faults, coloured by type; 18 national or NZ-wide catalogues span the
 full extent and are not drawn, and two Kermadec-arc catalogues lie north of the
@@ -709,7 +709,7 @@ The five dimension scores $Q_d \in [0,100]$ are:
     \citep{bondar2004,warrensmith2025}: a small azimuthal gap
     ($\leq 90^{\circ}$) and a well-populated network ($\geq 20$ stations) each
     earn full marks on their respective (additive) terms, whereas a gap
-    $\geq 180^{\circ}$ or very few stations is heavily penalised.  GeoNet location quality has been
+    $\geq 180^{\circ}$ or few stations is heavily penalised.  GeoNet location quality has been
     benchmarked against exactly these criteria \citep{warrensmith2025}.
   \item[$Q_{\text{sol}}$: Solution fit (15\%)]  The RMS arrival-time residual
     (standard error) of the location: $< 0.3$\,s earns full points, with
@@ -946,8 +946,8 @@ interaction zone is:
 \begin{align}
   L(M)  &= 10^{0.1238M + 0.983}\;\text{km}, \\
   T(M)  &= \begin{cases}
-            10^{0.5409M - 0.547}\;\text{days}, & M \geq 6.5, \\
-            10^{0.032M + 2.7389}\;\text{days}, & M < 6.5,
+            10^{0.032M + 2.7389}\;\text{days}, & M \geq 6.5, \\
+            10^{0.5409M - 0.547}\;\text{days}, & M < 6.5,
            \end{cases}
 \end{align}
 the two-branch time window $T(M)$ following the larger-magnitude relation for
@@ -1285,9 +1285,9 @@ guide) is hosted at:
   \url{https://catalogofcatalogs.readthedocs.io/en/latest/}
 \end{center}
 Docker Compose recipes for single-command deployment, and a continuous-integration
-pipeline (linting, type-checking, and the Jest test suite---covering the
+pipeline (linting, type-checking, and the Jest test suite, covering the
 parsing, merging, quality-scoring, and seismological-analysis modules and the
-worked-example reproduction---on Node~18 and~20),
+worked-example reproduction, on Node~18 and~20),
 are included in the repository.  For citation of a fixed software state, a
 tagged release is archived with a Zenodo DOI (assigned at submission); the
 present paper describes release \texttt{v0.1.0}.  A tagged \texttt{v0.1.0}
@@ -1328,7 +1328,7 @@ scoring; ObsPy \citep{obspy2010} handles I/O and QuakeML parsing but leaves
 the statistical workflow entirely to the user; the ISC catalogue
 \citep{storchak2013} provides expert-reviewed global data but is static (updated
 annually) and not directly linkable to regional agency data for local analyses.
-CofC addresses much of this loop---from multi-source ingest through duplicate removal,
+CofC addresses much of this loop, from multi-source ingest through duplicate removal,
 quality scoring, declustering, and GR fitting, within a persistent web interface
 that preserves provenance at every step.
 
