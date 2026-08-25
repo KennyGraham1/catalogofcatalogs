@@ -645,7 +645,7 @@ changes in network completeness immediately visible as rate anomalies.
 
 \subsection{Supported input formats}
 
-Table~\ref{tab:formats} summarises the five supported formats.
+Table~\ref{tab:formats} summarises the four supported input paths.
 
 \begin{table}[ht]
 \centering
@@ -732,14 +732,16 @@ views, and aggregated at catalogue level.
 \centering
 \caption{Quality grade thresholds. The A$^+$--F scale provides an at-a-glance,
 ordinal event-level quality indicator derived from the continuous score $Q$ of
-equation~\eqref{eq:quality}.}
+equation~\eqref{eq:quality}.  Grades summarise the reported solution and
+metadata indicators, not event accuracy or fitness for a specific analysis, and
+the bands are uncalibrated defaults (Section~\ref{sec:discussion}).}
 \label{tab:grades}
 \begin{tabular}{@{}ccp{7.5cm}@{}}
 \toprule
 \textbf{Grade} & \textbf{Score} & \textbf{Recommended use} \\
 \midrule
-A$^+$ & 95--100 & Publication-ready; suitable for quantitative analyses, subject to the user's own suitability assessment. \\
-A     & 85--94  & Good; suitable for most research and engineering applications. \\
+A$^+$ & 95--100 & Very strong solution indicators; verify suitability for the intended analysis. \\
+A     & 85--94  & Strong indicators; suitable for screening and candidate selection. \\
 B$^+$ & 75--84  & Acceptable; document limitations in methods. \\
 B     & 65--74  & Fair; notable gaps in uncertainty or provenance. \\
 C     & 45--64  & Poor; expert review recommended before quantitative use. \\
@@ -1021,7 +1023,11 @@ Processed or merged catalogues can be exported in:
     provenance recorded as QuakeML \texttt{comment} elements.
   \item \textbf{GeoJSON} \citep{geojson2016}: suitable for GIS software
     and web mapping.
+  \item \textbf{KML}: Open Geospatial Consortium Keyhole Markup Language,
+    for Google Earth and similar viewers, with magnitude-scaled symbols.
 \end{itemize}
+Exports may be taken for a whole catalogue or a filtered query, and are
+version-specific, so a study can cite the exact data state it used.
 
 \section{Worked Example: New Zealand Seismicity}
 \label{sec:example}
