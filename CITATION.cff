@@ -1,0 +1,49 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+title: "Catalogue of Catalogues: A Web Platform for Earthquake Catalogue Management, Merging, and Statistical Analysis"
+abstract: >-
+  A browser-native, FAIR-oriented web platform for integrating, merging,
+  quality-scoring, and statistically analysing earthquake catalogues from
+  multiple agencies and formats.
+type: software
+license: MIT
+version: 0.1.0
+repository-code: "https://github.com/KennyGraham1/catalogofcatalogs"
+url: "https://catalogofcatalogs.readthedocs.io/en/latest/"
+keywords:
+  - earthquake catalogue
+  - seismicity
+  - catalogue merging
+  - FAIR data
+  - QuakeML
+  - Aotearoa New Zealand
+# doi: 10.5281/zenodo.XXXXXXX   # add the minted Zenodo DOI on deposit
+authors:
+  - family-names: Graham
+    given-names: K.
+    affiliation: "GNS Science, Lower Hutt, New Zealand"
+    email: johnkengh1@gmail.com
+  - family-names: Hanson
+    given-names: J.
+    affiliation: "GNS Science, Lower Hutt, New Zealand"
+  - family-names: Chamberlain
+    given-names: C. J.
+    affiliation: "Victoria University of Wellington, Wellington, New Zealand"
+  - family-names: Mestel
+    given-names: E.
+    affiliation: "Victoria University of Wellington, Wellington, New Zealand"
+  - family-names: Rollins
+    given-names: C.
+    affiliation: "GNS Science, Lower Hutt, New Zealand"
+  - family-names: Bourguignon
+    given-names: S.
+    affiliation: "GNS Science, Lower Hutt, New Zealand"
+  - family-names: Aden
+    given-names: F.
+    affiliation: "GNS Science, Lower Hutt, New Zealand"
+  - family-names: Williams
+    given-names: C.-L.
+    affiliation: "Victoria University of Wellington, Wellington, New Zealand"
+  - family-names: Bradley
+    given-names: B.
+    affiliation: "University of Canterbury, Christchurch, New Zealand"

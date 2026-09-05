@@ -1,0 +1,54 @@
+\begin{tikzpicture}[
+    font=\footnotesize,
+    cat/.style={draw=black, line width=0.4pt, rounded corners=2pt,
+                fill=gray!8, align=center, inner sep=4pt,
+                minimum height=0.6cm, text width=2.0cm},
+    hub/.style={draw=black, line width=0.4pt, rounded corners=2pt,
+                fill=gray!20, align=center, inner sep=5pt,
+                minimum height=1.0cm, text width=2.0cm},
+    grp/.style={font=\footnotesize\bfseries},
+    note/.style={font=\itshape, align=center},
+    feed/.style={draw=black, line width=0.5pt},
+    arr/.style={-{Stealth[length=2mm,width=1.6mm]}, draw=black, line width=0.5pt}]
+
+% ===================== LEFT: fragmented =====================
+\begin{scope}
+  \node[grp] at (2.45,5.05) {Today: fragmented};
+  % Tidy 2-column x 3-row grid: intentional, aligned, but UNconnected.
+  \node[cat] at (1.0,4.30) {GeoNet (national)};
+  \node[cat, text width=2.4cm] at (3.9,4.30) {Regional/\\volcano-specific};
+  \node[cat] at (1.0,3.20) {Temporary};
+  \node[cat] at (3.9,3.20) {Historical};
+  \node[cat] at (1.0,2.10) {Derived / PSHA};
+  \node[cat] at (3.9,2.10) {Global};
+  \node[note, text width=4.6cm] at (2.45,0.75)
+       {Different formats, IDs, and magnitude scales; combined manually};
+\end{scope}
+
+% ===================== Divider =====================
+\draw[draw=black, line width=0.4pt] (5.95,0.30) -- (5.95,5.30);
+
+% ===================== RIGHT: unified =====================
+\begin{scope}[xshift=6.7cm]
+  \node[grp] at (2.55,5.05) {Proposed: catalogue of catalogues};
+  \node[cat] (g) at (0.95,4.30) {GeoNet};
+  \node[cat, text width=2.4cm] (t) at (0.95,3.50) {Regional/\\volcano-specific};
+  \node[cat] (a) at (0.95,2.70) {Temporary};
+  \node[cat] (h) at (0.95,1.90) {Historical};
+  \node[cat] (m) at (0.95,1.10) {Global};
+  \node[hub] (H) at (4.20,3.05) {FAIR portal \& API};
+  % Clean feed: each box -> vertical bus (plain line); single arrow bus -> hub.
+  \def\busx{2.45}
+  \coordinate (bt) at (\busx,4.30); % top of bus (GeoNet row)
+  \coordinate (bb) at (\busx,1.10); % bottom of bus (+ many more row)
+  \coordinate (bj) at (\busx,3.05); % junction, aligned to hub centre
+  \draw[feed] (bt) -- (bb);                 % the collecting bus
+  \foreach \n in {g,t,a,h,m} {
+     \draw[feed] (\n.east) -- (\n.east -| bt);
+  }
+  \draw[arr] (bj) -- (H.west);              % single arrow into hub
+  \node[note, text width=3.6cm] at (4.20,0.75)
+       {Shared descriptors; discoverable, citable, interoperable};
+\end{scope}
+
+\end{tikzpicture}

@@ -1,0 +1,21 @@
+\begin{tikzpicture}[x=0.95cm,y=0.95cm,>={Stealth[length=2mm,width=1.6mm]},font=\footnotesize]
+% axes: local East--North frame (km), origin at Source A
+\draw[->,gray!70] (-2.1,0) -- (5.7,0) node[right,black]{East of A (km)};
+\draw[->,gray!70] (0,-3.7) -- (0,3.3) node[above,black]{North of A (km)};
+\foreach \xk in {-1,1,2,3,4,5} {\draw[gray!45] (\xk,-0.07)--(\xk,0.07) node[below=1pt,black,scale=0.8]{$\xk$};}
+\foreach \yk in {-3,-2,-1,1,2,3} {\draw[gray!45] (-0.07,\yk)--(0.07,\yk) node[left=1pt,black,scale=0.8]{$\yk$};}
+% 1-sigma horizontal uncertainty circles
+\draw[blue!60,dashed,line width=0.5pt] (0,0) circle (1.5);
+\draw[red!55,dashed,line width=0.5pt] (2.61,-0.44) circle (3.0);
+\draw[black!45,dotted,line width=0.6pt] (0.52,-0.09) circle (1.34);
+\draw[black,line width=0.9pt] (0.52,-0.09) circle (1.5);
+% A -> B baseline; merged sits ~20% along
+\draw[gray,->] (0,0) -- (2.61,-0.44);
+% solutions
+\fill[blue] (0,0) circle (2.3pt);
+\node[above left=0pt,blue!70!black] at (0,0) {A ($w{=}0.80$)};
+\fill[red] (2.61,-0.44) circle (2.3pt);
+\node[above right=1pt,red!60!black] at (2.61,-0.44) {B ($w{=}0.20$)};
+\fill[black] (0.52-0.075,-0.09-0.075) rectangle (0.52+0.075,-0.09+0.075);
+\node[below=4pt,black] at (0.52,-0.09) {merged};
+\end{tikzpicture}

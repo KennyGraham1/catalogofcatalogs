@@ -1,0 +1,83 @@
+\begin{tikzpicture}[
+  font=\footnotesize,
+  >={Stealth[length=2mm,width=1.6mm]},
+  box/.style={draw=black, line width=0.4pt, rounded corners=2pt, align=center, inner sep=4.5pt},
+  src/.style={box, fill=gray!8, text width=2.85cm, minimum height=0.66cm},
+  proc/.style={box, fill=gray!20, align=center},
+  acc/.style={box, fill=white, align=center},
+  cons/.style={box, fill=gray!8, text width=2.7cm, minimum height=0.72cm},
+  hdr/.style={font=\footnotesize\bfseries, text=black},
+  arr/.style={->, draw=black, line width=0.5pt},
+  busarr/.style={-, draw=black, line width=0.5pt}
+]
+% ---------- column x-positions ----------
+\def\xsrc{0}
+\def\xing{3.55}
+\def\xstore{7.55}
+\def\xacc{11.5}
+\def\xcons{15.6}
+
+% ---------- Sources ----------
+\node[hdr] at (\xsrc,4.95) {Catalogue sources};
+\node[src] (s1) at (\xsrc,4.2)  {GeoNet national\\(FDSN)};
+\node[src] (s2) at (\xsrc,3.1)  {Regional / volcano-specific};
+\node[src] (s3) at (\xsrc,2.0)  {Temporary onshore/offshore};
+\node[src] (s4) at (\xsrc,0.9)  {Historical / pre-instrumental};
+\node[src] (s5) at (\xsrc,-0.2) {Derived / synthetic};
+
+% ---------- Incorporation ----------
+\node[hdr] at (\xing,4.95) {Incorporation};
+\node[proc, text width=3.0cm, minimum height=1.6cm] (ing) at (\xing,2.0)
+  {Incorporation \& field mapping\\[2pt]{\scriptsize CSV, JSON, GeoJSON, QuakeML, FDSN sync; duplicate detection}};
+
+% ---------- Curation & services ----------
+\node[hdr] at (\xstore,4.95) {Curation \& services};
+\node[proc, text width=3.1cm, minimum height=1.15cm] (store) at (\xstore,3.05)
+  {Standardised versioned dataset\\[1pt]{\scriptsize DOIs, lineage}};
+\node[proc, text width=3.1cm, minimum height=1.3cm] (svc) at (\xstore,0.85)
+  {Core services\\[1pt]{\scriptsize quality scoring; merge; event-ID mapping; provenance}};
+
+% ---------- Access ----------
+\node[hdr] at (\xacc,4.95) {Access};
+\node[acc, text width=2.9cm, minimum height=1.15cm] (portal) at (\xacc,3.05)
+  {Portal\\[1pt]{\scriptsize search, map, analytics}};
+\node[acc, text width=2.9cm, minimum height=1.3cm] (api) at (\xacc,0.85)
+  {REST / FDSN API\\[1pt]{\scriptsize versioned exports:\\ CSV / GeoJSON /\\ KML / QuakeML}};
+
+% ---------- Users ----------
+\node[hdr] at (\xcons,4.95) {Users};
+\node[cons] (c1) at (\xcons,3.65) {Research \& reproducibility};
+\node[cons] (c2) at (\xcons,2.55) {Hazard \& risk modelling (NSHM)};
+\node[cons] (c3) at (\xcons,1.45) {Engineering \& insurance};
+\node[cons] (c4) at (\xcons,0.35) {Public \& emergency mgmt};
+
+% ================= arrows =================
+% sources -> incorporation (orthogonal funnel into a single vertical bus)
+\def\xsbus{1.9}
+\foreach \s in {s1,s2,s3,s4,s5} {
+  \draw[busarr] (\s.east) -- ($(\xsbus,0)!(\s.east)!(\xsbus,1)$);
+}
+\draw[busarr] (\xsbus,4.2) -- (\xsbus,-0.2);
+\draw[arr] (\xsbus,2.0) -- (ing.west);
+
+% incorporation -> store and -> services
+\draw[arr] (ing.east) -- ($(ing.east)+(0.55,0)$) |- (store.west);
+\draw[arr] (ing.east) -- ($(ing.east)+(0.55,0)$) |- (svc.west);
+
+% store <-> services
+\draw[arr,<->] (store.south) -- (svc.north);
+
+% store -> portal ; services -> api
+\draw[arr] (store.east) -- (portal.west);
+\draw[arr] (svc.east)   -- (api.west);
+
+% portal & api funnel into a single access bus that fans out to users
+\def\xabus{13.55}
+\draw[busarr] (portal.east) -| (\xabus,3.05);
+\draw[busarr] (api.east)    -| (\xabus,0.85);
+\draw[busarr] (\xabus,3.65) -- (\xabus,0.35);
+% fan-out: bus -> each user (orthogonal, no crossings)
+\foreach \c in {c1,c2,c3,c4} {
+  \draw[arr] ($(\xabus,0)!(\c.west)!(\xabus,1)$) -- (\c.west);
+}
+\end{tikzpicture}%

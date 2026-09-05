@@ -1,0 +1,32 @@
+\begin{tikzpicture}[
+  font=\footnotesize,
+  phase/.style={
+    draw=black, line width=0.4pt, fill=gray!8,
+    rounded corners=2pt, align=center, text width=3.2cm,
+    inner sep=4.5pt, anchor=north
+  },
+  title/.style={font=\footnotesize\bfseries, align=center, anchor=south, text width=3.3cm},
+  milestone/.style={circle, draw=black, line width=0.4pt, fill=gray!25,
+    inner sep=0pt, minimum size=5pt},
+  axis/.style={-{Stealth[length=2mm,width=1.6mm]}, black, line width=0.5pt}
+]
+% phase x-centres, evenly spaced
+\def\xa{0}\def\xb{4}\def\xc{8}\def\xd{12}\def\axisy{0}
+% horizontal timeline axis
+\draw[axis] (\xa-1.7,\axisy) -- (\xd+2.4,\axisy);
+% milestone markers and connector ticks (down to blocks, up to titles)
+\foreach \x in {\xa,\xb,\xc,\xd}{
+  \node[milestone] at (\x,\axisy) {};
+  \draw[black, line width=0.4pt] (\x,\axisy-0.30) -- (\x,\axisy+0.30);
+}
+% bold phase titles above axis
+\node[title] at (\xa,\axisy+0.34) {Phase~1\\Planning \& mobilisation};
+\node[title] at (\xb,\axisy+0.34) {Phase~2\\Prototype \& pilot};
+\node[title] at (\xc,\axisy+0.34) {Phase~3\\Full-scale launch};
+\node[title] at (\xd,\axisy+0.34) {Phase~4\\Sustained service};
+% uniform stacked description blocks below the axis
+\node[phase] at (\xa,\axisy-0.40) {Governance,\\schema, and\\architecture};
+\node[phase] at (\xb,\axisy-0.40) {Core portal/API;\\5--10 pilot catalogues;\\training};
+\node[phase] at (\xc,\axisy-0.40) {Incorporate major datasets;\\event-ID service;\\DOI minting};
+\node[phase] at (\xd,\axisy-0.40) {National core\\service; annual\\FAIR reporting};
+\end{tikzpicture}%
