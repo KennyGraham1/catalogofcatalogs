@@ -1,7 +1,7 @@
 /**
- * Merge-engine reproduction for the SRL paper's worked example (Section 5).
+ * Merge-engine reproduction for the SRL paper's worked example.
  *
- * The tabulated funnel counts in Section 5 (218,000 -> 169,000 unique, i.e. a 50%
+ * The tabulated funnel counts in the worked example (218,000 -> 169,000 unique, i.e. a 50%
  * duplicate overlap of the smaller catalogue) are DESIGN CONSTANTS of the synthetic
  * construction, drawn in paper/figures/generate_figures.py. This test instead runs the
  * ACTUAL CofC merge matching engine (groupMatchingEvents from lib/merge) on a seeded

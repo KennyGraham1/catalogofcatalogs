@@ -22,7 +22,7 @@
 \usepackage{enumitem}
 \usepackage{siunitx}
 \usepackage{tikz}
-\usetikzlibrary{positioning, arrows.meta}
+\usetikzlibrary{positioning, arrows.meta, fit}
 \usepackage{url}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
@@ -253,7 +253,7 @@ gaps typically associated with errors of tens of kilometres.
 The standard desktop tool for catalogue-based seismicity analysis is
 ZMAP \citep{wiemer2001}, which implements GR analysis, spatial $b$-value
 mapping, declustering, and Omori-law fitting in a MATLAB environment.
-While it covers a wide range of analyses, ZMAP requires MATLAB licensing and
+It requires MATLAB licensing and
 familiarity with its GUI; it can compare two catalogues to flag identical
 events but does not reconcile them into a merged catalogue, offers no
 quality-scored event selection, and does not read the QuakeML exchange format.  ObsPy \citep{obspy2010} provides a Python
@@ -511,9 +511,9 @@ intermediate state and provenance persisted in the database at every step.
 \begin{tikzpicture}[
   node distance=5mm and 7mm,
   box/.style={draw, rounded corners, align=center, font=\footnotesize,
-              minimum height=11mm, text width=21mm, fill=blue!6},
+              minimum height=11mm, text width=23mm, fill=blue!6},
   store/.style={draw, align=center, font=\footnotesize, minimum height=9mm,
-                text width=70mm, fill=gray!10},
+                fill=gray!10},
   arr/.style={-{Latex[length=2mm]}, thick}
 ]
   \node[box] (ingest) {Ingest \&\\normalise\\{\scriptsize CSV, GeoJSON,}\\{\scriptsize QuakeML, FDSN}};
@@ -525,12 +525,14 @@ intermediate state and provenance persisted in the database at every step.
   \draw[arr] (qc)--(merge);
   \draw[arr] (merge)--(analysis);
   \draw[arr] (analysis)--(export);
-  \node[store, below=7mm of merge] (db) {MongoDB persistence: catalogues, event-level provenance, versions};
-  \draw[arr, {Latex[length=2mm]}-{Latex[length=2mm]}] (ingest.south) -- (db.north -| ingest.south);
+  \node[store, text width=70mm, below=9mm of merge] (db) {MongoDB persistence: catalogues, event-level provenance, versions};
+  % Stages above the store connect straight down; the outer two elbow into its
+  % sides, so no arrow ends in empty space.
+  \draw[arr, {Latex[length=2mm]}-{Latex[length=2mm]}] (ingest.south) |- (db.west);
   \draw[arr, {Latex[length=2mm]}-{Latex[length=2mm]}] (qc.south) -- (db.north -| qc.south);
-  \draw[arr, {Latex[length=2mm]}-{Latex[length=2mm]}] (merge.south) -- (db);
+  \draw[arr, {Latex[length=2mm]}-{Latex[length=2mm]}] (merge.south) -- (db.north);
   \draw[arr, {Latex[length=2mm]}-{Latex[length=2mm]}] (analysis.south) -- (db.north -| analysis.south);
-  \draw[arr, {Latex[length=2mm]}-{Latex[length=2mm]}] (export.south) -- (db.north -| export.south);
+  \draw[arr, {Latex[length=2mm]}-{Latex[length=2mm]}] (export.south) |- (db.east);
 \end{tikzpicture}
 \caption{The CofC processing pipeline.  Heterogeneous catalogues are ingested
 and normalised to a canonical schema, quality-scored per event on import
@@ -671,10 +673,9 @@ GeoNet live import & (FDSN WS)        & Configurable date range; imported direct
 \section{Quality Scoring and Validation}
 \label{sec:quality}
 
-A distinguishing feature of the platform is a transparent, event-level quality
-index computed at import and available to every downstream step (merging,
-filtering, and analysis).  This section defines that index and the companion
-cross-field consistency checks.
+CofC computes an event-level quality index on import and makes it available to
+every downstream step: merging, filtering, and analysis.  This section defines
+that index and the companion cross-field consistency checks.
 
 \subsection{Event-level quality index}
 
@@ -826,7 +827,7 @@ are also provided by catalogue-building toolkits \citep{oqmbtk}.  Pairwise
 matches are assembled into duplicate groups by a greedy anchor sweep: each
 unprocessed event in turn becomes an anchor, every later event within its
 matching window joins that group, and grouped events are not reconsidered.
-This is deliberately more conservative than single-linkage clustering, which
+The sweep is deliberately more conservative than single-linkage clustering, which
 would merge events linked only transitively (A--B and B--C but not A--C);
 connected-component (transitive) grouping is used internally only to re-group
 clusters that fail the group-consistency checks, not for the primary grouping.
@@ -890,6 +891,31 @@ systematically favours solutions from denser networks; it is a reproducible,
 explicit preference, not a network-neutral one, and we recommend inspecting the
 per-strategy provenance split (Section~\ref{sec:example}) as a bias
 diagnostic.
+
+Figure~\ref{fig:app_merge} shows the configuration and preview steps as the user
+encounters them: the matching windows and merge strategy are set explicitly, and
+the duplicate groups, their time/distance/magnitude separations, and any groups
+failing the validity gates are reported for inspection before the merge is
+committed.
+
+\begin{figure}[p]
+  \centering
+  \includegraphics[width=0.80\linewidth]{figures/app_merge_c.png}\\[5pt]
+  \includegraphics[width=0.80\linewidth]{figures/app_preview_crop.png}
+  \caption{%
+    The merge workflow in the browser (CofC \texttt{v0.1.0}).
+    \textit{Top:} the \emph{Configure} step, with the matching windows
+    (equations~\eqref{eq:dt}--\eqref{eq:dd}), the conflict-resolution strategy
+    (Table~\ref{tab:strategies}), and an in-app statement of how the adaptive
+    multipliers widen those baselines with magnitude and depth.
+    \textit{Bottom:} the \emph{Preview} step, a dry run reporting each duplicate
+    group's time, distance, and magnitude separation and flagging groups that
+    fail the physical-validity gates, before any merge is committed.
+    Data are a reduced-scale ($9{,}500$-event) synthetic catalogue pair with the
+    same 50\,\% overlap as the worked example (Section~\ref{sec:example}).
+  }
+  \label{fig:app_merge}
+\end{figure}
 
 \section{Statistical Analyses}
 \label{sec:analysis}
@@ -1129,7 +1155,7 @@ merged catalogue retains 143\,650 events (85\% of the 169\,000 unique events).
 The 25\,350 removed events are predominantly offshore Agency~B sources with
 azimuthal gap $> 180^{\circ}$ and $\sigma_{\text{loc}} > 10$~km, exactly
 the population visible in the tail of Figure~\ref{fig:gap}.  Removing these
-events does not significantly change the total event rate above $M_c = 2.0$
+events barely changes the total event rate above $M_c = 2.0$
 for onshore New Zealand, but it eliminates a spatially biased subset that
 would otherwise distort spatial $b$-value maps along the Hikurangi margin.
 
@@ -1473,16 +1499,18 @@ invariant).  The GeoNet FDSN Event Web Service, from which users can obtain the
 live New Zealand catalogue, is available at \url{https://www.geonet.org.nz/}.
 The ISC-GEM catalogue \citep{storchak2013} is available at
 \url{https://www.isc.ac.uk/iscgem/}.  All CofC source code and documentation
-URLs are given in Section~\ref{sec:software}.
+URLs are given in Section~\ref{sec:software}.  Additional screen captures of the
+platform's analysis pages, using the same synthetic catalogues, are provided in
+the electronic supplement.
 
 % --- Bibliography -------------------------------------------
 \bibliographystyle{apalike}
 \bibliography{references}
 
 % --- Figures ---------------------------------------------------
-% Data figures, in first in-text-citation order: map (Fig. 3), gap (Fig. 4),
-% quality (Fig. 5), FMD (Fig. 6), funnel (Fig. 7).  (Fig. 1 is the coverage map;
-% Fig. 2 is the TikZ workflow schematic in Section 2.)
+% Data figures follow, in first in-text-citation order.  Figure numbers are
+% assigned by LaTeX and shift whenever a figure is added, so they are
+% deliberately not listed here.
 % Reproduced by figures/generate_figures.py (seeded; see Data and Resources).
 % File-name prefixes (fig1_/fig2_/fig3_) are historical, not figure numbers.
 \clearpage
@@ -1495,13 +1523,14 @@ URLs are given in Section~\ref{sec:software}.
     overlaid: the GeoNet-like primary catalogue (blue circles) and the
     secondary Agency~B catalogue (orange triangles).  The inset zooms on the
     boxed region and shows that the same earthquake is reported by both
-    agencies with a small offset; such events are flagged as duplicate candidates
+    agencies with a small offset, with a 20~km scale bar for comparison against
+    the matching window; such events are flagged as duplicate candidates
     when they fall within the time and distance window
     (equations~\eqref{eq:dt}--\eqref{eq:dd}); magnitude consistency is then checked
     as a separate per-group gate.  \textit{(b)}~The merged catalogue
-    coloured by provenance: events seen only by GeoNet (blue), events present
-    in both and resolved to a single solution (green), and events seen only by
-    Agency~B (orange).  The Agency-B-only events concentrate offshore along the
+    coloured by provenance: events seen only by GeoNet (blue circles), events
+    present in both and resolved to a single solution (teal squares), and events
+    seen only by Agency~B (orange triangles).  The Agency-B-only events concentrate offshore along the
     Hikurangi margin, carry high azimuthal gap, and are the population removed
     by quality filtering (Section~\ref{sec:example}).  Marker size scales with
     magnitude.  Data are synthetic and for illustration only.
@@ -1529,8 +1558,11 @@ URLs are given in Section~\ref{sec:software}.
 \centering
 \begin{tikzpicture}[
   font=\footnotesize,
-  dim/.style={draw, rounded corners, align=left, text width=37mm,
-              minimum height=8.5mm, fill=blue!6, inner sep=3pt},
+  % Wide enough that the attribute lists set without hyphenation
+  % ("un-certainty", "sta-tion/phase", "re-view" in narrower boxes).
+  dim/.style={draw, rounded corners, align=left, text width=46mm,
+              minimum height=8.5mm, fill=blue!6, inner sep=3pt,
+              execute at begin node={\hyphenpenalty=10000\exhyphenpenalty=10000\relax}},
   qnode/.style={draw, rounded corners, align=center, text width=23mm,
                 minimum height=17mm, fill=teal!12},
   grade/.style={draw, align=left, text width=25mm, minimum height=4.3mm,
@@ -1576,11 +1608,12 @@ conservatively.}
   \includegraphics[width=\linewidth]{figures/fig3_fmd.pdf}
   \caption{%
     Frequency-magnitude distributions (FMD) for the synthetic New Zealand
-    catalogue before (grey symbols/bars) and after (black) Gardner-Knopoff
-    declustering.  \textit{Left:} cumulative FMD with maximum-likelihood GR
-    fits (dashed line: before; solid line: after) above $M_c = 2.0$ (blue
-    dotted line).  \textit{Right:} non-cumulative FMD showing the excess of
-    small events contributed by aftershock sequences.  Declustering removes
+    catalogue before (grey open circles and bars) and after (blue filled squares
+    and step outline) Gardner-Knopoff declustering.  \textit{(a)}~Cumulative FMD
+    with maximum-likelihood GR fits (grey dashed line: before; blue solid line:
+    after) above $M_c = 2.0$ (dotted vertical line); the shallower slope of the
+    declustered fit is the $\hat{b}$ shift quoted below.  \textit{(b)}~Non-cumulative
+    FMD showing the excess of small events contributed by aftershock sequences.  Declustering removes
     these clustered small events, shifting $\hat{b}$ from $1.02 \pm 0.005$
     (before declustering) to $0.94 \pm 0.005$ (declustered) and removing 23\% of
     events.  Data are synthetic and for illustration only (see

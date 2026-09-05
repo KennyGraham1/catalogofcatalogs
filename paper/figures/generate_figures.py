@@ -1,8 +1,8 @@
 """
-Reproduce the Section 5 worked example for the CofC SRL submission.
+Reproduce the worked example for the CofC SRL submission.
 
 This single, seeded script reproduces every quantity quoted in the worked
-example (Section 5) and writes the three paper figures.  It (i) sizes the two
+example and writes the three paper figures.  It (i) sizes the two
 synthetic catalogues and their overlap, (ii) derives the duplicate-aware merge
 and quality-filter bookkeeping arithmetically (these are definitional in the
 worked example), (iii) simulates representative azimuthal-gap, quality, depth
@@ -12,14 +12,13 @@ the quality-filtered catalogue before and after declustering.
 All randomness is seeded with numpy.default_rng(42); re-running reproduces the
 figures and the printed summary exactly.
 
-This script writes the three *data* figures (the paper's Figure 1 is a
-separate TikZ workflow schematic). In the compiled paper they appear as
-Figures 2-4, in first in-text-citation order:
-  fig1_map.pdf   -- merge illustration (inputs + provenance)   -> Figure 2
-  fig2_gap.pdf   -- azimuthal-gap distributions                -> Figure 3
-  fig3_fmd.pdf   -- FMD before/after declustering              -> Figure 4
-(The fig1_/fig2_/fig3_ filename prefixes are historical and do not match the
-final figure numbers.)
+This script writes the three *data* figures of the paper:
+  fig1_map.pdf   -- merge illustration (inputs + provenance)
+  fig2_gap.pdf   -- azimuthal-gap distributions
+  fig3_fmd.pdf   -- FMD before/after declustering
+The fig1_/fig2_/fig3_ filename prefixes are historical; the figures are
+numbered by LaTeX in first in-text-citation order, so the prefixes do not
+track the printed figure numbers.
 """
 
 import numpy as np
@@ -54,7 +53,7 @@ TEAL   = '#0D9488'
 GRAY   = '#6B7280'
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Worked-example bookkeeping (Section 5) — definitional, exact
+#  Worked-example bookkeeping — definitional, exact
 # ══════════════════════════════════════════════════════════════════════════════
 N_GEONET   = 120_000                       # GeoNet-like primary catalogue
 N_AGENCYB  = 98_000                        # secondary Agency B catalogue
@@ -151,7 +150,7 @@ def make_map():
     proj = ccrs.PlateCarree()
     ext  = [165.5, 179.8, -47.6, -34.0]
 
-    # Provenance groups, rendered in the 71 : 49 : 49 proportion of Section 5.
+    # Provenance groups, rendered in the 71 : 49 : 49 proportion of the worked example.
     n_geo_only, n_dup, n_agb_only = 260, 180, 180
     geo_lon, geo_lat, geo_mag = _sample_regions(n_geo_only)                 # GeoNet only
     dup_lon, dup_lat, dup_mag = _sample_regions(n_dup)                      # seen by both
@@ -180,13 +179,15 @@ def make_map():
     axA.set_title('(a) Two input catalogues')
     axA.legend(loc='lower left', fontsize=7, framealpha=0.92, edgecolor=GRAY, markerscale=1.2)
 
-    # zoom box over a populated region, and an inset showing matched pairs
+    # Zoom box over a populated region, with the inset placed in the empty Tasman
+    # Sea (upper left) so it does not cover coastline or events, and connected to
+    # the box it magnifies.
     box = [175.1, 177.4, -41.5, -39.6]                       # lon0, lon1, lat0, lat1
     axA.add_patch(mpatches.Rectangle((box[0], box[2]), box[1]-box[0], box[3]-box[2],
-                  fill=False, ec='black', lw=0.9, transform=proj, zorder=6))
+                  fill=False, ec='#111827', lw=0.9, transform=proj, zorder=6))
     sel = np.where((dup_lon > box[0]) & (dup_lon < box[1]) &
                    (dup_lat > box[2]) & (dup_lat < box[3]))[0][:16]
-    axI = axA.inset_axes([0.50, 0.05, 0.46, 0.40])
+    axI = axA.inset_axes([0.015, 0.60, 0.40, 0.345])
     for i in sel:
         axI.plot([dgeo_lon[i], dagb_lon[i]], [dgeo_lat[i], dagb_lat[i]],
                  '-', color=GRAY, lw=0.7, zorder=1)
@@ -194,12 +195,23 @@ def make_map():
                 edgecolors='white', linewidths=0.3, zorder=2)
     axI.scatter(dagb_lon[sel], dagb_lat[sel], s=26, c=ORANGE, marker='^',
                 edgecolors='white', linewidths=0.3, zorder=2)
-    axI.set_title('matched duplicate pairs', fontsize=7)
+    axI.set_title('Matched duplicate pairs\n'
+                  r'($|\Delta t|\leq 60$ s, $d\leq 50$ km)', fontsize=7, pad=3)
     axI.set_xticks([]); axI.set_yticks([])
+    axI.set_facecolor('white')
     for s in axI.spines.values():
-        s.set_edgecolor('black')
-    axI.text(0.5, -0.10, r'paired if $|\Delta t|\leq 60$ s and $d\leq 50$ km',
-             transform=axI.transAxes, ha='center', va='top', fontsize=6)
+        s.set_edgecolor('#111827')
+    # Scale bar (20 km) so the pair offsets can be judged against the 50 km window.
+    x0, x1 = axI.get_xlim(); y0, y1 = axI.get_ylim()
+    km_deg = 20.0 / (111.32 * np.cos(np.deg2rad(40.5)))      # 20 km in degrees lon
+    bx = x0 + 0.07 * (x1 - x0); by = y0 + 0.08 * (y1 - y0)
+    axI.plot([bx, bx + km_deg], [by, by], '-', color='#111827', lw=1.6, zorder=4)
+    axI.text(bx + km_deg / 2, by + 0.02 * (y1 - y0), '20 km', ha='center',
+             va='bottom', fontsize=6, color='#111827')
+    # Connector from the zoom box to the inset.
+    axA.indicate_inset(bounds=[box[0], box[2], box[1]-box[0], box[3]-box[2]],
+                       inset_ax=axI, edgecolor='#111827', linewidth=0.7,
+                       alpha=0.85, zorder=6)
 
     # ---- panel (b): merged catalogue coloured by provenance ----
     axB = fig.add_subplot(1, 2, 2, projection=proj)
@@ -207,7 +219,9 @@ def make_map():
     axB.scatter(geo_lon, geo_lat, s=_msize(geo_mag), c=BLUE, alpha=0.6,
                 edgecolors='white', linewidths=0.2, transform=proj, zorder=3,
                 rasterized=True, label='GeoNet only (71,000)')
-    axB.scatter(dgeo_lon, dgeo_lat, s=_msize(dup_mag), c=GREEN, alpha=0.65,
+    # Teal rather than green for the duplicate class: green/orange separate by only
+    # dE 6.9 under deuteranopia, teal/orange by 13.8.
+    axB.scatter(dgeo_lon, dgeo_lat, s=_msize(dup_mag), c=TEAL, alpha=0.65, marker='s',
                 edgecolors='white', linewidths=0.2, transform=proj, zorder=4,
                 rasterized=True, label='Resolved duplicate (49,000)')
     axB.scatter(agb_lon, agb_lat, s=_msize(agb_mag), c=ORANGE, alpha=0.6, marker='^',
@@ -215,12 +229,12 @@ def make_map():
                 rasterized=True, label='Agency B only (49,000)')
     axB.set_title('(b) Merged catalogue by provenance')
     axB.legend(loc='lower left', fontsize=6.6, framealpha=0.92, edgecolor=GRAY)
-    axB.text(0.97, 0.04, 'offshore Agency-B-only events\ncarry high azimuthal gap',
-             transform=axB.transAxes, ha='right', va='bottom', fontsize=6,
+    axB.text(0.975, 0.045, 'offshore Agency-B-only events\ncarry high azimuthal gap',
+             transform=axB.transAxes, ha='right', va='bottom', fontsize=6.5,
              color=ORANGE, style='italic')
 
-    fig.text(0.5, 0.005, 'Synthetic data for illustration; marker size $\\propto$ magnitude '
-             '(see Section 5).', ha='center', fontsize=7, color=GRAY, style='italic')
+    fig.text(0.5, 0.005, 'Synthetic data for illustration; marker size $\\propto$ magnitude.',
+             ha='center', fontsize=7, color=GRAY, style='italic')
     fig.tight_layout(rect=[0, 0.02, 1, 1])
     fig.savefig(OUT / 'fig1_map.pdf', bbox_inches='tight', dpi=150)
     fig.savefig(OUT / 'fig1_map.png', dpi=300, bbox_inches='tight')
@@ -244,7 +258,7 @@ def make_gap_distribution():
 
     # Representative per-event quality scores (network/location dominated):
     # higher gap -> lower score, mirroring the implemented scorer's weighting.
-    # The level is pinned so the per-catalogue medians match Section 5.2 (72 / 58)
+    # The level is pinned so the per-catalogue medians match the worked example (72 / 58)
     # while the gap correlation and spread remain genuinely simulated.
     def pin_median(raw, target):
         return np.clip(raw + (target - np.median(raw)), 0, 100)
@@ -252,23 +266,36 @@ def make_gap_distribution():
     q_b      = pin_median(-gap_b * 0.22 - rng.normal(0, 9, len(gap_b)), 58)
     med_geonet, med_b = np.median(q_geonet), np.median(q_b)
 
+    # Two overlaid, alpha-blended fills would mix to a third colour that is in
+    # neither legend entry, so each distribution is drawn as a step outline with
+    # only a faint fill: the curves stay individually readable where they overlap.
     bins = np.arange(0, 361, 20)
     fig, ax = plt.subplots(figsize=(7.2, 3.6))
-    ax.hist(gap_geonet, bins=bins, density=True, alpha=0.75, color=BLUE,
-            label='GeoNet', edgecolor='white', linewidth=0.4)
-    ax.hist(gap_b, bins=bins, density=True, alpha=0.65, color=ORANGE,
-            label='Agency B', edgecolor='white', linewidth=0.4)
-    ax.axvline(180, color='black', linestyle='--', linewidth=0.9, label=r'$180°$ threshold')
-    ax.axvspan(180, 360, alpha=0.07, color='red', zorder=0)
-    ax.text(270, ax.get_ylim()[1] * 0.85, 'Poor coverage\n(gap > 180°)',
-            ha='center', va='top', fontsize=8, color='firebrick', style='italic')
+    ax.axvspan(180, 360, color='#FEE2E2', alpha=0.55, zorder=0, lw=0)
+    for data, colour, lab in ((gap_geonet, BLUE, 'GeoNet'), (gap_b, ORANGE, 'Agency B')):
+        ax.hist(data, bins=bins, density=True, histtype='stepfilled',
+                color=colour, alpha=0.12, zorder=2)
+        ax.hist(data, bins=bins, density=True, histtype='step',
+                color=colour, linewidth=1.6, label=lab, zorder=3)
+    ax.axvline(180, color='#374151', linestyle='--', linewidth=1.0,
+               label=r'$180°$ threshold', zorder=4)
     ax.set_xlabel('Azimuthal gap (degrees)'); ax.set_ylabel('Probability density')
     ax.set_xlim(0, 360); ax.set_xticks(range(0, 361, 45))
-    ax.legend(framealpha=0.9, loc='upper left')
+    ax.set_ylim(0, None)
+    ytop = ax.get_ylim()[1]
+    ax.text(228, ytop * 0.975, 'Poor coverage (gap > 180°)',
+            ha='center', va='top', fontsize=8, color='#B91C1C', style='italic')
+    # Direct labels on the curves keep identity off colour alone.
+    ax.annotate(f'GeoNet\n{pct_geonet:.0f}% above 180°', xy=(86, 0.0094),
+                xytext=(46, 0.0086), fontsize=8, color=BLUE, ha='center',
+                arrowprops=dict(arrowstyle='-', color=BLUE, lw=0.7))
+    ax.annotate(f'Agency B\n{pct_b:.0f}% above 180°', xy=(300, 0.0027),
+                xytext=(300, 0.0052), fontsize=8, color=ORANGE, ha='center',
+                arrowprops=dict(arrowstyle='-', color=ORANGE, lw=0.7))
+    ax.legend(framealpha=0.95, loc='upper right', fontsize=8.5)
     ax.set_title('Azimuthal gap distribution: GeoNet vs Agency B')
-    ax.annotate(f'GeoNet: {pct_geonet:.0f}% gap > 180°\nAgency B: {pct_b:.0f}% gap > 180°',
-                xy=(0.98, 0.97), xycoords='axes fraction', ha='right', va='top', fontsize=8,
-                bbox=dict(boxstyle='round,pad=0.3', fc='white', ec=GRAY, alpha=0.85))
+    ax.grid(True, axis='y', lw=0.3, color='#D1D5DB', alpha=0.7)
+    ax.set_axisbelow(True)
 
     fig.tight_layout()
     fig.savefig(OUT / 'fig2_gap.pdf'); fig.savefig(OUT / 'fig2_gap.png', dpi=300)
@@ -313,7 +340,11 @@ def make_fmd():
     nc_all, _  = np.histogram(np.round(all_mag / dm) * dm,  bins=np.append(bins, bins[-1] + dm))
     nc_main, _ = np.histogram(np.round(main_mag / dm) * dm, bins=np.append(bins, bins[-1] + dm))
 
-    a_all, a_main = np.log10(cum_all[0]), np.log10(cum_main[0])
+    # GR intercept: log10 N(M) = a - b M, anchored on N at Mc, so a = log10 N(Mc) + b*Mc.
+    # (Omitting the b*Mc term offsets the fitted line by 10^(b*Mc) ~ 100x and lifts it
+    #  clear of the data it is fitting.)
+    a_all  = np.log10(cum_all[0])  + b_all  * MC
+    a_main = np.log10(cum_main[0]) + b_main * MC
     fit_m = np.linspace(MC, 7.2, 200)
     fit_all  = 10 ** (a_all  - b_all  * fit_m)
     fit_main = 10 ** (a_main - b_main * fit_m)
@@ -321,31 +352,49 @@ def make_fmd():
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.2))
     ax = axes[0]
     ma, mm = cum_all > 0, cum_main > 0
-    ax.semilogy(bins[ma], cum_all[ma], 'o', color=GRAY, ms=4, alpha=0.7,
-                label='Before declustering')
-    ax.semilogy(bins[mm], cum_main[mm], 's', color='black', ms=4, alpha=0.9,
-                label='After declustering')
-    ax.semilogy(fit_m, fit_all,  '--', color=GRAY,  lw=1.5)
-    ax.semilogy(fit_m, fit_main, '-',  color='black', lw=1.5)
-    ax.axvline(MC, color='steelblue', linestyle=':', linewidth=1.2, label=f'$M_c = {MC}$')
-    ax.text(0.98, 0.97,
-            f'Before: $\\hat{{b}} = {b_all:.2f} \\pm {s_all:.3f}$\n'
-            f'After:  $\\hat{{b}} = {b_main:.2f} \\pm {s_main:.3f}$',
-            transform=ax.transAxes, ha='right', va='top', fontsize=9,
-            bbox=dict(boxstyle='round,pad=0.35', fc='white', ec=GRAY, alpha=0.9))
-    ax.set_xlabel('Magnitude'); ax.set_ylabel('Cumulative N ($\\geq M$)')
-    ax.set_xlim(MC - 0.2, 7.5); ax.set_title('Cumulative frequency-magnitude distribution')
-    ax.legend(loc='lower left', handlelength=1.5)
+    # Before: open circles, so the (nearly coincident) after-series stays visible
+    # through them.  After: smaller filled squares.
+    ax.semilogy(bins[ma], cum_all[ma], 'o', mfc='none', mec=GRAY, mew=0.9, ms=6.0,
+                linestyle='none', label='Before declustering')
+    ax.semilogy(bins[mm], cum_main[mm], 's', color=BLUE, ms=3.2,
+                linestyle='none', label='After declustering')
+    ax.semilogy(fit_m, fit_all,  '--', color=GRAY, lw=1.4,
+                label=fr'GR fit, $\hat{{b}} = {b_all:.2f}$')
+    ax.semilogy(fit_m, fit_main, '-',  color=BLUE, lw=1.4,
+                label=fr'GR fit, $\hat{{b}} = {b_main:.2f}$')
+    ax.axvline(MC, color=GRAY, linestyle=':', linewidth=1.0)
+    ax.text(MC + 0.06, 1.4, f'$M_c = {MC}$', fontsize=8, color=GRAY,
+            rotation=90, va='bottom', ha='left')
+    ax.set_xlabel('Magnitude'); ax.set_ylabel(r'Cumulative $N\,(\geq M)$')
+    ax.set_xlim(MC - 0.2, 7.5)
+    ax.set_ylim(0.5, cum_all[0] * 3)
+    ax.set_title('(a) Cumulative frequency-magnitude distribution')
+    ax.legend(loc='upper right', handlelength=1.8, framealpha=0.92, fontsize=8.5)
+    ax.grid(True, which='major', axis='both', lw=0.3, color='#D1D5DB', alpha=0.7)
+    ax.set_axisbelow(True)
 
+    # Non-cumulative: filled bars for "before", dark step outline for "after", so
+    # the declustered subset is legible where the two nearly coincide.
     ax2 = axes[1]
     bin_c = bins + dm / 2
-    ax2.bar(bin_c, nc_all,  width=dm * 0.85, color=GRAY,  alpha=0.6, label='Before declustering')
-    ax2.bar(bin_c, nc_main, width=dm * 0.85, color='black', alpha=0.7, label='After declustering')
-    ax2.axvline(MC, color='steelblue', linestyle=':', linewidth=1.2, label=f'$M_c = {MC}$')
+    ax2.bar(bin_c, nc_all, width=dm * 0.9, color=GRAY, alpha=0.35,
+            edgecolor='none', label='Before declustering')
+    ax2.step(np.append(bin_c - dm / 2, bin_c[-1] + dm / 2),
+             np.append(nc_main, nc_main[-1]), where='post',
+             color=BLUE, lw=1.2, label='After declustering')
+    ax2.axvline(MC, color=GRAY, linestyle=':', linewidth=1.0)
+    ax2.text(MC + 0.06, 1.4, f'$M_c = {MC}$', fontsize=8, color=GRAY,
+             rotation=90, va='bottom', ha='left')
     ax2.set_xlabel('Magnitude'); ax2.set_ylabel('Number of events per bin')
-    ax2.set_yscale('log'); ax2.set_xlim(MC - 0.2, 7.5)
-    ax2.set_title('Non-cumulative frequency-magnitude distribution')
-    ax2.legend(loc='upper right', handlelength=1.5)
+    ax2.set_yscale('log'); ax2.set_xlim(MC - 0.2, 7.5); ax2.set_ylim(0.7, None)
+    ax2.set_title('(b) Non-cumulative frequency-magnitude distribution')
+    # Order the legend before/after rather than by artist type.
+    h2, l2 = ax2.get_legend_handles_labels()
+    order2 = [l2.index('Before declustering'), l2.index('After declustering')]
+    ax2.legend([h2[i] for i in order2], [l2[i] for i in order2],
+               loc='upper right', handlelength=1.8, framealpha=0.92, fontsize=8.5)
+    ax2.grid(True, which='major', axis='y', lw=0.3, color='#D1D5DB', alpha=0.7)
+    ax2.set_axisbelow(True)
 
     pct = (len(all_mag) - len(main_mag)) / len(all_mag) * 100
     fig.suptitle(f'Declustering removes {len(aftershocks):,} aftershocks ({pct:.0f}%); '
@@ -371,7 +420,7 @@ if __name__ == '__main__':
     assert N_RETAINED + N_REMOVED == N_MERGED
 
     print('\n' + '=' * 66)
-    print(' WORKED-EXAMPLE SUMMARY (Section 5) — reproduced, seed=42')
+    print(' WORKED-EXAMPLE SUMMARY — reproduced, seed=42')
     print('=' * 66)
     print(f' GeoNet-like catalogue            : {N_GEONET:>8,}')
     print(f' Agency B catalogue               : {N_AGENCYB:>8,}')

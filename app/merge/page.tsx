@@ -1509,10 +1509,17 @@ export default function MergePage() {
                             <h4 className="text-sm font-medium text-blue-900 mb-1">
                               Adaptive Thresholds Active
                             </h4>
+                            {/* Derived from the engine's actual multipliers (lib/merge.ts):
+                                time 1.0/1.5/2.0/3.0 and distance 1.0/1.5/2.5/4.0 across the
+                                M<4 / 4-5.5 / 5.5-7 / >=7 bands, with a further 1.2x (100-300 km)
+                                or 1.5x (>300 km) on distance. Hard-coding example windows here
+                                let the text drift out of step with the configured baselines. */}
                             <p className="text-xs text-blue-800 leading-relaxed">
-                              The merge algorithm automatically adjusts matching thresholds based on event magnitude and depth.
-                              Small events (M&lt;4.0) use tighter windows (25 km, 30s), while large events (M&gt;7.0) use wider windows (200 km, 300s).
-                              Deep events (&gt;300 km) get 1.5× larger distance thresholds. Your configured values serve as baselines.
+                              The merge algorithm automatically widens the matching thresholds for larger and deeper events.
+                              Your configured values ({timeThreshold}s, {distanceThreshold} km) apply as-is below M4.0
+                              and are scaled up with magnitude, reaching {timeThreshold * 3}s and {distanceThreshold * 4} km
+                              at M7.0 and above. Events deeper than 300 km get a further 1.5× on distance
+                              (1.2× between 100 and 300 km).
                             </p>
                           </div>
                         </div>

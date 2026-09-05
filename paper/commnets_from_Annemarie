@@ -1,0 +1,92 @@
+swop the order to go with the acronum? :: readily \emph{interoperable}; few carry the persistent identifiers and versioning needed to \emph{access}   
+
+Is there a reason that you do not cite Chris' Rollins integraded catalog for NSHM integrated catalogue here and at other places in the document? If adding the citation, I would recommend slight rewrite as anpther example of cost. ::: and combining catalogues remains a manual, error-prone task
+
+ is "FAIR" services a standard term? Or are you makint it one? ::; FAIR services 
+
+
+to reword but keep bullet points
+ \begin{itemize}
+  \item researchers can readily discover the catalogues relevant to their study;
+  \item catalogues from temporary deployments remain visible and usable after the projects that produced them conclude;
+  \item catalogue versions are citable and reproducible;
+  \item differences between catalogues are documented and traceable;
+  \item data custodians retain stewardship of their datasets; and
+  \item hazard and risk projects spend less effort locating and harmonising information, and more on analysis.
+\end{itemize}
+
+
+
+not quite a sentence, at least not one I understand:::  ather than a verbatim record of them, with representative examples and characteristic strengths and limitations.
+
+
+is that short for localisation method?:: Precise depths, uniform local methods
+
+Extend the record by centuries; large uncertainties,:: Extend the record by centuries; large uncertainties,
+
+
+CHallange to put everything tgeteher since slow slip catalogues are by nature very short. Might need splitting up? :: Unique long-timescale
+
+Not sure what is meant by that?::;  NSHM-derived snapshots;
+
+
+having problems understanding this word in this context ::: (ComCat) federates 
+
+Each what? Format?::: } summarises each. 
+
+Is it appropriate to lump them together? Can you split up? I would assume Swiss is far more detailed? Would it be useful to include ISC as well?:: Switzerland (SED) / EPOS
+
+again not so sure what it means::: Enhance federated discovery
+
+
+Maybe say "is proposed to" because this still needs to be decided?::: ) will validate the prototype
+
+it is more than the coordinating layer?:: The framework has a single coordinating layer
+
+
+what exactly do you mean by "FAIR service"? Does this need a definitation as term?:: richer FAIR services 
+
+"illustrative" instead?::  are motivating examples
+
+
+needs explaining ::: distinct from \emph{aggregation}:
+
+is that explained anywhere?:: the ISC type hierarchy a
+
+
+Remove RSQSim but say something about it in the main text? 
+
+
+needs re-ordering start here from A \section{Glossary} {RSQSim Synthetic Earthquake Catalogue + 
+
+
+remove syntethic catalogues? synthetic (RSQSim) catalogues.
+
+
+Introduction of GeoNet programme and dedicated funding for earthquake location systemt is missing::: (targeted arrays and double-difference relocation).] 
+
+
+Maybe this example is getting a bit overused? The real problem with the magnitude was the introduction of SesiComp without consideration of making the magnitude consistent with what had been reported before::: the 2022 National Seismic Hazard Model, which required dedicated effort to standardise magnitudes across sources.
+
+
+ the wording does not quite make sense; maybe "current version" ?:: working population
+
+
+ here is my "challenge word" again - can you replace it with another one with the same meaning? :: federated 
+
+
+This is for the catalog compilations 
+
+remove syntethic catalogues? synthetic (RSQSim) catalogues.
+
+
+Introduction of GeoNet programme and dedicated funding for earthquake location systemt is missing::: (targeted arrays and double-difference relocation).] 
+
+
+Maybe this example is getting a bit overused? The real problem with the magnitude was the introduction of SesiComp without consideration of making the magnitude consistent with what had been reported before::: the 2022 National Seismic Hazard Model, which required dedicated effort to standardise magnitudes across sources.
+
+
+ the wording does not quite make sense; maybe "current version" ?:: working population
+
+
+ here is my "challenge word" again - can you replace it with another one with the same meaning? :: federated 

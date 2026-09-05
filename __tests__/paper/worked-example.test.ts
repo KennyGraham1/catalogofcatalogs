@@ -1,5 +1,5 @@
 /**
- * Platform-exercising reproduction for the SRL paper's worked example (Section 5).
+ * Platform-exercising reproduction for the SRL paper's worked example.
  *
  * Unlike paper/figures/generate_figures.py (a standalone NumPy script that draws the
  * figures), this test runs the ACTUAL CofC TypeScript estimators on a seeded synthetic
