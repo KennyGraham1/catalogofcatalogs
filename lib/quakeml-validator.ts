@@ -20,6 +20,43 @@ export interface QuakeMLValidationResult {
 }
 
 /**
+ * Check that element start and end tags nest correctly.
+ */
+function findStructuralError(xmlContent: string): string | null {
+  const markup = xmlContent
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, '')
+    .replace(/<\?[\s\S]*?\?>/g, '')
+    .replace(/<!DOCTYPE[^>]*>/gi, '');
+
+  // Attribute values may legally contain '>', so quoted runs are matched as units.
+  const tagPattern = /<(\/?)([A-Za-z_][\w.:-]*)((?:"[^"]*"|'[^']*'|[^>"'])*?)(\/?)>/g;
+  const stack: string[] = [];
+
+  let match: RegExpExecArray | null;
+  while ((match = tagPattern.exec(markup)) !== null) {
+    const [, closing, name, , selfClosing] = match;
+
+    if (closing) {
+      const open = stack.pop();
+      if (open !== name) {
+        return open === undefined
+          ? `XML document is malformed (unexpected closing tag </${name}>)`
+          : `XML document is malformed (</${name}> closes <${open}>)`;
+      }
+    } else if (!selfClosing) {
+      stack.push(name);
+    }
+  }
+
+  if (stack.length > 0) {
+    return `XML document is malformed (unclosed element <${stack[stack.length - 1]}>)`;
+  }
+
+  return null;
+}
+
+/**
  * Validate QuakeML XML structure
  */
 export function validateQuakeMLStructure(xmlContent: string): QuakeMLValidationResult {
@@ -45,8 +82,11 @@ export function validateQuakeMLStructure(xmlContent: string): QuakeMLValidationR
     });
   }
 
-  // Count events
-  const eventMatches = xmlContent.match(/<event[^>]*>/g);
+  // Count events. The name must be terminated (\b plus a guard against '-'),
+  // otherwise the mandatory <eventParameters> container — every QuakeML 1.2 BED
+  // document has exactly one — is counted as an event. Mirrors the event tag
+  // pattern used by the QuakeML reader in lib/parsers.ts.
+  const eventMatches = xmlContent.match(/<(?:[\w.-]+:)?event\b(?![\w-])[^>]*>/g);
   const eventCount = eventMatches ? eventMatches.length : 0;
 
   if (eventCount === 0) {
@@ -57,15 +97,13 @@ export function validateQuakeMLStructure(xmlContent: string): QuakeMLValidationR
     });
   }
 
-  // Check for well-formed XML (basic check)
-  const openTags = xmlContent.match(/<[^/][^>]*>/g) || [];
-  const closeTags = xmlContent.match(/<\/[^>]+>/g) || [];
-  
-  if (openTags.length !== closeTags.length) {
+  // Check that element start/end tags nest correctly
+  const structuralError = findStructuralError(xmlContent);
+  if (structuralError) {
     errors.push({
       type: 'error',
       path: 'xml',
-      message: 'XML document appears to be malformed (mismatched tags)'
+      message: structuralError
     });
   }
 

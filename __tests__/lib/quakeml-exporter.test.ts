@@ -134,12 +134,15 @@ describe('eventToQuakeML — fallback origin (no origins JSON)', () => {
     expect(xml).toContain('<depthType>from location</depthType>');
   });
 
-  it('emits <earthModelID> from earth_model_id', () => {
-    expect(xml).toContain('<earthModelID>nz3d</earthModelID>');
+  // earthModelID / methodID are bed:ResourceReference in QuakeML-BED-1.2.xsd and
+  // must match the "(smi|quakeml):authority/path" grammar, so a bare column value
+  // ("nz3d", "NonLinLoc") is wrapped in the smi:local namespace on export.
+  it('emits <earthModelID> from earth_model_id as a conformant resource reference', () => {
+    expect(xml).toContain('<earthModelID>smi:local/earthModel/nz3d</earthModelID>');
   });
 
-  it('emits <methodID> from method_id', () => {
-    expect(xml).toContain('<methodID>NonLinLoc</methodID>');
+  it('emits <methodID> from method_id as a conformant resource reference', () => {
+    expect(xml).toContain('<methodID>smi:local/method/NonLinLoc</methodID>');
   });
 
   it('emits <originUncertainty> with horizontal_uncertainty in meters', () => {
@@ -208,8 +211,8 @@ describe('eventToQuakeML — fallback magnitude (no magnitudes JSON)', () => {
     expect(xml).toContain('<originID>quakeml:nz.geonet.org.nz/origin/scalar</originID>');
   });
 
-  it('emits <methodID> from magnitude_method_id', () => {
-    expect(xml).toContain('<methodID>weighted_mean</methodID>');
+  it('emits <methodID> from magnitude_method_id as a conformant resource reference', () => {
+    expect(xml).toContain('<methodID>smi:local/method/weighted_mean</methodID>');
   });
 
   it('uses magnitude_evaluation_mode rather than generic evaluation_mode', () => {

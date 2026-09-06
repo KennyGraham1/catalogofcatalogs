@@ -250,10 +250,9 @@ function parseGeoJSONFeature(
   // Resolve depth (km, positive down). The GeoJSON third coordinate is ambiguous across producers:
   //   * RFC 7946 §3.1.1 (and this app's own GeoJSON exporter): elevation in METRES, positive up —
   //     so a hypocentre at depth d km is encoded as -d*1000.
-  //   * USGS/ComCat & GeoNet feeds: depth in KM, positive down.
-  // Disambiguate by sign/magnitude: a value that is negative or |z| > 1000 cannot be a km depth
-  // (deepest events are ~700 km), so treat it as elevation-in-metres and convert; otherwise treat it
-  // as km depth. An explicit properties.depth/dep (km) always wins when present.
+  //   * USGS/ComCat & GeoNet feeds: depth in KM, positive down, with a small negative value for
+  //     the rare event located above the datum.
+  // An explicit properties.depth/dep (km) always wins when present.
   let depth: number | null = null;
   const propDepth = props.depth ?? props.dep;
   if (propDepth !== undefined && propDepth !== null && propDepth !== '') {
@@ -261,10 +260,13 @@ function parseGeoJSONFeature(
   } else if (thirdCoord !== undefined && thirdCoord !== null) {
     const z = Number(thirdCoord);
     if (Number.isFinite(z)) {
-      // |z| > 1000 cannot be a km depth (deepest events ~700 km) -> elevation-in-metres,
-      // convert to km. Small negatives (e.g. USGS events above the WGS84 reference) are
-      // kept as km depth, matching normalizeOptionalDepth in lib/parsers.ts.
-      depth = Math.abs(z) > 1000 ? -z / 1000 : z;
+      // Disambiguate against the depth domain this platform accepts: lib/validation.ts admits
+      // -5 km <= depth <= 1000 km. So
+      // z < -5     -> outside the km-depth domain; the only consistent reading is RFC 7946
+      // elevation in metres (a 0.8 km hypocentre is written as -800), convert.
+      // |z| > 1000 -> deeper than any earthquake (~700 km max); elevation in metres, convert.
+      // otherwise  -> km depth as written. This keeps the USGS/GeoNet -5..0 km band (events
+      depth = (z < -5 || Math.abs(z) > 1000) ? -z / 1000 : z;
     }
   }
 
@@ -310,9 +312,22 @@ function parseGeoJSONFeature(
   if (props.status)             { event.evaluation_status       = String(props.status);     detectedFields.add('evaluation_status'); }
   if (props.type)               { event.event_type              = String(props.type);       detectedFields.add('event_type'); }
 
-  // Add all other properties to the event
+  // Add all other properties to the event.
+  // Fields already resolved above are skipped so the properties bag cannot overwrite them.
+  // The location keys matter most: in RFC 7946 §3.2 the geometry member is the authoritative
+  // position of a Feature and `properties` is arbitrary application data, but exports produced
+  // from a lat/lon table by GeoPandas/QGIS/ArcGIS routinely keep `latitude`/`longitude`
+  // properties (often string-typed, sometimes stale). Letting those win silently relocated the
+  // hypocentre, or rejected the whole feature as "Latitude must be a number".
+  const geometryDerivedKeys = [
+    'time', 'datetime', 'date',
+    'magnitude', 'mag', 'm',
+    'depth', 'dep',
+    'latitude', 'lat', 'y',
+    'longitude', 'lon', 'lng', 'long', 'x',
+  ];
   Object.keys(props).forEach(key => {
-    if (!['time', 'datetime', 'date', 'magnitude', 'mag', 'm', 'depth', 'dep'].includes(key)) {
+    if (!geometryDerivedKeys.includes(key.toLowerCase())) {
       event[key] = props[key];
       detectedFields.add(key);
     }

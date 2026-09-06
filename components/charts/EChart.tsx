@@ -11,7 +11,7 @@
  *   in the top-right corner; pass `exportData` to enable the data downloads.
  */
 
-import { useMemo, useRef } from 'react';
+import { memo, useMemo, useRef } from 'react';
 import { useTheme } from 'next-themes';
 import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
@@ -37,7 +37,7 @@ export interface EChartProps {
   hideExport?: boolean;
 }
 
-export function EChart({
+export const EChart = memo(function EChart({
   option,
   exportName = 'chart',
   exportData,
@@ -86,6 +86,6 @@ export function EChart({
       )}
     </div>
   );
-}
+});
 
 export default EChart;

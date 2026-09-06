@@ -13,7 +13,8 @@ import { quakemlEventToDbFields } from './quakeml-to-db';
 import * as sax from 'sax';
 import { createReadStream } from 'fs';
 import { createInterface } from 'readline';
-import { detectDelimiter, parseLine, parseWithDelimiter, type Delimiter } from './delimiter-detector';
+import { detectDelimiter, parseLine, parseWithDelimiter, stripHeaderCommentMarker, type Delimiter } from './delimiter-detector';
+import { stripSpreadsheetFormulaGuard } from './export-utils';
 import { parseGeoJSON } from './geojson-parser';
 import { detectDateFormat, type DateFormat } from './date-format-detector';
 import { FIELD_ALIASES } from './field-definitions';
@@ -327,8 +328,29 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
     }
   }
 
-  // Parse with detected/specified delimiter
-  const { headers, rows } = parseWithDelimiter(content, actualDelimiter);
+  // Parse with detected/specified delimiter. An unterminated quoted field is a hard
+  // error: silently absorbing the rest of the file into one cell would report success
+  // while discarding most of the catalogue.
+  let headers: string[];
+  let rows: string[][];
+  try {
+    ({ headers, rows } = parseWithDelimiter(content, actualDelimiter));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to tokenize delimited content';
+    appendParserFailure(validationAccumulator, { line: 0 }, message);
+    return {
+      success: false,
+      events: [],
+      errors: [{ line: 0, message }],
+      warnings,
+      detectedFields: [],
+      validationReport: summarizeValidationFailures(validationAccumulator.failures, {
+        totalEvents: 0,
+        validEvents: 0,
+        invalidEvents: 0,
+      })
+    };
+  }
   const detectedFields = [...headers];
 
   // Auto-detect date format if not specified
@@ -382,6 +404,42 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
     };
   }
 
+  // Decide the depth unit ONCE for the whole file (see inferDepthUnit)
+  const depthColumn = findSourceKeyForTarget(headers, 'depth');
+  // lastIndexOf: duplicate header names collapse to one key, and the LAST column wins
+  const depthColumnIndex = depthColumn === null ? -1 : headers.lastIndexOf(depthColumn);
+  const depthUnit = inferDepthUnit(
+    depthColumn,
+    depthColumnIndex < 0
+      ? []
+      : rows.reduce<number[]>((acc, row) => {
+          const v = safeParseFloat(row[depthColumnIndex]);
+          if (v !== null) acc.push(v);
+          return acc;
+        }, [])
+  );
+  if (depthUnit.divisor !== 1) {
+    warnings.push({
+      line: 0,
+      message: `Depth interpreted as metres and converted to kilometres (${depthUnit.reason}). ` +
+               'Depth and horizontal uncertainty were divided by 1000 with it.'
+    });
+  }
+
+  // Decide the moment-tensor unit ONCE for the whole file (see inferMomentTensorScaleForFile).
+  // headers are lower-cased above, so the column lookup is too.
+  const momentTensorIndices = MOMENT_TENSOR_COMPONENT_KEYS.map((key) => headers.indexOf(key.toLowerCase()));
+  const scalarMomentIndex = SCALAR_MOMENT_KEYS.reduce<number>(
+    (found, key) => (found >= 0 ? found : headers.indexOf(key.toLowerCase())),
+    -1
+  );
+  const momentTensorScale = momentTensorIndices.every((index) => index < 0)
+    ? MOMENT_TENSOR_SCALE_SI
+    : inferMomentTensorScaleForFile(rows.length, (i) => ({
+        components: momentTensorIndices.map((index) => (index < 0 ? null : safeParseFloat(rows[i][index]))),
+        Mo: scalarMomentIndex < 0 ? null : safeParseFloat(rows[i][scalarMomentIndex]),
+      }));
+
   // Parse data rows
   for (let i = 0; i < rows.length; i++) {
     const values = rows[i];
@@ -405,8 +463,8 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
       });
 
       // Map common field names with date format hint
-      const mappedEvent = mapCommonFields(event, actualDateFormat, true);
-      normalizeOptionalDepth(mappedEvent as Record<string, unknown>);
+      const mappedEvent = mapCommonFields(event, actualDateFormat, true, momentTensorScale);
+      normalizeOptionalDepth(mappedEvent as Record<string, unknown>, depthUnit);
       const mappingReport = (mappedEvent as any)._mappingReport as FieldMappingTrace[] | undefined;
       const context: ValidationEventContext = {
         line: lineNumber,
@@ -462,16 +520,6 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
 }
 /**
  * Parse JSON format earthquake catalogue. Automatically detects and handles GeoJSON.
- *
- * UNITS: generic JSON/CSV field values are taken AS-IS in each field's canonical DB
- * unit (see lib/field-definitions.ts): depth and horizontal/depth uncertainty in
- * KILOMETRES, latitude/longitude (and their uncertainties) in DEGREES, time
- * uncertainty in SECONDS. No unit conversion is applied here — unlike the QuakeML
- * importer (lib/quakeml-to-db.ts), which converts depth/horizontal uncertainty from
- * the QuakeML metre convention to km. Providers exporting metres should pre-convert.
- *
- * @param content - The JSON content to parse
- * @param dateFormat - Optional date format hint for ambiguous dates
  */
 export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult {
   const errors: Array<{ line: number; message: string }> = [];
@@ -556,11 +604,41 @@ export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult
       detectedFields = Object.keys(eventArray[0]);
     }
 
+    // Decide the depth unit ONCE for the whole file (see inferDepthUnit)
+    const depthKey = findSourceKeyForTarget(detectedFields, 'depth');
+    const depthUnit = inferDepthUnit(
+      depthKey,
+      depthKey === null
+        ? []
+        : eventArray.reduce<number[]>((acc, item) => {
+            const v = safeParseFloat(item?.[depthKey]);
+            if (v !== null) acc.push(v);
+            return acc;
+          }, [])
+    );
+    if (depthUnit.divisor !== 1) {
+      warnings.push({
+        line: 0,
+        message: `Depth interpreted as metres and converted to kilometres (${depthUnit.reason}). ` +
+                 'Depth and horizontal uncertainty were divided by 1000 with it.'
+      });
+    }
+
+    // Decide the moment-tensor unit ONCE for the whole file (see inferMomentTensorScaleForFile)
+    const momentTensorScale = inferMomentTensorScaleForFile(eventArray.length, (i) => {
+      const item = eventArray[i];
+      if (item === null || typeof item !== 'object') return null;
+      return {
+        components: MOMENT_TENSOR_COMPONENT_KEYS.map((key) => readRowNumber(item, [key])),
+        Mo: readRowNumber(item, SCALAR_MOMENT_KEYS),
+      };
+    });
+
     // Parse each event
     eventArray.forEach((item, index) => {
       try {
-        const mappedEvent = mapCommonFields(item, dateFormat, true);
-        normalizeOptionalDepth(mappedEvent as Record<string, unknown>);
+        const mappedEvent = mapCommonFields(item, dateFormat, true, momentTensorScale);
+        normalizeOptionalDepth(mappedEvent as Record<string, unknown>, depthUnit);
         const mappingReport = (mappedEvent as any)._mappingReport as FieldMappingTrace[] | undefined;
         const context: ValidationEventContext = {
           line: index + 1,
@@ -958,32 +1036,99 @@ export async function parseQuakeMLFileStream(
   };
 }
 
+/** 1 dyne.cm = 1e-7 N.m (CGS -> SI). */
+const DYNE_CM_TO_NEWTON_METRE = 1e-7;
+
+/**
+ * Decide the multipliers that bring a flat moment-tensor row to the newton metres that
+ * QuakeML 1.2 BED requires for MomentTensor.scalarMoment and every tensor component.
+ */
+type MomentTensorScale = { tensor: number; scalarMoment: number };
+
+/** Values already in the SI units QuakeML requires: no conversion. */
+const MOMENT_TENSOR_SCALE_SI: MomentTensorScale = { tensor: 1, scalarMoment: 1 };
+/** GeoNet CMT: components in 1e20 dyne.cm, Mo in dyne.cm. */
+const MOMENT_TENSOR_SCALE_CGS: MomentTensorScale = {
+  tensor: 1e20 * DYNE_CM_TO_NEWTON_METRE,
+  scalarMoment: DYNE_CM_TO_NEWTON_METRE,
+};
+
+/** The NED moment-tensor component columns, in the order assembleFocalMechanismFromRow reads them. */
+const MOMENT_TENSOR_COMPONENT_KEYS = ['Mxx', 'Mxy', 'Mxz', 'Myy', 'Myz', 'Mzz'];
+/** Scalar-moment column spellings. */
+const SCALAR_MOMENT_KEYS = ['Mo', 'MO', 'mo', 'scalar_moment', 'scalarmoment'];
+
+/**
+ * What one row says about the unit system, or 'unknown' when the row cannot say.
+ *
+ * On GeoNet's scale Mo / max|Mij| is ~1e20 (5.61e26 / 4.99e6 = 1.1e20 for the Mw 7.1
+ * 2003 Fiordland solution), whereas for a file already in N.m the same ratio is ~1.
+ * A row without a positive scalar moment, or with an all-zero tensor, carries no
+ * evidence either way.
+ */
+function classifyMomentTensorRow(
+  components: Array<number | null>,
+  Mo: number | null
+): 'cgs' | 'si' | 'unknown' {
+  const maxAbs = components.reduce<number>(
+    (acc, v) => (v === null ? acc : Math.max(acc, Math.abs(v))),
+    0
+  );
+  if (Mo === null || Mo <= 0 || maxAbs === 0) return 'unknown';
+  const ratio = Mo / maxAbs;
+  return ratio >= 1e19 && ratio <= 1e21 ? 'cgs' : 'si';
+}
+
+/** Per-row fallback, used only where the whole file is not visible (the streaming parsers). */
+function inferMomentTensorScale(
+  components: Array<number | null>,
+  Mo: number | null
+): MomentTensorScale {
+  return classifyMomentTensorRow(components, Mo) === 'cgs'
+    ? MOMENT_TENSOR_SCALE_CGS
+    : MOMENT_TENSOR_SCALE_SI;
+}
+
+/**
+ * Decide the moment-tensor scale ONCE for a whole file, from the rows that carry evidence.
+ */
+function inferMomentTensorScaleForFile(
+  rowCount: number,
+  readRow: (index: number) => { components: Array<number | null>; Mo: number | null } | null
+): MomentTensorScale {
+  let cgs = 0;
+  let si = 0;
+  for (let i = 0; i < rowCount; i++) {
+    const row = readRow(i);
+    if (row === null) continue;
+    const verdict = classifyMomentTensorRow(row.components, row.Mo);
+    if (verdict === 'cgs') cgs++;
+    else if (verdict === 'si') si++;
+  }
+  return cgs > si ? MOMENT_TENSOR_SCALE_CGS : MOMENT_TENSOR_SCALE_SI;
+}
+
+/**
+ * Read a numeric column from a flat row, trying the given spellings plus their lower- and
+ * upper-case forms. Shared by the moment-tensor scan and the focal-mechanism assembler so
+ * both read exactly the same columns.
+ */
+function readRowNumber(row: any, keys: string[]): number | null {
+  for (const k of keys) {
+    const v = row[k] ?? row[k.toLowerCase()] ?? row[k.toUpperCase()];
+    if (v !== undefined && v !== null && String(v).trim() !== '') {
+      const n = parseFloat(String(v));
+      if (!isNaN(n)) return n;
+    }
+  }
+  return null;
+}
+
 /**
  * Assemble a focal_mechanisms JSON field from flat nodal-plane / moment-tensor columns.
- *
- * Recognised column sets:
- *   Nodal planes : strike1 dip1 rake1 / strike2 dip2 rake2
- *   Moment tensor: Mxx Mxy Mxz Myy Myz Mzz  (NED Cartesian, Z=up convention)
- *                  → converted to QuakeML USE spherical (Mrr Mtt Mpp Mrt Mrp Mtp)
- *   Principal axes: Tva Tpl Taz / Nva Npl Naz / Pva Ppl Paz
- *   Scalar moment : Mo
- *   Double couple : DC (percentage, e.g. 87 → 0.87)
- *   Variance red. : VR
- *
- * Returns the assembled FocalMechanism object (to be JSON-stringified), or null
- * when none of the recognised columns are present.
  */
-function assembleFocalMechanismFromRow(row: any): object | null {
-  const get = (keys: string[]): number | null => {
-    for (const k of keys) {
-      const v = row[k] ?? row[k.toLowerCase()] ?? row[k.toUpperCase()];
-      if (v !== undefined && v !== null && String(v).trim() !== '') {
-        const n = parseFloat(String(v));
-        if (!isNaN(n)) return n;
-      }
-    }
-    return null;
-  };
+function assembleFocalMechanismFromRow(row: any, momentTensorScale?: MomentTensorScale): object | null {
+  const get = (keys: string[]): number | null => readRowNumber(row, keys);
 
   const strike1 = get(['strike1', 'Strike1']);
   const dip1    = get(['dip1',    'Dip1']);
@@ -1027,27 +1172,40 @@ function assembleFocalMechanismFromRow(row: any): object | null {
     };
   }
 
-  // Moment tensor — convert NED Cartesian (Z=up) to QuakeML USE spherical
-  // Convention: r=Up=Z, t=South=-X(North), p=East=Y
-  // Mrr=Mzz, Mtt=Mxx, Mpp=Myy, Mrt=-Mxz, Mrp=Myz, Mtp=-Mxy
+  // Moment tensor — convert NED Cartesian (x=North, y=East, z=Down) to QuakeML USE
+  // spherical. The USE basis vectors are r=Up=-z, t=South(colatitude)=-x, p=East=y, so
+  //   Mrr=Mzz, Mtt=Mxx, Mpp=Myy, Mrt=Mxz, Mrp=-Myz, Mtp=-Mxy
+  // (Aki & Richards 1980; GFZ NMSOP-2 IS 3.8 eq. 3 — the mapping ObsPy, GMT psmeca and
+  // SeisComP use). Flipping Mrt and Mrp instead is conjugation by diag(1,1,-1), i.e. the
+  // mirror-image mechanism: every principal-axis azimuth rotates by 180 degrees.
+  // Verified against the GeoNet CMT CSV: decomposed as z=DOWN the tensors reproduce that
+  // file's own Tpl/Taz, Npl/Naz, Ppl/Paz columns for 3690 of 3708 solutions (the rest are
+  // near-vertical axes whose azimuth is ill-conditioned); as z=UP, 3690 of 3708 disagree.
   if (Mxx !== null || Mzz !== null) {
-    const tensor = {
-      ...(Mzz !== null ? { Mrr: { value: Mzz } } : {}),
-      ...(Mxx !== null ? { Mtt: { value: Mxx } } : {}),
-      ...(Myy !== null ? { Mpp: { value: Myy } } : {}),
-      ...(Mxz !== null ? { Mrt: { value: -Mxz } } : {}),
-      ...(Myz !== null ? { Mrp: { value: Myz } } : {}),
-      ...(Mxy !== null ? { Mtp: { value: -Mxy } } : {}),
-    };
-
-    const Mo = get(['Mo', 'MO', 'mo', 'scalar_moment', 'scalarmoment']);
+    const Mo = get(SCALAR_MOMENT_KEYS);
     const DC = get(['DC', 'dc', 'double_couple', 'doublecouple']);
     const VR = get(['VR', 'vr', 'variance_reduction', 'variancereduction']);
+
+    // QuakeML wants N.m for the tensor and the scalar moment. The scale is the FILE's
+    // (see inferMomentTensorScaleForFile), so a row with no Mo is converted with the rest
+    // instead of being left 1e13 too small; callers that cannot see the whole file fall
+    // back to this row's own evidence.
+    const scale = momentTensorScale ?? inferMomentTensorScale([Mxx, Mxy, Mxz, Myy, Myz, Mzz], Mo);
+
+    const tensor = {
+      ...(Mzz !== null ? { Mrr: { value:  Mzz * scale.tensor } } : {}),
+      ...(Mxx !== null ? { Mtt: { value:  Mxx * scale.tensor } } : {}),
+      ...(Myy !== null ? { Mpp: { value:  Myy * scale.tensor } } : {}),
+      ...(Mxz !== null ? { Mrt: { value:  Mxz * scale.tensor } } : {}),
+      ...(Myz !== null ? { Mrp: { value: -Myz * scale.tensor } } : {}),
+      ...(Mxy !== null ? { Mtp: { value: -Mxy * scale.tensor } } : {}),
+    };
 
     fm.momentTensor = {
       derivedOriginID: '',
       tensor,
-      ...(Mo !== null ? { scalarMoment: { value: Mo } } : {}),
+      ...(Mo !== null ? { scalarMoment: { value: Mo * scale.scalarMoment } } : {}),
+      // QuakeML doubleCouple is a 0-1 fraction; the column is a percentage (87 -> 0.87)
       ...(DC !== null ? { doubleCouple: DC / 100 } : {}),
       ...(VR !== null ? { varianceReduction: VR } : {}),
     };
@@ -1172,23 +1330,88 @@ function safeParseFloat(value: any): number | null {
   return isNaN(num) ? null : num;
 }
 
-function normalizeOptionalDepth(event: Record<string, unknown>): void {
+/**
+ * The length unit a file reports depths in, decided ONCE for the whole file.
+ * `divisor` converts a raw value to the canonical DB unit, kilometres.
+ */
+interface DepthUnitDecision {
+  /** Divide a raw value by this to get kilometres (1 for km, 1000 for metres). */
+  divisor: number;
+  unit: 'km' | 'm';
+  reason: string;
+}
+
+/** Default: values are already in the canonical DB unit (km). */
+const DEPTH_UNIT_KM: DepthUnitDecision = { divisor: 1, unit: 'km', reason: 'no evidence of metres' };
+
+/**
+ * Locate the source column/key that a target field (e.g. 'depth') will be mapped from.
+ * Mirrors mapCommonFields' first-wins resolution so the unit decided here is the unit
+ * of the column that actually ends up in the event.
+ */
+function findSourceKeyForTarget(keys: string[], targetField: string): string | null {
+  const aliasLookup = getAliasLookup();
+  for (const key of keys) {
+    const lookup = aliasLookup.get(key) ?? aliasLookup.get(key.toLowerCase());
+    if (lookup?.targetField === targetField) return key;
+  }
+  return null;
+}
+
+/**
+ * Decide ONCE per file whether a depth column is reported in metres or kilometres.
+ */
+function inferDepthUnit(sourceColumn: string | null, values: number[]): DepthUnitDecision {
+  const name = (sourceColumn ?? '').toLowerCase().replace(/[\s)\]]+$/, '');
+  if (name) {
+    if (/(?:^|[^a-z])(?:km|kilomet(?:re|er)s?)$/.test(name)) {
+      return { divisor: 1, unit: 'km', reason: `column "${sourceColumn}" names kilometres` };
+    }
+    if (/(?:^|[^a-z])(?:m|met(?:re|er)s?)$/.test(name)) {
+      return { divisor: 1000, unit: 'm', reason: `column "${sourceColumn}" names metres` };
+    }
+  }
+
+  const finite = values.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+  if (finite.length > 0) {
+    const p95 = finite[Math.floor(0.95 * (finite.length - 1))];
+    if (p95 > 1000) {
+      return {
+        divisor: 1000,
+        unit: 'm',
+        reason: `95th percentile of the depth column is ${p95}, which is impossible in kilometres`,
+      };
+    }
+  }
+
+  return DEPTH_UNIT_KM;
+}
+
+/**
+ * Apply the file-level depth unit to an already-mapped event.
+ */
+function normalizeOptionalDepth(
+  event: Record<string, unknown>,
+  depthUnit: DepthUnitDecision = DEPTH_UNIT_KM
+): void {
+  if (depthUnit.divisor !== 1) {
+    for (const key of ['depth_uncertainty', 'horizontal_uncertainty']) {
+      const raw = safeParseFloat(event[key]);
+      if (raw !== null) event[key] = raw / depthUnit.divisor;
+    }
+  }
+
   if (event.depth === undefined || event.depth === null || event.depth === '') return;
 
   const depth = safeParseFloat(event.depth);
-  if (depth === null || depth < -5) {
-    // Null out invalid depths; allow -5 to 0 for above-sea-level events
+  if (depth === null) {
     event.depth = null;
     return;
   }
 
-  if (depth > 1000) {
-    const depthKm = depth / 1000;
-    event.depth = depthKm <= 1000 ? depthKm : null;
-    return;
-  }
-
-  event.depth = depth;
+  const depthKm = depth / depthUnit.divisor;
+  // Null out impossible depths; allow -5 to 0 for above-sea-level events
+  event.depth = depthKm < -5 || depthKm > 1000 ? null : depthKm;
 }
 
 /**
@@ -1201,13 +1424,54 @@ export interface MappingReportEntry {
 }
 
 /**
+ * Resolve a DD/MM/YYYY vs MM/DD/YYYY string using the date format detected for the FILE.
+ */
+function applyDateFormatHint(raw: string, hint?: 'US' | 'International'): string {
+  if (!hint) return raw;
+
+  const match = raw.trim().match(
+    /^(\d{1,2})([\/-])(\d{1,2})\2(\d{4})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,6}))?)?)?$/
+  );
+  if (!match) return raw;
+
+  const [, first, , second, year, hour = '00', minute = '00', secs = '00', frac = ''] = match;
+  const firstNum = parseInt(first, 10);
+  const secondNum = parseInt(second, 10);
+
+  let day: string;
+  let month: string;
+  if (firstNum > 12 && secondNum <= 12) {
+    day = first; month = second;            // unambiguous DD/MM
+  } else if (firstNum <= 12 && secondNum > 12) {
+    month = first; day = second;            // unambiguous MM/DD
+  } else if (firstNum <= 12 && secondNum <= 12) {
+    // Ambiguous: the file-level hint decides (International/DD-MM is the default,
+    // matching normalizeTimestamp's own ambiguous branch)
+    if (hint === 'US') { month = first; day = second; } else { day = first; month = second; }
+  } else {
+    return raw;                             // both > 12: invalid, let normalizeTimestamp reject it
+  }
+
+  const millis = frac ? frac.padEnd(3, '0').slice(0, 3) : '000';
+  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T` +
+         `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${secs.padStart(2, '0')}.${millis}Z`;
+}
+
+/**
  * Map common field name variations to standard names using FIELD_ALIASES
  * This is the single source of truth for field mappings, shared with the UI
  * @param event - The event object to map
  * @param dateFormat - Optional date format hint for ambiguous dates
  * @param includeMappingReport - Whether to include _mappingReport in the result
+ * @param momentTensorScale - Optional file-level moment-tensor unit decision
+ *                            (see inferMomentTensorScaleForFile)
  */
-function mapCommonFields(event: any, dateFormat?: DateFormat, includeMappingReport: boolean = false): ParsedEvent {
+function mapCommonFields(
+  event: any,
+  dateFormat?: DateFormat,
+  includeMappingReport: boolean = false,
+  momentTensorScale?: MomentTensorScale
+): ParsedEvent {
   const mapped: any = { ...event };
   const aliasLookup = getAliasLookup();
   const mappingReport: MappingReportEntry[] = [];
@@ -1272,7 +1536,10 @@ function mapCommonFields(event: any, dateFormat?: DateFormat, includeMappingRepo
   // Normalize timestamp to ISO 8601 format with date format hint
   if (mapped.time) {
     const formatHint = dateFormat === 'US' ? 'US' : dateFormat === 'International' ? 'International' : undefined;
-    const normalized = normalizeTimestamp(mapped.time, formatHint);
+    // Resolve the day/month order here: normalizeTimestamp's own hint-aware branches sit
+    // below a generic new Date() fallback that silently wins for these strings.
+    const hinted = typeof mapped.time === 'string' ? applyDateFormatHint(mapped.time, formatHint) : mapped.time;
+    const normalized = normalizeTimestamp(hinted, formatHint);
     if (normalized) {
       mapped.time = normalized;
     }
@@ -1299,7 +1566,7 @@ function mapCommonFields(event: any, dateFormat?: DateFormat, includeMappingRepo
 
   // Assemble focal mechanism from flat nodal-plane / moment-tensor columns if present
   if (!mapped.focal_mechanisms) {
-    const fm = assembleFocalMechanismFromRow(event);
+    const fm = assembleFocalMechanismFromRow(event, momentTensorScale);
     if (fm) {
       mapped.focal_mechanisms = JSON.stringify([fm]);
       if (includeMappingReport) {
@@ -1359,24 +1626,6 @@ export function parseFile(content: string, filename: string, delimiter?: Delimit
 
 /**
  * Performance Optimization: Streaming CSV parser for large files
- *
- * This parser processes files line-by-line with constant memory usage,
- * allowing it to handle files of any size (100MB+) without loading
- * the entire file into memory.
- *
- * @param filePath - Path to the CSV file
- * @param onEvent - Callback function called for each parsed event
- * @param onBatch - Optional callback for batch processing (called every batchSize events)
- * @param batchSize - Number of events to accumulate before calling onBatch (default: 100)
- * @returns Promise with parsing statistics
- *
- * @example
- * ```typescript
- * const stats = await parseCSVStream('large-catalogue.csv', async (event) => {
- *   await dbQueries.insertEvent(event);
- * });
- * console.log(`Processed ${stats.totalEvents} events with ${stats.errors.length} errors`);
- * ```
  */
 export async function parseCSVStream(
   filePath: string,
@@ -1401,6 +1650,10 @@ export async function parseCSVStream(
   let batch: ParsedEvent[] = [];
   let batchStartLine = 0;
   let actualDelimiter = delimiter || ','; // Default to comma if not specified
+  // A streaming parser only ever sees one line at a time, so the depth unit can only be
+  // taken from the column name (see inferDepthUnit); otherwise values stay in km and an
+  // unconverted metres file fails validateEvent() loudly instead of being half-converted.
+  let depthUnit: DepthUnitDecision = DEPTH_UNIT_KM;
 
   const fileStream = createReadStream(filePath, { encoding: 'utf-8' });
   const rl = createInterface({
@@ -1429,14 +1682,26 @@ export async function parseCSVStream(
         }
       }
 
-      headers = parseLine(line, actualDelimiter).map(h => h.trim().toLowerCase());
+      try {
+        headers = parseLine(line, actualDelimiter).map((h, index) =>
+          (index === 0 ? stripHeaderCommentMarker(h) : h).trim().toLowerCase()
+        );
+      } catch (error) {
+        errors.push({
+          line: 1,
+          message: `Parse error: ${error instanceof Error ? error.message : String(error)}`
+        });
+        headers = [];
+      }
       detectedFields = [...headers];
+      depthUnit = inferDepthUnit(findSourceKeyForTarget(headers, 'depth'), []);
       batchStartLine = lineNumber + 1;
       continue;
     }
 
     try {
-      const values = parseLine(line, actualDelimiter);
+      // Same guard-strip as parseWithDelimiter, for parity with the buffered path.
+      const values = parseLine(line, actualDelimiter).map(stripSpreadsheetFormulaGuard);
 
       if (values.length !== headers.length) {
         errors.push({
@@ -1453,7 +1718,7 @@ export async function parseCSVStream(
 
       // Map common field names
       const mappedEvent = mapCommonFields(event, dateFormat);
-      normalizeOptionalDepth(mappedEvent as Record<string, unknown>);
+      normalizeOptionalDepth(mappedEvent as Record<string, unknown>, depthUnit);
 
       // Validate the event
       const validation = validateEvent(mappedEvent);
@@ -1506,21 +1771,13 @@ export async function parseCSVStream(
 
 /**
  * Performance Optimization: Streaming JSON parser for large NDJSON files
- *
- * Processes newline-delimited JSON (NDJSON) files line-by-line with constant memory usage.
- * Each line should contain a single JSON object representing an event.
- *
- * @param filePath - Path to the NDJSON file
- * @param onEvent - Callback function called for each parsed event
- * @param onBatch - Optional callback for batch processing
- * @param batchSize - Number of events to accumulate before calling onBatch (default: 100)
- * @returns Promise with parsing statistics
  */
 export async function parseJSONStream(
   filePath: string,
   onEvent?: (event: ParsedEvent, lineNumber: number) => Promise<void> | void,
   onBatch?: (events: ParsedEvent[], startLine: number, endLine: number) => Promise<void> | void,
-  batchSize: number = 100
+  batchSize: number = 100,
+  dateFormat?: DateFormat
 ): Promise<{
   success: boolean;
   totalEvents: number;
@@ -1533,6 +1790,115 @@ export async function parseJSONStream(
   let totalEvents = 0;
   let batch: ParsedEvent[] = [];
   let batchStartLine = 1;
+
+  // The depth unit and the date format are properties of the FILE, not of a record, so
+  // they are decided ONCE (see inferDepthUnit) and then applied to every record - the
+  // same decisions parseJSON makes for the identical content held in an array. A stream
+  // cannot look at the whole file, so the first SAMPLE_RECORDS records are held back,
+  // the decisions are taken from them, and the held records are then processed with the
+  // rest. The buffer is bounded, so memory stays constant.
+  const SAMPLE_RECORDS = 200;
+  const pending: Array<{ data: any; line: number }> = [];
+  let decisionsMade = false;
+  let depthUnit: DepthUnitDecision = DEPTH_UNIT_KM;
+  let actualDateFormat = dateFormat;
+
+  const makeFileLevelDecisions = () => {
+    decisionsMade = true;
+    const sample = pending.filter((rec) => rec.data !== null && typeof rec.data === 'object');
+    const keys = sample.length > 0 ? Object.keys(sample[0].data) : [];
+
+    const depthKey = findSourceKeyForTarget(keys, 'depth');
+    depthUnit = inferDepthUnit(
+      depthKey,
+      depthKey === null
+        ? []
+        : sample.reduce<number[]>((acc, rec) => {
+            const v = safeParseFloat(rec.data[depthKey]);
+            if (v !== null) acc.push(v);
+            return acc;
+          }, [])
+    );
+    if (depthUnit.divisor !== 1) {
+      warnings.push({
+        line: 0,
+        message: `Depth interpreted as metres and converted to kilometres (${depthUnit.reason}). ` +
+                 'Depth and horizontal uncertainty were divided by 1000 with it.'
+      });
+    }
+
+    if (!actualDateFormat || actualDateFormat === 'Unknown') {
+      const timeKey = findSourceKeyForTarget(keys, 'time');
+      if (timeKey !== null) {
+        const dateStrings = sample
+          .map((rec) => rec.data[timeKey])
+          .filter((v) => typeof v === 'string' && v.trim().length > 0)
+          .slice(0, 50); // Sample first 50 dates, as parseCSV does
+        if (dateStrings.length > 0) {
+          const detection = detectDateFormat(dateStrings);
+          actualDateFormat = detection.format;
+          if (detection.confidence < 0.5) {
+            warnings.push({
+              line: 0,
+              message: `Low confidence date format detection (${Math.round(detection.confidence * 100)}%). ${detection.reasoning}`
+            });
+          } else if (detection.format !== 'ISO' && detection.format !== 'Unknown') {
+            warnings.push({
+              line: 0,
+              message: `Detected ${detection.format} date format. ${detection.reasoning}`
+            });
+          }
+        }
+      }
+    }
+  };
+
+  const processRecord = async (eventData: any, line: number) => {
+    try {
+      const mappedEvent = mapCommonFields(eventData, actualDateFormat);
+      normalizeOptionalDepth(mappedEvent as Record<string, unknown>, depthUnit);
+
+      // Validate the event
+      const validation = validateEvent(mappedEvent);
+      if (!validation.valid) {
+        errors.push({
+          line,
+          message: `Validation failed: ${validation.errors.join(', ')}`
+        });
+        return;
+      }
+
+      totalEvents++;
+
+      // Call per-event callback if provided
+      if (onEvent) {
+        await onEvent(mappedEvent, line);
+      }
+
+      // Accumulate for batch processing
+      if (onBatch) {
+        batch.push(mappedEvent);
+
+        if (batch.length >= batchSize) {
+          await onBatch(batch, batchStartLine, line);
+          batch = [];
+          batchStartLine = line + 1;
+        }
+      }
+    } catch (error) {
+      errors.push({
+        line,
+        message: `Parse error: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
+  };
+
+  const flushPending = async () => {
+    for (const rec of pending) {
+      await processRecord(rec.data, rec.line);
+    }
+    pending.length = 0;
+  };
 
   const fileStream = createReadStream(filePath, { encoding: 'utf-8' });
   const rl = createInterface({
@@ -1547,44 +1913,33 @@ export async function parseJSONStream(
       continue; // Skip empty lines
     }
 
+    let eventData: any;
     try {
-      const eventData = JSON.parse(line);
-      const mappedEvent = mapCommonFields(eventData);
-      normalizeOptionalDepth(mappedEvent as Record<string, unknown>);
-
-      // Validate the event
-      const validation = validateEvent(mappedEvent);
-      if (!validation.valid) {
-        errors.push({
-          line: lineNumber,
-          message: `Validation failed: ${validation.errors.join(', ')}`
-        });
-        continue;
-      }
-
-      totalEvents++;
-
-      // Call per-event callback if provided
-      if (onEvent) {
-        await onEvent(mappedEvent, lineNumber);
-      }
-
-      // Accumulate for batch processing
-      if (onBatch) {
-        batch.push(mappedEvent);
-
-        if (batch.length >= batchSize) {
-          await onBatch(batch, batchStartLine, lineNumber);
-          batch = [];
-          batchStartLine = lineNumber + 1;
-        }
-      }
+      eventData = JSON.parse(line);
     } catch (error) {
       errors.push({
         line: lineNumber,
         message: `Parse error: ${error instanceof Error ? error.message : String(error)}`
       });
+      continue;
     }
+
+    if (!decisionsMade) {
+      pending.push({ data: eventData, line: lineNumber });
+      if (pending.length >= SAMPLE_RECORDS) {
+        makeFileLevelDecisions();
+        await flushPending();
+      }
+      continue;
+    }
+
+    await processRecord(eventData, lineNumber);
+  }
+
+  // Short file: the sample never filled, so decide from what was read and process it.
+  if (!decisionsMade) {
+    makeFileLevelDecisions();
+    await flushPending();
   }
 
   // Process remaining batch

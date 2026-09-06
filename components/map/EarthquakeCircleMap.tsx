@@ -1,17 +1,20 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, memo } from 'react';
-import { dedupeById } from '@/lib/utils';
+import { useEffect, useCallback, memo } from 'react';
+import { useMapEventSelection } from '@/hooks/use-map-event-selection';
+import { MapViewportObserver } from './MapViewportObserver';
+import { MapDetailControl } from './MapDetailControl';
+import type { MapDetail } from '@/lib/map-event-selection';
+import { EarthquakeMarkerLayer } from './EarthquakeMarkerLayer';
+import { useEventMapPopup } from '@/hooks/use-event-map-popup';
 import L from 'leaflet';
-import { MapContainer, CircleMarker, Popup } from 'react-leaflet';
+import { MapContainer, Popup } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Activity, Calendar, Ruler, MapPin, Info } from 'lucide-react';
 import { TechnicalTermTooltip } from '@/components/ui/info-tooltip';
-import { getMagnitudePixelRadius, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
+import { getEarthquakeColor } from '@/lib/earthquake-utils';
 import { useMapColors } from '@/hooks/use-map-theme';
 import 'leaflet/dist/leaflet.css';
 
@@ -29,12 +32,38 @@ export interface CircleMapEvent {
 
 interface EarthquakeCircleMapProps {
   events: CircleMapEvent[];
-  sampleSize: number;
-  onSampleSizeChange: (size: number) => void;
+  sampleSize: MapDetail;
+  onSampleSizeChange: (size: MapDetail) => void;
   center?: [number, number];
   zoom?: number;
   height?: string;
   mapKey?: string;
+}
+
+/**
+ * Origin times are UTC by definition (QuakeML 1.2 / ISO 8601 "Z"), so they are rendered
+ * in UTC with the zone shown - formatting them in the browser's zone puts an event on the
+ * wrong calendar day for 13 of every 24 hours under NZDT (UTC+13).
+ *
+ * Hoisted to module scope on purpose: popups are rebuilt per event over thousands of
+ * events, and constructing an Intl.DateTimeFormat per render costs ~82 ms per 1000 rows.
+ */
+const UTC_SECOND_FORMAT = new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  timeZone: 'UTC',
+  timeZoneName: 'short',
+});
+
+/** Render an ISO origin time in UTC; unparseable values are shown verbatim. */
+function formatOriginTime(time: string): string {
+  const date = new Date(time);
+  if (Number.isNaN(date.getTime())) return time;
+  return UTC_SECOND_FORMAT.format(date);
 }
 
 function getMagnitudeLabel(magnitude: number): string {
@@ -57,10 +86,7 @@ function EventPopupContent({ event }: { event: CircleMapEvent }) {
       <div className="space-y-1 text-sm">
         <div className="flex items-center gap-2">
           <Calendar className="h-3 w-3 text-muted-foreground" />
-          <span>{new Date(event.time).toLocaleString('en-GB', {
-            day: '2-digit', month: '2-digit', year: 'numeric',
-            hour: '2-digit', minute: '2-digit', second: '2-digit',
-          })}</span>
+          <span>{formatOriginTime(event.time)}</span>
         </div>
         <div className="flex items-center gap-2">
           <MapPin className="h-3 w-3 text-muted-foreground" />
@@ -100,10 +126,7 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
 }: EarthquakeCircleMapProps) {
   const mapColors = useMapColors();
 
-  const { sampled: sampledEvents, total, displayCount, isSampled } = useMemo(
-    () => sampleEarthquakeEvents(events, sampleSize),
-    [events, sampleSize]
-  );
+  const { sampled: sampledEvents, total, displayCount, visibleCount, isSampled, onViewportChange } = useMapEventSelection(events, sampleSize);
 
   useEffect(() => {
     delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -114,41 +137,20 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
     });
   }, []);
 
-  const clickSeqRef = useRef(0);
-  const [activePopup, setActivePopup] = useState<{ event: CircleMapEvent; seq: number } | null>(null);
-
-  const eventMarkers = useMemo(() => {
-    return dedupeById(sampledEvents).sort((a, b) => a.magnitude - b.magnitude).map((event) => (
-      <CircleMarker
-        key={event.id}
-        center={[event.latitude, event.longitude]}
-        radius={getMagnitudePixelRadius(event.magnitude)}
-        pathOptions={{
-          fillColor: getEarthquakeColor(event.depth ?? 0, mapColors.isDark),
-          fillOpacity: mapColors.markerOpacity,
-          color: getEarthquakeColor(event.depth ?? 0, mapColors.isDark),
-          weight: 1,
-        }}
-        eventHandlers={{
-          click: () => {
-            clickSeqRef.current += 1;
-            setActivePopup({ event, seq: clickSeqRef.current });
-          },
-        }}
-      />
-    ));
-  }, [sampledEvents, mapColors]);
+  const { activePopup, onEventClick } = useEventMapPopup(events, mapKey);
+  const getEventColor = useCallback((event: CircleMapEvent) =>
+    getEarthquakeColor(event.depth, mapColors.isDark), [mapColors.isDark]);
 
   return (
     <div className="relative" style={{ height }}>
       {/* Sampling badge */}
       {isSampled && (
-        <Card className="absolute top-4 left-4 z-[2000] p-3 bg-background/95 backdrop-blur-sm shadow-lg">
+        <Card className="absolute top-20 left-4 z-[2000] p-3 bg-background/95 backdrop-blur-sm shadow-lg">
           <div className="flex items-center gap-2 text-sm">
             <Info className="h-4 w-4 text-blue-500" />
             <span>
               Displaying <strong>{displayCount.toLocaleString()}</strong> of{' '}
-              <strong>{total.toLocaleString()}</strong> events
+              <strong>{visibleCount.toLocaleString()}</strong> visible events. Zoom in for more.
             </span>
           </div>
         </Card>
@@ -164,11 +166,12 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
         preferCanvas={true}
       >
         <MapLayerControl position="topright" />
-        {eventMarkers}
+        <MapViewportObserver onChange={onViewportChange} />
+        <EarthquakeMarkerLayer events={sampledEvents} getColor={getEventColor} opacity={mapColors.markerOpacity} onEventClick={onEventClick} />
         {activePopup && (
           <Popup
             key={activePopup.seq}
-            position={[activePopup.event.latitude, activePopup.event.longitude]}
+            position={activePopup.position}
           >
             <EventPopupContent event={activePopup.event} />
           </Popup>
@@ -183,11 +186,12 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
         </div>
         <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
           {[
-            { color: '#06B6D4', label: '<15 km (Shallow)' },
-            { color: '#14B8A6', label: '15–40 km' },
-            { color: '#0D9488', label: '40–100 km' },
-            { color: '#0F766E', label: '100–200 km' },
-            { color: '#115E59', label: '>200 km (Deep)' },
+            { color: getEarthquakeColor(0, mapColors.isDark), label: '<15 km (Shallow)' },
+            { color: getEarthquakeColor(15, mapColors.isDark), label: '15–40 km' },
+            { color: getEarthquakeColor(40, mapColors.isDark), label: '40–100 km' },
+            { color: getEarthquakeColor(100, mapColors.isDark), label: '100–200 km' },
+            { color: getEarthquakeColor(200, mapColors.isDark), label: '≥200 km (Deep)' },
+            { color: getEarthquakeColor(null, mapColors.isDark), label: 'Unknown depth' },
           ].map(({ color, label }) => (
             <div key={label} className="flex items-center gap-1.5">
               <div className="h-2.5 w-2.5 flex-shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: color }} />
@@ -218,24 +222,7 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
 
         <div className="mt-2 border-t border-border/60 pt-2">
           <p className="text-[10px] text-muted-foreground mb-2">{total.toLocaleString()} total events</p>
-          <Label htmlFor="sampleSize-circlemap" className="text-[11px] font-medium mb-1 block">
-            Max Events
-          </Label>
-          <Select
-            value={sampleSize === Infinity ? 'Infinity' : sampleSize.toString()}
-            onValueChange={(v) => onSampleSizeChange(v === 'Infinity' ? Infinity : Number(v))}
-          >
-            <SelectTrigger className="w-full h-7 text-[11px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent position="popper" className="z-[10000]">
-              <SelectItem value="500">500</SelectItem>
-              <SelectItem value="1000">1,000</SelectItem>
-              <SelectItem value="2000">2,000</SelectItem>
-              <SelectItem value="5000">5,000</SelectItem>
-              <SelectItem value="Infinity">All</SelectItem>
-            </SelectContent>
-          </Select>
+          <MapDetailControl value={sampleSize} onChange={onSampleSizeChange} />
         </div>
       </Card>
     </div>

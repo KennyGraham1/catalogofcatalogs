@@ -70,13 +70,18 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
   {
     id: 'depth',
     name: 'Depth',
-    description: 'Depth of the earthquake hypocenter below sea level',
+    description: 'Depth of the earthquake hypocenter below sea level; negative values are above sea level (e.g. volcanic events beneath a summit, mining-induced events)',
     category: 'basic',
     required: false,
     type: 'number',
     unit: 'km',
     example: '33.0',
-    validation: { min: 0, max: 1000 },
+    // The ranges here are shown to depositors as the accepted range, so they must match what
+    // the platform actually enforces: earthquakeEventSchema in lib/validation.ts and
+    // validateDepth() in lib/earthquake-utils.ts both accept -5 to 1000 km. The negative band
+    // exists for above-sea-level sources (Taupo Volcanic Zone, Ruapehu, Whakaari, mining);
+    // documenting a floor of 0 made depositors drop or clamp those legitimate events.
+    validation: { min: -5, max: 1000 },
     quakemlPath: 'event/origin/depth/value'
   },
   {
@@ -87,7 +92,10 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     required: true,
     type: 'number',
     example: '5.8',
-    validation: { min: -2, max: 10 },
+    // Matches the -3 floor enforced by earthquakeEventSchema in lib/validation.ts and
+    // validateMagnitude() in lib/earthquake-utils.ts; borehole/mine microseismicity is
+    // routinely catalogued below M -2.
+    validation: { min: -3, max: 10 },
     quakemlPath: 'event/magnitude/mag/value'
   },
   
@@ -157,6 +165,9 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
   },
   
   // ===== ORIGIN UNCERTAINTIES =====
+  // The units and ranges declared here are rendered to depositors as the accepted range
+  // (components/settings/DefaultFieldMappings.tsx), so they mirror the bounds enforced by
+  // earthquakeEventSchema in lib/validation.ts.
   {
     id: 'time_uncertainty',
     name: 'Time Uncertainty',
@@ -166,31 +177,41 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     type: 'number',
     unit: 'seconds',
     example: '0.5',
-    validation: { min: 0 },
+    // Upper bound of one day covers pre-instrumental origin times, which the platform admits
+    // back to 1000 CE and which are often known only to the nearest hour or day.
+    validation: { min: 0, max: 86400 },
     quakemlPath: 'event/origin/time/uncertainty'
   },
   {
     id: 'latitude_uncertainty',
     name: 'Latitude Uncertainty',
-    description: 'Uncertainty of the latitude in kilometers',
+    // DEGREES, not km. This is the QuakeML RealQuantity uncertainty carried on
+    // origin/latitude, whose value is in degrees, and the platform reads it that way
+    // throughout (metricsFromEvent() in lib/quality-scoring.ts and calculateUncertaintyEllipse()
+    // in lib/uncertainty-utils.ts both convert it with 111 km/degree). Documenting it as km
+    // invited depositors to supply kilometres, which are then read as degrees - a 2.5 km
+    // uncertainty would be interpreted as ~278 km.
+    description: 'Uncertainty of the latitude in decimal degrees (multiply by 111 km/degree for kilometres)',
     category: 'origin_uncertainty',
     required: false,
     type: 'number',
-    unit: 'km',
-    example: '2.5',
-    validation: { min: 0 },
+    unit: 'degrees',
+    example: '0.022',
+    validation: { min: 0, max: 10 },
     quakemlPath: 'event/origin/latitude/uncertainty'
   },
   {
     id: 'longitude_uncertainty',
     name: 'Longitude Uncertainty',
-    description: 'Uncertainty of the longitude in kilometers',
+    // DEGREES, not km - see the note on latitude_uncertainty above. A degree of longitude is
+    // 111 km x cos(latitude), i.e. ~84 km at New Zealand latitudes.
+    description: 'Uncertainty of the longitude in decimal degrees (multiply by 111 km/degree x cos(latitude) for kilometres)',
     category: 'origin_uncertainty',
     required: false,
     type: 'number',
-    unit: 'km',
-    example: '3.1',
-    validation: { min: 0 },
+    unit: 'degrees',
+    example: '0.030',
+    validation: { min: 0, max: 10 },
     quakemlPath: 'event/origin/longitude/uncertainty'
   },
   {
@@ -202,7 +223,7 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     type: 'number',
     unit: 'km',
     example: '5.0',
-    validation: { min: 0 },
+    validation: { min: 0, max: 100 },
     quakemlPath: 'event/origin/depth/uncertainty'
   },
   
@@ -226,7 +247,7 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     required: false,
     type: 'number',
     example: '0.2',
-    validation: { min: 0 },
+    validation: { min: 0, max: 5 },
     quakemlPath: 'event/magnitude/mag/uncertainty'
   },
   {
@@ -237,11 +258,14 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     required: false,
     type: 'number',
     example: '25',
-    validation: { min: 0 },
+    validation: { min: 0, max: 5000 },
     quakemlPath: 'event/magnitude/stationCount'
   },
   
   // ===== ORIGIN QUALITY METRICS =====
+  // Maxima mirror the sanity bounds enforced by earthquakeEventSchema in lib/validation.ts;
+  // the counts are sized for agency-reviewed solutions of large NZ events, which routinely
+  // use several thousand phases from well over 500 stations.
   {
     id: 'azimuthal_gap',
     name: 'Azimuthal Gap',
@@ -262,7 +286,7 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     required: false,
     type: 'number',
     example: '45',
-    validation: { min: 0 },
+    validation: { min: 0, max: 10000 },
     quakemlPath: 'event/origin/quality/usedPhaseCount'
   },
   {
@@ -273,7 +297,7 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     required: false,
     type: 'number',
     example: '18',
-    validation: { min: 0 },
+    validation: { min: 0, max: 5000 },
     quakemlPath: 'event/origin/quality/usedStationCount'
   },
   {
@@ -285,7 +309,7 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     type: 'number',
     unit: 'seconds',
     example: '0.35',
-    validation: { min: 0 },
+    validation: { min: 0, max: 100 },
     quakemlPath: 'event/origin/quality/standardError'
   },
   

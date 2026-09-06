@@ -28,39 +28,61 @@ export function crossesDateline(bounds: GeographicBounds): boolean {
  * Compute the tightest longitudinal interval covering all the given longitudes,
  * accounting for the antimeridian. Returns [west, east]; west > east means the
  * interval crosses 180°.
- *
- * Algorithm: sort the longitudes around the circle, find the largest angular gap
- * (including the wrap gap from the easternmost point back to the westernmost).
- * The covering interval is the complement of that largest gap. If the largest gap
- * is the wrap gap, the plain min/max is tightest (no crossing); otherwise the
- * tightest box crosses the dateline.
  */
 // NOTE: for antipodal or evenly-spaced longitudes the "largest gap" is ambiguous, so the
 // covering arc (and thus the box) may be the wider of two equally-valid options. This is an
 // inherent property of minimum-arc on a circle and is acceptable for a bounding box.
 function computeLongitudinalBounds(longitudes: number[]): { west: number; east: number } {
-  const sorted = [...longitudes].sort((a, b) => a - b);
-  const n = sorted.length;
-  if (n === 1) return { west: sorted[0], east: sorted[0] };
+  // A longitude is a degenerate (zero-width) interval, so the interval version of
+  // the largest-gap search below covers the point case too.
+  return smallestCoveringArc(longitudes.map((lon) => [lon, lon] as [number, number]));
+}
 
-  let largestGap = -Infinity;
-  let gapStartIdx = n - 1; // index of the point on the WEST side of the largest gap
-  for (let i = 0; i < n - 1; i++) {
-    const gap = sorted[i + 1] - sorted[i];
-    if (gap > largestGap) {
-      largestGap = gap;
-      gapStartIdx = i;
+/**
+ * Smallest [west, east] arc covering a set of normal (west <= east) longitude
+ * intervals, all within [-180, 180]. Returns west > east when the covering arc
+ * crosses the antimeridian, and the full [-180, 180] when the intervals already
+ * cover the whole circle.
+ */
+function smallestCoveringArc(intervals: Array<[number, number]>): { west: number; east: number } {
+  const finite = intervals.filter(
+    ([start, end]) => Number.isFinite(start) && Number.isFinite(end)
+  );
+  if (finite.length === 0) return { west: NaN, east: NaN };
+
+  const sorted = [...finite].sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+  const merged: Array<[number, number]> = [];
+  for (const [start, end] of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && start <= last[1]) {
+      if (end > last[1]) last[1] = end;
+    } else {
+      merged.push([start, end]);
     }
   }
-  // Wrap gap: from the easternmost point, across the antimeridian, to the westernmost.
-  const wrapGap = sorted[0] + 360 - sorted[n - 1];
-  if (wrapGap >= largestGap) {
-    // Largest gap straddles 180° -> the data does NOT cross it; plain min/max is tightest.
-    return { west: sorted[0], east: sorted[n - 1] };
+
+  let largestGap = -Infinity;
+  let gapWestIdx = -1; // index of the merged interval on the WEST side of the largest gap
+  for (let i = 0; i < merged.length - 1; i++) {
+    const gap = merged[i + 1][0] - merged[i][1];
+    if (gap > largestGap) {
+      largestGap = gap;
+      gapWestIdx = i;
+    }
   }
-  // Largest gap is interior -> covering box crosses the dateline.
-  // West edge = first point east of the gap; east edge = last point west of the gap.
-  return { west: sorted[gapStartIdx + 1], east: sorted[gapStartIdx] };
+  const first = merged[0];
+  const last = merged[merged.length - 1];
+  // Wrap gap: from the easternmost end, across the antimeridian, to the westernmost start.
+  const wrapGap = first[0] + 360 - last[1];
+  if (wrapGap >= largestGap) {
+    // No gap at all anywhere on the circle -> the intervals cover the full globe.
+    if (wrapGap <= 0) return { west: -180, east: 180 };
+    // Largest gap straddles 180° -> the data does NOT cross it; plain min/max is tightest.
+    return { west: first[0], east: last[1] };
+  }
+  // Largest gap is interior -> covering arc crosses the dateline.
+  // West edge = start of the interval east of the gap; east edge = end of the one west of it.
+  return { west: merged[gapWestIdx + 1][0], east: merged[gapWestIdx][1] };
 }
 
 function boundsFromCoords(coords: Array<{ lat: number; lon: number }>): GeographicBounds | null {
@@ -120,6 +142,21 @@ export function longitudeExtent(longitudes: number[]): { west: number; east: num
 }
 
 /**
+ * Min/max of a numeric series, ignoring non-finite values. Returns null when
+ * nothing finite is left.
+ */
+export function finiteExtent(values: number[]): { min: number; max: number } | null {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const value of values) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
+  return min === Infinity ? null : { min, max };
+}
+
+/**
  * Antimeridian-aware bounding box from raw lat/lon points.
  */
 export function boundsFromLatLon(points: Array<{ lat: number; lon: number }>): GeographicBounds | null {
@@ -134,32 +171,39 @@ export function boundsFromLatLon(points: Array<{ lat: number; lon: number }>): G
  * (latitude is a simple min/max).
  */
 export function unionBounds(a: GeographicBounds, b: GeographicBounds): GeographicBounds {
-  const minLatitude = Math.min(a.minLatitude, b.minLatitude);
-  const maxLatitude = Math.max(a.maxLatitude, b.maxLatitude);
+  const minLatitude = combineLatitude(a.minLatitude, b.minLatitude, Math.min);
+  const maxLatitude = combineLatitude(a.maxLatitude, b.maxLatitude, Math.max);
 
-  const inArc = (lon: number, x: GeographicBounds) =>
-    x.minLongitude <= x.maxLongitude
-      ? lon >= x.minLongitude && lon <= x.maxLongitude
-      : lon >= x.minLongitude || lon <= x.maxLongitude;
-
-  // Sample the circle (1-degree steps) plus the exact box edges; keep longitudes
-  // covered by either box, then take the smallest enclosing arc of the covered set.
-  const covered: number[] = [];
-  for (let lon = -180; lon < 180; lon += 1) {
-    if (inArc(lon, a) || inArc(lon, b)) covered.push(lon);
-  }
-  for (const edge of [a.minLongitude, a.maxLongitude, b.minLongitude, b.maxLongitude]) {
-    covered.push(edge);
-  }
-  const { west, east } = computeLongitudinalBounds(covered);
+  // Union the two arcs exactly: split each into normal intervals at the antimeridian
+  // and take the smallest arc covering all of them. (Sampling the circle in 1° steps
+  // instead, as this once did, mistook the sampling step for a real hole in the
+  // coverage: a near-global box unioned with a small one came back as a 359° box
+  // crossing the dateline, i.e. *smaller* than one of its own inputs.)
+  const { west, east } = smallestCoveringArc([
+    ...lonIntervals(a.minLongitude, a.maxLongitude),
+    ...lonIntervals(b.minLongitude, b.maxLongitude),
+  ]);
   return { minLatitude, maxLatitude, minLongitude: west, maxLongitude: east };
+}
+
+/** Combine two latitudes with min/max, ignoring a non-finite one. */
+function combineLatitude(x: number, y: number, pick: (p: number, q: number) => number): number {
+  if (!Number.isFinite(x)) return y;
+  if (!Number.isFinite(y)) return x;
+  return pick(x, y);
 }
 
 /**
  * Decompose a [west, east] longitude range into one or two normal (west <= east)
  * intervals, splitting at the antimeridian when the range crosses it.
+ *
+ * A range with a non-finite edge describes no arc at all, so it contributes no
+ * interval: the crossing test (west <= east) is false for NaN, which would
+ * otherwise emit a spurious [-180, east] / [west, 180] half-interval and widen
+ * every union built from it.
  */
 function lonIntervals(west: number, east: number): Array<[number, number]> {
+  if (!Number.isFinite(west) || !Number.isFinite(east)) return [];
   if (west <= east) return [[west, east]];
   return [[west, 180], [-180, east]];
 }

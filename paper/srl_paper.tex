@@ -97,8 +97,9 @@ by maximum likelihood, magnitude of completeness ($M_c$) by the Maximum
 Curvature (MAXC) method, Gardner-Knopoff (window) and Reasenberg (link-based)
 declustering, and cumulative seismic moment.  Using a fully synthetic
 two-catalogue New Zealand example (no real event data), we illustrate the
-end-to-end workflow; as an internal consistency check, the platform reproduces
-the planted Gutenberg-Richter $b = 1.02$ of the synthetic construction and
+end-to-end workflow; as an internal consistency check, the maximum-likelihood
+estimator recovers the planted Gutenberg-Richter $b = 1.00$ of the synthetic
+independent population to within $0.003$, and quality scoring
 isolates an offshore high-azimuthal-gap population, with full provenance
 retained.  These values characterise the controlled synthetic inputs, not real
 New Zealand seismicity.
@@ -625,7 +626,12 @@ catalogue page.
 magnitude and whose colour can encode focal depth, quality grade, or source
 catalogue (the last is used in Figure~\ref{fig:map}).  Events are drawn on a
 single canvas layer (Leaflet \texttt{preferCanvas}) and, for very large
-catalogues, spatially sub-sampled, to maintain browser responsiveness.  Two additional overlays are available on demand: (i)
+catalogues, sub-sampled to maintain browser responsiveness.  The sample is
+magnitude-stratified rather than spatial: the largest events are always
+retained and the remaining display budget is spread over magnitude bins and
+over time, so the plotted set is deliberately not proportional to the
+catalogue's magnitude--frequency distribution and should not be read as a
+density map.  Two additional overlays are available on demand: (i)
 \emph{uncertainty ellipses}, which draw the horizontal location error as a
 scaled ellipse derived from the latitude and longitude uncertainty fields,
 giving an immediate visual indication of poorly-constrained events; and (ii)
@@ -1151,35 +1157,54 @@ work (Section~\ref{sec:discussion}).
 \subsection{Step 4: Quality filtering and statistical analysis}
 
 Applying a quality threshold of $Q \geq 70$ (upper grade~B and above) to the
-merged catalogue retains 143\,650 events (85\% of the 169\,000 unique events).
-The 25\,350 removed events are predominantly offshore Agency~B sources with
-azimuthal gap $> 180^{\circ}$ and $\sigma_{\text{loc}} > 10$~km, exactly
-the population visible in the tail of Figure~\ref{fig:gap}.  Removing these
-events barely changes the total event rate above $M_c = 2.0$
-for onshore New Zealand, but it eliminates a spatially biased subset that
-would otherwise distort spatial $b$-value maps along the Hikurangi margin.
+merged catalogue retains 81\,289 events (48\% of the 169\,000 unique events).
+This retention is measured by applying the threshold to the simulated
+per-event scores of the merged provenance mix, not assumed: with the threshold
+set above Agency~B's median score of 58, and below GeoNet's of 72, a cut of
+this size is the arithmetic consequence of the two score distributions.
+Of the 87\,711 removed events, 55\% are Agency-B-only sources and 60\% have
+azimuthal gap $> 180^{\circ}$; conversely the filter removes 99\% of the
+53\,320 merged events with gap $> 180^{\circ}$, the population visible in the
+tail of Figure~\ref{fig:gap}.  The cut is severe, but it is exactly the
+spatially biased subset that would otherwise distort spatial $b$-value maps
+along the Hikurangi margin.
 
 Gutenberg-Richter $b$-value estimation on the quality-filtered catalogue
-(Section~\ref{sec:analysis}), restricted to the 48\,600 of the 143\,650
-retained events at or above $M_c = 2.0$ (estimated by Maximum Curvature with
-the standard $+0.2$ correction), gives:
+(Section~\ref{sec:analysis}), restricted to the 48\,600 of the 81\,289
+retained events at or above $M_c = 2.0$ (the magnitude above which the
+synthetic catalogue is constructed complete; on real data the platform
+estimates $M_c$ from the catalogue by Maximum Curvature with the standard
+$+0.2$ correction), gives:
 \begin{equation*}
-  \hat{b} = 1.02 \pm 0.005 \quad (M_c = 2.0,\; N = 48\,600)
+  \hat{b} = 1.05 \pm 0.005 \quad (M_c = 2.0,\; N = 48\,600)
 \end{equation*}
-which by construction matches the value to which the synthetic
-quality-filtered catalogue was calibrated (chosen near the realistic New
-Zealand value $b \approx 1.0$; cf.\ \citealt{cattania2018}).  This is a check
+That population is a mixture by construction: 77\% of it is an independent
+background planted at $b = 1.00$ and 23\% is injected aftershock sequences
+planted at the higher $b = 1.30$ of clustered seismicity, so the mixed estimate
+sits above the background value.  Applied to the independent population alone,
+the same routine returns $\hat{b} = 0.997 \pm 0.005$, an error of $-0.003$
+against the planted $b = 1.00$ (chosen near the realistic New Zealand value
+$b \approx 1.0$; cf.\ \citealt{cattania2018}).  This is a check
 that the estimator and $M_c$ handling behave correctly on a controlled input,
 not an empirical measurement of New Zealand seismicity.  Full provenance is preserved throughout: each
 event in the export carries its source catalogue ID(s), the quality score, and
 the merge strategy applied.
 
 As an additional preprocessing step, applying Gardner-Knopoff declustering
-(Section~\ref{sec:decluster}) reduces the catalogue by a further 23\%,
-removing the clustered aftershock population and lowering $\hat{b}$
-slightly to $0.94 \pm 0.005$ (Figure~\ref{fig:fmd}), illustrating the
-sensitivity of $b$-value estimates to preprocessing choices
-(Section~\ref{sec:biases}).  Figure~\ref{fig:funnel} summarises the
+(Section~\ref{sec:decluster}) to the 48\,600 events above $M_c$ removes
+18\,542 of them (38\%) and lowers $\hat{b}$ to $0.95 \pm 0.005$
+(Figure~\ref{fig:fmd}), illustrating the sensitivity of $b$-value estimates to
+preprocessing choices (Section~\ref{sec:biases}).  The removal fraction is an
+output of the windows, not a design constant, and it exceeds the 23\% that was
+injected as clustered: the windows recover 97\% of the injected aftershocks but
+also remove 7\,697 independent events that merely fall inside the space-time
+window of a larger one.  Those swept-up independent events are preferentially
+small ($b = 1.24$ among themselves, against the $b = 1.00$ of the population
+they come from), so removing them flattens the surviving distribution and the
+declustered $\hat{b} = 0.95$ sits $0.05$ \emph{below} the planted background
+$b = 1.00$ rather than recovering it.  Window methods over-decluster in
+precisely this way \citep{vanstiphout2012}; the controlled example makes the
+size of the resulting $b$ bias explicit.  Figure~\ref{fig:funnel} summarises the
 event-count flow through these steps.
 
 \section{Guidance on Avoiding Statistical Biases}
@@ -1248,9 +1273,10 @@ depths (Section~\ref{sec:biasmech}).
 Aftershock sequences cluster in space, time, and magnitude, violating this
 assumption and shifting the estimated $b$.  In the synthetic example of
 Section~\ref{sec:example}, where the clustered population was assigned a higher
-$b$ by construction, the quality-filtered catalogue gives $\hat{b} = 1.02$
-before declustering versus $0.94$ after; the sign of this shift is a property
-of the injected sequence, not a universal result.
+$b$ by construction, the quality-filtered catalogue gives $\hat{b} = 1.05$
+before declustering versus $0.95$ after; the sign of this shift is a property
+of the injected sequence, not a universal result, and part of the shift is the
+window method's own bias rather than the removal of genuine aftershocks.
 
 \textbf{Guidance.}
 \begin{enumerate}[leftmargin=*]
@@ -1447,8 +1473,8 @@ Using a fully synthetic two-catalogue New Zealand example, we illustrated the
 end-to-end workflow and verified that it is internally consistent and
 reproducible: an injected 50\% duplicate overlap is reproduced, quality scoring
 isolates an offshore high-azimuthal-gap population that would otherwise bias
-spatial seismicity analysis, and Gutenberg-Richter analysis of the
-quality-filtered catalogue returns the input $\hat{b} = 1.02$ with full
+spatial seismicity analysis, and Gutenberg-Richter analysis recovers the
+planted $b = 1.00$ of the independent population to within $0.003$, with full
 provenance retained.  These figures characterise the controlled synthetic
 inputs and the software's behaviour on them, not real New Zealand seismicity.
 The priority next steps are validation on heterogeneous real catalogues,
@@ -1483,10 +1509,16 @@ Section~\ref{sec:example} and the three data figures
 source repository, which prints the worked-example summary and writes the
 figures; its Python dependencies are pinned in
 \texttt{paper/figures/requirements.txt}.  That script is a standalone NumPy
-reference used only to draw the figures and check the event-count bookkeeping;
-the event-count funnel of Section~\ref{sec:example} (the 49\,000 duplicate pairs,
-169\,000 unique events, and downstream cuts) therefore comprises design constants
-of the synthetic construction rather than outputs of the merge engine.  The
+reference used only to draw the figures and check the event-count bookkeeping,
+so none of its numbers is an output of the merge engine.  Within it, the two
+catalogue sizes and the injected 50\% duplicate overlap (and therefore the
+49\,000 duplicate pairs and 169\,000 unique events), the quality threshold
+$Q \geq 70$, the completeness magnitude $M_c = 2.0$ and the 48\,600 events
+above it, the 23\% of those injected as clustered sequences, and the planted
+$b$-values of the two populations are all \emph{inputs} of the synthetic
+construction.  The quality-filter retention, the fraction that Gardner-Knopoff
+declustering removes, and every $b$-value quoted are \emph{outputs} computed
+from them; no quantity in the script is calibrated to a target value.  The
 \emph{platform's own} estimators and merge engine are exercised separately by two
 tests.  \texttt{\_\_tests\_\_/paper/worked-example.test.ts} runs the CofC
 Gutenberg-Richter, completeness, and Gardner-Knopoff routines on a seeded
@@ -1609,14 +1641,19 @@ conservatively.}
   \caption{%
     Frequency-magnitude distributions (FMD) for the synthetic New Zealand
     catalogue before (grey open circles and bars) and after (blue filled squares
-    and step outline) Gardner-Knopoff declustering.  \textit{(a)}~Cumulative FMD
+    and step outline) Gardner-Knopoff declustering.  The declustering is
+    executed, not assumed: the synthetic events carry origin times and
+    epicentres, and the partition is the one produced by the $L(M)$ and $T(M)$
+    windows of equations~\eqref{eq:gk_L}--\eqref{eq:gk_T}.
+    \textit{(a)}~Cumulative FMD
     with maximum-likelihood GR fits (grey dashed line: before; blue solid line:
     after) above $M_c = 2.0$ (dotted vertical line); the shallower slope of the
     declustered fit is the $\hat{b}$ shift quoted below.  \textit{(b)}~Non-cumulative
     FMD showing the excess of small events contributed by aftershock sequences.  Declustering removes
-    these clustered small events, shifting $\hat{b}$ from $1.02 \pm 0.005$
-    (before declustering) to $0.94 \pm 0.005$ (declustered) and removing 23\% of
-    events.  Data are synthetic and for illustration only (see
+    18\,542 events (38\% of the catalogue, against the 23\% injected as
+    clustered), shifting $\hat{b}$ from $1.05 \pm 0.005$
+    (before declustering) to $0.95 \pm 0.005$ (declustered).
+    Data are synthetic and for illustration only (see
     Section~\ref{sec:example}).
   }
   \label{fig:fmd}
@@ -1634,7 +1671,7 @@ conservatively.}
   % bars centred at x=0; width (cm) proportional to event count (9\,cm = 218\,000)
   \node[bar=10, minimum width=9.00cm] (b1) at (0,0)     {218\,000};
   \node[bar=16, minimum width=6.98cm] (b2) at (0,-1.25) {169\,000};
-  \node[bar=24, minimum width=5.93cm] (b3) at (0,-2.50) {143\,650};
+  \node[bar=24, minimum width=3.36cm] (b3) at (0,-2.50) {81\,289};
   \node[bar=34, minimum width=2.01cm] (b4) at (0,-3.75) {48\,600};
   \node[stage] at (-5.1,0)     {Ingested records};
   \node[stage] at (-5.1,-1.25) {Merged (unique)};
@@ -1645,13 +1682,13 @@ conservatively.}
     \draw[blue!25] (\a.south east)--(\b.north east);
   }
   \node[cut] (c1) at (5.3,-0.625) {$-49\,000$ duplicate pairs};
-  \node[cut] (c2) at (5.3,-1.875) {$-25\,350$ low quality ($Q<70$)};
-  \node[cut] (c3) at (5.3,-3.125) {$-95\,050$ below $M_c$};
+  \node[cut] (c2) at (5.3,-1.875) {$-87\,711$ low quality ($Q<70$)};
+  \node[cut] (c3) at (5.3,-3.125) {$-32\,689$ below $M_c$};
   \draw[->,red!50!black] (c1.west) -- (4.0,-0.625);
-  \draw[->,red!50!black] (c2.west) -- (3.2,-1.875);
-  \draw[->,red!50!black] (c3.west) -- (2.0,-3.125);
+  \draw[->,red!50!black] (c2.west) -- (2.6,-1.875);
+  \draw[->,red!50!black] (c3.west) -- (1.4,-3.125);
   \node[anchor=north, font=\footnotesize] (res) at (0,-4.6)
-    {Gutenberg--Richter fit: $\hat{b}=1.02\pm0.005$\quad(after declustering, $\hat{b}=0.94$)};
+    {Gutenberg--Richter fit: $\hat{b}=1.05\pm0.005$\quad(after declustering, $\hat{b}=0.95$)};
   \draw[->,blue!55!black] (b4.south) -- (res.north);
 \end{tikzpicture}%
 }

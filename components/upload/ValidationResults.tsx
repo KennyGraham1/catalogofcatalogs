@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { csvRow } from '@/lib/export-utils';
 
 interface ValidationError {
   line?: number;
@@ -144,14 +145,6 @@ export function ValidationResults({ results, catalogueName, onRemoveFile, onPrev
       'expected'
     ];
 
-    const escapeCsv = (value: unknown) => {
-      const raw = formatValue(value);
-      if (raw.includes('"') || raw.includes(',') || raw.includes('\n')) {
-        return `"${raw.replace(/"/g, '""')}"`;
-      }
-      return raw;
-    };
-
     const failures = result.validationReport?.failures ?? [];
     const rows = failures.map(failure => [
       catalogueName || '',
@@ -168,9 +161,12 @@ export function ValidationResults({ results, catalogueName, onRemoveFile, onPrev
       failure.expected ?? ''
     ]);
 
+    // csvField()/csvRow() (lib/export-utils) is the platform's single CSV escaper: it also
+    // quotes lone carriage returns and neutralises spreadsheet formulas, which matters here
+    // because every cell below is depositor-supplied text from the uploaded file.
     const csv = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => escapeCsv(cell)).join(','))
+      csvRow(headers),
+      ...rows.map(row => csvRow(row.map(cell => formatValue(cell))))
     ].join('\n');
 
     downloadBlob(csv, `${baseName}_validation_report.csv`, 'text/csv');

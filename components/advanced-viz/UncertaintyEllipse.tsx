@@ -3,7 +3,11 @@
 import { useEffect } from 'react';
 import { useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { UncertaintyEllipse as UncertaintyEllipseType, createUncertaintyEllipseOptions } from '@/lib/uncertainty-utils';
+import {
+  UncertaintyEllipse as UncertaintyEllipseType,
+  createUncertaintyEllipseOptions,
+  generateEllipsePoints,
+} from '@/lib/uncertainty-utils';
 
 interface UncertaintyEllipseProps {
   ellipse: UncertaintyEllipseType;
@@ -31,9 +35,18 @@ export function UncertaintyEllipse({ ellipse, eventId }: UncertaintyEllipseProps
 
     const leafletEllipse = L.polygon(points, options);
 
-    // Add tooltip
+    // Tooltip states what is actually drawn. The shape is the reported
+    // uncertainty extent, NOT a 68%/95% confidence region: scaling a bivariate
+    // normal to probability p needs both semi-axes multiplied by
+    // k = sqrt(-2 ln(1 - p)) (k = 1.515 for 68%, 2.448 for 95%), which is not
+    // done here. The colour encodes the azimuthal gap, not a confidence level.
+    const axes = `${(ellipse.semiMajorAxis / 1000).toFixed(1)} × ${(ellipse.semiMinorAxis / 1000).toFixed(1)} km`;
+    const provenance =
+      ellipse.source === 'origin-uncertainty'
+        ? 'QuakeML OriginUncertainty horizontal error ellipse'
+        : 'Approximate: axis-aligned from independent lat/lon uncertainties (no covariance)';
     leafletEllipse.bindTooltip(
-      `Uncertainty Ellipse<br/>Confidence: ${(ellipse.confidence * 100).toFixed(0)}%`,
+      `Location uncertainty extent<br/>Semi-axes: ${axes}<br/>${provenance}<br/><em>Not a 68%/95% confidence region</em>`,
       { permanent: false, direction: 'top' }
     );
 
@@ -47,42 +60,4 @@ export function UncertaintyEllipse({ ellipse, eventId }: UncertaintyEllipseProps
   }, [map, ellipse, eventId]);
 
   return null;
-}
-
-/**
- * Generate points for an ellipse polygon
- */
-function generateEllipsePoints(
-  center: [number, number],
-  semiMajorAxis: number,
-  semiMinorAxis: number,
-  rotation: number,
-  numPoints: number = 64
-): [number, number][] {
-  const points: [number, number][] = [];
-  const [centerLat, centerLon] = center;
-  const rotationRad = (rotation * Math.PI) / 180;
-
-  // Earth's radius in meters
-  const R = 6371000;
-
-  for (let i = 0; i < numPoints; i++) {
-    const angle = (i * 2 * Math.PI) / numPoints;
-
-    // Calculate point on ellipse in local coordinates
-    const x = semiMajorAxis * Math.cos(angle);
-    const y = semiMinorAxis * Math.sin(angle);
-
-    // Rotate the point
-    const xRotated = x * Math.cos(rotationRad) - y * Math.sin(rotationRad);
-    const yRotated = x * Math.sin(rotationRad) + y * Math.cos(rotationRad);
-
-    // Convert meters to degrees (approximate)
-    const latOffset = (yRotated / R) * (180 / Math.PI);
-    const lonOffset = (xRotated / R) * (180 / Math.PI) / Math.cos(centerLat * Math.PI / 180);
-
-    points.push([centerLat + latOffset, centerLon + lonOffset]);
-  }
-
-  return points;
 }

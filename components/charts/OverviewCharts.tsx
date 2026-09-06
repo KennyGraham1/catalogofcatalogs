@@ -13,6 +13,7 @@ import type { EChartsOption } from 'echarts';
 import { EChart } from './EChart';
 import { chartColors, axis, tooltip, grid, ttHeader, ttRow, ttBadge } from '@/lib/echarts-theme';
 import { SEISMIC_COLORS, magnitudeClass, depthClass, getDepthColor } from '@/lib/chart-config';
+import { sampleMagnitudeDepth } from '@/lib/plot-sampling';
 
 // Magnitude severity classes (match getMagnitudeColor / MAGNITUDE_COLOR_SCALE).
 const MAG_PIECES = [
@@ -29,15 +30,15 @@ export const MagnitudeDepthScatter = memo(function MagnitudeDepthScatter({
   data,
   height = 350,
 }: {
-  data: { magnitude: number; depth: number | null }[];
+  data: { magnitude: number; depth: number | null; region?: string | null }[];
   height?: number;
 }) {
   const { resolvedTheme } = useTheme();
   const c = chartColors(resolvedTheme === 'dark');
-  const points = useMemo(
-    () => data.filter((d): d is { magnitude: number; depth: number } => typeof d.depth === 'number'),
-    [data]
-  );
+  const { points, total } = useMemo(() => sampleMagnitudeDepth(data), [data]);
+  const exportRows = useMemo(() => points.map(point => ({
+    magnitude: point.magnitude, depth: point.depth, region: point.region ?? 'Unknown',
+  })), [points]);
   const option = useMemo<EChartsOption>(
     () => ({
       grid: grid({ top: 16, left: 56, right: 24, bottom: 52 }),
@@ -78,7 +79,12 @@ export const MagnitudeDepthScatter = memo(function MagnitudeDepthScatter({
     }),
     [points, c]
   );
-  return <EChart option={option} height={height} exportData={points} exportName="magnitude-vs-depth" aria-label="Magnitude versus depth" />;
+  return <div>
+    {points.length < total && <p className="text-xs text-muted-foreground" role="status">
+      Showing {points.length.toLocaleString()} of {total.toLocaleString()} events with magnitude and depth.
+    </p>}
+    <EChart option={option} height={height} exportData={exportRows} exportName="magnitude-vs-depth" aria-label="Magnitude versus depth" />
+  </div>;
 });
 
 export const EventTimelineChart = memo(function EventTimelineChart({
@@ -104,7 +110,7 @@ export const EventTimelineChart = memo(function EventTimelineChart({
           const d = new Date(String(p.axisValue));
           const label = isNaN(d.getTime())
             ? String(p.axisValue)
-            : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+            : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
           return ttHeader(c, label) + ttRow(c, seriesName, `${Number(p.value).toLocaleString()} events`, SEISMIC_COLORS.magnitude.dark);
         },
       }),
@@ -118,7 +124,8 @@ export const EventTimelineChart = memo(function EventTimelineChart({
         {
           type: 'line',
           name: seriesName,
-          smooth: true,
+          smooth: false,
+          sampling: 'lttb',
           showSymbol: showDots,
           symbolSize: 5,
           lineStyle: { width: 2, color: SEISMIC_COLORS.magnitude.dark },

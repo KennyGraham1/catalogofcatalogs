@@ -28,11 +28,16 @@ browser against a local instance.
 
 \medskip
 \noindent
-\textbf{Data.}  Every capture uses the reduced-scale synthetic catalogue pair
-described in the main paper (a $5{,}200$-event ``GeoNet-like'' catalogue and a
-$4{,}300$-event ``Agency~B'' catalogue, sharing a 50\,\% duplicate overlap),
-generated with a fixed seed by the script in the source repository.  No real
-event data are shown anywhere in this supplement.
+\textbf{Data.}  Every capture uses a reduced-scale synthetic catalogue pair (a
+$5{,}200$-event ``GeoNet-like'' catalogue and a $4{,}300$-event ``Agency~B''
+catalogue, sharing a 50\,\% duplicate overlap): the same construction as the
+worked example of the main paper, at roughly one twenty-third of its scale so
+that it loads and analyses interactively in the browser.  The seeded
+reproductions distributed with the source repository --- the figure script and
+the two unit tests listed under Data and Resources in the main paper --- build
+catalogues of other sizes, so they reproduce the workflow but not the specific
+event counts and estimates shown in these captures.  No real event data are
+shown anywhere in this supplement.
 
 \section*{Statistical analysis in the browser}
 
@@ -44,9 +49,11 @@ event data are shown anywhere in this supplement.
   counting-statistics uncertainty, the $a$-value, the goodness of fit, and the
   Maximum Curvature estimate of $M_c$; the frequency-magnitude plot marks the
   incomplete range below $M_c$ and overlays the fitted relation.  The recovered
-  $\hat{b} = 0.963 \pm 0.021$ is consistent with the $b = 1.0$ used to generate
-  the synthetic catalogue, and is a check on the estimator rather than a
-  measurement of New Zealand seismicity.}
+  $\hat{b} = 0.963 \pm 0.021$ is fitted above the platform's own Maximum
+  Curvature cut-off of $M_c = M2.4$ (Figure~\ref{fig:s_mc}), on the 41.8\,\% of
+  the catalogue above that cut-off, and lies $1.8$ counting-statistics standard
+  errors below the $b = 1.0$ used to generate the synthetic catalogue.  It is a
+  check on the estimator rather than a measurement of New Zealand seismicity.}
   \label{fig:s_gr}
 \end{figure}
 
@@ -55,7 +62,10 @@ event data are shown anywhere in this supplement.
   \includegraphics[width=\linewidth]{figures/app_analytics_mc.png}
   \caption{Magnitude-of-completeness panel for the same catalogue.  $M_c$ is
   estimated by Maximum Curvature with the $+0.2$ correction discussed in the
-  main paper, and is exposed as an explicit, user-adjustable cut-off rather than
+  main paper: here the modal bin is $M2.2$, so the reported cut-off is
+  $M_c = M2.4$, above the $M2.0$ at which this synthetic catalogue was
+  constructed complete, and 41.8\,\% of the events lie above it.  The estimate
+  is exposed as an explicit, user-adjustable cut-off rather than
   applied silently, so that the completeness assumption behind any subsequent
   $b$-value is visible at the point of use.}
   \label{fig:s_mc}

@@ -4,6 +4,7 @@
 
 // Import canonical EarthquakeEvent type from central types module
 import { EarthquakeEvent } from '@/types/earthquake';
+import { dedupeById } from '@/lib/utils';
 
 // Re-export for backwards compatibility with existing imports
 export type { EarthquakeEvent } from '@/types/earthquake';
@@ -13,6 +14,7 @@ export type { EarthquakeEvent } from '@/types/earthquake';
  * Allows any event type with the required fields for sampling
  */
 interface SampleableEvent {
+  id?: string | number | null;
   time: string;
   latitude: number;
   longitude: number;
@@ -27,7 +29,7 @@ interface SampleableEvent {
  * @param isDark - Whether dark theme is active
  * @returns Color hex code
  */
-export function getEarthquakeColor(depth: number, isDark: boolean = false): string {
+export function getEarthquakeColor(depth: number | null | undefined, isDark: boolean = false): string {
   // Handle missing or null depth - use a neutral color
   if (depth === null || depth === undefined || isNaN(depth)) {
     return isDark ? '#9ca3af' : '#6b7280';  // gray for unknown depth
@@ -62,19 +64,6 @@ export function getMagnitudeColor(_magnitude: number): string {
 /**
  * Get radius for map visualization based on magnitude
  * Returns radius in meters for Leaflet Circle component
- *
- * Uses a fixed lookup table with linear progression (+3km increment) for each
- * magnitude increment, starting from a base radius of 3,000 meters.
- * This provides consistent visual representation and improved maintainability.
- *
- * Magnitude-to-radius mapping (values in meters):
- *   Magnitude 0.0-1.9: 3,000m radius (base size)
- *   Magnitude 2.0-2.9: 6,000m radius
- *   Magnitude 3.0-3.9: 9,000m radius
- *   Magnitude 4.0-4.9: 12,000m radius
- *   Magnitude 5.0-5.9: 15,000m radius
- *   Magnitude 6.0-6.9: 18,000m radius
- *   Magnitude 7.0+: 21,000m radius (capped)
  */
 export function getMagnitudeRadius(magnitude: number): number {
   // Handle edge cases - return base radius for invalid values
@@ -204,11 +193,6 @@ export function validateDepth(depth: number | null): boolean {
  * - Unix timestamp (seconds): 1705318200
  * - Unix timestamp (milliseconds): 1705318200000
  * - Common date formats: DD/MM/YYYY, MM/DD/YYYY, DD.MM.YYYY, YYYY/MM/DD
- * - Space-separated: YYYY-MM-DD HH:MM:SS, YYYY-MM-DD HH:MM:SS.sss
- * - Seismological formats: YYYYMMDD HHMMSS, YYYY DDD HH:MM:SS (Julian day)
- *
- * @param time - The timestamp to normalize
- * @param dateFormat - Optional date format hint ('US' or 'International') for ambiguous dates
  */
 export function normalizeTimestamp(time: string | number, dateFormat?: 'US' | 'International'): string | null {
   if (typeof time === 'number') {
@@ -498,9 +482,17 @@ export function normalizeTimestamp(time: string | number, dateFormat?: 'US' | 'I
   }
 
   // YYYYDDDHHMMSS format (compact Julian day format)
+  // Shape-identical to a 13-digit Unix millisecond epoch, which CSV imports always
+  // deliver as a string (lib/parsers.ts assigns the raw cell text). The two are
+  // separated by the leading year: epoch-ms values only reach a 19xx leading group
+  // in 2030-03 (1.9e12 ms) and a 20xx group in 2033-05 (2.0e12 ms), so a Julian year
+  // >= 1900 is unambiguous, while 1000-1899 (1.0e12-1.8e12 ms = 2001-2027) is an
+  // epoch and is handled by the branch below. Day-of-year is range-checked here so
+  // that an out-of-range value falls through rather than silently rolling over.
   const compactJulian = /^(\d{4})(\d{3})(\d{2})(\d{2})(\d{2})(?:\.(\d{1,6}))?$/;
   match = trimmed.match(compactJulian);
-  if (match) {
+  if (match && parseInt(match[1]) >= 1900 &&
+      parseInt(match[2]) >= 1 && parseInt(match[2]) <= 366) {
     const [, year, dayOfYear, hour, minute, second, ms] = match;
     const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
     const baseDate = new Date(parseInt(year), 0, 1);
@@ -512,6 +504,16 @@ export function normalizeTimestamp(time: string | number, dateFormat?: 'US' | 'I
     if (!isNaN(date.getTime())) {
       return date.toISOString();
     }
+  }
+
+  // Unix epoch supplied as a string. The numeric branch at the top of this function
+  // is unreachable for file imports, because parsers hand over the raw cell text, so
+  // the epoch support promised above has to be honoured for digit strings as well:
+  // 10 digits are seconds and 13 are milliseconds, the same split the numeric branch
+  // applies. No other supported format is a bare 10- or 13-digit string once the
+  // compact Julian day form above has had its (year-restricted) turn.
+  if (/^\d{10}$|^\d{13}$/.test(trimmed)) {
+    return normalizeTimestamp(Number(trimmed), dateFormat);
   }
 
   return null;
@@ -589,151 +591,153 @@ export function validateEvent(event: Partial<EarthquakeEvent>): {
   };
 }
 
+/** Normalize a rendering budget; Infinity explicitly means all events. */
+export function normalizeSampleLimit(limit: number, total: number): number {
+  if (limit === Infinity) return total;
+  return Number.isFinite(limit) ? Math.min(total, Math.max(0, Math.floor(limit))) : 0;
+}
+
+/** Keep only unique, plottable events before allocating the rendering budget. */
+function plottableEvents<T extends SampleableEvent>(events: T[]): T[] {
+  return dedupeById(events.filter(event =>
+    Number.isFinite(event.latitude) && Math.abs(event.latitude) <= 90 &&
+    Number.isFinite(event.longitude) && Number.isFinite(event.magnitude)
+  ));
+}
+
 /**
- * Sample earthquake events intelligently for map rendering performance.
- * Uses stratified sampling to maintain representativeness across:
- * - Magnitude distribution (prioritizing larger events)
- * - Geographic spread (sampling across the spatial distribution)
- * - Temporal distribution (sampling across time periods)
- *
- * @param events - Array of earthquake events to sample
- * @param maxSamples - Maximum number of events to return (default: 1000)
- * @returns Object containing sampled events and metadata
+ * Deterministic map sampling: retain the largest events, then spread the remaining
+ * budget over magnitude bins and time. Selection is without replacement; repeated
+ * renders of the same catalogue select the same events. Counts describe unique,
+ * plottable events, including when the user selects All.
  */
 export function sampleEarthquakeEvents<T extends SampleableEvent>(
   events: T[],
   maxSamples: number = 1000
-): {
+): { sampled: T[]; total: number; displayCount: number; isSampled: boolean } {
+  const eligible = plottableEvents(events);
+  const total = eligible.length;
+  const limit = normalizeSampleLimit(maxSamples, total);
+  const sampled = sampleEligibleEvents(eligible, limit);
+  return { sampled, total, displayCount: sampled.length, isSampled: sampled.length < total };
+}
+
+/**
+ * How the rendering budget is spread over the catalogue.
+ * - 'magnitude-stratified' reserves the largest events and then gives each magnitude
+ * bin an equal share of the remaining budget, so a sparse M>=6 bin is retained far
+ * more often than the M<3 bin. Good for maps that must show the big events; NOT a
+ * representative sample of the magnitude distribution.
+ * - 'proportional' keeps every event with the same probability (a systematic pass in
+ */
+export type SampleStrategy = 'magnitude-stratified' | 'proportional';
+
+/** Magnitude bins used by the stratified strategy and by its reporting, largest first. */
+const MAGNITUDE_BINS = ['M>=6', 'M5-6', 'M4-5', 'M3-4', 'M<3'] as const;
+
+function magnitudeBinIndex(magnitude: number): number {
+  return magnitude >= 6 ? 0 : magnitude >= 5 ? 1 :
+    magnitude >= 4 ? 2 : magnitude >= 3 ? 3 : 4;
+}
+
+function sampleEligibleEvents<T extends SampleableEvent>(
+  events: T[],
+  limit: number,
+  strategy: SampleStrategy = 'magnitude-stratified'
+): T[] {
+  if (limit >= events.length) return events;
+  if (limit === 0) return [];
+  // Equal retention probability for every event, so no magnitude is favoured.
+  if (strategy === 'proportional') return sampleAcrossTime(events, limit);
+
+  const ranked = [...events].sort((a, b) => b.magnitude - a.magnitude);
+  const topCount = Math.min(Math.max(1, Math.floor(limit * 0.1)), 100);
+  const sampled = ranked.slice(0, topCount);
+  const bins: T[][] = MAGNITUDE_BINS.map(() => []);
+  for (let i = topCount; i < ranked.length; i++) {
+    const event = ranked[i];
+    bins[magnitudeBinIndex(event.magnitude)].push(event);
+  }
+
+  // Redistribute unused capacity in sparse bins before selecting any events.
+  const quotas = bins.map(() => 0);
+  let remaining = limit - topCount;
+  while (remaining > 0) {
+    const available = bins.map((bin, index) => index).filter(i => quotas[i] < bins[i].length);
+    const share = Math.max(1, Math.floor(remaining / available.length));
+    for (const i of available) {
+      const count = Math.min(share, bins[i].length - quotas[i], remaining);
+      quotas[i] += count;
+      remaining -= count;
+    }
+  }
+  bins.forEach((bin, i) => {
+    for (const event of sampleAcrossTime(bin, quotas[i])) sampled.push(event);
+  });
+  return sampled;
+}
+
+function sampleAcrossTime<T extends SampleableEvent>(events: T[], count: number): T[] {
+  if (count === 0) return [];
+  if (count >= events.length) return events;
+  // Parse timestamps once per event, instead of twice per sort comparison.
+  const ordered = events.map(event => ({ event, time: Date.parse(event.time) || 0 }))
+    .sort((a, b) => a.time - b.time);
+  // Include both ends of the time range; integer division of the step followed
+  // by truncation would systematically lose events at the end of the catalogue.
+  return Array.from({ length: count }, (_, i) =>
+    ordered[count === 1 ? Math.floor(ordered.length / 2) :
+      Math.round(i * (ordered.length - 1) / (count - 1))].event
+  );
+}
+
+/** Per-bin outcome of a selection, so callers can state what a map actually shows. */
+export interface MagnitudeBinCount {
+  /** Bin label, e.g. 'M4-5'. */
+  label: string;
+  /** Unique, plottable events in this bin. */
+  total: number;
+  /** How many of them the selection retained. */
+  retained: number;
+}
+
+export interface StrategySampleResult<T> {
   sampled: T[];
   total: number;
   displayCount: number;
   isSampled: boolean;
-} {
-  const total = events.length;
+  strategy: SampleStrategy;
+  /** Largest magnitude bin first; retained/total is the bin's retention rate. */
+  bins: MagnitudeBinCount[];
+}
 
-  // If we have fewer events than the limit, return all
-  if (total <= maxSamples) {
-    return {
-      sampled: events,
-      total,
-      displayCount: total,
-      isSampled: false,
-    };
-  }
-
-  // Stratified sampling strategy
-  const sampledEvents: T[] = [];
-  const samplingRatio = maxSamples / total;
-
-  // Sort events by magnitude (descending) to prioritize larger events
-  const sortedByMagnitude = [...events].sort((a, b) => b.magnitude - a.magnitude);
-
-  // Step 1: Always include the largest events (top 10% or 100, whichever is smaller)
-  const topEventCount = Math.min(Math.floor(maxSamples * 0.1), 100);
-  const topEvents = sortedByMagnitude.slice(0, topEventCount);
-  sampledEvents.push(...topEvents);
-
-  // Step 2: Sample remaining events using stratified approach
-  const remainingEvents = sortedByMagnitude.slice(topEventCount);
-  const remainingSamples = maxSamples - topEventCount;
-
-  // Divide into magnitude bins for stratified sampling
-  const magnitudeBins = createMagnitudeBins(remainingEvents);
-  const eventsPerBin = Math.floor(remainingSamples / magnitudeBins.length);
-
-  for (const bin of magnitudeBins) {
-    // Sample events from this bin
-    const binSample = stratifiedSampleBin(bin, eventsPerBin);
-    sampledEvents.push(...binSample);
-  }
-
-  // If we still have room, add more random samples to reach the target
-  if (sampledEvents.length < maxSamples) {
-    const usedIds = new Set(sampledEvents.map((e, idx) => idx));
-    const remaining = events.filter((_, idx) => !usedIds.has(idx));
-    const additionalCount = maxSamples - sampledEvents.length;
-    const additionalSamples = randomSample(remaining, additionalCount);
-    sampledEvents.push(...additionalSamples);
-  }
-
-  // Shuffle the final result to avoid clustering by magnitude
-  const shuffled = shuffleArray(sampledEvents.slice(0, maxSamples));
-
+/**
+ * Map sampling with an explicit strategy and a per-magnitude-bin account of the
+ * result. Same selection as sampleEarthquakeEvents when the default strategy is
+ * used; 'proportional' instead retains every event with equal probability. The bin
+ * counts exist so a figure caption can quote real retention rates rather than
+ * implying the plotted events are a representative sample.
+ */
+export function sampleEarthquakeEventsWithStrategy<T extends SampleableEvent>(
+  events: T[],
+  maxSamples: number = 1000,
+  strategy: SampleStrategy = 'magnitude-stratified'
+): StrategySampleResult<T> {
+  const eligible = plottableEvents(events);
+  const total = eligible.length;
+  const limit = normalizeSampleLimit(maxSamples, total);
+  const sampled = sampleEligibleEvents(eligible, limit, strategy);
+  const eligibleCounts = MAGNITUDE_BINS.map(() => 0);
+  const retainedCounts = MAGNITUDE_BINS.map(() => 0);
+  for (const event of eligible) eligibleCounts[magnitudeBinIndex(event.magnitude)]++;
+  for (const event of sampled) retainedCounts[magnitudeBinIndex(event.magnitude)]++;
   return {
-    sampled: shuffled,
-    total,
-    displayCount: shuffled.length,
-    isSampled: true,
+    sampled, total, displayCount: sampled.length,
+    isSampled: sampled.length < total, strategy,
+    bins: MAGNITUDE_BINS.map((label, i) => ({
+      label, total: eligibleCounts[i], retained: retainedCounts[i],
+    })),
   };
-}
-
-/**
- * Create magnitude bins for stratified sampling
- */
-function createMagnitudeBins<T extends SampleableEvent>(events: T[]): T[][] {
-  const bins: T[][] = [[], [], [], [], []]; // 5 bins for magnitude ranges
-
-  for (const event of events) {
-    const mag = event.magnitude;
-    if (mag >= 6.0) bins[0].push(event); // Major
-    else if (mag >= 5.0) bins[1].push(event); // Moderate
-    else if (mag >= 4.0) bins[2].push(event); // Light
-    else if (mag >= 3.0) bins[3].push(event); // Minor
-    else bins[4].push(event); // Micro
-  }
-
-  return bins.filter(bin => bin.length > 0);
-}
-
-/**
- * Sample events from a bin using geographic and temporal distribution
- */
-function stratifiedSampleBin<T extends SampleableEvent>(
-  bin: T[],
-  targetCount: number
-): T[] {
-  if (bin.length <= targetCount) {
-    return bin;
-  }
-
-  // Sort by time to ensure temporal distribution
-  const sorted = [...bin].sort((a, b) =>
-    new Date(a.time).getTime() - new Date(b.time).getTime()
-  );
-
-  // Use systematic sampling with a random start for even distribution
-  const step = bin.length / targetCount;
-  const start = Math.random() * step;
-  const samples: T[] = [];
-
-  for (let i = 0; i < targetCount; i++) {
-    const index = Math.floor(start + i * step);
-    if (index < sorted.length) {
-      samples.push(sorted[index]);
-    }
-  }
-
-  return samples;
-}
-
-/**
- * Random sample without replacement
- */
-function randomSample<T>(array: T[], count: number): T[] {
-  const shuffled = shuffleArray([...array]);
-  return shuffled.slice(0, Math.min(count, array.length));
-}
-
-/**
- * Fisher-Yates shuffle algorithm
- */
-function shuffleArray<T>(array: T[]): T[] {
-  const result = [...array];
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
 }
 
 /**
@@ -750,11 +754,6 @@ export interface ViewportBounds {
  * Sample earthquake events with viewport awareness.
  * Prioritizes events in the current viewport while maintaining
  * representativeness across the full dataset.
- *
- * @param events - Array of earthquake events to sample
- * @param maxSamples - Maximum number of events to return
- * @param viewport - Optional viewport bounds to prioritize visible events
- * @returns Object containing sampled events and metadata
  */
 export function sampleEarthquakeEventsWithViewport<T extends SampleableEvent>(
   events: T[],
@@ -767,79 +766,24 @@ export function sampleEarthquakeEventsWithViewport<T extends SampleableEvent>(
   isSampled: boolean;
   inViewport: number;
 } {
-  const total = events.length;
-
-  // If we have fewer events than the limit, return all
-  if (total <= maxSamples) {
-    return {
-      sampled: events,
-      total,
-      displayCount: total,
-      isSampled: false,
-      inViewport: total,
-    };
+  const eligible = plottableEvents(events);
+  const total = eligible.length;
+  const limit = normalizeSampleLimit(maxSamples, total);
+  const inside: T[] = [];
+  const outside: T[] = [];
+  for (const event of eligible) {
+    (viewport && !isEventInBounds(event, viewport) ? outside : inside).push(event);
   }
 
-  // Separate events into viewport and outside viewport
-  const inViewportEvents: T[] = [];
-  const outsideViewportEvents: T[] = [];
-
-  if (viewport) {
-    for (const event of events) {
-      if (
-        event.latitude >= viewport.south &&
-        event.latitude <= viewport.north &&
-        event.longitude >= viewport.west &&
-        event.longitude <= viewport.east
-      ) {
-        inViewportEvents.push(event);
-      } else {
-        outsideViewportEvents.push(event);
-      }
-    }
-  } else {
-    // No viewport, treat all as in-viewport
-    inViewportEvents.push(...events);
-  }
-
-  const sampledEvents: T[] = [];
-
-  // Step 1: Prioritize in-viewport events (up to 80% of max samples)
-  const viewportAllocation = Math.floor(maxSamples * 0.8);
-  if (inViewportEvents.length <= viewportAllocation) {
-    // All in-viewport events fit, add them all
-    sampledEvents.push(...inViewportEvents);
-  } else {
-    // Need to sample in-viewport events
-    // Prioritize by magnitude (larger events first)
-    const sortedViewport = [...inViewportEvents].sort((a, b) => b.magnitude - a.magnitude);
-
-    // Always include top 20% by magnitude
-    const topCount = Math.floor(viewportAllocation * 0.2);
-    sampledEvents.push(...sortedViewport.slice(0, topCount));
-
-    // Stratified sample the rest
-    const remainingViewport = sortedViewport.slice(topCount);
-    const remainingSlots = viewportAllocation - topCount;
-    const viewportSample = stratifiedSampleBin(remainingViewport, remainingSlots);
-    sampledEvents.push(...viewportSample);
-  }
-
-  // Step 2: Fill remaining slots with outside-viewport events (for context)
-  const remainingSlots = maxSamples - sampledEvents.length;
-  if (remainingSlots > 0 && outsideViewportEvents.length > 0) {
-    // Prioritize larger events from outside viewport
-    const sortedOutside = [...outsideViewportEvents].sort((a, b) => b.magnitude - a.magnitude);
-    const outsideSample = sortedOutside.slice(0, remainingSlots);
-    sampledEvents.push(...outsideSample);
-  }
-
+  // Reserve 80% for visible events, borrowing any unused outside capacity.
+  // With no viewport (or no outside events) the full budget remains available.
+  const insideLimit = Math.min(inside.length,
+    Math.max(Math.ceil(limit * 0.8), limit - outside.length));
+  const sampled = sampleEligibleEvents(inside, insideLimit)
+    .concat(sampleEligibleEvents(outside, limit - insideLimit));
   return {
-    sampled: sampledEvents,
-    total,
-    displayCount: sampledEvents.length,
-    isSampled: true,
-    inViewport: inViewportEvents.length,
+    sampled, total, displayCount: sampled.length,
+    isSampled: sampled.length < total, inViewport: inside.length,
   };
 }
 
@@ -850,12 +794,15 @@ export function isEventInBounds<T extends { latitude: number; longitude: number 
   event: T,
   bounds: ViewportBounds
 ): boolean {
-  return (
-    event.latitude >= bounds.south &&
-    event.latitude <= bounds.north &&
-    event.longitude >= bounds.west &&
-    event.longitude <= bounds.east
-  );
+  if (!Number.isFinite(event.latitude) || !Number.isFinite(event.longitude) ||
+      event.latitude < bounds.south || event.latitude > bounds.north) return false;
+  const span = bounds.east - bounds.west;
+  if (Math.abs(span) >= 360) return true;
+  // Leaflet reports unwrapped bounds (e.g. 170..190 or 530..550); APIs may
+  // instead express the same dateline crossing as 170..-170.
+  const width = ((span % 360) + 360) % 360;
+  const offset = (((event.longitude - bounds.west) % 360) + 360) % 360;
+  return offset <= width;
 }
 
 /**
@@ -883,6 +830,45 @@ export function createSpatialIndex<T extends { latitude: number; longitude: numb
 }
 
 /**
+ * Longitude cell columns (x indices of the spatial index) covered by a viewport.
+ */
+function longitudeCellColumns(bounds: ViewportBounds, cellSize: number): number[] {
+  const columns: number[] = [];
+  const seen = new Set<number>();
+  const add = (x: number) => {
+    if (!seen.has(x)) {
+      seen.add(x);
+      columns.push(x);
+    }
+  };
+
+  const span = bounds.east - bounds.west;
+  if (!Number.isFinite(span) || !Number.isFinite(bounds.west) || cellSize <= 0) return columns;
+
+  // Normalise to a west edge in [-180, 180) plus an eastward width in [0, 360),
+  // then split at the antimeridian into one or two ascending intervals.
+  const width = Math.abs(span) >= 360 ? 360 : ((span % 360) + 360) % 360;
+  const west = Math.abs(span) >= 360 ? -180 : ((((bounds.west + 180) % 360) + 360) % 360) - 180;
+  const east = west + width;
+  const intervals: Array<[number, number]> =
+    east <= 180 ? [[west, east]] : [[west, 180], [-180, east - 360]];
+
+  for (const [from, to] of intervals) {
+    for (let x = Math.floor(from / cellSize); x <= Math.floor(to / cellSize); x++) {
+      add(x);
+    }
+  }
+  // +180 and -180 are the same meridian but land in different cells, so a walk
+  // that reaches either edge must probe both.
+  const westEdgeCell = Math.floor(-180 / cellSize);
+  const eastEdgeCell = Math.floor(180 / cellSize);
+  if (seen.has(westEdgeCell)) add(eastEdgeCell);
+  else if (seen.has(eastEdgeCell)) add(westEdgeCell);
+
+  return columns;
+}
+
+/**
  * Query events from spatial index within bounds
  */
 export function queryEventsInBounds<T extends { latitude: number; longitude: number; id: string | number }>(
@@ -892,12 +878,10 @@ export function queryEventsInBounds<T extends { latitude: number; longitude: num
 ): T[] {
   const results: T[] = [];
 
-  const minCellX = Math.floor(bounds.west / cellSize);
-  const maxCellX = Math.floor(bounds.east / cellSize);
   const minCellY = Math.floor(bounds.south / cellSize);
   const maxCellY = Math.floor(bounds.north / cellSize);
 
-  for (let x = minCellX; x <= maxCellX; x++) {
+  for (const x of longitudeCellColumns(bounds, cellSize)) {
     for (let y = minCellY; y <= maxCellY; y++) {
       const key = `${x},${y}`;
       const cell = grid.get(key);
@@ -914,4 +898,3 @@ export function queryEventsInBounds<T extends { latitude: number; longitude: num
 
   return results;
 }
-

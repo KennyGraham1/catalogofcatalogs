@@ -135,15 +135,49 @@ export async function bumpJwtVersion(userId: string): Promise<number> {
 }
 
 /**
+ * Authorisation state of a signed-in user, read fresh from the database.
+ *
+ * A JWT session carries the role that was current when the token was issued, so
+ * a demotion or a deactivation would otherwise not take effect until the token
+ * expired (24 h). Every authenticated request re-reads this state instead of
+ * trusting the token claim.
+ */
+export interface SessionUserState {
+  role: UserRole;
+  isActive: boolean;
+  jwtVersion: number;
+}
+
+/**
+ * Read the current role / active flag / jwt_version for a user.
+ * Returns null if the account no longer exists.
+ */
+export async function getSessionUserState(userId: string): Promise<SessionUserState | null> {
+  const collection = await getCollection(COLLECTIONS.USERS);
+  const user = await collection.findOne(
+    { id: userId },
+    { projection: { role: 1, is_active: 1, jwt_version: 1 } },
+  );
+  if (!user) return null;
+
+  const doc = user as unknown as Partial<User> & { jwt_version?: number };
+  return {
+    role: doc.role as UserRole,
+    // Documents written before is_active existed have no flag; only an explicit
+    // `false` deactivates an account.
+    isActive: doc.is_active !== false,
+    jwtVersion: doc.jwt_version ?? 0,
+  };
+}
+
+/**
  * Check if a JWT's embedded version matches the stored version.
  * Returns false if the version is stale (token should be rejected).
  */
 export async function isJwtVersionValid(userId: string, tokenVersion: number): Promise<boolean> {
-  const collection = await getCollection(COLLECTIONS.USERS);
-  const user = await collection.findOne({ id: userId }, { projection: { jwt_version: 1 } });
-  if (!user) return false;
-  const storedVersion = (user as any).jwt_version ?? 0;
-  return tokenVersion >= storedVersion;
+  const state = await getSessionUserState(userId);
+  if (!state) return false;
+  return tokenVersion >= state.jwtVersion;
 }
 
 /**

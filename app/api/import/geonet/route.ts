@@ -10,6 +10,12 @@ import { geonetImportService } from '@/lib/geonet-import-service';
 import { apiCache } from '@/lib/cache';
 import { requireEditor } from '@/lib/auth/middleware';
 
+// A broad import fans out into hundreds of serial GeoNet requests (the time-window
+// chunker bisects until every window is under GeoNet's 10,000-event cap) plus the
+// batched database writes, so this route needs the same extended budget the bulk
+// upload routes get instead of the platform default. Seconds; Vercel Pro/Enterprise.
+export const maxDuration = 300;
+
 export async function POST(request: NextRequest) {
   try {
     // Require Editor role or higher

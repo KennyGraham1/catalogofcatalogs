@@ -32,12 +32,21 @@ export const earthquakeEventSchema = z.object({
   source: z.string().max(100).optional(),
   status: z.enum(['automatic', 'reviewed', 'manual']).optional(),
 
-  // Uncertainty fields with validation
+  // Uncertainty fields with validation.
+  // latitude_uncertainty / longitude_uncertainty are in DEGREES, matching the QuakeML
+  // RealQuantity uncertainty carried on origin/latitude and origin/longitude (whose values
+  // are degrees). The rest of the platform converts them with 111 km/degree — see
+  // metricsFromEvent() in lib/quality-scoring.ts and calculateUncertaintyEllipse() in
+  // lib/uncertainty-utils.ts — so the 10-degree cap here is a ~1100 km sanity bound.
   latitude_uncertainty: z.number().min(0).max(10).optional(),
   longitude_uncertainty: z.number().min(0).max(10).optional(),
   depth_uncertainty: z.number().min(0).max(100).optional(),
   horizontal_uncertainty: z.number().min(0).max(100).optional(),
-  time_uncertainty: z.number().min(0).max(60).optional(),
+  // Origin-time uncertainty in seconds. The cap must cover the pre-instrumental events this
+  // schema explicitly admits (year 1000 CE onwards, see the `time` refinement above), whose
+  // origin times are known only to the nearest hour or day — a 60 s cap rejected every one
+  // of them (e.g. the 1855 Wairarapa M8.2). One day (86400 s) is the practical ceiling.
+  time_uncertainty: z.number().min(0).max(86400).optional(),
   magnitude_uncertainty: z.number().min(0).max(5).optional(),
 
   // Origin metadata (QuakeML/GeoNet/ISC)
@@ -56,10 +65,15 @@ export const earthquakeEventSchema = z.object({
 
   // Quality metrics with validation
   azimuthal_gap: z.number().min(0).max(360).optional(),
-  used_phase_count: z.number().int().min(0).max(1000).optional(),
-  used_station_count: z.number().int().min(0).max(500).optional(),
+  // Used phase/station counts are bounded by the *associated* counts below (a used phase or
+  // station is by definition also associated), so they share those caps. The previous
+  // 1000/500 caps were below what agency-reviewed solutions for large NZ events report —
+  // ISC-reviewed origins for M7+ events routinely use several thousand phases from well
+  // over 500 stations — and rejected them as out of range.
+  used_phase_count: z.number().int().min(0).max(10000).optional(),
+  used_station_count: z.number().int().min(0).max(5000).optional(),
   standard_error: z.number().min(0).max(100).optional(),
-  magnitude_station_count: z.number().int().min(0).max(500).optional(),
+  magnitude_station_count: z.number().int().min(0).max(5000).optional(),
   minimum_distance: z.number().min(0).max(180).optional(), // degrees
   maximum_distance: z.number().min(0).max(180).optional(), // degrees
   associated_phase_count: z.number().int().min(0).max(10000).optional(),
@@ -71,6 +85,16 @@ export const earthquakeEventSchema = z.object({
 // They were previously .refine() hard-rejections here, which silently dropped valid events.
 
 export type EarthquakeEvent = z.infer<typeof earthquakeEventSchema>;
+
+// The four fields a catalogue record must carry to be usable. Used to measure completeness
+// ("% of events have all required fields") independently of the optional-metadata range
+// checks above, which describe metadata richness rather than required-field presence.
+const requiredEventFieldsSchema = earthquakeEventSchema.pick({
+  time: true,
+  latitude: true,
+  longitude: true,
+  magnitude: true,
+});
 
 // Merge configuration schema
 export const mergeConfigSchema = z.object({
@@ -751,6 +775,24 @@ export interface DataQualityReport {
 }
 
 /**
+ * Resolve an event's horizontal location uncertainty in KM.
+ */
+export function horizontalUncertaintyKm(event: any): number | null {
+  const num = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isFinite(v) ? v : null;
+  const km = num(event?.horizontal_uncertainty);
+  if (km !== null) return km;
+  const latUnc = num(event?.latitude_uncertainty);
+  const lonUnc = num(event?.longitude_uncertainty);
+  if (latUnc === null && lonUnc === null) return null;
+  const lat = num(event?.latitude) ?? 0;
+  return Math.max(
+    (latUnc ?? 0) * 111,
+    (lonUnc ?? 0) * 111 * Math.cos((lat * Math.PI) / 180)
+  );
+}
+
+/**
  * Perform comprehensive data quality assessment
  */
 export function assessDataQuality(events: any[]): DataQualityReport {
@@ -786,8 +828,24 @@ export function assessDataQuality(events: any[]): DataQualityReport {
     return result.success;
   });
 
+  // Completeness is reported to the user as "% of events have all required fields", so it
+  // must be measured against the required fields only. Measuring it with the full
+  // earthquakeEventSchema (as this did) also range-checked ~16 OPTIONAL metadata fields, so a
+  // single out-of-range optional value — a historical time_uncertainty, an ISC-scale station
+  // count — dropped completeness to 0% and failed the quality gate for a catalogue whose
+  // required fields were all present and in range. Depth range violations are reported
+  // separately by validateEventWithDetails() and detectAnomalies().
+  const completeEvents = events.filter(e => requiredEventFieldsSchema.safeParse(e).success);
+
+  // Counts events reporting ANY uncertainty. horizontal_uncertainty (km) must be included:
+  // it is the only horizontal column the QuakeML/GeoNet import path writes, so omitting it
+  // reported "0.0% of events have uncertainty information" for those catalogues. Tested with
+  // != null rather than truthiness so a genuinely reported 0 still counts as reported.
   const eventsWithUncertainties = events.filter(e =>
-    e.latitude_uncertainty || e.longitude_uncertainty || e.depth_uncertainty
+    e.horizontal_uncertainty != null ||
+    e.latitude_uncertainty != null ||
+    e.longitude_uncertainty != null ||
+    e.depth_uncertainty != null
   ).length;
 
   const eventsWithQualityMetrics = events.filter(e =>
@@ -850,7 +908,7 @@ export function assessDataQuality(events: any[]): DataQualityReport {
   } : null;
 
   // Completeness checks
-  const completenessScore = (validEvents.length / events.length) * 100;
+  const completenessScore = (completeEvents.length / events.length) * 100;
 
   if (completenessScore < 50) {
     checks.push({
@@ -927,37 +985,77 @@ export function assessDataQuality(events: any[]): DataQualityReport {
     });
   }
 
-  // Check for suspicious magnitude-depth relationships
+  // Check for suspicious magnitude-depth relationships.
+  // Threshold: depth < 5 km AND magnitude > 8. This is the same cut used by
+  // validateMagnitudeDepthRelationship() in lib/cross-field-validation.ts and is the one
+  // documented for the platform ("M > 8 at depth < 5 km is extremely rare"); the two sites
+  // previously disagreed (>7 here, >8 there). M7-8 hypocentres shallower than 5 km do occur
+  // in instrumental catalogues — commonly where depth is poorly constrained or fixed at a
+  // shallow default — so the lower >7 cut penalised legitimate large shallow events.
   const suspiciousEvents = events.filter(e =>
-    e.depth !== null && e.depth !== undefined && e.depth < 5 && e.magnitude > 7
+    e.depth !== null && e.depth !== undefined && e.depth < 5 && e.magnitude > 8
   ).length;
   if (suspiciousEvents > 0) {
     consistencyScore -= 5;
     checks.push({
       passed: false,
       severity: 'warning',
-      message: `Found ${suspiciousEvents} very shallow (<5km) events with large magnitude (>7)`,
+      message: `Found ${suspiciousEvents} very shallow (<5km) events with large magnitude (>8)`,
       suggestion: 'These events are rare and should be reviewed for accuracy'
     });
   }
 
-  // Accuracy checks based on uncertainty values
+  // Accuracy checks based on uncertainty values.
+  // A missing uncertainty is NOT evidence of a precise location, so it must not be coerced to
+  // 0 (which previously left a catalogue that publishes no uncertainty metadata at all on a
+  // perfect accuracy of 100, out-ranking one that honestly reports its uncertainties). Score
+  // the reported values on their own, and penalise the un-reported fraction by the same
+  // amount as the worst reported case so that withholding uncertainties can never score
+  // better than publishing them.
   let accuracyScore = 100;
+  const HIGH_UNCERTAINTY_PENALTY = 30;
+  const HIGH_UNCERTAINTY_KM = 10;
 
-  const highUncertaintyEvents = events.filter(e => {
-    const horizUncert = Math.max(e.latitude_uncertainty || 0, e.longitude_uncertainty || 0);
-    return horizUncert > 0.1; // > ~10km
-  }).length;
+  // Resolve each event's horizontal uncertainty in km from EITHER representation — the
+  // horizontal_uncertainty column (km) or the latitude/longitude pair (degrees). Testing only
+  // the degree pair, as this did, reported every QuakeML/GeoNet import as publishing no
+  // location uncertainty and cost it the full 30-point penalty. See horizontalUncertaintyKm().
+  const reportedUncertaintiesKm = events
+    .map(e => horizontalUncertaintyKm(e))
+    .filter((km): km is number => km !== null);
 
-  if (highUncertaintyEvents > events.length * 0.5) {
-    accuracyScore -= 30;
+  const missingUncertaintyFraction =
+    (events.length - reportedUncertaintiesKm.length) / events.length;
+
+  if (missingUncertaintyFraction > 0) {
+    accuracyScore -= Math.round(HIGH_UNCERTAINTY_PENALTY * missingUncertaintyFraction);
     checks.push({
       passed: false,
-      severity: 'warning',
-      message: `${((highUncertaintyEvents / events.length) * 100).toFixed(1)}% of events have high location uncertainty (>10km)`,
+      severity: missingUncertaintyFraction >= 0.5 ? 'warning' : 'info',
+      message: `${(missingUncertaintyFraction * 100).toFixed(1)}% of events report no horizontal location uncertainty, so their location accuracy cannot be assessed`,
       field: 'location_uncertainty',
-      suggestion: 'Consider improving location accuracy with more stations or better velocity models'
+      suggestion: 'Publish latitude/longitude (or horizontal) uncertainties so location accuracy can be assessed'
     });
+  }
+
+  if (reportedUncertaintiesKm.length > 0) {
+    // Degrees were already converted to km by horizontalUncertaintyKm(). A degree of longitude
+    // shortens by cos(latitude), so at NZ latitudes (~-41 deg) 0.1 deg of longitude is 8.4 km,
+    // not 10 km — the original bare 0.1-degree threshold ignored that factor.
+    const highUncertaintyEvents = reportedUncertaintiesKm.filter(
+      km => km > HIGH_UNCERTAINTY_KM
+    ).length;
+
+    if (highUncertaintyEvents > reportedUncertaintiesKm.length * 0.5) {
+      accuracyScore -= HIGH_UNCERTAINTY_PENALTY;
+      checks.push({
+        passed: false,
+        severity: 'warning',
+        message: `${((highUncertaintyEvents / reportedUncertaintiesKm.length) * 100).toFixed(1)}% of events with a reported uncertainty have high location uncertainty (>${HIGH_UNCERTAINTY_KM}km)`,
+        field: 'location_uncertainty',
+        suggestion: 'Consider improving location accuracy with more stations or better velocity models'
+      });
+    }
   }
 
   // Overall quality determination

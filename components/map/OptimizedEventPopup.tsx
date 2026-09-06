@@ -39,6 +39,32 @@ interface OptimizedEventPopupProps {
 }
 
 /**
+ * Origin times are UTC by definition (QuakeML 1.2 / ISO 8601 "Z"), so they are rendered
+ * in UTC with the zone shown - formatting them in the browser's zone puts an event on the
+ * wrong calendar day for 13 of every 24 hours under NZDT (UTC+13).
+ *
+ * Hoisted to module scope on purpose: popups are rebuilt per event over thousands of
+ * events, and constructing an Intl.DateTimeFormat per render costs ~82 ms per 1000 rows.
+ */
+const UTC_SECOND_FORMAT = new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  timeZone: 'UTC',
+  timeZoneName: 'short',
+});
+
+/** Render an ISO origin time in UTC; unparseable values are shown verbatim. */
+function formatOriginTime(time: string): string {
+  const date = new Date(time);
+  if (Number.isNaN(date.getTime())) return time;
+  return UTC_SECOND_FORMAT.format(date);
+}
+
+/**
  * Lightweight popup content that shows immediately
  */
 const QuickPopupContent = memo(function QuickPopupContent({
@@ -88,15 +114,8 @@ const QuickPopupContent = memo(function QuickPopupContent({
         <div className="flex items-center gap-2">
           <Calendar className="h-3.5 w-3.5 text-primary flex-shrink-0" />
           <div className="flex items-center gap-1.5">
-            <span className="text-xs">{new Date(event.time).toLocaleString('en-GB', {
-              day: '2-digit',
-              month: '2-digit',
-              year: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-            })}</span>
-            <InfoTooltip content="Event origin time in local timezone." />
+            <span className="text-xs">{formatOriginTime(event.time)}</span>
+            <InfoTooltip content="Event origin time in UTC, the reference frame catalogues report origin times in." />
           </div>
         </div>
 
@@ -300,15 +319,8 @@ export const SimpleEventPopup = memo(function SimpleEventPopup({
         <div className="flex items-center gap-2">
           <Calendar className="h-3 w-3 text-muted-foreground" />
           <div className="flex items-center gap-1.5">
-            <span>{new Date(event.time).toLocaleString('en-GB', {
-              day: '2-digit',
-              month: '2-digit',
-              year: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-            })}</span>
-            <InfoTooltip content="Event origin time in local timezone." />
+            <span>{formatOriginTime(event.time)}</span>
+            <InfoTooltip content="Event origin time in UTC, the reference frame catalogues report origin times in." />
           </div>
         </div>
         <div className="flex items-center gap-2">

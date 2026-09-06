@@ -53,6 +53,20 @@ export async function POST(request: NextRequest) {
     if (!Number.isFinite(fileSize) || fileSize <= 0) {
       return NextResponse.json({ error: 'fileSize must be a positive number' }, { status: 400 });
     }
+    // The chunk plan has to be consistent with the declared size. The server
+    // dictates the chunk size (returned below and used by the client), so a plan
+    // whose capacity exceeds the declared size by more than one chunk means the
+    // two disagree — the pattern used to declare a tiny file and then stream
+    // hundreds of megabytes. Finalize additionally enforces the caps against the
+    // bytes actually stored.
+    if (totalChunks * CHUNK_SIZE > fileSize + CHUNK_SIZE) {
+      return NextResponse.json(
+        {
+          error: `totalChunks is inconsistent with fileSize; chunks must be at most ${CHUNK_SIZE} bytes each`,
+        },
+        { status: 400 },
+      );
+    }
     if (fileSize > MAX_FILE_SIZE) {
       return NextResponse.json(
         { error: `File size exceeds maximum of ${MAX_FILE_SIZE / 1024 / 1024}MB` },

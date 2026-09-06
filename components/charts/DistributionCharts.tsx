@@ -123,8 +123,16 @@ export const DepthDistributionChart = memo(function DepthDistributionChart({
 
 export const RegionDistributionChart = memo(function RegionDistributionChart({
   data,
+  total: totalEvents,
 }: {
   data: { region: string; count: number }[];
+  /**
+   * Event total the tooltip percentages are taken over. Callers pass the top-N
+   * regions only, so summing the drawn bars would report each region's share of
+   * that truncated set as if it were its share of the catalogue. Defaults to the
+   * bar sum for callers that really do pass every region.
+   */
+  total?: number;
 }) {
   const { resolvedTheme } = useTheme();
   const c = chartColors(resolvedTheme === 'dark');
@@ -140,7 +148,7 @@ export const RegionDistributionChart = memo(function RegionDistributionChart({
           if (!params?.length) return '';
           const p = params[0];
           const count = Number(p.value) || 0;
-          const total = ordered.reduce((s, d) => s + d.count, 0);
+          const total = totalEvents ?? ordered.reduce((s, d) => s + d.count, 0);
           const pct = total ? ((count / total) * 100).toFixed(1) : '0.0';
           return ttHeader(c, String(p.axisValue)) +
             ttRow(c, 'Events', `${count.toLocaleString()} (${pct}%)`, SEISMIC_COLORS.secondary.dark);
@@ -167,7 +175,7 @@ export const RegionDistributionChart = memo(function RegionDistributionChart({
         },
       ],
     }),
-    [ordered, c]
+    [ordered, totalEvents, c]
   );
   return <EChart option={option} height={300} exportData={data} exportName="top-regions" aria-label="Top regions by event count" />;
 });

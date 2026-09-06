@@ -47,14 +47,55 @@ function sanitizeExtension(format: string): string {
     .toLowerCase() || 'txt';
 }
 
+// Leading characters that make Excel / LibreOffice / Google Sheets evaluate a cell as a
+// formula rather than text (OWASP "CSV Injection" / formula injection).
+const FORMULA_TRIGGER = /^[=+\-@\t\r]/;
+// A bare numeric literal is data, not a formula: "-41.2865", "+3", "1e-3" must stay
+// numeric so the file still round-trips through a numeric parser.
+const NUMERIC_LITERAL = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+
+/**
+ * Prefix a formula-triggering value with an apostrophe so spreadsheets treat it as text.
+ * Numeric literals are exempt (see NUMERIC_LITERAL).
+ */
+function neutralizeSpreadsheetFormula(str: string): string {
+  if (!FORMULA_TRIGGER.test(str) || NUMERIC_LITERAL.test(str)) return str;
+  return `'${str}`;
+}
+
+/**
+ * Undo neutralizeSpreadsheetFormula(): strip the apostrophe this module adds.
+ */
+export function stripSpreadsheetFormulaGuard(value: string): string {
+  if (value.charAt(0) !== "'") return value;
+  const rest = value.slice(1);
+  return FORMULA_TRIGGER.test(rest) && !NUMERIC_LITERAL.test(rest) ? rest : value;
+}
+
+export interface CsvFieldOptions {
+  /**
+   * Neutralise text a spreadsheet would execute as a formula (default true).
+   *
+   * Leave it on for anything a person downloads and opens in Excel. Turn it off for
+   * machine-readable output that must round-trip byte-for-byte: the apostrophe becomes
+   * part of the value once written, so "-- unknown --" comes back as "'-- unknown --"
+   * unless the reader strips it with stripSpreadsheetFormulaGuard().
+   */
+  neutralizeFormulas?: boolean;
+}
+
 /**
  * Escape a value for inclusion in a CSV field.
  * Wraps the value in double-quotes if it contains a comma, double-quote, or newline.
  * Internal double-quotes are escaped by doubling them (RFC 4180).
  */
-export function csvField(value: string | number | null | undefined): string {
+export function csvField(
+  value: string | number | null | undefined,
+  options?: CsvFieldOptions
+): string {
   if (value === null || value === undefined) return '';
-  const str = String(value);
+  const raw = String(value);
+  const str = options?.neutralizeFormulas === false ? raw : neutralizeSpreadsheetFormula(raw);
   if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
     return `"${str.replace(/"/g, '""')}"`;
   }
@@ -62,19 +103,21 @@ export function csvField(value: string | number | null | undefined): string {
 }
 
 /**
+ * Escape and join one CSV record (RFC 4180 §2). Values are escaped with csvField().
+ *
+ * The values are mapped through an arrow rather than passed to `map(csvField)` directly:
+ * Array#map supplies (value, index, array), which would land the index in csvField's
+ * options parameter.
+ */
+export function csvRow(
+  values: Array<string | number | null | undefined>,
+  options?: CsvFieldOptions
+): string {
+  return values.map(value => csvField(value, options)).join(',');
+}
+
+/**
  * Generate a descriptive export filename
- * 
- * @param catalogueName - Name of the catalogue being exported
- * @param format - Export format (csv, xml, json, geojson, etc.)
- * @param options - Optional parameters
- * @returns Formatted filename with timestamp
- * 
- * @example
- * generateExportFilename('GeoNet 2024', 'csv')
- * // Returns: 'geonet_2024_20241029_143022.csv'
- * 
- * generateExportFilename('Merged Catalogue', 'xml', { prefix: 'quakeml' })
- * // Returns: 'quakeml_merged_catalogue_20241029_143022.xml'
  */
 export function generateExportFilename(
   catalogueName: string,

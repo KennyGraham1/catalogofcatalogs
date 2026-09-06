@@ -51,3 +51,10 @@ If you need to create additional indexes later, run:
 .. code-block:: bash
 
    npx tsx scripts/create-indexes.ts
+
+The event loading redesign requires the ``catalogue_time_id_idx`` index on
+``merged_events`` with keys ``{ catalogue_id: 1, time: -1, id: -1 }``. This
+supports cursor pages ordered by time with an event ID tie-breaker. Run the
+index setup against existing databases when deploying this change; updating
+the application alone does not create the index. Fresh database initialization
+also includes it.

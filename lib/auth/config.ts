@@ -5,7 +5,7 @@
 
 import { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
-import { getUserByEmail, verifyPassword, updateLastLogin, toSafeUser, isJwtVersionValid } from './utils';
+import { getUserByEmail, verifyPassword, updateLastLogin, toSafeUser, getSessionUserState } from './utils';
 import { UserRole } from './types';
 import { writeAuditLog } from '../audit';
 
@@ -111,12 +111,25 @@ export const authOptions: NextAuthOptions = {
         return token;
       }
 
-      // Subsequent calls (session refresh): validate that the stored jwt_version
-      // still matches. If the user changed their password, the version was bumped
-      // and this token is now invalid.
-      if (token.id && typeof token.jwtVersion === 'number') {
-        const valid = await isJwtVersionValid(token.id as string, token.jwtVersion as number);
-        if (!valid) return null as any; // signals NextAuth to destroy the session
+      // Subsequent calls (session refresh, and every getServerSession() on an
+      // API route): re-read the authorisation state from the database instead of
+      // trusting the claims baked into the token at sign-in. Without this a
+      // demoted admin keeps admin access, and a deactivated account keeps any
+      // access at all, until the token expires (24 h).
+      if (token.id) {
+        const current = await getSessionUserState(token.id as string);
+
+        // Account deleted or deactivated -> destroy the session immediately.
+        if (!current || !current.isActive) return null as any;
+
+        // Password change/reset bumps jwt_version; tokens issued before the bump
+        // are revoked. A token without a version predates the field and is
+        // treated as version 0.
+        const tokenVersion = typeof token.jwtVersion === 'number' ? token.jwtVersion : 0;
+        if (tokenVersion < current.jwtVersion) return null as any;
+
+        // Role changes (demotion or promotion) take effect on the next request.
+        if (current.role) token.role = current.role;
       }
 
       return token;

@@ -134,7 +134,7 @@ export const CompletenessChart = memo(function CompletenessChart({
             ttBadge(c, complete ? `Complete (≥ Mc ${mc.toFixed(1)})` : `Incomplete (< Mc ${mc.toFixed(1)})`, complete ? c.fit : c.reference);
         },
       }),
-      xAxis: { ...axis(c, { type: 'category', name: 'Magnitude (M)', nameGap: 30 }), data: distribution.map((d) => d.magnitude), axisLabel: { ...axis(c).axisLabel, formatter: (v: string) => `M${Number(v).toFixed(1)}` } },
+      xAxis: { ...axis(c, { type: 'category', name: 'Magnitude (M)', nameGap: 30 }), data: distribution.map((d) => String(d.magnitude)), axisLabel: { ...axis(c).axisLabel, formatter: (v: string) => `M${Number(v).toFixed(1)}` } },
       yAxis: axis(c, { name: 'Number of events', nameGap: 46 }),
       series: [
         {
@@ -151,7 +151,7 @@ export const CompletenessChart = memo(function CompletenessChart({
             symbol: 'none',
             lineStyle: { color: c.reference, type: 'dashed', width: 2 },
             label: { formatter: `Mc = ${mc.toFixed(1)}`, color: c.reference, fontWeight: 'bold', fontSize: 12 },
-            data: [{ xAxis: mcBin }],
+            data: [{ xAxis: String(mcBin) }],
           },
         },
       ],
@@ -173,9 +173,23 @@ export const TemporalSeriesChart = memo(function TemporalSeriesChart({
 }) {
   const { resolvedTheme } = useTheme();
   const c = chartColors(resolvedTheme === 'dark');
+  // The temporal analysis emits ISO day keys ('2024-03-05') for catalogues
+  // spanning up to a year and week keys ('2019-W07') beyond that. Week keys are
+  // not parseable dates, so show the bin label itself instead of the 'NaN/aN'
+  // ticks and 'Invalid Date' tooltips a bare `new Date(key)` produces. Day keys
+  // parse as UTC midnight and are formatted in UTC to match that binning.
   const fmtDate = (v: string) => {
-    const d = new Date(v);
-    return `${d.getMonth() + 1}/${d.getFullYear().toString().slice(-2)}`;
+    const t = Date.parse(v);
+    if (!Number.isFinite(t)) return v;
+    const d = new Date(t);
+    return `${d.getUTCMonth() + 1}/${d.getUTCFullYear().toString().slice(-2)}`;
+  };
+  const fmtTooltipDate = (v: string) => {
+    const t = Date.parse(v);
+    if (!Number.isFinite(t)) return v;
+    return new Date(t).toLocaleDateString('en-GB', {
+      day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC',
+    });
   };
   const option = useMemo<EChartsOption>(
     () => ({
@@ -186,7 +200,7 @@ export const TemporalSeriesChart = memo(function TemporalSeriesChart({
           if (!params || !params.length) return '';
           const row = data[params[0].dataIndex];
           if (!row) return '';
-          const date = new Date(row.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+          const date = fmtTooltipDate(row.date);
           let html = ttHeader(c, date) + ttRow(c, 'Cumulative events', row.cumulativeCount.toLocaleString(), SEISMIC_COLORS.time.dark);
           if (row.dailyCount !== undefined) html += ttRow(c, 'This period', row.dailyCount.toLocaleString());
           return html;
@@ -202,7 +216,8 @@ export const TemporalSeriesChart = memo(function TemporalSeriesChart({
         {
           type: 'line',
           name: 'Cumulative Events',
-          smooth: true,
+          smooth: false,
+          sampling: 'lttb',
           showSymbol: false,
           lineStyle: { color: SEISMIC_COLORS.time.dark, width: 2 },
           itemStyle: { color: SEISMIC_COLORS.time.dark },
@@ -249,7 +264,10 @@ export const MomentReleaseChart = memo(function MomentReleaseChart({
           const row = data[params[0].dataIndex];
           if (!row) return '';
           const pct = ((row.moment / totalMoment) * 100).toFixed(1);
-          const equivMw = row.moment > 0 ? (2 / 3) * Math.log10(row.moment) - 6.07 : 0; // Hanks & Kanamori (1979)
+          // Mw = (log10 M0 - 9.1) / 1.5 for M0 in N*m - Hanks & Kanamori (1979) as
+          // standardised by IASPEI (2005). (The textbook -10.7 constant is the
+          // dyne*cm form; 1 N*m = 1e7 dyne*cm.) Matches the moment worker exactly.
+          const equivMw = row.moment > 0 ? (Math.log10(row.moment) - 9.1) / 1.5 : 0;
           const color = getMagnitudeColor(row.magnitude);
           let html = ttHeader(c, `Magnitude M ${row.magnitude.toFixed(1)} bin`) +
             ttRow(c, 'Seismic moment', `${row.moment.toExponential(2)} N·m`, color) +
@@ -325,11 +343,16 @@ export const MFDComparisonChart = memo(function MFDComparisonChart({
     const pts = (arr: { magnitude: number; count: number }[]) =>
       (logScale ? arr.filter((d) => d.count > 0) : arr).map((d) => [d.magnitude, d.count]);
     const series: any[] = [];
+    // Incremental N(M) and cumulative N(>=M) are different quantities, so they
+    // must not share a series name: ECharts keys legend items by name, and the
+    // axis tooltip prints one row per series using that name. Sharing it gave
+    // one legend entry that toggled both curves and two identically labelled
+    // tooltip rows holding different numbers.
     if (showHistogram) {
       for (const cat of catalogues) {
         series.push({
           type: 'line',
-          name: cat.catalogueName,
+          name: `${cat.catalogueName} N(M)`,
           step: 'end',
           showSymbol: false,
           lineStyle: { color: cat.color, width: 1 },
@@ -343,7 +366,7 @@ export const MFDComparisonChart = memo(function MFDComparisonChart({
       for (const cat of catalogues) {
         series.push({
           type: 'line',
-          name: cat.catalogueName,
+          name: `${cat.catalogueName} N(≥M)`,
           step: 'end',
           symbol: 'circle',
           symbolSize: 5,

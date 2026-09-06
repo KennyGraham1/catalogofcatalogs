@@ -377,12 +377,12 @@ Most efficient for large datasets. Uses stable cursors to navigate through resul
      - string
      - No
      - -
-     - Cursor for pagination (format: "timestamp:id")
+     - Opaque cursor returned by the preceding response; URL-encode it when sending
    * - ``limit``
      - number
      - No
      - 100
-     - Number of items to return (1-1000)
+     - Number of items to return (capped at 10,000; deployment limits may be lower)
    * - ``direction``
      - string
      - No
@@ -424,7 +424,7 @@ Most efficient for large datasets. Uses stable cursors to navigate through resul
        }
      ],
      "pagination": {
-       "nextCursor": "2024-10-24T12:34:56.789Z:event-001",
+       "nextCursor": "WyIyMDI0LTEwLTI0VDEyOjM0OjU2Ljc4OVoiLCJldmVudC0wMDEiXQ",
        "prevCursor": null,
        "hasMore": true,
        "limit": 50
@@ -437,13 +437,37 @@ Most efficient for large datasets. Uses stable cursors to navigate through resul
 To get the next page, use the ``nextCursor`` value:
 .. code-block:: text
 
-   GET /api/catalogues/{id}/events?cursor=2024-10-24T12:34:56.789Z:event-001&limit=50&direction=desc
+   GET /api/catalogues/{id}/events?cursor={nextCursor}&limit=50&direction=desc
 
 
 To get the previous page, use the ``prevCursor`` value with opposite direction:
 .. code-block:: text
 
-   GET /api/catalogues/{id}/events?cursor=2024-10-24T12:34:56.789Z:event-001&limit=50&direction=asc
+   GET /api/catalogues/{id}/events?cursor={prevCursor}&limit=50&direction=asc
+
+Lightweight Event Pages
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Add ``view=summary`` for maps, event tables, and plots. This mode always uses
+cursor pagination and returns the same ``data`` and ``pagination`` envelope.
+It retains scalar event and quality fields and focal mechanisms, but omits
+``source_events``, ``origins``, ``magnitudes``, ``picks``, ``arrivals``,
+``amplitudes``, ``station_magnitudes``, ``event_descriptions``, ``comments``,
+and ``creation_info``. Omitted fields can still exist in the full event record.
+
+.. code-block:: text
+
+   GET /api/catalogues/{id}/events?view=summary&limit=500
+   GET /api/catalogues/{id}/events?view=summary&limit=5000&cursor={nextCursor}
+
+Continue until ``pagination.hasMore`` is false. Summary page sizes are capped
+by both 10,000 and any positive ``MAX_EVENTS_REQUEST_LIMIT`` configuration.
+Without ``view=summary``, the full-record response remains available.
+
+The UI shows a preview of up to 500 events, loads the remaining pages with at
+most three requests in flight, and enables catalogue analyses only after all
+pages finish. Completed catalogues are cached within the mounted page for up
+to two minutes, subject to size and catalogue metadata limits.
 
 
 2. Page-Based Pagination
@@ -634,6 +658,17 @@ Get events filtered by various criteria.
 
 
 
+
+Get Full Event Details
+^^^^^^^^^^^^^^^^^^^^^^
+
+**Endpoint**: ``GET /api/catalogues/{id}/events/{eventId}``
+
+Returns one full event, including nested QuakeML fields omitted from summary
+pages. The event must belong to the specified catalogue. URL-encode both path
+parameters. A successful response is the event object with status ``200``;
+an unknown event returns ``404``. This endpoint requires the same viewer
+authentication as the event list endpoint.
 
 .. END EVENTS API
 

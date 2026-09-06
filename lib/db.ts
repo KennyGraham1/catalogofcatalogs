@@ -11,6 +11,7 @@ import { getDb, getCollection, COLLECTIONS, withTransaction, ClientSession } fro
 import { Db, WithId, Document } from 'mongodb';
 import { invalidateCatalogueCache } from './cache';
 import { boundsOverlap, type GeographicBounds } from './geo-bounds-utils';
+import { decodeEventCursor, encodeEventCursor } from './event-cursor';
 
 export interface MergedCatalogue {
   id: string;
@@ -156,7 +157,22 @@ export interface MergedEvent {
 export interface PaginationParams {
   page?: number;
   pageSize?: number;
+  /**
+   * Absolute number of documents to skip, as the public API documents `offset`
+   * ("number of items to skip"). Takes precedence over `page` when supplied:
+   * deriving the skip from `page` alone rounds the caller's offset down to a
+   * multiple of `pageSize` and silently returns a different window.
+   */
+  offset?: number;
 }
+
+/** Event list responses omit large provenance and waveform-related collections. */
+/** Derived from EVENT_SUMMARY_PROJECTION so the type cannot drift from the projection. */
+export type EventSummary = Omit<MergedEvent, keyof typeof EVENT_SUMMARY_PROJECTION>;
+export const EVENT_SUMMARY_PROJECTION = {
+  _id: 0, source_events: 0, origins: 0, magnitudes: 0, picks: 0, arrivals: 0,
+  amplitudes: 0, station_magnitudes: 0, event_descriptions: 0, comments: 0, creation_info: 0,
+};
 
 export interface PaginatedResult<T> {
   data: T[];
@@ -173,6 +189,7 @@ export interface PaginatedResult<T> {
  * Performance Optimization: More efficient than offset-based pagination for large datasets
  */
 export interface CursorPaginationParams {
+  summary?: boolean;
   /**
    * Cursor value (typically the ID or timestamp of the last item from previous page)
    */
@@ -229,7 +246,10 @@ export interface DbQueries {
     source_events: string;
   }, session?: ClientSession) => Promise<void>;
 
-  // Performance Optimization: Bulk insert for importing large datasets
+  // Performance Optimization: Bulk insert for importing large datasets.
+  // Resolves to the number of documents actually written, which can be lower
+  // than events.length: rows repeating a source_id are dropped in-batch and
+  // rows colliding with the (catalogue_id, source_id) unique index are skipped.
   bulkInsertEvents: (events: Array<Partial<MergedEvent> & {
     id: string;
     catalogue_id: string;
@@ -238,7 +258,7 @@ export interface DbQueries {
     longitude: number;
     magnitude: number;
     source_events: string;
-  }>, session?: ClientSession) => Promise<void>;
+  }>, session?: ClientSession) => Promise<number>;
 
   getCatalogues: (params?: PaginationParams) => Promise<MergedCatalogue[] | PaginatedResult<MergedCatalogue>>;
 
@@ -247,7 +267,8 @@ export interface DbQueries {
   getEventsByCatalogueId: (catalogueId: string, params?: PaginationParams) => Promise<MergedEvent[] | PaginatedResult<MergedEvent>>;
 
   // Performance Optimization: Cursor-based pagination for better performance on large datasets
-  getEventsByCatalogueIdCursor: (catalogueId: string, params?: CursorPaginationParams) => Promise<CursorPaginatedResult<MergedEvent>>;
+  getEventsByCatalogueIdCursor: (catalogueId: string, params?: CursorPaginationParams) => Promise<CursorPaginatedResult<EventSummary>>;
+  getEventById: (catalogueId: string, eventId: string) => Promise<MergedEvent | undefined>;
 
   updateCatalogueStatus: (status: string, id: string, session?: ClientSession) => Promise<void>;
 
@@ -265,6 +286,10 @@ export interface DbQueries {
   deleteCatalogue: (id: string) => Promise<void>;
 
   getFilteredEvents: (catalogueId: string, filters: EventFilters) => Promise<FilteredEventsResult>;
+
+  // Aggregated in MongoDB: a 218k-event catalogue must not be materialised in Node
+  // just to take a min/max/mean.
+  getCatalogueEventStatistics: (catalogueId: string) => Promise<CatalogueEventStatistics>;
 
   // Transaction support
   transaction: <T>(callback: TransactionCallback<T>) => Promise<T>;
@@ -551,6 +576,30 @@ export interface FilteredEventsResult {
   limit: number;
 }
 
+/**
+ * Summary statistics for one catalogue's events, computed by MongoDB rather than
+ * by loading every event into Node. `null` means "no event carried that field".
+ */
+export interface CatalogueEventStatistics {
+  eventCount: number;
+  earliestTime: string | null;
+  latestTime: string | null;
+  magnitudeCount: number;
+  minMagnitude: number | null;
+  maxMagnitude: number | null;
+  averageMagnitude: number | null;
+  medianMagnitude: number | null;
+  depthCount: number;
+  minDepth: number | null;
+  maxDepth: number | null;
+  averageDepth: number | null;
+  magnitudeTypes: Array<{ type: string; count: number }>;
+  averageAzimuthalGap: number | null;
+  averageStationCount: number | null;
+  eventsWithUncertainty: number;
+  eventsWithFocalMechanism: number;
+}
+
 function parseOptionalPositiveInt(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const parsed = Number.parseInt(value, 10);
@@ -560,6 +609,31 @@ function parseOptionalPositiveInt(value: string | undefined): number | undefined
 
 const UNPAGINATED_EVENTS_LIMIT = parseOptionalPositiveInt(process.env.UNPAGINATED_EVENTS_LIMIT);
 const FILTERED_EVENTS_LIMIT = parseOptionalPositiveInt(process.env.FILTERED_EVENTS_LIMIT);
+
+/**
+ * Newest-first event ordering with `id` as a tiebreaker. `time` alone is not
+ * unique — normalizeTimestamp maps a date-only origin time to exact midnight, so
+ * a day-precision historical catalogue has whole blocks of events sharing one
+ * `time` — and MongoDB gives no stable order within a tie group, so skip/limit
+ * paging over `{time: -1}` alone can repeat a document on one page and drop it
+ * from another (MongoDB manual, cursor.sort() "Sort Consistency"). `id` is
+ * unique per event, which makes the order total. Matches the cursor path's sort.
+ */
+const EVENT_TIME_SORT_DESC = { time: -1, id: -1 } as const;
+
+/**
+ * Resolve the document offset for a paginated query. `offset` is absolute and
+ * wins over `page`; `page` is still reported back so the response envelope keeps
+ * its shape.
+ */
+function resolveSkip(params: PaginationParams, pageSize: number): { skip: number; page: number } {
+  if (params.offset !== undefined) {
+    const skip = Math.max(0, Math.trunc(params.offset));
+    return { skip, page: Math.floor(skip / pageSize) + 1 };
+  }
+  const page = params.page || 1;
+  return { skip: (page - 1) * pageSize, page };
+}
 
 // Helper function to convert MongoDB document to plain object (remove _id)
 function toPlainObject<T>(doc: WithId<Document> | null): T | undefined {
@@ -675,9 +749,9 @@ if (typeof window === 'undefined') {
       longitude: number;
       magnitude: number;
       source_events: string;
-    }>, session?: ClientSession): Promise<void> => {
+    }>, session?: ClientSession): Promise<number> => {
       if (!events || events.length === 0) {
-        return;
+        return 0;
       }
 
       // Validate all events before touching the database — fail fast on the
@@ -708,33 +782,49 @@ if (typeof window === 'undefined') {
       // ordered:false so a duplicate-key (E11000) from the partial-unique
       // (catalogue_id, source_id) index skips that row rather than aborting the batch,
       // making re-imports idempotent. Any non-duplicate write error is re-thrown.
+      //
+      // Report the number of documents MongoDB actually wrote, not docs.length:
+      // in-batch source_id duplicates were already dropped above, and E11000
+      // collisions with rows already stored are skipped by the server. Callers
+      // persist this as the catalogue's event_count, so counting submitted rows
+      // instead would invent events that are not in the collection.
+      let insertedCount = 0;
       try {
-        await collection.insertMany(docs, { ...(session ? { session } : {}), ordered: false });
+        const result = await collection.insertMany(docs, { ...(session ? { session } : {}), ordered: false });
+        insertedCount = result.insertedCount;
       } catch (err) {
-        const e = err as { code?: number; writeErrors?: Array<{ code?: number; err?: { code?: number } }> };
+        const e = err as {
+          code?: number;
+          insertedCount?: number;
+          result?: { insertedCount?: number };
+          writeErrors?: Array<{ code?: number; err?: { code?: number } }>;
+        };
         const writeErrors = e?.writeErrors ?? [];
         const onlyDuplicates =
           e?.code === 11000 ||
           (writeErrors.length > 0 && writeErrors.every((w) => (w?.code ?? w?.err?.code) === 11000));
         if (!onlyDuplicates) throw err;
+        // MongoBulkWriteError still carries the partial result for the rows that succeeded.
+        insertedCount = e.result?.insertedCount ?? e.insertedCount ?? 0;
       }
 
       // Invalidate caches
       const catalogueIds = new Set(events.map(e => e.catalogue_id));
       catalogueIds.forEach(id => invalidateCatalogueCache(id));
+
+      return insertedCount;
     },
 
     getCatalogues: async (params?: PaginationParams): Promise<MergedCatalogue[] | PaginatedResult<MergedCatalogue>> => {
       const collection = await getCollection(COLLECTIONS.CATALOGUES);
 
-      if (!params || (!params.page && !params.pageSize)) {
+      if (!params || (!params.page && !params.pageSize && params.offset === undefined)) {
         const docs = await collection.find({}).sort({ created_at: -1 }).toArray();
         return toPlainArray<MergedCatalogue>(docs);
       }
 
-      const page = params.page || 1;
       const pageSize = params.pageSize || 10;
-      const skip = (page - 1) * pageSize;
+      const { skip, page } = resolveSkip(params, pageSize);
 
       const [docs, totalItems] = await Promise.all([
         collection.find({}).sort({ created_at: -1 }).skip(skip).limit(pageSize).toArray(),
@@ -761,10 +851,10 @@ if (typeof window === 'undefined') {
     getEventsByCatalogueId: async (catalogueId: string, params?: PaginationParams): Promise<MergedEvent[] | PaginatedResult<MergedEvent>> => {
       const collection = await getCollection(COLLECTIONS.EVENTS);
 
-      if (!params || (!params.page && !params.pageSize)) {
+      if (!params || (!params.page && !params.pageSize && params.offset === undefined)) {
         let query = collection
           .find({ catalogue_id: catalogueId })
-          .sort({ time: -1 });
+          .sort(EVENT_TIME_SORT_DESC);
 
         // Optional cap for deployments that want to bound unpaginated payloads.
         // If UNPAGINATED_EVENTS_LIMIT is unset, return all matching events.
@@ -776,12 +866,11 @@ if (typeof window === 'undefined') {
         return toPlainArray<MergedEvent>(docs);
       }
 
-      const page = params.page || 1;
       const pageSize = params.pageSize || 10;
-      const skip = (page - 1) * pageSize;
+      const { skip, page } = resolveSkip(params, pageSize);
 
       const [docs, totalItems] = await Promise.all([
-        collection.find({ catalogue_id: catalogueId }).sort({ time: -1 }).skip(skip).limit(pageSize).toArray(),
+        collection.find({ catalogue_id: catalogueId }).sort(EVENT_TIME_SORT_DESC).skip(skip).limit(pageSize).toArray(),
         collection.countDocuments({ catalogue_id: catalogueId })
       ]);
 
@@ -802,7 +891,7 @@ if (typeof window === 'undefined') {
     getEventsByCatalogueIdCursor: async (
       catalogueId: string,
       params?: CursorPaginationParams
-    ): Promise<CursorPaginatedResult<MergedEvent>> => {
+    ): Promise<CursorPaginatedResult<EventSummary>> => {
       const limit = params?.limit || 100;
       const direction = params?.direction || 'desc';
       const cursor = params?.cursor;
@@ -817,7 +906,7 @@ if (typeof window === 'undefined') {
       const query: Record<string, unknown> = { catalogue_id: catalogueId };
 
       if (cursor) {
-        const [cursorTime, cursorId] = cursor.split(':');
+        const [cursorTime, cursorId] = decodeEventCursor(cursor);
         if (direction === 'desc') {
           query.$or = [
             { time: { $lt: cursorTime } },
@@ -832,13 +921,13 @@ if (typeof window === 'undefined') {
       }
 
       const docs = await collection
-        .find(query)
+        .find(query, params?.summary ? { projection: EVENT_SUMMARY_PROJECTION } : {})
         .sort({ time: sortDir, id: sortDir })
         .limit(limit + 1)
         .toArray();
 
       const hasMore = docs.length > limit;
-      const data = toPlainArray<MergedEvent>(hasMore ? docs.slice(0, limit) : docs);
+      const data = toPlainArray<EventSummary>(hasMore ? docs.slice(0, limit) : docs);
 
       let nextCursor: string | null = null;
       let prevCursor: string | null = null;
@@ -847,10 +936,10 @@ if (typeof window === 'undefined') {
         const lastItem = data[data.length - 1];
         const firstItem = data[0];
         if (hasMore) {
-          nextCursor = `${lastItem.time}:${lastItem.id}`;
+          nextCursor = encodeEventCursor(lastItem.time, lastItem.id);
         }
         if (cursor) {
-          prevCursor = `${firstItem.time}:${firstItem.id}`;
+          prevCursor = encodeEventCursor(firstItem.time, firstItem.id);
         }
       }
 
@@ -858,6 +947,11 @@ if (typeof window === 'undefined') {
         data,
         pagination: { nextCursor, prevCursor, hasMore, limit }
       };
+    },
+
+    getEventById: async (catalogueId: string, eventId: string): Promise<MergedEvent | undefined> => {
+      const collection = await getCollection(COLLECTIONS.EVENTS);
+      return toPlainObject<MergedEvent>(await collection.findOne({ catalogue_id: catalogueId, id: eventId }));
     },
 
     updateCatalogueStatus: async (status: string, id: string, session?: ClientSession): Promise<void> => {
@@ -889,6 +983,145 @@ if (typeof window === 'undefined') {
     countEventsByCatalogue: async (id: string): Promise<number> => {
       const collection = await getCollection(COLLECTIONS.EVENTS);
       return collection.countDocuments({ catalogue_id: id });
+    },
+
+    // Catalogue-wide event statistics, aggregated server-side. Loading every event
+    // into Node to reduce it was both a memory hazard on 200k+ event catalogues and
+    // an outright failure: Math.min(...array) throws RangeError above ~125,000
+    // elements on Node 20 (measured: 125,263 is the largest length that works), so
+    // the statistics endpoint returned HTTP 500 for the repo's larger catalogues.
+    getCatalogueEventStatistics: async (catalogueId: string): Promise<CatalogueEventStatistics> => {
+      const collection = await getCollection(COLLECTIONS.EVENTS);
+      const match = { catalogue_id: catalogueId };
+
+      // "present" means the field exists and is not null — the same test the
+      // previous in-Node implementation used (`!= null`).
+      const isPresent = (field: string) => ({ $ne: [{ $ifNull: [field, null] }, null] });
+
+      type OverallRow = Omit<CatalogueEventStatistics, 'magnitudeTypes' | 'medianMagnitude'>;
+      type FacetResult = {
+        overall: OverallRow[];
+        magnitudeTypes: Array<{ _id: unknown; count: number }>;
+      };
+
+      // $min/$max/$avg all skip null and missing fields, so they reproduce the
+      // "filter out null/undefined, then reduce" semantics of the old code.
+      const [facets] = await collection.aggregate<FacetResult>([
+        { $match: match },
+        {
+          $facet: {
+            overall: [{
+              $group: {
+                _id: null,
+                eventCount: { $sum: 1 },
+                earliestTime: { $min: '$time' },
+                latestTime: { $max: '$time' },
+                magnitudeCount: { $sum: { $cond: [{ $isNumber: '$magnitude' }, 1, 0] } },
+                minMagnitude: { $min: '$magnitude' },
+                maxMagnitude: { $max: '$magnitude' },
+                averageMagnitude: { $avg: '$magnitude' },
+                depthCount: { $sum: { $cond: [{ $isNumber: '$depth' }, 1, 0] } },
+                minDepth: { $min: '$depth' },
+                maxDepth: { $max: '$depth' },
+                averageDepth: { $avg: '$depth' },
+                averageAzimuthalGap: { $avg: '$azimuthal_gap' },
+                averageStationCount: { $avg: '$used_station_count' },
+                eventsWithUncertainty: {
+                  $sum: {
+                    $cond: [
+                      { $or: [isPresent('$latitude_uncertainty'), isPresent('$longitude_uncertainty')] },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+                eventsWithFocalMechanism: {
+                  $sum: { $cond: [isPresent('$focal_mechanisms'), 1, 0] },
+                },
+              },
+            }],
+            magnitudeTypes: [
+              { $group: { _id: '$magnitude_type', count: { $sum: 1 } } },
+            ],
+          },
+        },
+      ], { allowDiskUse: true }).toArray();
+
+      const overall = facets?.overall?.[0];
+      if (!overall || overall.eventCount === 0) {
+        return {
+          eventCount: 0,
+          earliestTime: null,
+          latestTime: null,
+          magnitudeCount: 0,
+          minMagnitude: null,
+          maxMagnitude: null,
+          averageMagnitude: null,
+          medianMagnitude: null,
+          depthCount: 0,
+          minDepth: null,
+          maxDepth: null,
+          averageDepth: null,
+          magnitudeTypes: [],
+          averageAzimuthalGap: null,
+          averageStationCount: null,
+          eventsWithUncertainty: 0,
+          eventsWithFocalMechanism: 0,
+        };
+      }
+
+      // Median: fetch only the middle element(s) of the sorted magnitudes. For an
+      // even count the median is the mean of the two central values (the previous
+      // implementation returned the upper of the two, which is not the median).
+      let medianMagnitude: number | null = null;
+      if (overall.magnitudeCount > 0) {
+        const lowerIndex = Math.floor((overall.magnitudeCount - 1) / 2);
+        const take = overall.magnitudeCount % 2 === 0 ? 2 : 1;
+        const middle = await collection.aggregate<{ magnitude: number }>([
+          { $match: { ...match, magnitude: { $type: 'number' } } },
+          { $project: { _id: 0, magnitude: 1 } },
+          { $sort: { magnitude: 1 } },
+          { $skip: lowerIndex },
+          { $limit: take },
+        ], { allowDiskUse: true }).toArray();
+        if (middle.length === take) {
+          medianMagnitude = take === 2
+            ? (middle[0].magnitude + middle[1].magnitude) / 2
+            : middle[0].magnitude;
+        }
+      }
+
+      // Blank/absent magnitude types collapse into a single "Unknown" bucket, as
+      // `event.magnitude_type || 'Unknown'` did.
+      const typeCounts = new Map<string, number>();
+      for (const row of facets.magnitudeTypes ?? []) {
+        const label = typeof row._id === 'string' && row._id.length > 0 ? row._id : 'Unknown';
+        typeCounts.set(label, (typeCounts.get(label) ?? 0) + row.count);
+      }
+      // Most common first; the name breaks ties so the response is deterministic
+      // (aggregation group order is not).
+      const magnitudeTypes = Array.from(typeCounts, ([type, count]) => ({ type, count }))
+        .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+
+      return {
+        eventCount: overall.eventCount,
+        earliestTime: overall.earliestTime ?? null,
+        latestTime: overall.latestTime ?? null,
+        magnitudeCount: overall.magnitudeCount,
+        minMagnitude: overall.minMagnitude ?? null,
+        maxMagnitude: overall.maxMagnitude ?? null,
+        averageMagnitude: overall.averageMagnitude ?? null,
+        medianMagnitude,
+        depthCount: overall.depthCount,
+        minDepth: overall.minDepth ?? null,
+        maxDepth: overall.maxDepth ?? null,
+        averageDepth: overall.averageDepth ?? null,
+        magnitudeTypes,
+        averageAzimuthalGap: overall.averageAzimuthalGap ?? null,
+        averageStationCount: overall.averageStationCount ?? null,
+        eventsWithUncertainty: overall.eventsWithUncertainty,
+        eventsWithFocalMechanism: overall.eventsWithFocalMechanism,
+      };
     },
 
     updateCatalogueGeoBounds: async (id: string, minLat: number, maxLat: number, minLon: number, maxLon: number, session?: ClientSession): Promise<void> => {
@@ -1023,17 +1256,33 @@ if (typeof window === 'undefined') {
       if (filters.maxStandardError !== undefined) query.standard_error = { $lte: filters.maxStandardError };
       if (filters.minLatitude !== undefined) query.latitude = { ...(query.latitude as object), $gte: filters.minLatitude };
       if (filters.maxLatitude !== undefined) query.latitude = { ...(query.latitude as object), $lte: filters.maxLatitude };
-      if (filters.minLongitude !== undefined) query.longitude = { ...(query.longitude as object), $gte: filters.minLongitude };
-      if (filters.maxLongitude !== undefined) query.longitude = { ...(query.longitude as object), $lte: filters.maxLongitude };
+      // Longitude: minLongitude > maxLongitude denotes a box crossing the
+      // antimeridian (180°), the same RFC 7946 §5.2 convention the catalogue
+      // bounds use. No document can satisfy {$gte: 179, $lte: -179}, so that
+      // case has to be split into the two arcs either side of the dateline —
+      // otherwise a Kermadec-arc filter silently returns zero events.
+      if (
+        filters.minLongitude !== undefined &&
+        filters.maxLongitude !== undefined &&
+        filters.minLongitude > filters.maxLongitude
+      ) {
+        query.$or = [
+          { longitude: { $gte: filters.minLongitude } },
+          { longitude: { $lte: filters.maxLongitude } },
+        ];
+      } else {
+        if (filters.minLongitude !== undefined) query.longitude = { ...(query.longitude as object), $gte: filters.minLongitude };
+        if (filters.maxLongitude !== undefined) query.longitude = { ...(query.longitude as object), $lte: filters.maxLongitude };
+      }
 
       let docs: WithId<Document>[];
       let truncated = false;
 
       if (FILTERED_EVENTS_LIMIT) {
-        docs = await collection.find(query).sort({ time: -1 }).limit(FILTERED_EVENTS_LIMIT + 1).toArray();
+        docs = await collection.find(query).sort(EVENT_TIME_SORT_DESC).limit(FILTERED_EVENTS_LIMIT + 1).toArray();
         truncated = docs.length > FILTERED_EVENTS_LIMIT;
       } else {
-        docs = await collection.find(query).sort({ time: -1 }).toArray();
+        docs = await collection.find(query).sort(EVENT_TIME_SORT_DESC).toArray();
       }
 
       const limitedDocs = truncated && FILTERED_EVENTS_LIMIT ? docs.slice(0, FILTERED_EVENTS_LIMIT) : docs;
@@ -1556,7 +1805,9 @@ if (typeof window === 'undefined') {
 
       const events = await eventsCollection
         .find(searchQuery)
-        .sort({ time: -1 })
+        // `id` breaks ties on the non-unique `time`, so which events survive the
+        // limit is reproducible rather than plan-dependent.
+        .sort(EVENT_TIME_SORT_DESC)
         .limit(limit)
         .toArray() as any[];
 

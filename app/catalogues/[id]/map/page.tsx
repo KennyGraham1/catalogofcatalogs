@@ -7,6 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Loader2, MapPin, AlertCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useCatalogueEvents } from '@/hooks/use-catalogue-events';
+import type { MapDetail } from '@/lib/map-event-selection';
+import { Button } from '@/components/ui/button';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
 import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 
@@ -15,33 +18,6 @@ const EarthquakeCircleMap = dynamic(
   () => import('@/components/map/EarthquakeCircleMap').then(mod => ({ default: mod.EarthquakeCircleMap })),
   { ssr: false }
 );
-
-interface CatalogueEvent {
-  id: number | string;
-  latitude: number;
-  longitude: number;
-  magnitude: number;
-  depth: number | null;
-  time: string;
-  region?: string | null;
-  magnitude_type?: string | null;
-  event_type?: string | null;
-
-  // Uncertainty fields
-  latitude_uncertainty?: number | null;
-  longitude_uncertainty?: number | null;
-  depth_uncertainty?: number | null;
-
-  // Quality metrics
-  azimuthal_gap?: number | null;
-  used_station_count?: number | null;
-  used_phase_count?: number | null;
-
-  // Complex data
-  focal_mechanisms?: string | null;
-  picks?: string | null;
-  arrivals?: string | null;
-}
 
 interface Catalogue {
   id: string;
@@ -54,39 +30,28 @@ interface Catalogue {
 export default function CatalogueMapPage() {
   const params = useParams();
   const catalogueId = params.id as string;
-  const [sampleSize, setSampleSize] = useState<number>(1000);
+  const [sampleSize, setSampleSize] = useState<MapDetail>('auto');
 
   const { data: catalogues, loading: cataloguesLoading } = useCachedFetch<Catalogue[]>(
     '/api/catalogues',
     { cacheTime: 5 * 60 * 1000 }
   );
 
-  const { data: eventsData, loading: eventsLoading, error: eventsError } = useCachedFetch<CatalogueEvent[] | { data: CatalogueEvent[] }>(
-    catalogueId ? `/api/catalogues/${catalogueId}/events` : null,
-    { cacheTime: 2 * 60 * 1000 }
-  );
+  const availableCatalogues = useMemo(() => Array.isArray(catalogues) ? catalogues : [], [catalogues]);
+  const { events, loading: eventsLoading, complete, loadedCount, error, retry: reload } = useCatalogueEvents(availableCatalogues, catalogueId);
 
   const catalogue = useMemo(() => {
     if (!catalogues || !catalogueId) return null;
     return catalogues.find((c: Catalogue) => c.id === catalogueId) || null;
   }, [catalogues, catalogueId]);
 
-  const events = useMemo(() => {
-    if (!eventsData) return [];
-    if (Array.isArray(eventsData)) return eventsData;
-    if ('data' in eventsData && Array.isArray(eventsData.data)) return eventsData.data;
-    return [];
-  }, [eventsData]);
-
-  const loading = cataloguesLoading || eventsLoading;
-  const error = eventsError?.message || null;
-
-  const stats = {
+  const loading = cataloguesLoading || (eventsLoading && events.length === 0);
+  const stats = useMemo(() => ({
     total: events.length,
-    withUncertainty: events.filter(e => e.latitude_uncertainty || e.longitude_uncertainty || e.depth_uncertainty).length,
+    withUncertainty: events.filter(e => e.latitude_uncertainty != null || e.longitude_uncertainty != null || e.depth_uncertainty != null).length,
     withFocalMechanisms: events.filter(e => e.focal_mechanisms).length,
-    withStationData: events.filter(e => e.picks || e.arrivals).length,
-  };
+    withStationData: events.filter(e => (e.used_station_count ?? 0) > 0).length,
+  }), [events]);
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -104,7 +69,7 @@ export default function CatalogueMapPage() {
           )}
         </div>
 
-        {!loading && events.length > 0 && (
+        {complete && events.length > 0 && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card>
               <CardHeader className="pb-2">
@@ -137,7 +102,7 @@ export default function CatalogueMapPage() {
               <CardHeader className="pb-2">
                 <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                   <span>Station Data</span>
-                  <InfoTooltip content="Events that include picks or arrivals from seismic stations." />
+                  <InfoTooltip content="Events with a reported count of stations used in the solution." />
                 </div>
                 <CardTitle className="text-2xl">{stats.withStationData.toLocaleString()}</CardTitle>
               </CardHeader>
@@ -145,6 +110,11 @@ export default function CatalogueMapPage() {
           </div>
         )}
       </div>
+
+      {!complete && events.length > 0 && <div role={error ? 'alert' : 'status'} className="rounded-lg border p-3 text-sm">
+        {error || `Showing a preview. ${loadedCount.toLocaleString()} events received; loading the remaining events...`}
+        {error && <Button variant="outline" onClick={reload}>Retry loading events</Button>}
+      </div>}
 
       {/* Map Card */}
       <Card>
@@ -171,11 +141,12 @@ export default function CatalogueMapPage() {
             </div>
           )}
 
-          {error && (
+          {error && events.length === 0 && (
             <div className="h-[700px] flex items-center justify-center p-6">
               <Alert variant="destructive" className="max-w-md">
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>{error}</AlertDescription>
+                <Button variant="outline" onClick={reload}>Retry loading events</Button>
               </Alert>
             </div>
           )}
@@ -189,7 +160,7 @@ export default function CatalogueMapPage() {
             </div>
           )}
 
-          {!loading && !error && events.length > 0 && (
+          {!loading && events.length > 0 && (
             <EarthquakeCircleMap
               events={events}
               sampleSize={sampleSize}

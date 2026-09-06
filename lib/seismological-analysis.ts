@@ -1,15 +1,5 @@
 /**
  * Seismological Analysis Library
- *
- * Advanced seismological calculations including:
- * - Gutenberg-Richter b-value
- * - Completeness magnitude (Mc)
- * - Temporal analysis
- * - Spatial clustering
- * - Seismic moment calculations
- *
- * Performance Optimization: All expensive calculations are memoized using LRU cache
- * to avoid redundant computations when called with the same data.
  */
 
 import { memoize } from './memoization';
@@ -17,13 +7,6 @@ import { EarthquakeEvent as BaseEarthquakeEvent } from '@/types/earthquake';
 
 /**
  * Seismological analysis event type
- *
- * Extends the base EarthquakeEvent with required fields for analysis:
- * - id: Required for cluster tracking and memoization keys
- * - depth: Required for 3D distance calculations in clustering
- *
- * Events passed to seismological analysis functions should have these fields
- * populated. Use `toSeismologicalEvent()` to convert from base events.
  */
 export interface EarthquakeEvent extends Omit<BaseEarthquakeEvent, 'id' | 'depth'> {
   id: number | string;
@@ -132,6 +115,54 @@ export interface MFDComparisonResult {
 }
 
 /**
+ * Smallest / largest value in a numeric array.
+ *
+ * `Math.min(...array)` spreads every element as a separate function argument and
+ * throws `RangeError: Maximum call stack size exceeded` once the array passes the
+ * V8 argument limit (measured: 125,000 arguments succeed, 131,000 throw on Node
+ * 20.19.6). A national New Zealand catalogue is well past that, so every min/max
+ * taken over an event array in this module goes through these helpers.
+ */
+function minOf(values: number[]): number {
+  let min = Infinity;
+  for (const value of values) {
+    if (value < min) min = value;
+  }
+  return min;
+}
+
+function maxOf(values: number[]): number {
+  let max = -Infinity;
+  for (const value of values) {
+    if (value > max) max = value;
+  }
+  return max;
+}
+
+/**
+ * Absorbs IEEE-754 representation error when locating a magnitude bin.
+ */
+const BIN_EPSILON = 1e-9;
+
+/** Lower edge of the magnitude bin containing `magnitude`. */
+function binLowerEdge(magnitude: number, binWidth: number): number {
+  return Math.floor(magnitude / binWidth + BIN_EPSILON) * binWidth;
+}
+
+/**
+ * Canonical numeric key for a bin edge.
+ *
+ * Rounding to a fixed number of decimals keeps `Map` keys stable against drift in
+ * repeated `edge + binWidth` accumulation. Four decimals covers every bin width
+ * the UI offers (0.01, 0.05, 0.1); the previous `Math.round(edge * 10) / 10` hard
+ * coded a 0.1 grid, so selecting a finer bin width silently collapsed the finer
+ * bins back onto the 0.1 grid and summed their counts.
+ */
+function binKey(edge: number): number {
+  return Number(edge.toFixed(4));
+}
+
+/**
  * Calculate Magnitude-Frequency Distribution for a catalogue
  * Returns both incremental histogram and cumulative distribution
  */
@@ -176,21 +207,21 @@ export function calculateMFD(
     };
   }
 
-  const minMag = Math.floor(Math.min(...magnitudes) / binWidth) * binWidth;
-  const maxMag = Math.ceil(Math.max(...magnitudes) / binWidth) * binWidth;
+  const minMag = binLowerEdge(minOf(magnitudes), binWidth);
+  const maxMag = Math.ceil(maxOf(magnitudes) / binWidth - BIN_EPSILON) * binWidth;
 
-  // Create histogram bins
+  // Create histogram bins. Index-based so that repeated `mag += binWidth`
+  // accumulation cannot drift and drop the top bin.
   const bins: Map<number, number> = new Map();
-  for (let mag = minMag; mag <= maxMag + binWidth; mag += binWidth) {
-    const roundedMag = Math.round(mag * 10) / 10; // Round to avoid floating point issues
-    bins.set(roundedMag, 0);
+  const nBins = Math.round((maxMag - minMag) / binWidth) + 1;
+  for (let i = 0; i < nBins; i++) {
+    bins.set(binKey(minMag + i * binWidth), 0);
   }
 
   // Count events in each bin
   magnitudes.forEach(mag => {
-    const bin = Math.floor(mag / binWidth) * binWidth;
-    const roundedBin = Math.round(bin * 10) / 10;
-    bins.set(roundedBin, (bins.get(roundedBin) || 0) + 1);
+    const key = binKey(binLowerEdge(mag, binWidth));
+    bins.set(key, (bins.get(key) || 0) + 1);
   });
 
   // Convert to sorted array for histogram
@@ -280,21 +311,21 @@ export function calculateGutenbergRichter(
   }
 
   // Bin magnitudes
-  const minMag = Math.floor(Math.min(...filteredEvents.map(e => e.magnitude)) / binWidth) * binWidth;
-  const maxMag = Math.ceil(Math.max(...filteredEvents.map(e => e.magnitude)) / binWidth) * binWidth;
+  const filteredMagnitudes = filteredEvents.map(e => e.magnitude);
+  const minMag = binLowerEdge(minOf(filteredMagnitudes), binWidth);
+  const maxMag = Math.ceil(maxOf(filteredMagnitudes) / binWidth - BIN_EPSILON) * binWidth;
 
   const bins: Map<number, number> = new Map();
   // Index-based iteration so floating-point drift in `mag += binWidth` cannot drop
   // the maximum-magnitude bin (the previous `mag <= maxMag` loop could).
   const nBins = Math.round((maxMag - minMag) / binWidth) + 1;
   for (let i = 0; i < nBins; i++) {
-    bins.set(Number((minMag + i * binWidth).toFixed(2)), 0);
+    bins.set(binKey(minMag + i * binWidth), 0);
   }
 
   // Count events in each bin
   filteredEvents.forEach(event => {
-    const bin = Math.floor(event.magnitude / binWidth) * binWidth;
-    const roundedBin = Number(bin.toFixed(2));
+    const roundedBin = binKey(binLowerEdge(event.magnitude, binWidth));
     bins.set(roundedBin, (bins.get(roundedBin) || 0) + 1);
   });
 
@@ -315,8 +346,17 @@ export function calculateGutenbergRichter(
   }
 
   const n = cumulativeCounts.length;
-  if (n < 3) {
-    throw new Error('Insufficient magnitude bins for regression');
+  // Hard floor: a Gutenberg-Richter fit needs at least three POPULATED magnitude
+  // bins (paper, sec:mc). `cumulativeCounts.length` cannot express that — it holds
+  // every bin from minMag up to the largest populated one, so a catalogue with
+  // events at only M1.0 and M4.0 still produced 31 entries and was fitted
+  // (b = 0.15, R^2 = -13.5) instead of being withheld.
+  const populatedBins = sortedBins.reduce(
+    (count, [, binCount]) => (binCount > 0 ? count + 1 : count),
+    0
+  );
+  if (populatedBins < 3) {
+    throw new Error('Insufficient magnitude bins for regression (need at least 3 populated bins)');
   }
 
   // Completeness magnitude Mc. The Aki-Utsu MLE below is only valid for a sample
@@ -337,12 +377,16 @@ export function calculateGutenbergRichter(
     }
     mc = Number((peakMag + MAXC_CORRECTION).toFixed(2));
   }
-  let magsAboveMc = filteredEvents.map(e => e.magnitude).filter(m => m >= mc);
-  // Guard: if the estimated Mc leaves too few events for a stable estimate, fall
-  // back to the catalogue floor rather than producing a degenerate b-value.
+  const magsAboveMc = filteredEvents.map(e => e.magnitude).filter(m => m >= mc);
+  // Hard floor: fewer than 10 events above Mc means the estimate is WITHHELD, not
+  // reported (paper, sec:mc). The previous guard fell back to the catalogue floor,
+  // which anchored the Aki-Utsu MLE at a magnitude the catalogue is demonstrably
+  // not complete above and then returned that floor to the UI as `completeness`
+  // (e.g. a 14-event sequence with MAXC Mc = 1.2 reported Mc = 1.0, b = 0.53).
   if (magsAboveMc.length < 10) {
-    mc = minMag;
-    magsAboveMc = filteredEvents.map(e => e.magnitude).filter(m => m >= mc);
+    throw new Error(
+      `Insufficient data above the completeness magnitude (need at least 10 events above Mc=${mc})`
+    );
   }
 
   // Maximum-likelihood b-value (Aki, 1965) with the Utsu binning correction:
@@ -400,18 +444,18 @@ export function estimateCompletenessMagnitude(
   }
 
   // Bin magnitudes
-  const minMag = Math.floor(Math.min(...events.map(e => e.magnitude)) / binWidth) * binWidth;
-  const maxMag = Math.ceil(Math.max(...events.map(e => e.magnitude)) / binWidth) * binWidth;
+  const eventMagnitudes = events.map(e => e.magnitude);
+  const minMag = binLowerEdge(minOf(eventMagnitudes), binWidth);
+  const maxMag = Math.ceil(maxOf(eventMagnitudes) / binWidth - BIN_EPSILON) * binWidth;
 
   const bins: Map<number, number> = new Map();
   const nBins = Math.round((maxMag - minMag) / binWidth) + 1;
   for (let i = 0; i < nBins; i++) {
-    bins.set(Number((minMag + i * binWidth).toFixed(2)), 0);
+    bins.set(binKey(minMag + i * binWidth), 0);
   }
 
   events.forEach(event => {
-    const bin = Math.floor(event.magnitude / binWidth) * binWidth;
-    const roundedBin = Number(bin.toFixed(2));
+    const roundedBin = binKey(binLowerEdge(event.magnitude, binWidth));
     bins.set(roundedBin, (bins.get(roundedBin) || 0) + 1);
   });
 
@@ -450,15 +494,6 @@ export function estimateCompletenessMagnitude(
 /**
  * Gardner-Knopoff (1974) space-time window parameters
  * These are the standard parameters used for earthquake declustering
- *
- * Two-branch time window (days): T = 10^(0.032*M + 2.7389) for M >= 6.5,
- *   otherwise T = 10^(0.5409*M - 0.547)  (Gardner & Knopoff, 1974)
- * Distance window (km): L = 10^(0.1238*M + 0.983)  (Gardner & Knopoff, 1974)
- * (Table 1 of van Stiphout et al., 2012; OpenQuake hmtk GardnerKnopoffWindow)
- *
- * Sanity check of the (correct) assignment: M4 -> ~41 days, M8 -> ~989 days.
- * The previous code had the two branches swapped, giving M4 -> ~736 days and
- * M8 -> ~6026 days, grossly over-clustering small events.
  */
 export function getGardnerKnopoffWindow(magnitude: number): { timeWindowDays: number; distanceWindowKm: number } {
   const timeWindowDays = magnitude >= 6.5
@@ -467,6 +502,17 @@ export function getGardnerKnopoffWindow(magnitude: number): { timeWindowDays: nu
   const distanceWindowKm = Math.pow(10, 0.1238 * magnitude + 0.983);
 
   return { timeWindowDays, distanceWindowKm };
+}
+
+/**
+ * ISO-8601 week start (the Monday, in UTC) of the day containing `date`, as a
+ * `YYYY-MM-DD` string.
+ */
+function isoWeekStartUTC(date: Date): string {
+  const dayStartMs = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  // getUTCDay() is 0 for Sunday; ISO weeks run Monday (0 here) to Sunday (6).
+  const mondayOffset = (new Date(dayStartMs).getUTCDay() + 6) % 7;
+  return new Date(dayStartMs - mondayOffset * 86400000).toISOString().split('T')[0];
 }
 
 /**
@@ -486,15 +532,6 @@ function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 
 /**
  * Gardner-Knopoff Declustering Algorithm
- *
- * Reference:
- * - Gardner, J.K. and Knopoff, L. (1974). "Is the sequence of earthquakes in Southern
- *   California, with aftershocks removed, Poissonian?" BSSA, 64(5), 1363-1367.
- * - Uhrhammer, R.A. (1986). "Characteristics of Northern and Central California Seismicity"
- *   Earthquake Notes, 57(1), p. 21.
- *
- * This implementation identifies mainshocks and links dependent events (foreshocks/aftershocks)
- * using magnitude-dependent space-time windows.
  */
 export function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): {
   mainshocks: EarthquakeEvent[];
@@ -765,19 +802,6 @@ export interface ReasenbergParams {
 
 /**
  * Reasenberg (1985) link-based declustering.
- *
- * Reference:
- * - Reasenberg, P. (1985). "Second-order moment of central California seismicity,
- *   1969-1982." JGR, 90(B7), 5479-5495.
- * - Omori (1894); Utsu (1961) for the modified-Omori look-ahead.
- *
- * Events are linked into clusters when a later event falls within both an
- * Omori-Utsu temporal look-ahead window (tau, bounded by [taumin, taumax]) and a
- * spatial interaction zone of rfact crack radii, r(M) = 0.011 x 10^(0.4 M) km
- * (Kanamori & Anderson 1975 source-dimension scaling). The look-ahead grows after
- * the largest event of a cluster and shrinks with elapsed time. Returns the same
- * shape as {@link gardnerKnopoffDeclustering}: independent events (cluster heads +
- * singletons) as mainshocks, plus per-cluster summaries.
  */
 export function reasenbergDeclustering(
   events: EarthquakeEvent[],
@@ -800,7 +824,7 @@ export function reasenbergDeclustering(
   const sorted = [...events].sort(
     (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
   );
-  const xmeff = params.xmeff ?? Math.min(...sorted.map((e) => e.magnitude));
+  const xmeff = params.xmeff ?? minOf(sorted.map((e) => e.magnitude));
 
   const DAY = 1000 * 60 * 60 * 24;
   const tms = (e: EarthquakeEvent) => new Date(e.time).getTime();
@@ -924,15 +948,12 @@ export function analyzeTemporalPattern(
   const dailyBins: Map<string, number> = new Map();
   sortedEvents.forEach(event => {
     const eventDate = new Date(event.time);
-    let binKey: string;
-    if (useWeeklyBins) {
-      // Use ISO week number for weekly bins
-      const startOfYear = new Date(eventDate.getFullYear(), 0, 1);
-      const weekNumber = Math.ceil((((eventDate.getTime() - startOfYear.getTime()) / 86400000) + startOfYear.getDay() + 1) / 7);
-      binKey = `${eventDate.getFullYear()}-W${weekNumber.toString().padStart(2, '0')}`;
-    } else {
-      binKey = eventDate.toISOString().split('T')[0];
-    }
+    // Both branches emit a parseable ISO calendar date: the event's UTC day, or
+    // the Monday starting its ISO week. (Weekly bins were keyed "YYYY-Www", which
+    // no date formatter can parse.)
+    const binKey = useWeeklyBins
+      ? isoWeekStartUTC(eventDate)
+      : eventDate.toISOString().split('T')[0];
     dailyBins.set(binKey, (dailyBins.get(binKey) || 0) + 1);
   });
 
@@ -1031,15 +1052,6 @@ export function calculateSeismicMoment(events: EarthquakeEvent[]): SeismicMoment
 
 /**
  * Performance Optimization: Memoized versions of expensive calculations
- *
- * These memoized functions cache results for 10 minutes and can store up to 50 results.
- * This dramatically improves performance for dashboard views and repeated analyses.
- *
- * Usage: Simply replace the function call with the memoized version:
- * - calculateGutenbergRichter() -> calculateGutenbergRichterMemoized()
- * - estimateCompleteness() -> estimateCompletenessMemoized()
- * - analyzeTemporalDistribution() -> analyzeTemporalDistributionMemoized()
- * - calculateSeismicMoment() -> calculateSeismicMomentMemoized()
  */
 
 /**

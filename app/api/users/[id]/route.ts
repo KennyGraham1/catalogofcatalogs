@@ -84,6 +84,15 @@ export async function PATCH(
     }
     
     if (is_active !== undefined) {
+      // Must be stored as a real boolean: a string such as "false" is truthy at
+      // the login check (lib/auth/config.ts) and in getSessionUserState, so a
+      // malformed request would silently fail to deactivate the account.
+      if (typeof is_active !== 'boolean') {
+        return NextResponse.json(
+          { error: 'is_active must be a boolean' },
+          { status: 400 }
+        );
+      }
       updateFields.is_active = is_active;
     }
     

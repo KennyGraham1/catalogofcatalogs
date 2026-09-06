@@ -3,6 +3,8 @@
  * Provides consistent theming, colors, and styling across all charts
  */
 
+import { csvRow } from './export-utils';
+
 // Professional seismology color palette
 // Based on scientific visualization best practices and accessibility guidelines
 export const SEISMIC_COLORS = {
@@ -293,16 +295,17 @@ export function exportDataAsCSV(data: Record<string, unknown>[], filename: strin
 
   const headers = Object.keys(data[0]);
   const csvRows = [
-    headers.join(','),
+    csvRow(headers),
     ...data.map(row =>
-      headers.map(header => {
+      csvRow(headers.map(header => {
         const value = row[header];
-        // Escape strings with commas or quotes
-        if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
-          return `"${value.replace(/"/g, '""')}"`;
-        }
-        return String(value ?? '');
-      }).join(',')
+        // Nested values have no flat CSV representation; serialise them rather than
+        // emitting "[object Object]".
+        if (value !== null && typeof value === 'object') return JSON.stringify(value);
+        // A missing cell is an empty field, not the text "null"/"undefined": the object
+        // guard above deliberately excludes null, so null must be handled here.
+        return value === null || value === undefined ? '' : String(value);
+      }))
     )
   ];
 

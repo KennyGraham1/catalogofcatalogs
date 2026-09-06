@@ -1,25 +1,25 @@
 /**
  * Integrated Quality Assessment System
- * 
- * Combines our existing 0-100 quality scoring system with the GeoNet QS (QS0-QS6) system
- * to provide both detailed analysis and standardized quality classification.
  */
 
-import { calculateQualityScore, type QualityMetrics, type QualityScore } from './quality-scoring';
+import { calculateQualityScore, metricsFromEvent, type QualityMetrics, type QualityScore } from './quality-scoring';
 import { calculateGeoNetQS, formatQS, type GeoNetQSCriteria, type GeoNetQSResult } from './geonet-quality-score';
 
 export interface IntegratedQualityAssessment {
   // Detailed 0-100 scoring system
   detailedScore: QualityScore;
   
-  // Standardized GeoNet QS system
+  // In-house QS0-QS6 location-quality heuristic (NOT the published GeoNet QS; see header).
+  // Field name retained for API compatibility.
   geonetQS: GeoNetQSResult;
   
   // Combined summary
   summary: {
     overallQuality: 'Excellent' | 'Very Good' | 'Good' | 'Fair' | 'Poor' | 'Very Poor' | 'Unconstrained';
     primaryScore: number; // 0-100
-    standardizedScore: number; // 0-6 (QS)
+    // 0-6 from the in-house location-quality heuristic (not a standard; see header).
+    // Field name retained for API compatibility.
+    standardizedScore: number;
     recommendation: string;
     useCaseGuidance: {
       scientificResearch: boolean;
@@ -34,31 +34,28 @@ export interface IntegratedQualityAssessment {
  * Perform integrated quality assessment using both scoring systems
  */
 export function assessEventQuality(event: any): IntegratedQualityAssessment {
-  // Extract metrics for detailed scoring
-  const detailedMetrics: QualityMetrics = {
-    horizontalUncertainty: calculateHorizontalUncertainty(event),
-    depthUncertainty: event.depth_uncertainty ?? null,
-    timeUncertainty: event.time_uncertainty ?? null,
-    azimuthalGap: event.azimuthal_gap ?? null,
-    usedStationCount: event.used_station_count ?? null,
-    usedPhaseCount: event.used_phase_count ?? null,
-    standardError: event.standard_error ?? null,
-    magnitudeUncertainty: event.magnitude_uncertainty ?? null,
-    magnitudeStationCount: event.magnitude_station_count ?? null,
-    evaluationMode: event.evaluation_mode ?? null,
-    evaluationStatus: event.evaluation_status ?? null,
-  };
+  // Extract metrics for detailed scoring. metricsFromEvent() is the single adapter from a
+  // snake_case DB row to QualityMetrics: it resolves horizontal uncertainty from the
+  // horizontal_uncertainty km column first (the column the QuakeML/GeoNet import path
+  // populates, lib/quakeml-to-db.ts) and only falls back to the lat/lon degree pair. The
+  // local resolver this replaced knew only the degree pair, so a SeisComP-style origin that
+  // carries <horizontalUncertainty> but no per-coordinate uncertainties was scored as
+  // "no horizontal data" — 1.2 km of uncertainty reported as QS0 "Unconstrained".
+  const detailedMetrics: QualityMetrics = metricsFromEvent(event);
 
-  // Extract criteria for GeoNet QS
+  // Criteria for the in-house QS0-QS6 location heuristic, taken from the same resolved
+  // metrics so the two scorers can never disagree about the same event.
   const geonetCriteria: GeoNetQSCriteria = {
-    azimuthalGap: event.azimuthal_gap ?? null,
-    usedStationCount: event.used_station_count ?? null,
-    rmsResidual: event.standard_error ?? null,
-    horizontalUncertainty: calculateHorizontalUncertainty(event), // km
-    depthUncertainty: event.depth_uncertainty ?? null, // km (DB convention)
+    azimuthalGap: detailedMetrics.azimuthalGap ?? null,      // degrees
+    usedStationCount: detailedMetrics.usedStationCount ?? null,
+    rmsResidual: detailedMetrics.standardError ?? null,      // seconds
+    horizontalUncertainty: detailedMetrics.horizontalUncertainty ?? null, // km
+    depthUncertainty: detailedMetrics.depthUncertainty ?? null,           // km (DB convention)
     // minimum_distance is stored in degrees (QuakeML/FDSN OriginQuality.minimumDistance);
-    // the GeoNet QS scorer expects km, so convert here (~111.19 km per degree).
-    minimumDistance: event.minimum_distance != null ? event.minimum_distance * 111.19 : null,
+    // the QS scorer expects km, so convert here (~111.19 km per degree).
+    minimumDistance: typeof event?.minimum_distance === 'number' && Number.isFinite(event.minimum_distance)
+      ? event.minimum_distance * 111.19
+      : null,
   };
 
   // Calculate both scores
@@ -73,25 +70,6 @@ export function assessEventQuality(event: any): IntegratedQualityAssessment {
     geonetQS,
     summary,
   };
-}
-
-/**
- * Calculate horizontal uncertainty from latitude/longitude uncertainties
- */
-function calculateHorizontalUncertainty(event: any): number | null {
-  const latUncert = event.latitude_uncertainty;
-  const lonUncert = event.longitude_uncertainty;
-
-  if (latUncert === null || latUncert === undefined || lonUncert === null || lonUncert === undefined) {
-    return null;
-  }
-
-  // Convert degrees to km (approximate at mid-latitudes)
-  const latKm = latUncert * 111; // 1 degree latitude ≈ 111 km
-  const lonKm = lonUncert * 111 * Math.cos((event.latitude || 0) * Math.PI / 180);
-
-  // Return maximum of the two (conservative estimate)
-  return Math.max(latKm, lonKm);
 }
 
 /**
@@ -170,7 +148,8 @@ export function formatIntegratedAssessment(assessment: IntegratedQualityAssessme
   const lines = [
     `Overall Quality: ${assessment.summary.overallQuality}`,
     `Detailed Score: ${assessment.detailedScore.overall}/100 (${assessment.detailedScore.grade})`,
-    `GeoNet QS: ${formatQS(assessment.geonetQS.qualityScore)} - ${assessment.geonetQS.label}`,
+    // Deliberately not labelled "GeoNet QS": this is the in-house heuristic (see header).
+    `Location quality heuristic (in-house, not the GeoNet QS): ${formatQS(assessment.geonetQS.qualityScore)} - ${assessment.geonetQS.label}`,
     ``,
     `Recommendation: ${assessment.summary.recommendation}`,
     ``,

@@ -11,6 +11,7 @@
 import { geonetClient, GeoNetEventText } from './geonet-client';
 import { fetchTimeWindowChunked } from './geonet-chunking';
 import { dbQueries, MergedEvent, normalizeEventType } from './db';
+import { normalizeTimestamp } from './earthquake-utils';
 import { createId } from './id';
 import { extractBoundsFromMergedEvents, boundsFromLatLon, unionBounds } from './geo-bounds-utils';
 import pLimit from 'p-limit';
@@ -24,6 +25,124 @@ function getDbQueries() {
     throw new Error('Database not available');
   }
   return dbQueries;
+}
+
+/**
+ * Normalize a GeoNet origin time to an explicit-UTC ISO 8601 string.
+ */
+function normalizeGeoNetTime(time: string): string | null {
+  return normalizeTimestamp(time);
+}
+
+/** Coerce a QuakeML text/number node to a finite number, or null. */
+function quakeMLNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const n = typeof value === 'number' ? value : parseFloat(String(value));
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Non-negative finite value, else null (mirrors lib/db.ts validateMergedEvent ranges). */
+function nonNegative(value: number | null): number | null {
+  return value !== null && value >= 0 ? value : null;
+}
+
+/** xml2js with explicitArray:false yields either a node or an array of nodes. */
+function asArray<T>(value: T | T[] | undefined | null): T[] {
+  if (value === null || value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+/**
+ * Origin-quality fields lifted from a GeoNet QuakeML event.
+ *
+ * Units follow the conventions the rest of the repo stores and reads (lib/db.ts
+ * MergedEvent, lib/integrated-quality-assessment.ts): azimuthal gap and minimum
+ * distance in degrees, standard error (RMS travel-time residual) in seconds, station
+ * and phase counts as integers, uncertainties in km. QuakeML 1.2 expresses depth and
+ * origin-uncertainty lengths in METRES, so those two are converted (/1000).
+ */
+type GeoNetOriginQuality = Pick<
+  MergedEvent,
+  | 'azimuthal_gap'
+  | 'used_phase_count'
+  | 'used_station_count'
+  | 'standard_error'
+  | 'minimum_distance'
+  | 'horizontal_uncertainty'
+  | 'depth_uncertainty'
+>;
+
+/**
+ * Extract origin quality from the QuakeML the importer already fetches for M5.0+
+ * events (no extra request). Previously only strike/dip/rake was kept and every other
+ * field was discarded, so every GeoNet event reached the quality scorers with all
+ * inputs null. Fail-safe: any shape it does not recognise yields null.
+ */
+function extractOriginQualityFromQuakeML(quakeML: any): GeoNetOriginQuality | null {
+  try {
+    // The client strips the `q:` prefix during parsing (tagNameProcessors).
+    const eventParameters = quakeML?.quakeml?.eventParameters;
+    const quakeMLEvent = asArray<any>(eventParameters?.event)[0];
+    if (!quakeMLEvent) return null;
+
+    const origins = asArray<any>(quakeMLEvent.origin);
+    const preferredOriginId =
+      typeof quakeMLEvent.preferredOriginID === 'string' ? quakeMLEvent.preferredOriginID : undefined;
+    const origin =
+      (preferredOriginId && origins.find((o) => o?.publicID === preferredOriginId)) || origins[0];
+    if (!origin) return null;
+
+    const quality = origin.quality ?? {};
+    const originUncertainty = asArray<any>(origin.originUncertainty)[0] ?? {};
+
+    // Metres -> km for the two QuakeML length quantities.
+    const metresToKm = (v: number | null) => (v === null ? null : v / 1000);
+
+    const azimuthalGap = quakeMLNumber(quality.azimuthalGap);
+    const fields: GeoNetOriginQuality = {
+      azimuthal_gap: azimuthalGap !== null && azimuthalGap >= 0 && azimuthalGap <= 360 ? azimuthalGap : null,
+      used_phase_count: nonNegative(quakeMLNumber(quality.usedPhaseCount)),
+      used_station_count: nonNegative(quakeMLNumber(quality.usedStationCount)),
+      standard_error: nonNegative(quakeMLNumber(quality.standardError)),
+      minimum_distance: nonNegative(quakeMLNumber(quality.minimumDistance)),
+      horizontal_uncertainty: nonNegative(metresToKm(quakeMLNumber(originUncertainty.horizontalUncertainty))),
+      depth_uncertainty: nonNegative(metresToKm(quakeMLNumber(origin.depth?.uncertainty))),
+    };
+
+    return Object.values(fields).some((v) => v !== null) ? fields : null;
+  } catch (error) {
+    console.error('[extractOriginQualityFromQuakeML] Error:', error);
+    return null;
+  }
+}
+
+/**
+ * FDSN text columns that have no dedicated MergedEvent column, kept as provenance in
+ * `source_events` instead of being parsed and thrown away. `magnitudeType` records
+ * GeoNet's raw MagType verbatim: for most of the NZ catalogue this is the bare letter
+ * `M`, GeoNet's own SeisComP summary magnitude, which is not a QuakeML magnitude type
+ * and is therefore not recognised by lib/merge.ts's magnitude classifier.
+ */
+function geonetProvenance(event: GeoNetEventText): Record<string, string> {
+  const provenance: Record<string, string> = {};
+  const add = (key: string, value: string | undefined | null) => {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    if (trimmed) provenance[key] = trimmed;
+  };
+  add('author', event.Author);
+  add('catalog', event.Catalog);
+  add('contributor', event.Contributor);
+  add('contributorId', event.ContributorID);
+  add('magnitudeType', event.MagType);
+  add('magnitudeAuthor', event.MagAuthor);
+  add('locationName', event.EventLocationName);
+  return provenance;
+}
+
+/** Trim a text column to a stored value, or null when GeoNet left it blank. */
+function textColumn(value: string | undefined | null): string | null {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  return trimmed === '' ? null : trimmed;
 }
 
 /**
@@ -158,32 +277,49 @@ export class GeoNetImportService {
   private static readonly DEFAULT_CATALOGUE_DESCRIPTION = 'Automatically imported earthquake events from GeoNet FDSN Event Web Service';
   private static readonly FOCAL_MECHANISM_MIN_MAGNITUDE = 5.0; // Only fetch focal mechanisms for M5.0+
   private static readonly FOCAL_MECHANISM_CONCURRENCY = 5; // Max concurrent focal mechanism requests
-  private static readonly BULK_INSERT_BATCH_SIZE = 100; // Process events in batches for bulk insert
+  // MongoDB's maximum BSON document size is 16 MiB and that limit applies to the
+  // COMMAND document, so neither the insertMany payload nor the `$in` array used for
+  // duplicate detection may hold a whole broad import (chunked fetching removed the
+  // 10,000-event ceiling upstream, so a 1960-2026 NZ import returns >1e6 events).
+  // Both DB steps are therefore issued in fixed-size slices.
+  private static readonly BULK_INSERT_BATCH_SIZE = 1000; // Events per insertMany call
+  private static readonly SOURCE_ID_LOOKUP_BATCH_SIZE = 5000; // source_ids per $in query
 
   /**
    * Import events from GeoNet
    */
   async importEvents(options: ImportOptions = {}): Promise<ImportResult> {
     const startTime = new Date();
+    // Two classes of problem, kept apart because they mean different things about
+    // the CATALOGUE:
+    // * `errors` — the STORED catalogue is not the import it claims to be: a window
+    // GeoNet truncated at its result-set cap (events silently missing) or a bulk
+    // insert that never reached the collection. Only these mark the catalogue `error`.
+    // * `eventIssues` — per-event problems: a record that fails validation and is
     const errors: string[] = [];
+    const eventIssues: string[] = [];
+    // Tracked outside the try so a failure after the catalogue exists can mark it
+    // `error` rather than leaving it advertising a `complete` import.
+    let activeCatalogueId: string | undefined;
 
     console.log('[GeoNetImportService] Starting import with options:', options);
 
     try {
-      // 1. Fetch events from GeoNet API
-      const events = await this.fetchEvents(options);
+      // 1. Fetch events from GeoNet API. A window that GeoNet truncates at its
+      // result-set cap is recorded in `errors`, so `success` below reports it.
+      const events = await this.fetchEvents(options, errors);
       console.log(`[GeoNetImportService] Fetched ${events.length} events from GeoNet`);
 
       if (events.length === 0) {
         return {
-          success: true,
+          success: errors.length === 0,
           catalogueId: options.catalogueId || '',
           catalogueName: options.catalogueName || GeoNetImportService.DEFAULT_CATALOGUE_NAME,
           totalFetched: 0,
           newEvents: 0,
           updatedEvents: 0,
           skippedEvents: 0,
-          errors: [],
+          errors,
           startTime,
           endTime: new Date(),
           duration: Date.now() - startTime.getTime(),
@@ -196,7 +332,13 @@ export class GeoNetImportService {
         options.catalogueName || GeoNetImportService.DEFAULT_CATALOGUE_NAME,
         options.userId
       );
+      activeCatalogueId = catalogueId;
       console.log(`[GeoNetImportService] Using catalogue: ${catalogueId}`);
+
+      // Mark the target catalogue in-progress for the duration of the run; the final
+      // status is derived from `errors` below (matches the upload path in
+      // app/api/catalogues/route.ts, which is the only other writer of this field).
+      await this.setCatalogueStatus(catalogueId, 'processing');
 
       // 3. Process events with bulk insert optimization
       let newEvents = 0;
@@ -209,14 +351,15 @@ export class GeoNetImportService {
       updatedEvents = result.updatedEvents;
       skippedEvents = result.skippedEvents;
       errors.push(...result.errors);
+      eventIssues.push(...result.eventIssues);
 
       const endTime = new Date();
       const duration = endTime.getTime() - startTime.getTime();
 
       // 4. Update geographic bounds and event count for the catalogue
       // Performance fix: Calculate bounds from imported events only, merge with existing
-      if (newEvents > 0 || updatedEvents > 0) {
-        try {
+      try {
+        if (newEvents > 0 || updatedEvents > 0) {
           // Get current catalogue to retrieve existing bounds
           const catalogue = await getDbQueries().getCatalogueById(catalogueId);
 
@@ -248,17 +391,22 @@ export class GeoNetImportService {
             );
             console.log(`[GeoNetImportService] Updated geographic bounds for catalogue ${catalogueId}`);
           }
-
-          // Recount from the DB rather than a running tally, which drifts under
-          // concurrent imports or partial-insert failures.
-          const actualCount = await getDbQueries().countEventsByCatalogue(catalogueId);
-          await getDbQueries().updateCatalogueEventCount(catalogueId, actualCount);
-          console.log(`[GeoNetImportService] Updated event count for catalogue ${catalogueId}: ${actualCount} (+${newEvents} this run)`);
-        } catch (error) {
-          console.error(`[GeoNetImportService] Failed to update catalogue metadata:`, error);
-          // Don't fail the import if metadata update fails
         }
+
+        // Recount from the DB rather than a running tally, which drifts under
+        // concurrent imports or partial-insert failures. Deliberately OUTSIDE the
+        // `newEvents > 0` guard: a run whose inserts all failed must still write the
+        // true count instead of leaving a stale one on a catalogue it just touched.
+        const actualCount = await getDbQueries().countEventsByCatalogue(catalogueId);
+        await getDbQueries().updateCatalogueEventCount(catalogueId, actualCount);
+        console.log(`[GeoNetImportService] Updated event count for catalogue ${catalogueId}: ${actualCount} (+${newEvents} this run)`);
+      } catch (error) {
+        console.error(`[GeoNetImportService] Failed to update catalogue metadata:`, error);
+        // Don't fail the import if metadata update fails
       }
+
+      // Everything the caller and the import history are told about, in one list.
+      const reportedIssues = [...errors, ...eventIssues];
 
       // 5. Save import history
       await this.saveImportHistory({
@@ -269,20 +417,30 @@ export class GeoNetImportService {
         newEvents,
         updatedEvents,
         skippedEvents,
-        errors,
+        errors: reportedIssues,
       });
 
-      console.log(`[GeoNetImportService] Import complete: ${newEvents} new, ${updatedEvents} updated, ${skippedEvents} skipped, ${errors.length} errors`);
+      // 6. Final catalogue status. `error` only for the problems that make the stored
+      // catalogue wrong — a window GeoNet truncated, or a bulk insert that failed.
+      // Events skipped for invalid data are a property of the SOURCE data, not of the
+      // catalogue: condemning the whole catalogue for one bad record in 100,000 hid
+      // otherwise successful imports behind a broken-looking status.
+      await this.setCatalogueStatus(catalogueId, errors.length === 0 ? 'complete' : 'error');
+
+      console.log(`[GeoNetImportService] Import complete: ${newEvents} new, ${updatedEvents} updated, ${skippedEvents} skipped, ${errors.length} errors, ${eventIssues.length} events skipped as invalid`);
 
       return {
-        success: errors.length === 0,
+        // `success` still reports anything the RUN could not do, skipped records
+        // included, so a partial import is never announced as a clean one. Only the
+        // catalogue status above distinguishes the two classes.
+        success: reportedIssues.length === 0,
         catalogueId,
         catalogueName: options.catalogueName || GeoNetImportService.DEFAULT_CATALOGUE_NAME,
         totalFetched: events.length,
         newEvents,
         updatedEvents,
         skippedEvents,
-        errors,
+        errors: reportedIssues,
         startTime,
         endTime,
         duration,
@@ -292,15 +450,19 @@ export class GeoNetImportService {
       console.error(`[GeoNetImportService] ${errorMsg}`);
       errors.push(errorMsg);
 
+      if (activeCatalogueId) {
+        await this.setCatalogueStatus(activeCatalogueId, 'error');
+      }
+
       return {
         success: false,
-        catalogueId: options.catalogueId || '',
+        catalogueId: activeCatalogueId || options.catalogueId || '',
         catalogueName: options.catalogueName || GeoNetImportService.DEFAULT_CATALOGUE_NAME,
         totalFetched: 0,
         newEvents: 0,
         updatedEvents: 0,
         skippedEvents: 0,
-        errors,
+        errors: [...errors, ...eventIssues],
         startTime,
         endTime: new Date(),
         duration: Date.now() - startTime.getTime(),
@@ -309,9 +471,26 @@ export class GeoNetImportService {
   }
 
   /**
-   * Fetch events from GeoNet API
+   * Set the catalogue's status, never failing the import because of it.
    */
-  private async fetchEvents(options: ImportOptions): Promise<GeoNetEventText[]> {
+  private async setCatalogueStatus(
+    catalogueId: string,
+    status: 'processing' | 'complete' | 'error'
+  ): Promise<void> {
+    try {
+      await getDbQueries().updateCatalogueStatus(status, catalogueId);
+    } catch (error) {
+      console.error(`[GeoNetImportService] Failed to set catalogue ${catalogueId} status to '${status}':`, error);
+    }
+  }
+
+  /**
+   * Fetch events from GeoNet API
+   *
+   * @param errors - collects window-level problems (e.g. a window GeoNet truncated at
+   *   its result-set cap) so the caller can report the import as unsuccessful.
+   */
+  private async fetchEvents(options: ImportOptions, errors: string[]): Promise<GeoNetEventText[]> {
     // Determine time range
     let startDate: Date;
     let endDate: Date;
@@ -354,6 +533,14 @@ export class GeoNetImportService {
           onSplit: (s, e) =>
             console.warn(
               `[GeoNetImport] 10k-event cap hit for ${s.toISOString()}..${e.toISOString()}; subdividing time window.`
+            ),
+          // A window still at the cap that cannot be subdivided any further is a
+          // TRUNCATED window: the events beyond the cap are simply not returned. That
+          // must reach ImportResult.errors, otherwise a short import reports success.
+          onTruncate: (s, e, count) =>
+            errors.push(
+              `GeoNet returned its result-set cap (${count} events) for ${s.toISOString()}..${e.toISOString()} ` +
+              `and the window could not be subdivided further; this window is truncated and the import is incomplete.`
             ),
         }
       );
@@ -423,7 +610,9 @@ export class GeoNetImportService {
       JSON.stringify([{ source: 'GeoNet', description: GeoNetImportService.DEFAULT_CATALOGUE_DESCRIPTION }]),
       JSON.stringify({ source: 'GeoNet', importDate: new Date().toISOString() }),
       0,  // Initial event count
-      'complete',
+      // Created before a single event is processed, so it starts as 'processing';
+      // importEvents() sets the final 'complete'/'error' once the run is over.
+      'processing',
       userId ? { created_by: userId } : undefined
     );
 
@@ -478,16 +667,29 @@ export class GeoNetImportService {
     newEvents: number;
     updatedEvents: number;
     skippedEvents: number;
+    /** Failures that leave the catalogue incomplete (a batch that never got written). */
     errors: string[];
+    /** Per-event skips: bad source records, not a broken catalogue (see importEvents). */
+    eventIssues: string[];
   }> {
     const errors: string[] = [];
+    const eventIssues: string[] = [];
 
-    // Step 1: Check which events already exist (single bulk query - fixes N+1 problem)
+    // Step 1: Check which events already exist (bulk query - fixes N+1 problem)
     console.log(`[GeoNetImportService] Checking for existing events...`);
     const eventIds = events.map(e => e.EventID);
 
-    // Use bulk query instead of sequential queries for much better performance
-    const existingEventsMap = await getDbQueries().getEventsBySourceIds(catalogueId, eventIds);
+    // Use bulk queries instead of sequential queries for much better performance.
+    // The ids go into a MongoDB `$in`, which lives inside the command document and is
+    // therefore bound by the 16 MiB BSON limit, so query in slices and merge.
+    const existingEventsMap = new Map<string, string>();
+    for (let i = 0; i < eventIds.length; i += GeoNetImportService.SOURCE_ID_LOOKUP_BATCH_SIZE) {
+      const idSlice = eventIds.slice(i, i + GeoNetImportService.SOURCE_ID_LOOKUP_BATCH_SIZE);
+      const found = await getDbQueries().getEventsBySourceIds(catalogueId, idSlice);
+      // forEach rather than for..of: the repo's tsconfig target predates
+      // downlevelIteration, so a Map cannot be spread or iterated directly.
+      found.forEach((dbId, sourceId) => existingEventsMap.set(sourceId, dbId));
+    }
 
     // Step 2: Separate new events from existing ones
     const newEventsList: GeoNetEventText[] = [];
@@ -512,6 +714,10 @@ export class GeoNetImportService {
     // Step 3: Fetch focal mechanisms in parallel for significant events
     const limit = pLimit(GeoNetImportService.FOCAL_MECHANISM_CONCURRENCY);
     const focalMechanismsMap = new Map<string, string | null>();
+    // Origin quality comes from the SAME QuakeML response as the focal mechanism, so
+    // populating it costs no extra requests. Without it every GeoNet event reaches the
+    // quality scorers with all inputs null.
+    const originQualityMap = new Map<string, GeoNetOriginQuality>();
 
     const significantEvents = [...newEventsList, ...updateEventsList.map(u => u.event)]
       .filter(e => e.Magnitude >= GeoNetImportService.FOCAL_MECHANISM_MIN_MAGNITUDE);
@@ -524,6 +730,10 @@ export class GeoNetImportService {
           try {
             const quakeML = await geonetClient.fetchEventById(event.EventID);
             if (quakeML) {
+              const originQuality = extractOriginQualityFromQuakeML(quakeML);
+              if (originQuality) {
+                originQualityMap.set(event.EventID, originQuality);
+              }
               const builder = new Builder();
               const xmlString = builder.buildObject(quakeML);
               const focalMechanism = extractFocalMechanismFromXML(xmlString);
@@ -540,7 +750,7 @@ export class GeoNetImportService {
       );
 
       await Promise.all(focalMechanismPromises);
-      console.log(`[GeoNetImportService] Fetched ${focalMechanismsMap.size} focal mechanisms`);
+      console.log(`[GeoNetImportService] Fetched ${focalMechanismsMap.size} focal mechanisms and ${originQualityMap.size} origin-quality records`);
     }
 
     // Step 4: Bulk insert new events
@@ -552,16 +762,27 @@ export class GeoNetImportService {
         for (const event of newEventsList) {
           if (!this.validateEvent(event)) {
             console.warn(`[GeoNetImportService] Skipping invalid event ${event.EventID}: missing or invalid required fields`);
-            errors.push(`Skipped event ${event.EventID}: invalid data`);
+            eventIssues.push(`Skipped event ${event.EventID}: invalid data`);
             continue;
           }
           validEvents.push(event);
         }
 
-        if (validEvents.length > 0) {
-          const eventsToInsert = validEvents.map(event => this.convertToMergedEvent(event, catalogueId, focalMechanismsMap));
-          await getDbQueries().bulkInsertEvents(eventsToInsert);
-          newEventsCount = validEvents.length;
+        // insertMany sends one command document, so the batch must stay well under
+        // MongoDB's 16 MiB BSON limit; a broad chunked import can return >1e6 events.
+        // Mapping per batch also keeps only one batch of converted documents alive.
+        for (let i = 0; i < validEvents.length; i += GeoNetImportService.BULK_INSERT_BATCH_SIZE) {
+          const eventsToInsert = validEvents
+            .slice(i, i + GeoNetImportService.BULK_INSERT_BATCH_SIZE)
+            .map(event => this.convertToMergedEvent(event, catalogueId, focalMechanismsMap, originQualityMap));
+          // Count what MongoDB actually wrote, not what was submitted: bulkInsertEvents
+          // drops in-batch source_id duplicates and lets the (catalogue_id, source_id)
+          // unique index skip rows already stored, so the submitted length overstates
+          // ImportResult.newEvents — the "+N this run" figure — by every de-duplicated
+          // event. (The stored event_count is unaffected; it comes from a DB recount.)
+          newEventsCount += await getDbQueries().bulkInsertEvents(eventsToInsert);
+        }
+        if (newEventsCount > 0) {
           console.log(`[GeoNetImportService] Bulk inserted ${newEventsCount} new events`);
         }
       } catch (error) {
@@ -578,10 +799,15 @@ export class GeoNetImportService {
         // Validate event before update
         if (!this.validateEvent(event)) {
           console.warn(`[GeoNetImportService] Skipping invalid event update ${event.EventID}: missing or invalid required fields`);
-          errors.push(`Skipped event update ${event.EventID}: invalid data`);
+          eventIssues.push(`Skipped event update ${event.EventID}: invalid data`);
           continue;
         }
-        await this.updateEvent(dbId, event, focalMechanismsMap.get(event.EventID) || null);
+        await this.updateEvent(
+          dbId,
+          event,
+          focalMechanismsMap.get(event.EventID) || null,
+          originQualityMap.get(event.EventID) || null
+        );
         updatedEventsCount++;
       } catch (error) {
         const errorMsg = `Failed to update event ${event.EventID}: ${error instanceof Error ? error.message : String(error)}`;
@@ -594,7 +820,8 @@ export class GeoNetImportService {
       newEvents: newEventsCount,
       updatedEvents: updatedEventsCount,
       skippedEvents: skippedEventsList.length,
-      errors
+      errors,
+      eventIssues
     };
   }
 
@@ -610,9 +837,9 @@ export class GeoNetImportService {
       return false;
     }
 
-    // Validate time is parseable
-    const parsedTime = new Date(event.Time);
-    if (isNaN(parsedTime.getTime())) {
+    // Validate time is parseable by the same normalizer that stores it, so an event
+    // whose time cannot be pinned to UTC is rejected rather than stored raw.
+    if (normalizeGeoNetTime(event.Time) === null) {
       console.warn(`[GeoNetImportService] Invalid time for event ${event.EventID}: ${event.Time}`);
       return false;
     }
@@ -647,7 +874,8 @@ export class GeoNetImportService {
   private convertToMergedEvent(
     event: GeoNetEventText,
     catalogueId: string,
-    focalMechanismsMap: Map<string, string | null>
+    focalMechanismsMap: Map<string, string | null>,
+    originQualityMap?: Map<string, GeoNetOriginQuality>
   ): Partial<MergedEvent> & {
     id: string;
     catalogue_id: string;
@@ -665,18 +893,23 @@ export class GeoNetImportService {
       id: eventId,
       catalogue_id: catalogueId,
       source_id: event.EventID, // Critical: Include source_id for duplicate detection
-      time: event.Time,
+      // Offset-less FDSN time forced to UTC (see normalizeGeoNetTime).
+      time: normalizeGeoNetTime(event.Time) ?? event.Time,
       latitude: event.Latitude,
       longitude: event.Longitude,
       depth: event['Depth/km'],
       magnitude: event.Magnitude,
       source_events: JSON.stringify([{
         source: 'GeoNet', // Match format used in insertEvent()
-        eventId: event.EventID
+        eventId: event.EventID,
+        ...geonetProvenance(event),
       }]),
       magnitude_type: event.MagType || null,
       event_type: normalizeEventType(event.EventType),
       focal_mechanisms: focalMechanisms,
+      author: textColumn(event.Author),
+      location_name: textColumn(event.EventLocationName),
+      ...(originQualityMap?.get(event.EventID) ?? {}),
     };
   }
 
@@ -688,12 +921,16 @@ export class GeoNetImportService {
 
     // Fetch focal mechanism for significant events (M5.0+)
     let focalMechanisms: string | null = null;
+    let originQuality: GeoNetOriginQuality | null = null;
     if (event.Magnitude >= GeoNetImportService.FOCAL_MECHANISM_MIN_MAGNITUDE) {
       try {
         console.log(`[GeoNetImportService] Fetching focal mechanism for event ${event.EventID} (M${event.Magnitude})`);
         const quakeML = await geonetClient.fetchEventById(event.EventID);
 
         if (quakeML) {
+          // Same response also carries the origin quality metrics.
+          originQuality = extractOriginQualityFromQuakeML(quakeML);
+
           // Convert QuakeML object back to XML string for parsing
           const builder = new Builder();
           const xmlString = builder.buildObject(quakeML);
@@ -714,18 +951,23 @@ export class GeoNetImportService {
       id: eventId,
       catalogue_id: catalogueId,
       source_id: event.EventID,
-      time: event.Time,
+      // Offset-less FDSN time forced to UTC (see normalizeGeoNetTime).
+      time: normalizeGeoNetTime(event.Time) ?? event.Time,
       latitude: event.Latitude,
       longitude: event.Longitude,
       depth: event['Depth/km'],
       magnitude: event.Magnitude,
       source_events: JSON.stringify([{
         source: 'GeoNet',
-        eventId: event.EventID
+        eventId: event.EventID,
+        ...geonetProvenance(event),
       }]),
       magnitude_type: event.MagType || null,
       event_type: normalizeEventType(event.EventType),
       focal_mechanisms: focalMechanisms,
+      author: textColumn(event.Author),
+      location_name: textColumn(event.EventLocationName),
+      ...(originQuality ?? {}),
     });
   }
 
@@ -735,14 +977,17 @@ export class GeoNetImportService {
    * @param eventId - Database ID of the event to update
    * @param event - GeoNet event data
    * @param focalMechanismData - Optional pre-fetched focal mechanism data (for bulk processing)
+   * @param originQualityData - Optional pre-extracted origin quality (for bulk processing)
    */
   private async updateEvent(
     eventId: string,
     event: GeoNetEventText,
-    focalMechanismData: string | null = null
+    focalMechanismData: string | null = null,
+    originQualityData: GeoNetOriginQuality | null = null
   ): Promise<void> {
     // Use provided focal mechanism data, or fetch if needed and not provided
     let focalMechanisms: string | null = focalMechanismData;
+    let originQuality: GeoNetOriginQuality | null = originQualityData;
 
     if (!focalMechanisms && event.Magnitude >= GeoNetImportService.FOCAL_MECHANISM_MIN_MAGNITUDE) {
       try {
@@ -750,6 +995,9 @@ export class GeoNetImportService {
         const quakeML = await geonetClient.fetchEventById(event.EventID);
 
         if (quakeML) {
+          // Same response also carries the origin quality metrics.
+          originQuality = originQuality ?? extractOriginQualityFromQuakeML(quakeML);
+
           // Convert QuakeML object back to XML string for parsing
           const builder = new Builder();
           const xmlString = builder.buildObject(quakeML);
@@ -767,7 +1015,8 @@ export class GeoNetImportService {
     }
 
     await getDbQueries().updateEvent(eventId, {
-      time: event.Time,
+      // Offset-less FDSN time forced to UTC (see normalizeGeoNetTime).
+      time: normalizeGeoNetTime(event.Time) ?? event.Time,
       latitude: event.Latitude,
       longitude: event.Longitude,
       depth: event['Depth/km'],
@@ -775,6 +1024,9 @@ export class GeoNetImportService {
       magnitude_type: event.MagType || null,
       event_type: normalizeEventType(event.EventType),
       focal_mechanisms: focalMechanisms,
+      author: textColumn(event.Author),
+      location_name: textColumn(event.EventLocationName),
+      ...(originQuality ?? {}),
     });
   }
 

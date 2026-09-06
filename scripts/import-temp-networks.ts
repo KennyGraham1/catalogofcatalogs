@@ -12,6 +12,7 @@ import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { createId } from '../lib/id';
 import { getDb, COLLECTIONS } from '../lib/mongodb';
+import { finiteExtent, longitudeExtent } from '../lib/geo-bounds-utils';
 
 // Network metadata structure
 interface NetworkMetadata {
@@ -245,20 +246,32 @@ async function importTemporaryNetworks() {
       continue;
     }
 
-    // Calculate geographic bounds
-    const lats = events.map(e => e.latitude);
-    const lons = events.map(e => e.longitude);
-    const mags = events.map(e => e.magnitude);
-    const times = events.map(e => new Date(e.time));
+    // Calculate geographic bounds.
+    //
+    // Math.min(...array) passes one argument per event, and throws RangeError
+    // ("Maximum call stack size exceeded") once a catalogue is larger than the
+    // engine's argument limit — around 131k events in V8 — so fold the series
+    // instead. Longitude additionally must not be a plain min/max: for a
+    // catalogue spanning the antimeridian (Kermadec/Raoul) that stores the
+    // near-global box 166..-176 rather than the arc the data occupies.
+    // longitudeExtent() returns west > east for a crossing box, the RFC 7946
+    // §5.2 convention app/api/catalogues/route.ts and lib/db.ts read back.
+    const latExtent = finiteExtent(events.map(e => e.latitude));
+    const lonExtent = longitudeExtent(events.map(e => e.longitude));
+    const magExtent = finiteExtent(events.map(e => e.magnitude));
+    const timeExtent = finiteExtent(events.map(e => new Date(e.time).getTime()));
 
-    const minLat = Math.min(...lats);
-    const maxLat = Math.max(...lats);
-    const minLon = Math.min(...lons);
-    const maxLon = Math.max(...lons);
-    const minMag = Math.min(...mags);
-    const maxMag = Math.max(...mags);
-    const startTime = new Date(Math.min(...times.map(t => t.getTime())));
-    const endTime = new Date(Math.max(...times.map(t => t.getTime())));
+    if (!latExtent || !lonExtent || !magExtent || !timeExtent) {
+      console.warn(`   ⏭️  Skipping ${networkCode}: no usable coordinates, magnitudes or times`);
+      continue;
+    }
+
+    const minLat = latExtent.min;
+    const maxLat = latExtent.max;
+    const minMag = magExtent.min;
+    const maxMag = magExtent.max;
+    const startTime = new Date(timeExtent.min);
+    const endTime = new Date(timeExtent.max);
 
     // Create catalogue document
     const catalogueId = createId();
@@ -281,11 +294,12 @@ async function importTemporaryNetworks() {
       event_count: events.length,
       status: 'complete',
 
-      // Geographic bounds
+      // Geographic bounds (min_longitude > max_longitude marks a box that
+      // crosses the antimeridian — see longitudeExtent above)
       min_latitude: minLat,
       max_latitude: maxLat,
-      min_longitude: minLon,
-      max_longitude: maxLon,
+      min_longitude: lonExtent.west,
+      max_longitude: lonExtent.east,
 
       // Temporal coverage
       time_period_start: startTime.toISOString(),

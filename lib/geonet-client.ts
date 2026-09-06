@@ -9,7 +9,7 @@
  */
 
 import { parseStringPromise } from 'xml2js';
-import { retryFetch } from './retry-utils';
+import { retryFetchText } from './retry-utils';
 import { CircuitBreaker } from './circuit-breaker';
 
 // GeoNet FDSN Event Service base URL
@@ -166,7 +166,9 @@ export class GeoNetClient {
 
       console.log('[GeoNetClient] Fetching events (text format):', url);
 
-      const response = await retryFetch(url, {
+      // retryFetchText reads the body inside the retried attempt, so the 30 s timeout
+      // (and the abort behind it) covers the download and not just the headers.
+      const { status, contentType, text } = await retryFetchText(url, {
         headers: {
           'User-Agent': 'CatalogOfCatalogs/1.0 (https://github.com/KennyGraham1/catalogofcatalogs)',
         },
@@ -180,18 +182,15 @@ export class GeoNetClient {
         },
       });
 
-      if (response.status === 204 || response.status === 404) {
+      if (status === 204 || status === 404) {
         console.log('[GeoNetClient] No data found');
         return [];
       }
 
       // Validate Content-Type header to ensure we're getting the expected format
-      const contentType = response.headers.get('content-type') || '';
       const isTextFormat = contentType.includes('text/plain') ||
         contentType.includes('text/csv') ||
         contentType.includes('application/csv');
-
-      const text = await response.text();
 
       // Check for error responses that may come with 200 status
       // GeoNet API may return error messages as plain text even with 200 OK
@@ -304,7 +303,9 @@ export class GeoNetClient {
 
       console.log('[GeoNetClient] Fetching events (QuakeML format):', url);
 
-      const response = await retryFetch(url, {
+      // Body read inside the retried attempt (see fetchEventsText) so the timeout
+      // covers the QuakeML download, which is far larger than the text format.
+      const { status, text: xml } = await retryFetchText(url, {
         headers: {
           'User-Agent': 'CatalogOfCatalogs/1.0 (https://github.com/KennyGraham1/catalogofcatalogs)',
         },
@@ -318,12 +319,10 @@ export class GeoNetClient {
         },
       });
 
-      if (response.status === 204 || response.status === 404) {
+      if (status === 204 || status === 404) {
         console.log('[GeoNetClient] No data found');
         return null;
       }
-
-      const xml = await response.text();
 
       // Check for error responses that may come with 200 status
       const trimmedXml = xml.trim().toLowerCase();

@@ -14,8 +14,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import dynamic from 'next/dynamic';
 import 'leaflet/dist/leaflet.css';
-import { generateMergedCatalogueFilename, csvField } from '@/lib/export-utils';
-import { eventsToGeoJSON, eventsToJSON, eventsToKML } from '@/lib/exporters';
+import { generateMergedCatalogueFilename } from '@/lib/export-utils';
+import { eventsToCSV, eventsToGeoJSON, eventsToJSON, eventsToKML } from '@/lib/exporters';
 import { eventsToQuakeMLDocument } from '@/lib/quakeml-exporter';
 import { EventTable } from '@/components/events/EventTable';
 
@@ -170,179 +170,13 @@ export function MergeActions({ events, catalogueMetadata = {} }: MergeActionsPro
   };
 
   const downloadCSV = () => {
-    const meta = catalogueMetadata;
-    const metadataLines: string[] = [];
-
-    if (meta.name) metadataLines.push(`# Catalogue: ${meta.name}`);
-    if (meta.description) metadataLines.push(`# Description: ${meta.description}`);
-    if (meta.data_source) metadataLines.push(`# Source: ${meta.data_source}`);
-    if (meta.provider) metadataLines.push(`# Provider: ${meta.provider}`);
-    if (meta.geographic_region) metadataLines.push(`# Region: ${meta.geographic_region}`);
-    metadataLines.push(`# Event Count: ${events.length}`);
-    metadataLines.push(`# Generated: ${new Date().toISOString()}`);
-    if (meta.license) metadataLines.push(`# License: ${meta.license}`);
-    if (meta.citation) metadataLines.push(`# Citation: ${meta.citation}`);
-    if (meta.doi) metadataLines.push(`# DOI: ${meta.doi}`);
-    if (meta.version) metadataLines.push(`# Version: ${meta.version}`);
-    // Contact information
-    if (meta.contact_name) metadataLines.push(`# Contact Name: ${meta.contact_name}`);
-    if (meta.contact_email) metadataLines.push(`# Contact Email: ${meta.contact_email}`);
-    if (meta.contact_organization) metadataLines.push(`# Contact Organization: ${meta.contact_organization}`);
-    // Data quality
-    if (meta.data_quality) {
-      try {
-        const dq = typeof meta.data_quality === 'string' ? JSON.parse(meta.data_quality) : meta.data_quality;
-        if (dq.completeness) metadataLines.push(`# Data Completeness: ${dq.completeness}`);
-        if (dq.accuracy) metadataLines.push(`# Data Accuracy: ${dq.accuracy}`);
-        if (dq.reliability) metadataLines.push(`# Data Reliability: ${dq.reliability}`);
-      } catch { /* ignore parse errors */ }
-    }
-    if (meta.quality_notes) metadataLines.push(`# Quality Notes: ${meta.quality_notes}`);
-    // Keywords
-    if (meta.keywords) {
-      try {
-        const kw = typeof meta.keywords === 'string' ? JSON.parse(meta.keywords) : meta.keywords;
-        if (Array.isArray(kw) && kw.length > 0) metadataLines.push(`# Keywords: ${kw.join(', ')}`);
-      } catch { /* ignore parse errors */ }
-    }
-    // Reference links
-    if (meta.reference_links) {
-      try {
-        const rl = typeof meta.reference_links === 'string' ? JSON.parse(meta.reference_links) : meta.reference_links;
-        if (Array.isArray(rl) && rl.length > 0) metadataLines.push(`# References: ${rl.join(', ')}`);
-      } catch { /* ignore parse errors */ }
-    }
-    if (meta.usage_terms) metadataLines.push(`# Usage Terms: ${meta.usage_terms}`);
-    if (meta.notes) metadataLines.push(`# Notes: ${meta.notes}`);
-    // Geographic bounds
-    if (meta.min_latitude != null || meta.max_latitude != null ||
-        meta.min_longitude != null || meta.max_longitude != null) {
-      metadataLines.push(
-        `# Bounding Box: lat [${meta.min_latitude ?? '?'}, ${meta.max_latitude ?? '?'}], ` +
-        `lon [${meta.min_longitude ?? '?'}, ${meta.max_longitude ?? '?'}]`
-      );
-    }
-    // Merge-specific metadata
-    if (meta.merge_description) metadataLines.push(`# Merge Description: ${meta.merge_description}`);
-    if (meta.merge_use_case) metadataLines.push(`# Merge Use Case: ${meta.merge_use_case}`);
-    if (meta.merge_methodology) metadataLines.push(`# Merge Methodology: ${meta.merge_methodology}`);
-    if (meta.merge_quality_assessment) metadataLines.push(`# Merge Quality Assessment: ${meta.merge_quality_assessment}`);
-    // Provenance
-    if (meta.created_by) metadataLines.push(`# Created By: ${meta.created_by}`);
-    if (meta.modified_at) metadataLines.push(`# Modified At: ${meta.modified_at}`);
-
-    metadataLines.push('#');
-    // Note: complex nested fields (origins, magnitudes, picks, arrivals, focal_mechanisms,
-    // amplitudes, station_magnitudes, event_descriptions, comments, creation_info, source_events)
-    // cannot be represented in flat CSV format; use JSON or QuakeML export for full fidelity.
-
-    const headers = [
-      'Time',
-      'Latitude',
-      'Longitude',
-      'Depth',
-      'Magnitude',
-      'MagnitudeType',
-      'EventType',
-      'EventTypeCertainty',
-      'Region',
-      'LocationName',
-      'Source',
-      'SourceID',
-      'PublicID',
-      // Location uncertainties
-      'TimeUncertainty',
-      'LatitudeUncertainty',
-      'LongitudeUncertainty',
-      'DepthUncertainty',
-      'HorizontalUncertainty',
-      'MagnitudeUncertainty',
-      // Origin metadata
-      'DepthType',
-      'EarthModelID',
-      'MethodID',
-      'AgencyID',
-      'Author',
-      // Magnitude details
-      'MagnitudeStationCount',
-      'MagnitudeMethodID',
-      'MagnitudeEvaluationMode',
-      'MagnitudeEvaluationStatus',
-      // Quality metrics
-      'AzimuthalGap',
-      'UsedStationCount',
-      'UsedPhaseCount',
-      'StandardError',
-      'MinimumDistance',
-      'MaximumDistance',
-      'AssociatedPhaseCount',
-      'AssociatedStationCount',
-      'DepthPhaseCount',
-      // Evaluation metadata
-      'EvaluationMode',
-      'EvaluationStatus',
-    ];
-
-    const n = (v: number | string | null | undefined) => (v !== null && v !== undefined ? v : '');
-
-    const rows = events.map((event: any) => {
-      let source = 'unknown';
-      if (event.source_events) {
-        try {
-          const sourceEvents = JSON.parse(event.source_events) as Array<{ source?: string }>;
-          source = sourceEvents[0]?.source || 'unknown';
-        } catch { /* ignore */ }
-      }
-
-      return [
-        csvField(event.time),
-        csvField(event.latitude),
-        csvField(event.longitude),
-        csvField(n(event.depth)),
-        csvField(event.magnitude),
-        csvField(event.magnitude_type),
-        csvField(event.event_type),
-        csvField(event.event_type_certainty),
-        csvField(event.region || event.location_name || ''),
-        csvField(event.location_name),
-        csvField(source),
-        csvField(event.source_id),
-        csvField(event.event_public_id),
-        // Location uncertainties
-        csvField(n(event.time_uncertainty)),
-        csvField(n(event.latitude_uncertainty)),
-        csvField(n(event.longitude_uncertainty)),
-        csvField(n(event.depth_uncertainty)),
-        csvField(n(event.horizontal_uncertainty)),
-        csvField(n(event.magnitude_uncertainty)),
-        // Origin metadata
-        csvField(event.depth_type),
-        csvField(event.earth_model_id),
-        csvField(event.method_id),
-        csvField(event.agency_id),
-        csvField(event.author),
-        // Magnitude details
-        csvField(n(event.magnitude_station_count)),
-        csvField(event.magnitude_method_id),
-        csvField(event.magnitude_evaluation_mode),
-        csvField(event.magnitude_evaluation_status),
-        // Quality metrics
-        csvField(n(event.azimuthal_gap)),
-        csvField(n(event.used_station_count)),
-        csvField(n(event.used_phase_count)),
-        csvField(n(event.standard_error)),
-        csvField(n(event.minimum_distance)),
-        csvField(n(event.maximum_distance)),
-        csvField(n(event.associated_phase_count)),
-        csvField(n(event.associated_station_count)),
-        csvField(n(event.depth_phase_count)),
-        // Evaluation metadata
-        csvField(event.evaluation_mode),
-        csvField(event.evaluation_status),
-      ].join(',');
-    });
-
-    const csvContent = [...metadataLines, headers.join(','), ...rows].join('\n');
+    // Uses the shared exporter so the browser-side merge download and the server export
+    // (GET /api/catalogues/{id}/export?format=csv) emit the SAME dialect. The default is
+    // plain RFC 4180 — header as record 1, no `#` prologue — because RFC 4180 defines no
+    // comment convention and a prologue breaks pandas.read_csv, R's read.csv, ZMAP and this
+    // platform's own parseCSV. The catalogue metadata is still carried by the JSON, GeoJSON
+    // and QuakeML downloads below.
+    const csvContent = eventsToCSV(events, exportMetadata);
     const filename = generateMergedCatalogueFilename('csv', events.length);
     downloadFile(csvContent, filename, 'text/csv');
   };

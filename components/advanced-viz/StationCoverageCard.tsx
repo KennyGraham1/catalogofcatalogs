@@ -6,7 +6,7 @@ import { Progress } from '@/components/ui/progress';
 import { Radio, Target, Ruler, TrendingUp } from 'lucide-react';
 import {
   StationCoverage,
-  getCoverageQualityColor,
+  calculateAzimuthalGapDetail,
   calculateStationDistributionRatio,
   getStationDistributionDescription
 } from '@/lib/station-coverage-utils';
@@ -16,19 +16,28 @@ interface StationCoverageCardProps {
   coverage: StationCoverage;
 }
 
+const SOURCE_LABEL: Record<'origin-quality' | 'arrivals' | 'picks', string> = {
+  'origin-quality': 'from the origin quality record',
+  arrivals: 'derived from arrival azimuths',
+  picks: 'derived from the pick list',
+};
+
 export function StationCoverageCard({ coverage }: StationCoverageCardProps) {
-  const distributionRatio = calculateStationDistributionRatio(
-    // Mock azimuths for demonstration - in real app would come from arrivals data
-    Array.from({ length: coverage.stationCount }, (_, i) => (i * 360) / coverage.stationCount)
-  );
-  
-  const distribution = getStationDistributionDescription(distributionRatio);
+  // Real arrival azimuths only — never synthesised. When the arrivals carry no
+  // azimuths there is nothing to say about the distribution, so the block below
+  // is not rendered at all.
+  const distributionRatio = calculateStationDistributionRatio(coverage.azimuths);
+  const distribution = distributionRatio !== null ? getStationDistributionDescription(distributionRatio) : null;
+
+  // Directional gap, measured from the same azimuths, for the coverage diagram.
+  const gapDetail = calculateAzimuthalGapDetail(coverage.azimuths);
 
   const getQualityBadgeVariant = (quality: string): 'default' | 'secondary' | 'destructive' | 'outline' => {
     switch (quality) {
       case 'excellent': return 'default';
       case 'good': return 'secondary';
       case 'fair': return 'outline';
+      case 'unknown': return 'outline';
       default: return 'destructive';
     }
   };
@@ -55,14 +64,23 @@ export function StationCoverageCard({ coverage }: StationCoverageCardProps) {
               <span className="font-medium text-sm">Recording Stations</span>
               <TechnicalTermTooltip term="stationCount" />
             </div>
-            <span className="text-2xl font-bold">{coverage.stationCount}</span>
+            <span className="text-2xl font-bold">
+              {coverage.stationCount === null ? '—' : coverage.stationCount}
+            </span>
           </div>
-          <p className="text-xs text-muted-foreground">
-            {coverage.stationCount >= 20 && 'Excellent number of stations for reliable location'}
-            {coverage.stationCount >= 10 && coverage.stationCount < 20 && 'Good number of stations for location'}
-            {coverage.stationCount >= 5 && coverage.stationCount < 10 && 'Adequate number of stations'}
-            {coverage.stationCount < 5 && 'Limited number of stations - location may be less reliable'}
-          </p>
+          {coverage.stationCount === null ? (
+            <p className="text-xs text-muted-foreground">
+              Station count not reported for this event
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {coverage.stationCount >= 20 && 'Excellent number of stations for reliable location'}
+              {coverage.stationCount >= 10 && coverage.stationCount < 20 && 'Good number of stations for location'}
+              {coverage.stationCount >= 5 && coverage.stationCount < 10 && 'Adequate number of stations'}
+              {coverage.stationCount < 5 && 'Limited number of stations - location may be less reliable'}
+              {coverage.stationCountSource && ` (${SOURCE_LABEL[coverage.stationCountSource]})`}
+            </p>
+          )}
         </div>
 
         {/* Azimuthal Gap */}
@@ -73,41 +91,58 @@ export function StationCoverageCard({ coverage }: StationCoverageCardProps) {
               <span className="font-medium text-sm">Azimuthal Gap</span>
               <TechnicalTermTooltip term="azimuthalGap" />
             </div>
-            <Badge
-              variant={coverage.azimuthalGap < 90 ? 'default' : coverage.azimuthalGap < 180 ? 'secondary' : 'destructive'}
-            >
-              {coverage.azimuthalGap.toFixed(0)}°
-            </Badge>
+            {coverage.azimuthalGap === null ? (
+              <Badge variant="outline">not reported</Badge>
+            ) : (
+              <Badge
+                variant={coverage.azimuthalGap < 90 ? 'default' : coverage.azimuthalGap < 180 ? 'secondary' : 'destructive'}
+              >
+                {coverage.azimuthalGap.toFixed(0)}°
+              </Badge>
+            )}
           </div>
-          <Progress 
-            value={Math.max(0, 100 - (coverage.azimuthalGap / 360) * 100)} 
-            className="h-2"
-          />
-          <p className="text-xs text-muted-foreground">
-            {coverage.azimuthalGap < 90 && 'Excellent azimuthal coverage - stations well distributed around event'}
-            {coverage.azimuthalGap >= 90 && coverage.azimuthalGap < 180 && 'Good azimuthal coverage'}
-            {coverage.azimuthalGap >= 180 && coverage.azimuthalGap < 270 && 'Fair azimuthal coverage - some gaps in station distribution'}
-            {coverage.azimuthalGap >= 270 && 'Poor azimuthal coverage - large gap in station distribution may affect location accuracy'}
-          </p>
+          {coverage.azimuthalGap === null ? (
+            <p className="text-xs text-muted-foreground">
+              No azimuthal gap in the origin quality record and no arrival azimuths to derive one from.
+            </p>
+          ) : (
+            <>
+              <Progress
+                value={Math.max(0, 100 - (coverage.azimuthalGap / 360) * 100)}
+                className="h-2"
+              />
+              <p className="text-xs text-muted-foreground">
+                {coverage.azimuthalGap < 90 && 'Excellent azimuthal coverage - stations well distributed around event'}
+                {coverage.azimuthalGap >= 90 && coverage.azimuthalGap < 180 && 'Good azimuthal coverage'}
+                {coverage.azimuthalGap >= 180 && coverage.azimuthalGap < 270 && 'Fair azimuthal coverage - some gaps in station distribution'}
+                {coverage.azimuthalGap >= 270 && 'Poor azimuthal coverage - large gap in station distribution may affect location accuracy'}
+                {coverage.azimuthalGapSource && ` (${SOURCE_LABEL[coverage.azimuthalGapSource]})`}
+              </p>
+            </>
+          )}
         </div>
 
-        {/* Station Distribution */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-primary" />
-              <span className="font-medium text-sm">Station Distribution</span>
+        {/* Station Distribution — only when there are real azimuths to measure */}
+        {distribution !== null && distributionRatio !== null && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-primary" />
+                <span className="font-medium text-sm">Station Distribution</span>
+              </div>
+              <Badge variant={getQualityBadgeVariant(distribution.quality)}>
+                {distribution.quality}
+              </Badge>
             </div>
-            <Badge variant={getQualityBadgeVariant(distribution.quality)}>
-              {distribution.quality}
-            </Badge>
+            <Progress
+              value={(1 - distributionRatio) * 100}
+              className="h-2"
+            />
+            <p className="text-xs text-muted-foreground">
+              {distribution.description} (from {coverage.azimuths.length} arrival azimuths)
+            </p>
           </div>
-          <Progress 
-            value={(1 - distributionRatio) * 100} 
-            className="h-2"
-          />
-          <p className="text-xs text-muted-foreground">{distribution.description}</p>
-        </div>
+        )}
 
         {/* Distance Statistics */}
         {coverage.averageDistance > 0 && (
@@ -168,64 +203,97 @@ export function StationCoverageCard({ coverage }: StationCoverageCardProps) {
               'Fair station coverage. Location is acceptable but may have increased uncertainty.'}
             {coverage.coverageQuality === 'poor' && 
               'Poor station coverage. Location may have significant uncertainty due to limited or poorly distributed stations.'}
+            {coverage.coverageQuality === 'unknown' &&
+              'Coverage cannot be assessed: this event does not report both an azimuthal gap and a station count.'}
           </p>
         </div>
 
-        {/* Azimuthal Coverage Diagram */}
-        <div className="pt-2 border-t">
-          <h4 className="font-semibold text-sm mb-2">Azimuthal Coverage</h4>
-          <div className="flex justify-center">
-            <AzimuthalCoverageDiagram azimuthalGap={coverage.azimuthalGap} />
+        {/* Azimuthal Coverage Diagram — drawn at the real gap azimuths, so it is
+            omitted entirely when the arrivals carry no azimuths. */}
+        {gapDetail.gap !== null && gapDetail.startAzimuth !== null && gapDetail.endAzimuth !== null && (
+          <div className="pt-2 border-t">
+            <h4 className="font-semibold text-sm mb-2">Azimuthal Coverage</h4>
+            <div className="flex justify-center">
+              <AzimuthalCoverageDiagram
+                azimuths={coverage.azimuths}
+                gap={gapDetail.gap}
+                gapStartAzimuth={gapDetail.startAzimuth}
+                gapEndAzimuth={gapDetail.endAzimuth}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground text-center mt-1">
+              Green sector: azimuths covered by the {coverage.azimuths.length} recorded arrivals. North is up.
+            </p>
           </div>
-        </div>
+        )}
       </CardContent>
     </Card>
   );
 }
 
-// Simple azimuthal coverage diagram
-function AzimuthalCoverageDiagram({ azimuthalGap }: { azimuthalGap: number }) {
+/**
+ * Azimuthal coverage diagram drawn at the REAL azimuths.
+ *
+ * Screen mapping: azimuth is measured clockwise from north, and the plot is
+ * north-up, so (x, y) = (cx + r sin az, cy - r cos az). The covered sector runs
+ * clockwise from where the gap ends to where it starts, sweeping 360 - gap
+ * degrees (SVG sweep-flag 1 is clockwise on screen because y points down).
+ */
+function AzimuthalCoverageDiagram({
+  azimuths,
+  gap,
+  gapStartAzimuth,
+  gapEndAzimuth,
+}: {
+  azimuths: number[];
+  gap: number;
+  gapStartAzimuth: number;
+  gapEndAzimuth: number;
+}) {
   const size = 120;
   const center = size / 2;
   const radius = size / 2 - 10;
-  
-  // Calculate gap position (assume gap is centered at north for visualization)
-  const gapStart = -azimuthalGap / 2;
-  const gapEnd = azimuthalGap / 2;
-  
-  // Convert to radians
-  const gapStartRad = (gapStart - 90) * Math.PI / 180;
-  const gapEndRad = (gapEnd - 90) * Math.PI / 180;
-  
-  // Create arc path for coverage (everything except the gap)
-  const largeArcFlag = azimuthalGap < 180 ? 1 : 0;
-  
-  const x1 = center + radius * Math.cos(gapEndRad);
-  const y1 = center + radius * Math.sin(gapEndRad);
-  const x2 = center + radius * Math.cos(gapStartRad);
-  const y2 = center + radius * Math.sin(gapStartRad);
-  
-  const coveragePath = `M ${center} ${center} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2} Z`;
-  
+  const DEG = Math.PI / 180;
+
+  const point = (azimuth: number, r: number): [number, number] => [
+    center + r * Math.sin(azimuth * DEG),
+    center - r * Math.cos(azimuth * DEG),
+  ];
+
+  const [x1, y1] = point(gapEndAzimuth, radius);
+  const [x2, y2] = point(gapStartAzimuth, radius);
+  const coveredSweep = 360 - gap;
+  const largeArcFlag = coveredSweep > 180 ? 1 : 0;
+  const coveragePath =
+    coveredSweep <= 0
+      ? ''
+      : `M ${center} ${center} L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z`;
+
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`Azimuthal coverage, largest gap ${gap.toFixed(0)} degrees`}>
       {/* Background circle */}
       <circle cx={center} cy={center} r={radius} fill="#f3f4f6" stroke="#d1d5db" strokeWidth="2" />
-      
+
       {/* Coverage area (green) */}
-      <path d={coveragePath} fill="#22c55e" opacity="0.5" />
-      
+      {coveragePath && <path d={coveragePath} fill="#22c55e" opacity="0.5" />}
+
+      {/* Individual arrival azimuths */}
+      {azimuths.map((az, i) => {
+        const [ix, iy] = point(az, radius * 0.82);
+        const [ox, oy] = point(az, radius);
+        return <line key={i} x1={ix} y1={iy} x2={ox} y2={oy} stroke="#111827" strokeWidth="1.5" />;
+      })}
+
       {/* Center point */}
       <circle cx={center} cy={center} r="3" fill="#000" />
-      
+
       {/* North indicator */}
       <text x={center} y="12" textAnchor="middle" fontSize="10" fontWeight="bold">N</text>
-      
+
       {/* Gap label */}
       <text x={center} y={center + 5} textAnchor="middle" fontSize="12" fontWeight="bold">
-        {azimuthalGap.toFixed(0)}°
+        {gap.toFixed(0)}°
       </text>
     </svg>
   );
 }
-

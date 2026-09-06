@@ -43,6 +43,12 @@ export async function ensureIndexes() {
 
   await eventsCollection.createIndex({ catalogue_id: 1, time: -1 }, { name: 'catalogue_time_idx', background: true });
   console.log('✓ Created index: catalogue_time_idx');
+  await eventsCollection.createIndex(
+    { catalogue_id: 1, time: -1, id: -1 },
+    { name: 'catalogue_time_id_idx', background: true }
+  );
+  console.log('✓ Created index: catalogue_time_id_idx');
+
   await eventsCollection.createIndex({ catalogue_id: 1, magnitude: 1 }, { name: 'catalogue_magnitude_idx', background: true });
   console.log('✓ Created index: catalogue_magnitude_idx');
   await eventsCollection.createIndex({ catalogue_id: 1, latitude: 1, longitude: 1 }, { name: 'catalogue_geo_idx', background: true });

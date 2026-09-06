@@ -1,14 +1,19 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { dedupeById } from '@/lib/utils';
-import { MapContainer, CircleMarker, Popup, GeoJSON } from 'react-leaflet';
+import { useMapEventSelection } from '@/hooks/use-map-event-selection';
+import { MapViewportObserver } from '@/components/map/MapViewportObserver';
+import { MapDetailControl } from '@/components/map/MapDetailControl';
+import type { MapDetail } from '@/lib/map-event-selection';
+
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { EarthquakeMarkerLayer } from '@/components/map/EarthquakeMarkerLayer';
+import { useEventMapPopup } from '@/hooks/use-event-map-popup';
+import { MapContainer, Popup, GeoJSON } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Activity, Ruler, Calendar, MapPin, Layers, Target, Radio, Zap, Info } from 'lucide-react';
 import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import L from 'leaflet';
@@ -16,9 +21,9 @@ import 'leaflet/dist/leaflet.css';
 
 import { useMapColors } from '@/hooks/use-map-theme';
 import { calculateQualityScore, getQualityColor, metricsFromEvent } from '@/lib/quality-scoring';
-import { getMagnitudePixelRadius, getMagnitudeColor, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
+import { getMagnitudeColor, getEarthquakeColor } from '@/lib/earthquake-utils';
 import { useNearbyFaults } from '@/hooks/use-nearby-faults';
-import { loadFaultData, getFaultsInBounds, simplifyFaultsForZoom, FaultCollection, FaultFeature } from '@/lib/fault-data';
+import { loadFaultData, FaultCollection } from '@/lib/fault-data';
 import type { PathOptions } from 'leaflet';
 
 interface Earthquake {
@@ -81,21 +86,18 @@ export default function UnifiedEarthquakeMap({
   showFaultLines = true,
   showActiveFaults = true
 }: UnifiedEarthquakeMapProps) {
-  const clickSeqRef = useRef(0);
-  const [activePopup, setActivePopup] = useState<{ event: Earthquake; seq: number } | null>(null);
   const [showFaults, setShowFaults] = useState(showFaultLines);
   const [colorMode, setColorMode] = useState<'magnitude' | 'depth' | 'quality'>(colorBy);
   const [faultData, setFaultData] = useState<FaultCollection | null>(null);
-  const [sampleSize, setSampleSize] = useState<number>(1000);
+  const [sampleSize, setSampleSize] = useState<MapDetail>('auto');
 
   // Dark mode support for marker colors
   const mapColors = useMapColors();
 
   // Sample earthquakes for performance
-  const { sampled: sampledEarthquakes, total, displayCount, isSampled } = useMemo(
-    () => sampleEarthquakeEvents(earthquakes, sampleSize),
-    [earthquakes, sampleSize]
-  );
+  const { sampled: sampledEarthquakes, displayCount, visibleCount, isSampled, onViewportChange } = useMapEventSelection(earthquakes, sampleSize);
+
+  const { activePopup, onEventClick } = useEventMapPopup(earthquakes);
 
   // Update color mode when colorBy prop changes
   useEffect(() => {
@@ -121,30 +123,25 @@ export default function UnifiedEarthquakeMap({
 
   // Calculate quality scores (use sampled earthquakes)
   const qualityScores = useMemo(() => {
+    if (colorMode !== 'quality') return [];
     return sampledEarthquakes.map(event => ({
       eventId: event.id,
       score: calculateQualityScore(metricsFromEvent(event))
     }));
-  }, [sampledEarthquakes]);
+  }, [sampledEarthquakes, colorMode]);
+
+  const qualityScoreMap = useMemo(() => new Map(qualityScores.map(q => [q.eventId, q.score])), [qualityScores]);
 
   // Get event color based on selected mode
-  const getEventColor = (event: Earthquake) => {
+  const getEventColor = useCallback((event: Earthquake) => {
     if (colorMode === 'quality') {
-      const quality = qualityScores.find(q => q.eventId === event.id);
-      return quality ? getQualityColor(quality.score.overall) : getEarthquakeColor(event.depth, mapColors.isDark);
+      const quality = qualityScoreMap.get(event.id);
+      return quality ? getQualityColor(quality.overall) : getEarthquakeColor(event.depth, mapColors.isDark);
     } else if (colorMode === 'depth') {
       return getEarthquakeColor(event.depth, mapColors.isDark);
     }
     return getMagnitudeColor(event.magnitude);
-  };
-
-  const getMagnitudeLabel = (magnitude: number): string => {
-    if (magnitude >= 6.0) return 'Major';
-    if (magnitude >= 5.0) return 'Moderate';
-    if (magnitude >= 4.0) return 'Light';
-    if (magnitude >= 3.0) return 'Minor';
-    return 'Micro';
-  };
+  }, [colorMode, qualityScoreMap, mapColors.isDark]);
 
   return (
     <div className="relative">
@@ -222,24 +219,7 @@ export default function UnifiedEarthquakeMap({
           </div>
 
           <div className="pt-2 border-t">
-            <div className="flex items-center gap-1.5 mb-2">
-              <Label htmlFor="sampleSize" className="text-xs font-medium">
-                Max Events to Display
-              </Label>
-              <InfoTooltip content="Limits rendered events for performance." />
-            </div>
-            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(value === 'all' ? Infinity : Number(value))}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent position="popper" className="z-[10000]">
-                <SelectItem value="500">500</SelectItem>
-                <SelectItem value="1000">1,000</SelectItem>
-                <SelectItem value="2000">2,000</SelectItem>
-                <SelectItem value="5000">5,000</SelectItem>
-                <SelectItem value="Infinity">All</SelectItem>
-              </SelectContent>
-            </Select>
+            <MapDetailControl value={sampleSize} onChange={setSampleSize} />
           </div>
         </div>
       </Card>
@@ -251,7 +231,7 @@ export default function UnifiedEarthquakeMap({
             <Info className="h-4 w-4 text-blue-500" />
             <span>
               Displaying <strong>{displayCount.toLocaleString()}</strong> of{' '}
-              <strong>{total.toLocaleString()}</strong> events
+              <strong>{visibleCount.toLocaleString()}</strong> visible events. Zoom in for more.
             </span>
           </div>
         </Card>
@@ -268,6 +248,7 @@ export default function UnifiedEarthquakeMap({
           preferCanvas={true}
         >
           <MapLayerControl position="topright" />
+        <MapViewportObserver onChange={onViewportChange} />
 
           {/* NZ Active Faults from Local GeoJSON */}
           {showFaults && faultData && (
@@ -284,42 +265,7 @@ export default function UnifiedEarthquakeMap({
             />
           )}
 
-          {/* Earthquake markers - using intelligent sampling for performance */}
-          {/* De-duplicate by event id (the source may contain repeated records, which
-              would otherwise draw overlapping markers and break React's unique-key rule),
-              then sort by magnitude (small to large) so larger events render on top. */}
-          {dedupeById(sampledEarthquakes)
-            .sort((a, b) => a.magnitude - b.magnitude)
-            .map((eq, index) => {
-            const eventDate = new Date(eq.time).toLocaleDateString('en-GB', {
-              day: '2-digit',
-              month: '2-digit',
-              year: 'numeric',
-            });
-            const ariaLabel = `Magnitude ${eq.magnitude} earthquake at ${eq.latitude.toFixed(2)}, ${eq.longitude.toFixed(2)} on ${eventDate}`;
-
-            return (
-              <CircleMarker
-                key={eq.id ?? `eq-${index}`}
-                center={[eq.latitude, eq.longitude]}
-                radius={getMagnitudePixelRadius(eq.magnitude)}
-                pathOptions={{
-                  color: getEventColor(eq),
-                  fillColor: getEventColor(eq),
-                  fillOpacity: mapColors.markerOpacity,
-                  weight: 1,
-                  // Add title for accessibility (shows on hover)
-                  title: ariaLabel,
-                } as any}
-                eventHandlers={{
-                  click: () => {
-                    clickSeqRef.current += 1;
-                    setActivePopup({ event: eq, seq: clickSeqRef.current });
-                  },
-                }}
-              />
-            );
-          })}
+        <EarthquakeMarkerLayer events={sampledEarthquakes} getColor={getEventColor} opacity={mapColors.markerOpacity} onEventClick={onEventClick} />
 
           {/* One popup, rendered only for the clicked event. Keeping the popup (and
               its nearby-faults fetch in EventPopup) out of the per-marker loop avoids
@@ -328,7 +274,7 @@ export default function UnifiedEarthquakeMap({
           {activePopup && (
             <Popup
               key={activePopup.seq}
-              position={[activePopup.event.latitude, activePopup.event.longitude]}
+              position={activePopup.position}
             >
               <EventPopup event={activePopup.event} qualityScores={qualityScores} />
             </Popup>
@@ -348,7 +294,9 @@ export default function UnifiedEarthquakeMap({
 
 // Event popup component
 function EventPopup({ event, qualityScores }: { event: Earthquake; qualityScores: any[] }) {
-  const quality = qualityScores.find(q => q.eventId === event.id);
+  const quality = useMemo(() => qualityScores.find(q => q.eventId === event.id) ?? {
+    eventId: event.id, score: calculateQualityScore(metricsFromEvent(event)),
+  }, [event, qualityScores]);
 
   // Fetch nearby faults for this event
   const { faults, loading: faultsLoading, count: faultCount } = useNearbyFaults({

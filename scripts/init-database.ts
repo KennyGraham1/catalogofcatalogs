@@ -78,6 +78,7 @@ async function initializeDatabase() {
       { key: { used_station_count: 1 }, name: 'idx_used_station_count' },
       { key: { standard_error: 1 }, name: 'idx_standard_error' },
       { key: { catalogue_id: 1, time: -1 }, name: 'idx_catalogue_time' },
+      { key: { catalogue_id: 1, time: -1, id: -1 }, name: 'catalogue_time_id_idx' },
       { key: { catalogue_id: 1, magnitude: -1 }, name: 'idx_catalogue_magnitude' },
     ];
 

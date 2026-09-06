@@ -16,11 +16,20 @@ interface UncertaintyVisualizationProps {
   data: UncertaintyData;
 }
 
+/** Finite, non-negative number or null — anything else means "not reported". */
+function reported(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
 export function UncertaintyVisualization({ data }: UncertaintyVisualizationProps) {
   const quality = calculateLocationQuality(data);
-  
+
+  // Only fall back to a number when at least one of the two is reported;
+  // `|| 0` here would turn "no data" into "0 degrees" and print "excellent".
+  const latUnc = reported(data.latitude_uncertainty);
+  const lonUnc = reported(data.longitude_uncertainty);
   const horizontalLevel = getUncertaintyLevel(
-    Math.max(data.latitude_uncertainty || 0, data.longitude_uncertainty || 0),
+    latUnc === null && lonUnc === null ? null : Math.max(latUnc ?? 0, lonUnc ?? 0),
     'horizontal'
   );
   
@@ -42,9 +51,32 @@ export function UncertaintyVisualization({ data }: UncertaintyVisualizationProps
       case 'excellent': return 'default';
       case 'good': return 'secondary';
       case 'fair': return 'outline';
+      case 'unknown': return 'outline';
       default: return 'destructive';
     }
   };
+
+  // Grades map onto the same colour bands as the level badges.
+  const gradeVariant = (grade: 'A' | 'B' | 'C' | 'D' | 'F' | null): 'default' | 'secondary' | 'destructive' | 'outline' => {
+    if (grade === null) return 'outline';
+    if (grade === 'A') return 'default';
+    if (grade === 'B') return 'secondary';
+    if (grade === 'C') return 'outline';
+    return 'destructive';
+  };
+
+  /** Progress bar for one factor; renders "not reported" instead of a full bar when absent. */
+  const FactorBar = ({ level, value }: { level: string; value: number | null }) =>
+    value === null ? (
+      <p className="text-xs text-muted-foreground italic">Not reported — excluded from the score</p>
+    ) : (
+      <div className="w-full bg-gray-200 rounded-full h-2">
+        <div
+          className={`h-2 rounded-full ${getLevelColor(level)}`}
+          style={{ width: `${value}%` }}
+        />
+      </div>
+    );
 
   return (
     <Card>
@@ -54,8 +86,8 @@ export function UncertaintyVisualization({ data }: UncertaintyVisualizationProps
             <CardTitle>Location Uncertainty</CardTitle>
             <TechnicalTermTooltip term="uncertainty" />
           </div>
-          <Badge variant={getLevelBadgeVariant(quality.grade)}>
-            Grade: {quality.grade}
+          <Badge variant={gradeVariant(quality.grade)}>
+            {quality.grade === null ? 'No uncertainty metadata' : `Grade: ${quality.grade}`}
           </Badge>
         </div>
         <CardDescription>
@@ -67,9 +99,16 @@ export function UncertaintyVisualization({ data }: UncertaintyVisualizationProps
         <div>
           <div className="flex justify-between text-sm mb-2">
             <span className="font-medium">Location Quality Score</span>
-            <span className="text-muted-foreground">{quality.score}/100</span>
+            <span className="text-muted-foreground">
+              {quality.score === null ? 'not scored' : `${quality.score}/100`}
+            </span>
           </div>
-          <Progress value={quality.score} className="h-3" />
+          <Progress value={quality.score ?? 0} className="h-3" />
+          <p className="text-xs text-muted-foreground mt-1">
+            {quality.score === null
+              ? 'This event reports none of the four uncertainty fields, so no quality score can be computed.'
+              : `Weighted over the ${quality.scoredFactors.length} of 4 uncertainty fields this event reports (${Math.round(quality.metadataCoverage * 100)}% of the scoring weight).`}
+          </p>
         </div>
 
         {/* Horizontal Uncertainty */}
@@ -98,12 +137,7 @@ export function UncertaintyVisualization({ data }: UncertaintyVisualizationProps
             </div>
           </div>
           <p className="text-xs text-muted-foreground">{horizontalLevel.description}</p>
-          <div className="w-full bg-gray-200 rounded-full h-2">
-            <div
-              className={`h-2 rounded-full ${getLevelColor(horizontalLevel.level)}`}
-              style={{ width: `${quality.factors.horizontalUncertainty}%` }}
-            />
-          </div>
+          <FactorBar level={horizontalLevel.level} value={quality.factors.horizontalUncertainty} />
         </div>
 
         {/* Depth Uncertainty */}
@@ -124,12 +158,7 @@ export function UncertaintyVisualization({ data }: UncertaintyVisualizationProps
             </span>
           </div>
           <p className="text-xs text-muted-foreground">{depthLevel.description}</p>
-          <div className="w-full bg-gray-200 rounded-full h-2">
-            <div
-              className={`h-2 rounded-full ${getLevelColor(depthLevel.level)}`}
-              style={{ width: `${quality.factors.depthUncertainty}%` }}
-            />
-          </div>
+          <FactorBar level={depthLevel.level} value={quality.factors.depthUncertainty} />
         </div>
 
         {/* Time Uncertainty */}
@@ -150,12 +179,7 @@ export function UncertaintyVisualization({ data }: UncertaintyVisualizationProps
             </span>
           </div>
           <p className="text-xs text-muted-foreground">{timeLevel.description}</p>
-          <div className="w-full bg-gray-200 rounded-full h-2">
-            <div
-              className={`h-2 rounded-full ${getLevelColor(timeLevel.level)}`}
-              style={{ width: `${quality.factors.timeUncertainty}%` }}
-            />
-          </div>
+          <FactorBar level={timeLevel.level} value={quality.factors.timeUncertainty} />
         </div>
 
         {/* Azimuthal Gap */}
@@ -177,31 +201,31 @@ export function UncertaintyVisualization({ data }: UncertaintyVisualizationProps
               {data.azimuthal_gap >= 180 && data.azimuthal_gap < 270 && 'Fair station coverage'}
               {data.azimuthal_gap >= 270 && 'Poor station coverage - large gap in station distribution'}
             </p>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div
-                className={`h-2 rounded-full ${getLevelColor(
-                  data.azimuthal_gap < 90 ? 'excellent' : 
-                  data.azimuthal_gap < 180 ? 'good' : 
-                  data.azimuthal_gap < 270 ? 'fair' : 'poor'
-                )}`}
-                style={{ width: `${quality.factors.azimuthalGap}%` }}
-              />
-            </div>
+            <FactorBar
+              level={
+                data.azimuthal_gap < 90 ? 'excellent' :
+                data.azimuthal_gap < 180 ? 'good' :
+                data.azimuthal_gap < 270 ? 'fair' : 'poor'
+              }
+              value={quality.factors.azimuthalGap}
+            />
           </div>
         )}
 
         {/* Summary */}
         <div className="pt-2 border-t">
           <p className="text-sm text-muted-foreground">
-            {quality.score >= 90 && 'This is a high-quality location with excellent precision.'}
-            {quality.score >= 80 && quality.score < 90 && 'This is a good quality location with reliable precision.'}
-            {quality.score >= 70 && quality.score < 80 && 'This location has acceptable precision for most applications.'}
-            {quality.score >= 60 && quality.score < 70 && 'This location has moderate precision. Use with caution for critical applications.'}
-            {quality.score < 60 && 'This location has poor precision. Consider using additional data or alternative solutions.'}
+            {quality.score === null && 'No uncertainty metadata is recorded for this event, so its location precision cannot be assessed — this is not the same as a precise location.'}
+            {quality.score !== null && quality.score >= 90 && 'This is a high-quality location with excellent precision.'}
+            {quality.score !== null && quality.score >= 80 && quality.score < 90 && 'This is a good quality location with reliable precision.'}
+            {quality.score !== null && quality.score >= 70 && quality.score < 80 && 'This location has acceptable precision for most applications.'}
+            {quality.score !== null && quality.score >= 60 && quality.score < 70 && 'This location has moderate precision. Use with caution for critical applications.'}
+            {quality.score !== null && quality.score < 60 && 'This location has poor precision. Consider using additional data or alternative solutions.'}
+            {quality.score !== null && quality.metadataCoverage < 1 &&
+              ` Note: only ${Math.round(quality.metadataCoverage * 100)}% of the scoring weight is backed by reported metadata.`}
           </p>
         </div>
       </CardContent>
     </Card>
   );
 }
-

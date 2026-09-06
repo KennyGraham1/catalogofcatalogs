@@ -169,6 +169,69 @@ function safeParseNumber(value: any): number | null {
   return isNaN(num) ? null : num;
 }
 
+// Bin width of the longitude accumulator below, in degrees.
+const LONGITUDE_BIN_DEG = 0.1;
+
+/**
+ * Streaming form of longitudeExtent(): the smallest [west, east] arc covering every
+ * longitude added, with the RFC 7946 §5.2 crossing convention (west > east) that
+ * db.updateCatalogueGeoBounds and the region search expect.
+ */
+class LongitudeArcAccumulator {
+  private readonly bins = new Map<number, { min: number; max: number }>();
+
+  add(longitude: number | null | undefined): void {
+    if (typeof longitude !== 'number' || !Number.isFinite(longitude)) return;
+
+    const key = Math.floor(longitude / LONGITUDE_BIN_DEG);
+    const bin = this.bins.get(key);
+    if (!bin) {
+      this.bins.set(key, { min: longitude, max: longitude });
+      return;
+    }
+    if (longitude < bin.min) bin.min = longitude;
+    if (longitude > bin.max) bin.max = longitude;
+  }
+
+  /** null when no finite longitude was ever added (same as longitudeExtent([])). */
+  extent(): { west: number; east: number } | null {
+    if (this.bins.size === 0) return null;
+
+    // forEach rather than for..of over the Map: the repo's tsconfig target predates
+    // downlevelIteration, so a Map cannot be iterated or spread directly.
+    const keys: number[] = [];
+    this.bins.forEach((_span, key) => keys.push(key));
+    keys.sort((a, b) => a - b);
+    const spans = keys.map(key => this.bins.get(key)!);
+
+    // Largest gap between consecutive occupied bins; ties keep the westernmost gap,
+    // matching the scan order in lib/geo-bounds-utils.
+    let largestGap = -Infinity;
+    let gapWestIdx = -1;
+    for (let i = 0; i < spans.length - 1; i++) {
+      const gap = spans[i + 1].min - spans[i].max;
+      if (gap > largestGap) {
+        largestGap = gap;
+        gapWestIdx = i;
+      }
+    }
+
+    const first = spans[0];
+    const last = spans[spans.length - 1];
+    // Wrap gap: from the easternmost longitude, across the antimeridian, back to the
+    // westernmost one.
+    const wrapGap = first.min + 360 - last.max;
+    if (wrapGap >= largestGap) {
+      // No gap anywhere on the circle -> the data covers the whole globe.
+      if (wrapGap <= 0) return { west: -180, east: 180 };
+      // The largest gap straddles 180° -> the data does not cross it; min/max is tightest.
+      return { west: first.min, east: last.max };
+    }
+    // The largest gap is interior -> the covering arc crosses the antimeridian.
+    return { west: spans[gapWestIdx + 1].min, east: spans[gapWestIdx].max };
+  }
+}
+
 function dropInvalidOptionalNumericFields(row: InsertRow): void {
   const nonNegativeFields = [
     'magnitude_uncertainty',
@@ -385,12 +448,11 @@ async function insertBatchWithRetry(
   catalogueId: string,
   batch: InsertRow[],
   batchStart: number,
-): Promise<void> {
+): Promise<number> {
   let attempt = 0;
   while (true) {
     try {
-      await db.bulkInsertEvents(batch as Parameters<typeof db.bulkInsertEvents>[0]);
-      return;
+      return await db.bulkInsertEvents(batch as Parameters<typeof db.bulkInsertEvents>[0]);
     } catch (error) {
       if (attempt >= BATCH_INSERT_MAX_RETRIES || !isRetryableBatchInsertError(error)) {
         throw error;
@@ -415,17 +477,24 @@ async function bulkInsertEventRows(
   db: NonNullable<typeof dbQueries>,
   catalogueId: string,
   rows: InsertRow[],
-  insertedSoFar = 0,
+  submittedSoFar = 0,
 ): Promise<number> {
   const batches = chunkInsertRows(rows);
   let inserted = 0;
+  let submitted = 0;
 
   for (let i = 0; i < batches.length; i += EVENT_INSERT_MAX_PARALLEL_BATCHES) {
     const window = batches.slice(i, i + EVENT_INSERT_MAX_PARALLEL_BATCHES);
-    await Promise.all(window.map((batch, offset) =>
-      insertBatchWithRetry(db, catalogueId, batch, insertedSoFar + inserted + offset * EVENT_INSERT_BATCH_SIZE)
+    // Sum what MongoDB actually wrote, not what was handed to it: bulkInsertEvents
+    // drops rows repeating a source_id within the batch and skips rows that collide
+    // with the (catalogue_id, source_id) unique index. Counting submitted rows made
+    // every deduplicated row a phantom event in the catalogue's event_count.
+    // `submitted` stays a row offset so the retry log still points at the input.
+    const results = await Promise.all(window.map((batch, offset) =>
+      insertBatchWithRetry(db, catalogueId, batch, submittedSoFar + submitted + offset * EVENT_INSERT_BATCH_SIZE)
     ));
-    inserted += window.reduce((sum, batch) => sum + batch.length, 0);
+    inserted += results.reduce((sum, count) => sum + count, 0);
+    submitted += window.reduce((sum, batch) => sum + batch.length, 0);
   }
 
   return inserted;
@@ -464,14 +533,19 @@ async function createCatalogueFromPendingUploads(params: {
   );
 
   let totalSubmitted = 0;
-  let successfullyImported = 0;
+  let validEventCount = 0;
   let failedValidation = 0;
   let insertedCount = 0;
   const invalidEvents: { index: number; reason: string }[] = [];
   let minLat: number | undefined;
   let maxLat: number | undefined;
-  let minLon: number | undefined;
-  let maxLon: number | undefined;
+  // Longitude is accumulated into a covering arc rather than min/max-ed: a catalogue
+  // spanning 180° (Kermadec/Raoul) needs the smallest covering arc, which is
+  // minLongitude > maxLongitude under the RFC 7946 §5.2 convention that
+  // lib/geo-bounds-utils, db.updateCatalogueGeoBounds and the region search all use. A
+  // naive min/max would store the complement — a ~359°-wide box matching the whole
+  // planet. The accumulator keeps this streaming (see LongitudeArcAccumulator).
+  const longitudeArc = new LongitudeArcAccumulator();
 
   try {
     for (const id of ids) {
@@ -499,15 +573,14 @@ async function createCatalogueFromPendingUploads(params: {
           const lon = safeParseNumber(event.longitude)!;
           if (minLat === undefined || lat < minLat) minLat = lat;
           if (maxLat === undefined || lat > maxLat) maxLat = lat;
-          if (minLon === undefined || lon < minLon) minLon = lon;
-          if (maxLon === undefined || lon > maxLon) maxLon = lon;
+          longitudeArc.add(lon);
 
           rows.push(buildInsertRow(event, pendingEvent, catalogueId));
-          successfullyImported += 1;
+          validEventCount += 1;
         }
 
         if (rows.length > 0) {
-          insertedCount += await bulkInsertEventRows(db, catalogueId, rows, insertedCount);
+          insertedCount += await bulkInsertEventRows(db, catalogueId, rows, validEventCount - rows.length);
         }
       }
 
@@ -524,7 +597,7 @@ async function createCatalogueFromPendingUploads(params: {
       );
     }
 
-    if (successfullyImported === 0) {
+    if (validEventCount === 0) {
       await db.deleteCatalogue(catalogueId);
       return NextResponse.json(
         {
@@ -540,13 +613,9 @@ async function createCatalogueFromPendingUploads(params: {
 
     await db.updateCatalogueStatus('complete', catalogueId);
     await db.updateCatalogueEventCount(catalogueId, insertedCount);
-    if (
-      minLat !== undefined &&
-      maxLat !== undefined &&
-      minLon !== undefined &&
-      maxLon !== undefined
-    ) {
-      await db.updateCatalogueGeoBounds(catalogueId, minLat, maxLat, minLon, maxLon);
+    const lonExtent = longitudeArc.extent();
+    if (minLat !== undefined && maxLat !== undefined && lonExtent) {
+      await db.updateCatalogueGeoBounds(catalogueId, minLat, maxLat, lonExtent.west, lonExtent.east);
     }
   } catch (error) {
     logger.error('Catalogue import failed; cleaning up partially inserted data', {
@@ -576,10 +645,15 @@ async function createCatalogueFromPendingUploads(params: {
   invalidateCacheByPrefix('catalogues');
 
   const totalDurationMs = Math.round(performance.now() - startedAt);
+  // Report what is actually stored. Rows dropped as duplicates by bulkInsertEvents
+  // never reached the collection, so counting them as imported would overstate the
+  // catalogue by exactly the number of repeated source IDs.
+  const successfullyImported = insertedCount;
+  const duplicatesSkipped = validEventCount - insertedCount;
   const successRate = totalSubmitted > 0
     ? Math.round((successfullyImported / totalSubmitted) * 10000) / 100
     : 0;
-  const isPartialImport = failedValidation > 0;
+  const isPartialImport = failedValidation > 0 || duplicatesSkipped > 0;
 
   logger.info('Catalogue created successfully from pending uploads', {
     catalogueId,
@@ -587,6 +661,7 @@ async function createCatalogueFromPendingUploads(params: {
     eventCount: successfullyImported,
     totalSubmitted,
     failedValidation,
+    duplicatesSkipped,
     isPartialImport,
     durationMs: totalDurationMs,
   });
@@ -596,12 +671,21 @@ async function createCatalogueFromPendingUploads(params: {
     totalSubmitted,
     successfullyImported,
     failedValidation,
+    duplicatesSkipped,
     successRate,
     invalidEvents,
     hasMoreInvalidEvents: failedValidation > invalidEvents.length,
   };
   const importMessage = isPartialImport
-    ? `Imported ${successfullyImported.toLocaleString()} of ${totalSubmitted.toLocaleString()} events. ${failedValidation.toLocaleString()} event${failedValidation === 1 ? '' : 's'} failed validation.`
+    ? [
+        `Imported ${successfullyImported.toLocaleString()} of ${totalSubmitted.toLocaleString()} events.`,
+        failedValidation > 0
+          ? `${failedValidation.toLocaleString()} event${failedValidation === 1 ? '' : 's'} failed validation.`
+          : '',
+        duplicatesSkipped > 0
+          ? `${duplicatesSkipped.toLocaleString()} duplicate event${duplicatesSkipped === 1 ? '' : 's'} skipped.`
+          : '',
+      ].filter(Boolean).join(' ')
     : `Successfully imported all ${successfullyImported.toLocaleString()} events.`;
 
   return NextResponse.json(
@@ -864,11 +948,14 @@ export async function POST(request: NextRequest) {
     // Generate catalogue ID
     const catalogueId = createId();
 
-    // Calculate geographic bounds from VALID events only (more efficient for large datasets)
+    // Calculate geographic bounds from VALID events only (more efficient for large datasets).
+    // Longitude uses the smallest covering arc rather than a plain min/max so a
+    // catalogue spanning 180° (Kermadec/Raoul) stores the RFC 7946 §5.2 crossing
+    // box (minLongitude > maxLongitude) that db.updateCatalogueGeoBounds and the
+    // region search expect, not its ~359°-wide complement.
     let minLat: number | undefined;
     let maxLat: number | undefined;
-    let minLon: number | undefined;
-    let maxLon: number | undefined;
+    const longitudeArc = new LongitudeArcAccumulator();
 
     for (const { event } of validEvents) {
       const lat = safeParseNumber(event.latitude);
@@ -878,11 +965,12 @@ export async function POST(request: NextRequest) {
         if (minLat === undefined || lat < minLat) minLat = lat;
         if (maxLat === undefined || lat > maxLat) maxLat = lat;
       }
-      if (lon !== null) {
-        if (minLon === undefined || lon < minLon) minLon = lon;
-        if (maxLon === undefined || lon > maxLon) maxLon = lon;
-      }
+      longitudeArc.add(lon);
     }
+
+    const lonExtent = longitudeArc.extent();
+    const minLon = lonExtent?.west;
+    const maxLon = lonExtent?.east;
 
     // Prepare ONLY VALID events for insertion.
     //
@@ -897,12 +985,9 @@ export async function POST(request: NextRequest) {
 
     // Calculate validation statistics for the response
     const totalSubmitted = events.length;
-    const successfullyImported = validEvents.length;
+    const validEventCount = validEvents.length;
     const failedValidation = invalidEvents.length;
-    const successRate = totalSubmitted > 0
-      ? Math.round((successfullyImported / totalSubmitted) * 10000) / 100
-      : 0;
-    const isPartialImport = failedValidation > 0;
+    const hasInvalidEvents = failedValidation > 0;
 
     // Avoid long-running multi-document transactions during large imports.
     // A single transaction spanning insertMany over many events can pin
@@ -912,18 +997,20 @@ export async function POST(request: NextRequest) {
     await db.insertCatalogue(
       catalogueId,
       trimmedName,
-      JSON.stringify([{ source: 'upload', description: isPartialImport ? 'Uploaded catalogue (partial import)' : 'Uploaded catalogue' }]),
+      JSON.stringify([{ source: 'upload', description: hasInvalidEvents ? 'Uploaded catalogue (partial import)' : 'Uploaded catalogue' }]),
       JSON.stringify({
         uploadDate: new Date().toISOString(),
-        partialImport: isPartialImport,
+        partialImport: hasInvalidEvents,
         validationSummary: {
           totalSubmitted,
-          successfullyImported,
+          successfullyImported: validEventCount,
           failedValidation,
-          successRate,
+          successRate: totalSubmitted > 0
+            ? Math.round((validEventCount / totalSubmitted) * 10000) / 100
+            : 0,
         }
       }),
-      successfullyImported,
+      validEventCount,
       'processing',
       {
         ...metadata,
@@ -978,6 +1065,15 @@ export async function POST(request: NextRequest) {
     // Invalidate cache only after successful insertion
     invalidateCacheByPrefix('catalogues');
 
+    // Report what is actually stored: bulkInsertEvents drops rows repeating a
+    // source_id, so the count of rows submitted overstates the catalogue.
+    const successfullyImported = insertedCount;
+    const duplicatesSkipped = validEventCount - insertedCount;
+    const successRate = totalSubmitted > 0
+      ? Math.round((successfullyImported / totalSubmitted) * 10000) / 100
+      : 0;
+    const isPartialImport = hasInvalidEvents || duplicatesSkipped > 0;
+
     // Log with both success and failure counts
     logger.info('Catalogue created successfully', {
       catalogueId,
@@ -985,6 +1081,7 @@ export async function POST(request: NextRequest) {
       eventCount: successfullyImported,
       totalSubmitted,
       failedValidation,
+      duplicatesSkipped,
       isPartialImport,
     });
 
@@ -996,6 +1093,7 @@ export async function POST(request: NextRequest) {
       totalSubmitted,
       successfullyImported,
       failedValidation,
+      duplicatesSkipped,
       successRate,
       // Limit invalid events details to first 100 for performance
       invalidEvents: invalidEvents.slice(0, 100),
@@ -1004,7 +1102,15 @@ export async function POST(request: NextRequest) {
 
     // Build response message
     const importMessage = isPartialImport
-      ? `Imported ${successfullyImported.toLocaleString()} of ${totalSubmitted.toLocaleString()} events. ${failedValidation.toLocaleString()} event${failedValidation === 1 ? '' : 's'} failed validation.`
+      ? [
+          `Imported ${successfullyImported.toLocaleString()} of ${totalSubmitted.toLocaleString()} events.`,
+          failedValidation > 0
+            ? `${failedValidation.toLocaleString()} event${failedValidation === 1 ? '' : 's'} failed validation.`
+            : '',
+          duplicatesSkipped > 0
+            ? `${duplicatesSkipped.toLocaleString()} duplicate event${duplicatesSkipped === 1 ? '' : 's'} skipped.`
+            : '',
+        ].filter(Boolean).join(' ')
       : `Successfully imported all ${successfullyImported.toLocaleString()} events.`;
 
     // Return response with catalogue properties spread at top level for backward compatibility

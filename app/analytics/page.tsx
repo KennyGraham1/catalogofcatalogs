@@ -1,7 +1,9 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback, useDeferredValue, useTransition, memo, useRef } from 'react';
-import { dedupeById } from '@/lib/utils';
+import { useState, useEffect, useMemo, useCallback, useDeferredValue, useTransition, memo } from 'react';
+import { useCatalogueEvents } from '@/hooks/use-catalogue-events';
+import { useEventDetails } from '@/hooks/use-event-details';
+import type { CatalogueEvent as AnalyticsEvent } from '@/lib/catalogue-event-loader';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -54,7 +56,7 @@ import { parseStationData } from '@/lib/station-coverage-utils';
 import { EventTable } from '@/components/events/EventTable';
 import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import { type EarthquakeEvent, calculateMFDComparison, type MFDComparisonResult } from '@/lib/seismological-analysis';
-import { type MergedCatalogue, type MergedEvent } from '@/lib/db';
+import { type MergedCatalogue } from '@/lib/db';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
 import { useSeismologicalAnalyses } from '@/hooks/use-seismological-worker';
 import {
@@ -70,6 +72,7 @@ import {
   MomentReleaseChart,
   MFDComparisonChart,
 } from '@/components/charts';
+import { aggregateEventTimeline } from '@/lib/event-timeline';
 import {
   MFD_CATALOGUE_COLORS,
 } from '@/lib/chart-config';
@@ -81,6 +84,32 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 
+/**
+ * Origin times are UTC by definition (QuakeML 1.2 / ISO 8601 "Z"), so they are rendered
+ * in UTC with the zone shown - formatting them in the browser's zone puts an event on the
+ * wrong calendar day for 13 of every 24 hours under NZDT (UTC+13).
+ *
+ * Hoisted to module scope on purpose: these render once per event over lists of thousands of
+ * events, and constructing an Intl.DateTimeFormat per row costs ~82 ms per 1000 rows.
+ */
+const UTC_SECOND_FORMAT = new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  timeZone: 'UTC',
+  timeZoneName: 'short',
+});
+
+/** Render an ISO origin time in UTC; unparseable values are shown verbatim. */
+function formatOriginTime(time: string): string {
+  const date = new Date(time);
+  if (Number.isNaN(date.getTime())) return time;
+  return UTC_SECOND_FORMAT.format(date);
+}
+
 // Dynamically import unified map component to avoid SSR issues
 const UnifiedEarthquakeMap = dynamic(() => import('@/components/visualize/UnifiedEarthquakeMap'), {
   ssr: false,
@@ -88,16 +117,9 @@ const UnifiedEarthquakeMap = dynamic(() => import('@/components/visualize/Unifie
 });
 
 // Performance constants
-const MAX_CHART_DATA_POINTS = 500; // Limit for scatter plots
 const MAX_TIMELINE_POINTS = 365; // Max days for timeline chart
 
 const FILTER_DEBOUNCE_MS = 150; // Debounce delay for filter changes
-
-// Extended event type with catalogue info added during mapping
-interface AnalyticsEvent extends MergedEvent {
-  catalogue: string;      // Catalogue name
-  catalogueId: string;    // Catalogue ID
-}
 
 // Debounce hook for filter updates
 function useDebounce<T>(value: T, delay: number): T {
@@ -139,6 +161,24 @@ const AxisLegendHints = memo(function AxisLegendHints({
   );
 });
 
+// States which events an analysis actually consumed. The seismological workers
+// run on the filtered set, so the b-value, Mc, rates and moment totals describe
+// that subset and not the whole catalogue - say so next to every such heading.
+const FilterScopeNote = memo(function FilterScopeNote({
+  analysed,
+  total,
+}: {
+  analysed: number;
+  total: number;
+}) {
+  return (
+    <p className="text-xs text-muted-foreground mt-1">
+      Computed from {analysed.toLocaleString()} of {total.toLocaleString()} loaded events
+      {analysed < total ? ' (current filters applied)' : ' (no filters applied)'}.
+    </p>
+  );
+});
+
 // Loading skeleton for statistics cards
 const StatisticsCardSkeleton = memo(function StatisticsCardSkeleton() {
   return (
@@ -160,15 +200,10 @@ export default function AnalyticsPage() {
   const [selectedCatalogue, setSelectedCatalogue] = useState<string>(''); // Empty by default - user must select
   const [catalogueSelectOpen, setCatalogueSelectOpen] = useState(false);
   const [catalogueSearchTerm, setCatalogueSearchTerm] = useState('');
-  const [events, setEvents] = useState<AnalyticsEvent[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<AnalyticsEvent | null>(null);
   // Note: Events from API may have null depth values, which are handled in filtering/display logic
-  const [loading, setLoading] = useState(false);
-  const [loadingProgress, setLoadingProgress] = useState(0);
-  const [loadingMessage, setLoadingMessage] = useState('');
   const [activeTab, setActiveTab] = useState('map');
   const [isPending, startTransition] = useTransition();
-  const [eventsLoaded, setEventsLoaded] = useState(false); // Track if events have been loaded for current selection
 
   // Visualize page filters - default to showing ALL events
   const [magnitudeRange, setMagnitudeRange] = useState([-2.0, 10.0]);
@@ -195,15 +230,6 @@ export default function AnalyticsPage() {
   const deferredMagnitudeRange = useDeferredValue(debouncedMagnitudeRange);
   const deferredDepthRange = useDeferredValue(debouncedDepthRange);
 
-  // Ref to track mounted state for async operations
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
   useEffect(() => {
     if (!catalogueSelectOpen) {
       setCatalogueSearchTerm('');
@@ -222,134 +248,30 @@ export default function AnalyticsPage() {
     [catalogueData]
   );
 
-  // Fetch events for a single catalogue (on-demand loading)
-  const fetchSingleCatalogueEvents = useCallback(async (catalogueId: string) => {
-    if (!catalogues.length) return;
+  const { events, loading, complete: eventsLoaded, loadedCount, error: eventsError,
+    cancel: cancelEventLoading, retry: reloadEvents } = useCatalogueEvents(catalogues, selectedCatalogue);
+  const expectedEvents = catalogues.reduce((sum, catalogue) =>
+    sum + (selectedCatalogue === 'all' || selectedCatalogue === catalogue.id ? catalogue.event_count || 0 : 0), 0);
+  const loadingProgress = eventsLoaded ? 100 : expectedEvents > 0 ? Math.min(99, Math.round(loadedCount / expectedEvents * 100)) : 0;
+  const loadingMessage = loadedCount > 0
+    ? `Loaded ${loadedCount.toLocaleString()}${expectedEvents ? ` of approximately ${expectedEvents.toLocaleString()}` : ''} events`
+    : 'Loading the first events...';
 
-    const catalogue = catalogues.find((c) => c.id === catalogueId);
-    if (!catalogue) return;
-
-    setLoading(true);
-    setLoadingProgress(0);
-    setLoadingMessage(`Loading events for ${catalogue.name}...`);
-
-    try {
-      const eventsResponse = await fetch(
-        `/api/catalogues/${catalogueId}/events`
-      );
-
-      if (eventsResponse.ok) {
-        const eventsData = await eventsResponse.json();
-        const eventsList: MergedEvent[] = Array.isArray(eventsData) ? eventsData : eventsData.data || [];
-        const mappedEvents: AnalyticsEvent[] = eventsList.map((event) => ({
-          ...event,
-          catalogue: catalogue.name,
-          catalogueId: catalogue.id,
-          region: event.region || 'Unknown'
-        }));
-
-        const uniqueEvents = dedupeById(mappedEvents);
-        if (mountedRef.current) {
-          setEvents(uniqueEvents);
-          setEventsLoaded(true);
-          if (uniqueEvents.length > 0) {
-            setSelectedEvent(uniqueEvents[0]);
-          }
-          setLoadingProgress(100);
-          setLoadingMessage(`Loaded ${mappedEvents.length.toLocaleString()} events`);
-        }
-      }
-    } catch (error) {
-      console.error(`Failed to fetch events for catalogue ${catalogueId}:`, error);
-    } finally {
-      if (mountedRef.current) {
-        setLoading(false);
-        setLoadingMessage('');
-      }
-    }
-  }, [catalogues]);
-
-  // Fetch events for all catalogues (explicit user choice)
-  const fetchAllCataloguesEvents = useCallback(async () => {
-    if (!catalogues.length) return;
-
-    setLoading(true);
-    setLoadingProgress(0);
-    setLoadingMessage('Loading all catalogues... This may take a moment.');
-
-    try {
-      const allEvents: AnalyticsEvent[] = [];
-      const totalCatalogues = catalogues.length;
-
-      // Fetch events in parallel using Promise.allSettled
-      const eventPromises = catalogues.map(async (catalogue) => {
-        try {
-          const eventsResponse = await fetch(
-            `/api/catalogues/${catalogue.id}/events`
-          );
-          if (eventsResponse.ok) {
-            const eventsData = await eventsResponse.json();
-            const eventsList: MergedEvent[] = Array.isArray(eventsData) ? eventsData : eventsData.data || [];
-            return eventsList.map((event): AnalyticsEvent => ({
-              ...event,
-              catalogue: catalogue.name,
-              catalogueId: catalogue.id,
-              region: event.region || 'Unknown'
-            }));
-          }
-        } catch (error) {
-          console.error(`Failed to fetch events for catalogue ${catalogue.id}:`, error);
-        }
-        return [] as AnalyticsEvent[];
-      });
-
-      // Process results with progress updates
-      const results = await Promise.allSettled(eventPromises);
-      let processedCount = 0;
-
-      results.forEach((result) => {
-        if (result.status === 'fulfilled' && result.value) {
-          allEvents.push(...result.value);
-        }
-        processedCount++;
-        if (mountedRef.current) {
-          setLoadingProgress(Math.round((processedCount / totalCatalogues) * 100));
-          setLoadingMessage(`Loaded ${processedCount}/${totalCatalogues} catalogues (${allEvents.length.toLocaleString()} events)`);
-        }
-      });
-
-      const uniqueEvents = dedupeById(allEvents);
-      if (mountedRef.current) {
-        setEvents(uniqueEvents);
-        setEventsLoaded(true);
-        if (uniqueEvents.length > 0) {
-          setSelectedEvent(uniqueEvents[0]);
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching catalogues and events:', error);
-    } finally {
-      if (mountedRef.current) {
-        setLoading(false);
-        setLoadingProgress(100);
-        setLoadingMessage('');
-      }
-    }
-  }, [catalogues]);
-
-  // Handle catalogue selection change - load events on demand
   const handleCatalogueChange = useCallback((value: string) => {
+    cancelEventLoading();
     setSelectedCatalogue(value);
-    setEvents([]); // Clear current events
-    setEventsLoaded(false);
     setSelectedEvent(null);
+    setActiveTab('map');
+  }, [cancelEventLoading]);
 
-    if (value === 'all') {
-      fetchAllCataloguesEvents();
-    } else if (value) {
-      fetchSingleCatalogueEvents(value);
-    }
-  }, [fetchSingleCatalogueEvents, fetchAllCataloguesEvents]);
+  useEffect(() => {
+    if (eventsLoaded) setSelectedEvent(previous => previous ?? events[0] ?? null);
+  }, [events, eventsLoaded]);
+
+  const { data: eventDetails, loading: detailsLoading, error: detailsError } = useEventDetails(
+    selectedEvent?.catalogueId, selectedEvent?.id, activeTab === 'event-details'
+  );
+  const detailedEvent = eventDetails ?? selectedEvent;
 
   // Filter events based on selected catalogue (fast operation)
   // With lazy loading, events are already filtered by catalogue when loaded
@@ -416,14 +338,20 @@ export default function AnalyticsPage() {
   }, [events]);
 
   const magnitudeDistribution = useMemo(() => {
+    if (activeTab !== 'charts') return [];
+    // Bins span every magnitude the filter admits: open at the bottom (NZ
+    // catalogues are dominated by sub-M2 events, which the old M2.0 floor
+    // dropped silently) and open at the top, so the bars sum to the filtered
+    // event total the tooltip uses as its percentage denominator.
     const bins = [
+      { range: '< 2.0', min: -Infinity, max: 2.0, count: 0 },
       { range: '2.0-2.5', min: 2.0, max: 2.5, count: 0 },
       { range: '2.5-3.0', min: 2.5, max: 3.0, count: 0 },
       { range: '3.0-3.5', min: 3.0, max: 3.5, count: 0 },
       { range: '3.5-4.0', min: 3.5, max: 4.0, count: 0 },
       { range: '4.0-4.5', min: 4.0, max: 4.5, count: 0 },
       { range: '4.5-5.0', min: 4.5, max: 5.0, count: 0 },
-      { range: '5.0+', min: 5.0, max: 10.0, count: 0 },
+      { range: '5.0+', min: 5.0, max: Infinity, count: 0 },
     ];
 
     filteredEarthquakes.forEach(eq => {
@@ -432,9 +360,10 @@ export default function AnalyticsPage() {
     });
 
     return bins;
-  }, [filteredEarthquakes]);
+  }, [filteredEarthquakes, activeTab]);
 
   const depthDistribution = useMemo(() => {
+    if (activeTab !== 'charts') return [];
     const bins = [
       { range: '0-10 km', min: 0, max: 10, count: 0 },
       { range: '10-20 km', min: 10, max: 20, count: 0 },
@@ -450,9 +379,10 @@ export default function AnalyticsPage() {
     });
 
     return bins;
-  }, [filteredEarthquakes]);
+  }, [filteredEarthquakes, activeTab]);
 
   const regionDistribution = useMemo(() => {
+    if (activeTab !== 'distribution') return [];
     const regionCounts: Record<string, number> = {};
     filteredEarthquakes.forEach(eq => {
       const region = eq.region || 'Unknown';
@@ -463,9 +393,10 @@ export default function AnalyticsPage() {
       .map(([region, count]) => ({ region, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
-  }, [filteredEarthquakes]);
+  }, [filteredEarthquakes, activeTab]);
 
   const catalogueDistribution = useMemo(() => {
+    if (activeTab !== 'distribution') return [];
     const catalogueCounts: Record<string, number> = {};
     filteredEarthquakes.forEach(eq => {
       const catalogue = eq.catalogue || 'Unknown';
@@ -475,63 +406,13 @@ export default function AnalyticsPage() {
     return Object.entries(catalogueCounts)
       .map(([catalogue, count]) => ({ catalogue, count }))
       .sort((a, b) => b.count - a.count);
-  }, [filteredEarthquakes]);
+  }, [filteredEarthquakes, activeTab]);
 
-  // Optimized time series data with aggregation for large datasets
-  const timeSeriesData = useMemo(() => {
-    const dateCounts: Record<string, number> = {};
-    filteredEarthquakes.forEach(eq => {
-      const date = new Date(eq.time).toISOString().split('T')[0];
-      dateCounts[date] = (dateCounts[date] || 0) + 1;
-    });
-
-    let timeData = Object.entries(dateCounts)
-      .map(([date, count]) => ({ date, count }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-    // Aggregate data if too many points (group by week/month)
-    if (timeData.length > MAX_TIMELINE_POINTS) {
-      const aggregated: Record<string, number> = {};
-
-      timeData.forEach(({ date, count }) => {
-        const d = new Date(date);
-        const weekStart = new Date(d.getTime() - d.getDay() * 24 * 60 * 60 * 1000);
-        const aggregatedDate = weekStart.toISOString().split('T')[0];
-        aggregated[aggregatedDate] = (aggregated[aggregatedDate] || 0) + count;
-      });
-
-      timeData = Object.entries(aggregated)
-        .map(([date, count]) => ({ date, count }))
-        .sort((a, b) => a.date.localeCompare(b.date));
-    }
-
-    return timeData;
-  }, [filteredEarthquakes]);
-
-  // Sampled scatter data for large datasets
-  const magnitudeDepthScatter = useMemo(() => {
-    // Sample data if too large
-    let dataToPlot = filteredEarthquakes;
-
-    if (filteredEarthquakes.length > MAX_CHART_DATA_POINTS) {
-      // Stratified sampling: always include extremes, sample the rest
-      const sorted = [...filteredEarthquakes].sort((a, b) => b.magnitude - a.magnitude);
-      const topEvents = sorted.slice(0, Math.floor(MAX_CHART_DATA_POINTS * 0.2));
-      const remaining = sorted.slice(Math.floor(MAX_CHART_DATA_POINTS * 0.2));
-
-      // Random sample from remaining
-      const step = Math.floor(remaining.length / (MAX_CHART_DATA_POINTS * 0.8));
-      const sampled = remaining.filter((_, idx) => idx % step === 0);
-
-      dataToPlot = [...topEvents, ...sampled].slice(0, MAX_CHART_DATA_POINTS);
-    }
-
-    return dataToPlot.map(eq => ({
-      magnitude: eq.magnitude,
-      depth: eq.depth,
-      region: eq.region || 'Unknown'
-    }));
-  }, [filteredEarthquakes]);
+  const { data: timeSeriesData, daysPerBin: timelineDaysPerBin } = useMemo(
+    () => activeTab === 'timeline' ? aggregateEventTimeline(filteredEarthquakes, MAX_TIMELINE_POINTS) : { data: [], daysPerBin: 1 },
+    [filteredEarthquakes, activeTab]
+  );
+  const timelineSeriesName = timelineDaysPerBin === 1 ? 'Events per Day' : `Events per ${timelineDaysPerBin} Days`;
 
   const handleResetFilters = useCallback(() => {
     startTransition(() => {
@@ -565,7 +446,7 @@ export default function AnalyticsPage() {
 
   // Calculate statistics - optimized with single pass and sampling
   const statistics = useMemo(() => {
-    if (displayEvents.length === 0) return null;
+    if (!eventsLoaded || displayEvents.length === 0) return null;
 
     const totalEvents = displayEvents.length;
 
@@ -584,7 +465,7 @@ export default function AnalyticsPage() {
       const e = displayEvents[i];
 
       // Count uncertainty data
-      if (e.latitude_uncertainty || e.longitude_uncertainty || e.depth_uncertainty) {
+      if (e.latitude_uncertainty != null || e.longitude_uncertainty != null || e.depth_uncertainty != null) {
         withUncertainty++;
       }
 
@@ -640,16 +521,21 @@ export default function AnalyticsPage() {
       percentageWithFocalMechanism: ((withFocalMechanism / totalEvents) * 100).toFixed(1),
       percentageWithStationData: ((withStationData / totalEvents) * 100).toFixed(1),
     };
-  }, [displayEvents]);
+  }, [displayEvents, eventsLoaded]);
 
-  // Use web workers for seismological analysis (non-blocking)
+  // Use web workers for seismological analysis (non-blocking).
+  // The analyses run on `filteredEarthquakes`, the same set every chart, map and
+  // count on this page draws, so the headline statistics (b-value, Mc, rates,
+  // total moment) always describe the catalogue subset the user can see. Feeding
+  // the unfiltered `displayEvents` here made those numbers disagree with the rest
+  // of the page whenever any filter was narrowed.
   const {
     grAnalysis: grWorkerResult,
     completeness: completenessWorkerResult,
     temporalAnalysis: temporalWorkerResult,
     momentAnalysis: momentWorkerResult,
     anyLoading: analysisLoading
-  } = useSeismologicalAnalyses(displayEvents as EarthquakeEvent[], activeTab);
+  } = useSeismologicalAnalyses(filteredEarthquakes as EarthquakeEvent[], eventsLoaded ? activeTab : 'map');
 
   // Extract data from worker results
   const grAnalysis = grWorkerResult.data;
@@ -659,7 +545,7 @@ export default function AnalyticsPage() {
 
   // Calculate MFD comparison for selected catalogues
   const mfdComparison = useMemo((): MFDComparisonResult | null => {
-    if (mfdSelectedCatalogues.length === 0 || events.length === 0) {
+    if (!eventsLoaded || activeTab !== 'mfd' || mfdSelectedCatalogues.length === 0 || events.length === 0) {
       return null;
     }
 
@@ -676,7 +562,7 @@ export default function AnalyticsPage() {
     });
 
     return calculateMFDComparison(catalogueData, mfdBinWidth, mfdMinMagnitude);
-  }, [mfdSelectedCatalogues, events, catalogues, mfdBinWidth, mfdMinMagnitude]);
+  }, [eventsLoaded, activeTab, mfdSelectedCatalogues, events, catalogues, mfdBinWidth, mfdMinMagnitude]);
 
   // Handle MFD catalogue selection toggle
   const handleMfdCatalogueToggle = useCallback((catalogueId: string) => {
@@ -901,7 +787,7 @@ export default function AnalyticsPage() {
   }
 
   // Loading events for selected catalogue
-  if (loading) {
+  if (loading && events.length === 0) {
     return (
       <div className="container py-8">
         <div className="flex flex-col items-center justify-center min-h-[calc(100vh-9rem)]">
@@ -959,10 +845,7 @@ export default function AnalyticsPage() {
                   size="sm"
                   className="mt-2 text-muted-foreground hover:text-foreground"
                   onClick={() => {
-                    setSelectedCatalogue('');
-                    setEvents([]);
-                    setEventsLoaded(false);
-                    setLoading(false);
+                    handleCatalogueChange('');
                   }}
                 >
                   Cancel
@@ -973,6 +856,14 @@ export default function AnalyticsPage() {
         </div>
       </div>
     );
+  }
+
+  if (eventsError && events.length === 0) {
+    return <div className="container py-8 space-y-4">
+      <p role="alert">{eventsError}</p>
+      <Button onClick={reloadEvents}>Retry loading events</Button>
+      <Button variant="outline" onClick={() => handleCatalogueChange('')}>Select Different Catalogue</Button>
+    </div>;
   }
 
   // Events loaded but empty (shouldn't normally happen)
@@ -989,9 +880,7 @@ export default function AnalyticsPage() {
               : `No events found in "${currentCatalogue?.name || 'selected catalogue'}".`}
           </p>
           <Button variant="outline" onClick={() => {
-            setSelectedCatalogue('');
-            setEvents([]);
-            setEventsLoaded(false);
+            handleCatalogueChange('');
           }}>
             Select Different Catalogue
           </Button>
@@ -1037,6 +926,15 @@ export default function AnalyticsPage() {
           </p>
         </div>
       </div>
+
+      {!eventsLoaded && (loading || eventsError) && <div className="rounded-lg border bg-muted/50 p-4 space-y-2" role={eventsError ? 'alert' : 'status'}>
+        <p>{eventsError || `${loadingMessage}. Showing a preview while the remaining events load.`}</p>
+        {loading && <Progress value={loadingProgress} className="h-2" />}
+        <p className="text-sm text-muted-foreground">Charts and analyses become available when loading finishes.</p>
+        <Button size="sm" variant="outline" onClick={loading ? cancelEventLoading : reloadEvents}>
+          {loading ? 'Cancel loading' : 'Retry loading events'}
+        </Button>
+      </div>}
 
       {/* Performance indicator */}
       {(isPending || analysisLoading || filteredEarthquakes.length > 5000) && (
@@ -1127,47 +1025,47 @@ export default function AnalyticsPage() {
             <MapPin className="h-3 w-3 mr-1" />
             Map
           </TabsTrigger>
-          <TabsTrigger value="charts" className="text-xs">
+          <TabsTrigger value="charts" disabled={!eventsLoaded} className="text-xs">
             <BarChart3 className="h-3 w-3 mr-1" />
             Charts
           </TabsTrigger>
-          <TabsTrigger value="distribution" className="text-xs">
+          <TabsTrigger value="distribution" disabled={!eventsLoaded} className="text-xs">
             <Activity className="h-3 w-3 mr-1" />
             Distribution
           </TabsTrigger>
-          <TabsTrigger value="timeline" className="text-xs">
+          <TabsTrigger value="timeline" disabled={!eventsLoaded} className="text-xs">
             <Calendar className="h-3 w-3 mr-1" />
             Timeline
           </TabsTrigger>
-          <TabsTrigger value="event-list" className="text-xs">
+          <TabsTrigger value="event-list" disabled={!eventsLoaded} className="text-xs">
             <List className="h-3 w-3 mr-1" />
             Events
           </TabsTrigger>
-          <TabsTrigger value="event-details" className="text-xs">
+          <TabsTrigger value="event-details" disabled={!eventsLoaded} className="text-xs">
             <Target className="h-3 w-3 mr-1" />
             Details
           </TabsTrigger>
-          <TabsTrigger value="quality" className="text-xs">
+          <TabsTrigger value="quality" disabled={!eventsLoaded} className="text-xs">
             <TrendingUp className="h-3 w-3 mr-1" />
             Quality
           </TabsTrigger>
-          <TabsTrigger value="gutenberg-richter" className="text-xs">
+          <TabsTrigger value="gutenberg-richter" disabled={!eventsLoaded} className="text-xs">
             <Activity className="h-3 w-3 mr-1" />
             G-R
           </TabsTrigger>
-          <TabsTrigger value="completeness" className="text-xs">
+          <TabsTrigger value="completeness" disabled={!eventsLoaded} className="text-xs">
             <BarChart3 className="h-3 w-3 mr-1" />
             Mc
           </TabsTrigger>
-          <TabsTrigger value="temporal" className="text-xs">
+          <TabsTrigger value="temporal" disabled={!eventsLoaded} className="text-xs">
             <Clock className="h-3 w-3 mr-1" />
             Temporal
           </TabsTrigger>
-          <TabsTrigger value="moment" className="text-xs">
+          <TabsTrigger value="moment" disabled={!eventsLoaded} className="text-xs">
             <Zap className="h-3 w-3 mr-1" />
             Moment
           </TabsTrigger>
-          <TabsTrigger value="mfd" className="text-xs">
+          <TabsTrigger value="mfd" disabled={!eventsLoaded} className="text-xs">
             <BarChart3 className="h-3 w-3 mr-1" />
             MFD
           </TabsTrigger>
@@ -1325,7 +1223,7 @@ export default function AnalyticsPage() {
                 <CardContent>
                   <UnifiedEarthquakeMap
                     key={`map-${selectedCatalogue}`}
-                    earthquakes={filteredEarthquakes.filter(eq => eq.depth != null) as any}
+                    earthquakes={filteredEarthquakes as any}
                     colorBy={colorBy}
                     showFocalMechanisms={true}
                     showFaultLines={true}
@@ -1347,8 +1245,8 @@ export default function AnalyticsPage() {
                 </div>
                 <CardDescription className="text-xs">Number of events by magnitude range</CardDescription>
                 <AxisLegendHints
-                  axes="X: magnitude range bins. Y: event count."
-                  legend="Color indicates relative magnitude bin."
+                  axes="X: magnitude range bins (open-ended below M2.0 and above M5.0). Y: event count."
+                  legend="Color indicates relative magnitude bin; every filtered event falls in exactly one bin."
                 />
               </CardHeader>
               <CardContent>
@@ -1385,10 +1283,13 @@ export default function AnalyticsPage() {
                   <InfoTooltip content="Regions derived from event metadata or geocoding." />
                 </div>
                 <CardDescription className="text-xs">Events by region (top 10)</CardDescription>
-                <AxisLegendHints axes="X: event count. Y: region name." />
+                <AxisLegendHints
+                  axes="X: event count. Y: region name."
+                  legend="Only the ten largest regions are drawn; tooltip percentages are shares of all filtered events, not of the ten shown."
+                />
               </CardHeader>
               <CardContent>
-                <RegionDistributionChart data={regionDistribution} />
+                <RegionDistributionChart data={regionDistribution} total={filteredEarthquakes.length} />
               </CardContent>
             </Card>
 
@@ -1417,11 +1318,6 @@ export default function AnalyticsPage() {
                 </div>
                 <CardDescription className="text-xs">
                   Scatter plot showing relationship between magnitude and depth
-                  {magnitudeDepthScatter.length < filteredEarthquakes.length && (
-                    <span className="ml-2 text-amber-600">
-                      (Sampled: {magnitudeDepthScatter.length.toLocaleString()} of {filteredEarthquakes.length.toLocaleString()} events)
-                    </span>
-                  )}
                 </CardDescription>
                 <AxisLegendHints
                   axes="X: magnitude. Y: depth in km (inverted)."
@@ -1429,7 +1325,7 @@ export default function AnalyticsPage() {
                 />
               </CardHeader>
               <CardContent>
-                <MagnitudeDepthScatter data={magnitudeDepthScatter} height={350} />
+                <MagnitudeDepthScatter data={filteredEarthquakes} height={350} />
               </CardContent>
             </Card>
           </div>
@@ -1442,20 +1338,20 @@ export default function AnalyticsPage() {
               <CardTitle className="text-base">Earthquake Timeline</CardTitle>
               <CardDescription className="text-xs">
                 Number of events over time
-                {timeSeriesData.length < MAX_TIMELINE_POINTS && timeSeriesData.length > 0 && (
+                {timeSeriesData.length > 0 && (
                   <span className="ml-2">({timeSeriesData.length} data points)</span>
                 )}
-                {filteredEarthquakes.length > 40000 && (
-                  <span className="ml-2 text-amber-600">(Aggregated by week for performance)</span>
+                {timelineDaysPerBin > 1 && (
+                  <span className="ml-2 text-amber-600">({timelineDaysPerBin} days per point)</span>
                 )}
               </CardDescription>
               <AxisLegendHints
-                axes="X: date. Y: event count."
-                legend="Line shows events per day or per week when aggregated."
+                axes="X: date (UTC). Y: event count."
+                legend={`Each point shows totals over ${timelineDaysPerBin} ${timelineDaysPerBin === 1 ? 'day' : 'days'}.`}
               />
             </CardHeader>
             <CardContent>
-              <EventTimelineChart data={timeSeriesData} height={400} />
+              <EventTimelineChart data={timeSeriesData} seriesName={timelineSeriesName} height={400} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -1473,20 +1369,20 @@ export default function AnalyticsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="p-0">
-              {displayEvents.length > 0 ? (
+              {activeTab === 'event-list' && displayEvents.length > 0 ? (
                 <EventTable
                   events={displayEvents.map(e => ({
                     id: e.id,
                     time: e.time,
                     latitude: e.latitude,
                     longitude: e.longitude,
-                    depth: e.depth || 0,
+                    depth: e.depth,
                     magnitude: e.magnitude,
                     magnitude_type: e.magnitude_type || null,
                     location_name: e.region || e.location_name || null,
                     event_type: e.event_type || null,
-                    azimuthal_gap: e.azimuthal_gap || null,
-                    used_station_count: e.used_station_count || null,
+                    azimuthal_gap: e.azimuthal_gap ?? null,
+                    used_station_count: e.used_station_count ?? null,
                     public_id: e.event_public_id || null,
                   }))}
                   onEventClick={(event) => {
@@ -1530,14 +1426,7 @@ export default function AnalyticsPage() {
                       {/* Only show first 100 events in dropdown to prevent performance issues */}
                       {events.slice(0, 100).filter((event) => event.id && event.id !== '').map((event) => (
                         <SelectItem key={event.id} value={event.id}>
-                          M{event.magnitude.toFixed(1)} - {new Date(event.time).toLocaleString('en-GB', {
-                            day: '2-digit',
-                            month: '2-digit',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            second: '2-digit',
-                          })} - {event.region || 'Unknown'}
+                          M{event.magnitude.toFixed(1)} - {formatOriginTime(event.time)} - {event.region || 'Unknown'}
                         </SelectItem>
                       ))}
                       {events.length > 100 && (
@@ -1550,22 +1439,25 @@ export default function AnalyticsPage() {
                 </CardContent>
               </Card>
 
+              {detailsLoading && <p role="status" className="text-sm text-muted-foreground">Loading event details...</p>}
+              {detailsError && <p role="alert" className="text-sm text-destructive">{detailsError}</p>}
               {/* Event Analysis Cards */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <QualityScoreCard score={calculateQualityScore(metricsFromEvent(selectedEvent))} />
-                <UncertaintyVisualization data={selectedEvent} />
+                <QualityScoreCard score={calculateQualityScore(metricsFromEvent(detailedEvent))} />
+                <UncertaintyVisualization data={detailedEvent!} />
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {parseFocalMechanism(selectedEvent.focal_mechanisms) && (
+                {parseFocalMechanism(detailedEvent?.focal_mechanisms) && (
                   <FocalMechanismCard
-                    mechanism={parseFocalMechanism(selectedEvent.focal_mechanisms)!}
+                    mechanism={parseFocalMechanism(detailedEvent?.focal_mechanisms)!}
                   />
                 )}
 
-                {parseStationData(selectedEvent.picks, selectedEvent.arrivals, selectedEvent.latitude, selectedEvent.longitude) && (
+                {/* picks/arrivals are stripped by the summary projection: detail record only. */}
+                {parseStationData(eventDetails?.picks, eventDetails?.arrivals, selectedEvent.latitude, selectedEvent.longitude) && (
                   <StationCoverageCard
-                    coverage={parseStationData(selectedEvent.picks, selectedEvent.arrivals, selectedEvent.latitude, selectedEvent.longitude)!}
+                    coverage={parseStationData(eventDetails?.picks, eventDetails?.arrivals, selectedEvent.latitude, selectedEvent.longitude)!}
                   />
                 )}
               </div>
@@ -1645,7 +1537,7 @@ export default function AnalyticsPage() {
                         <div className="flex justify-between text-sm mb-1">
                           <div className="flex items-center gap-1.5">
                             <span>Events with Station Data</span>
-                            <InfoTooltip content="Events that include picks or arrivals from seismic stations." />
+                            <InfoTooltip content="Events with a reported count of stations used in the solution." />
                           </div>
                           <span>{statistics.percentageWithStationData}%</span>
                         </div>
@@ -1680,6 +1572,7 @@ export default function AnalyticsPage() {
                   <CardDescription>
                     Frequency-magnitude distribution following log₁₀(N) = a - bM relationship
                   </CardDescription>
+                  <FilterScopeNote analysed={filteredEarthquakes.length} total={events.length} />
                 </div>
               </div>
             </CardHeader>
@@ -1886,6 +1779,7 @@ export default function AnalyticsPage() {
                   <CardDescription>
                     Threshold magnitude above which the catalogue records all events
                   </CardDescription>
+                  <FilterScopeNote analysed={filteredEarthquakes.length} total={events.length} />
                 </div>
               </div>
             </CardHeader>
@@ -2040,6 +1934,7 @@ export default function AnalyticsPage() {
                   <CardDescription>
                     Time series evolution and seismicity cluster detection
                   </CardDescription>
+                  <FilterScopeNote analysed={filteredEarthquakes.length} total={events.length} />
                 </div>
               </div>
             </CardHeader>
@@ -2121,7 +2016,7 @@ export default function AnalyticsPage() {
                       <CardDescription>
                         Temporal evolution of seismicity showing cumulative events over time
                       </CardDescription>
-                      <AxisLegendHints axes="X: date. Y: cumulative events." />
+                      <AxisLegendHints axes="X: time bin (calendar day, or ISO week for catalogues spanning more than a year). Y: cumulative events." />
                     </CardHeader>
                     <CardContent>
                       <TemporalSeriesChart data={temporalAnalysis.timeSeries} height={420} />
@@ -2184,14 +2079,7 @@ export default function AnalyticsPage() {
                                     </div>
                                     <div className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
                                       <Calendar className="h-3 w-3" />
-                                      {new Date(cluster.mainshock?.time ?? cluster.startDate).toLocaleString('en-GB', {
-                                        day: '2-digit',
-                                        month: '2-digit',
-                                        year: 'numeric',
-                                        hour: '2-digit',
-                                        minute: '2-digit',
-                                        second: '2-digit',
-                                      })}
+                                      {formatOriginTime(cluster.mainshock?.time ?? cluster.startDate)}
                                     </div>
                                   </div>
                                 </div>
@@ -2313,6 +2201,7 @@ export default function AnalyticsPage() {
                   <CardDescription>
                     Energy release quantification and moment magnitude distribution
                   </CardDescription>
+                  <FilterScopeNote analysed={filteredEarthquakes.length} total={events.length} />
                 </div>
               </div>
             </CardHeader>
@@ -2427,7 +2316,10 @@ export default function AnalyticsPage() {
                       <p className="text-sm text-muted-foreground">
                         Seismic moment (M₀) is a measure of the total energy released during an earthquake.
                         It is proportional to the fault area, average slip, and rigidity of the rock.
-                        Moment magnitude (Mw) is derived from M₀ using: Mw = ⅔ log₁₀(M₀) - 10.7
+                        Moment magnitude (Mw) is derived from M₀ in N·m using:
+                        Mw = (log₁₀(M₀) − 9.1) / 1.5, i.e. Mw = ⅔ log₁₀(M₀) − 6.07.
+                        The familiar Mw = ⅔ log₁₀(M₀) − 10.7 is the same relation with M₀ in
+                        dyne·cm (1 N·m = 10⁷ dyne·cm); Hanks &amp; Kanamori (1979), IASPEI (2005).
                       </p>
                     </div>
                   </div>
@@ -2681,14 +2573,14 @@ export default function AnalyticsPage() {
                           <CardTitle className="text-base">Frequency-Magnitude Distribution</CardTitle>
                           <CardDescription>
                             {mfdShowCumulative && mfdShowHistogram
-                              ? 'Cumulative (lines) and incremental (bars) magnitude distribution'
+                              ? 'Cumulative N(≥M) lines and incremental N(M) stepped areas'
                               : mfdShowCumulative
                                 ? 'Cumulative distribution (N ≥ M)'
-                                : 'Incremental histogram'}
+                                : 'Incremental distribution N(M), drawn as a stepped area'}
                           </CardDescription>
                           <AxisLegendHints
                             axes="X: magnitude. Y: event count (log scale when enabled)."
-                            legend="Colors map to catalogues; lines are cumulative and bars are incremental when enabled."
+                            legend="Colors map to catalogues. Each catalogue contributes a separate legend entry per curve: N(≥M) is the heavier cumulative line, N(M) the lighter shaded stepped area."
                           />
                         </div>
                       </div>

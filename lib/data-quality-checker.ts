@@ -3,7 +3,15 @@
  * Comprehensive data quality assessment for earthquake catalogues
  */
 
-import { assessDataQuality, detectAnomalies, validateGeographicBounds, type DataQualityReport, type DataQualityCheck } from './validation';
+import {
+  assessDataQuality,
+  detectAnomalies,
+  validateGeographicBounds,
+  horizontalUncertaintyKm,
+  type DataQualityReport,
+  type DataQualityCheck,
+} from './validation';
+import { calculateQualityScore, metricsFromEvent } from './quality-scoring';
 
 export interface QualityCheckResult {
   passed: boolean;
@@ -12,6 +20,32 @@ export interface QualityCheckResult {
   anomalies: DataQualityCheck[];
   geographicChecks: DataQualityCheck[];
   recommendations: string[];
+  /**
+   * Mean event-level quality index Q (0-100, paper Eq. 1) over the catalogue — the fourth
+   * term of `score`. Optional only so that callers which build a QualityCheckResult by hand
+   * (tests, fixtures) keep type-checking; performQualityCheck always sets it.
+   */
+  eventQuality?: number;
+}
+
+/**
+ * Mean event-level quality index Q over the catalogue (0-100).
+ */
+function meanEventQuality(events: any[]): number {
+  if (!Array.isArray(events) || events.length === 0) return 0;
+  let total = 0;
+  for (const event of events) {
+    total += calculateQualityScore(metricsFromEvent(event)).overall;
+  }
+  return total / events.length;
+}
+
+/**
+ * Data-integrity score (0-100): the mean of the three terms that describe the catalogue's own
+ * records rather than the richness of its optional solution metadata.
+ */
+function dataIntegrityScore(report: DataQualityReport): number {
+  return (report.completeness + report.consistency + report.accuracy) / 3;
 }
 
 /**
@@ -30,14 +64,24 @@ export function performQualityCheck(events: any[]): QualityCheckResult {
     geographicChecks = validateGeographicBounds(report.statistics.spatialExtent);
   }
   
-  // Calculate overall score
-  const score = (report.completeness + report.consistency + report.accuracy) / 3;
-  
-  // Determine if quality check passed
-  const passed = score >= 60 && !report.checks.some(c => c.severity === 'error');
+  // Mean event-level quality index (see meanEventQuality above)
+  const eventQuality = meanEventQuality(events);
+
+  // Calculate the headline score. The four terms are equally weighted percentages: field
+  // completeness, internal consistency, reported-uncertainty accuracy, and the mean
+  // event-level quality index Q. This number DESCRIBES the catalogue (and is what the grade
+  // badge and the 0-100 progress bar show); it does not decide admissibility.
+  const score = (report.completeness + report.consistency + report.accuracy + eventQuality) / 4;
+
+  // Determine if the quality check passed. `passed` answers "is this catalogue admissible for
+  // import?", which is judged on data integrity plus the absence of hard errors — NOT on the
+  // headline score, because the score's Q term is dominated by optional instrument metadata a
+  // plain CSV catalogue can never supply. See dataIntegrityScore() for the full rationale.
+  const passed =
+    dataIntegrityScore(report) >= 60 && !report.checks.some(c => c.severity === 'error');
   
   // Generate recommendations
-  const recommendations = generateRecommendations(report, anomalies, geographicChecks);
+  const recommendations = generateRecommendations(report, anomalies, geographicChecks, eventQuality);
   
   return {
     passed,
@@ -45,7 +89,8 @@ export function performQualityCheck(events: any[]): QualityCheckResult {
     report,
     anomalies,
     geographicChecks,
-    recommendations
+    recommendations,
+    eventQuality: Math.round(eventQuality)
   };
 }
 
@@ -55,7 +100,8 @@ export function performQualityCheck(events: any[]): QualityCheckResult {
 function generateRecommendations(
   report: DataQualityReport,
   anomalies: DataQualityCheck[],
-  geographicChecks: DataQualityCheck[]
+  geographicChecks: DataQualityCheck[],
+  eventQuality: number
 ): string[] {
   const recommendations: string[] = [];
   
@@ -80,6 +126,14 @@ function generateRecommendations(
   // Accuracy recommendations
   if (report.accuracy < 80) {
     recommendations.push('Improve location accuracy by using more seismic stations or better velocity models');
+  }
+  
+  // Event-level quality recommendations. Grade band C (< 65) on the Table 2 thresholds.
+  if (eventQuality < 65) {
+    recommendations.push(
+      `Mean event quality index is ${Math.round(eventQuality)}/100 - solutions are weakly constrained ` +
+      `or their solution metadata (uncertainties, azimuthal gap, station/phase counts, RMS) is absent`
+    );
   }
   
   // Anomaly-based recommendations
@@ -113,14 +167,13 @@ function generateRecommendations(
 export function meetsMinimumQuality(result: QualityCheckResult): boolean {
   // Minimum requirements:
   // 1. At least 50% completeness
-  // 2. No critical errors
-  // 3. At least 60% overall score
-  
+  // 2. No critical errors (report, anomaly or geographic)
+  // 3. At least 60% data-integrity score
   const hasNoErrors = !result.report.checks.some(c => c.severity === 'error') &&
                       !result.anomalies.some(a => a.severity === 'error') &&
                       !result.geographicChecks.some(c => c.severity === 'error');
-  
-  return result.report.completeness >= 50 && hasNoErrors && result.score >= 60;
+
+  return result.report.completeness >= 50 && hasNoErrors && dataIntegrityScore(result.report) >= 60;
 }
 
 /**
@@ -200,31 +253,39 @@ export function formatQualityCheckResults(result: QualityCheckResult): {
  * Validate event data against quality thresholds
  */
 export function validateEventQuality(event: any, thresholds?: {
+  /** Horizontal location uncertainty threshold, KM (project-canonical unit) */
   maxHorizontalUncertainty?: number;
+  /** Depth uncertainty threshold, KM */
   maxDepthUncertainty?: number;
   minStationCount?: number;
+  /** Azimuthal gap threshold, DEGREES */
   maxAzimuthalGap?: number;
 }): DataQualityCheck[] {
   const checks: DataQualityCheck[] = [];
+  // All length thresholds are in km, matching the DB convention (lib/db.ts:104-105) and
+  // every other horizontal-uncertainty threshold in the codebase
+  // (lib/geonet-quality-score.ts, lib/validation.ts). maxHorizontalUncertainty used to be
+  // in DEGREES (0.1) while maxDepthUncertainty in the same object was in km, so a caller
+  // passing its own threshold in km silently disabled the check by a factor of ~111.
   const defaults = {
-    maxHorizontalUncertainty: 0.1, // ~10km
-    maxDepthUncertainty: 10, // 10km
+    maxHorizontalUncertainty: 10, // km
+    maxDepthUncertainty: 10, // km
     minStationCount: 6,
-    maxAzimuthalGap: 180,
+    maxAzimuthalGap: 180, // degrees
     ...thresholds
   };
   
-  // Check horizontal uncertainty
-  const horizUncert = Math.max(
-    event.latitude_uncertainty || 0,
-    event.longitude_uncertainty || 0
-  );
+  // Check horizontal uncertainty, resolved in km by horizontalUncertaintyKm() in
+  // lib/validation.ts — the same helper assessDataQuality()'s accuracy dimension uses, so the
+  // two sites cannot disagree about which columns count. Reading only the degree columns made
+  // this warning unreachable for QuakeML imports, which carry the km column instead.
+  const horizUncertKm = horizontalUncertaintyKm(event);
   
-  if (horizUncert > defaults.maxHorizontalUncertainty) {
+  if (horizUncertKm !== null && horizUncertKm > defaults.maxHorizontalUncertainty) {
     checks.push({
       passed: false,
       severity: 'warning',
-      message: `Horizontal uncertainty (${(horizUncert * 111).toFixed(1)}km) exceeds threshold`,
+      message: `Horizontal uncertainty (${horizUncertKm.toFixed(1)}km) exceeds threshold`,
       field: 'location_uncertainty',
       suggestion: 'Location may be poorly constrained'
     });
@@ -241,8 +302,8 @@ export function validateEventQuality(event: any, thresholds?: {
     });
   }
   
-  // Check station count
-  if (event.used_station_count && event.used_station_count < defaults.minStationCount) {
+  // Check station count (!= null, not truthiness: a reported count of 0 must still warn)
+  if (event.used_station_count != null && event.used_station_count < defaults.minStationCount) {
     checks.push({
       passed: false,
       severity: 'warning',

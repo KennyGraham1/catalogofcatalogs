@@ -25,6 +25,7 @@ import {
   assembleChunks,
   assembleChunksToFile,
   deleteUploadSession,
+  UploadSizeLimitError,
   CHUNK_SIZE,
 } from '@/lib/upload-chunks';
 import { parseFile, parseQuakeMLFileStream } from '@/lib/parsers';
@@ -58,6 +59,7 @@ function elapsedMs(start: number): number {
 
 export async function POST(request: NextRequest) {
   let tempFilePath: string | undefined;
+  let uploadSessionId: string | undefined;
 
   try {
     const authResult = await requireEditor(request);
@@ -69,6 +71,7 @@ export async function POST(request: NextRequest) {
     if (!sessionId || typeof sessionId !== 'string') {
       return NextResponse.json({ error: 'sessionId is required' }, { status: 400 });
     }
+    uploadSessionId = sessionId;
 
     // Retrieve session metadata (fileName, totalChunks, delimiter, dateFormat)
     const session = await getUploadSession(sessionId);
@@ -87,6 +90,10 @@ export async function POST(request: NextRequest) {
       date_format: dateFormat,
     } = session;
 
+    // `file_size` is whatever the client declared at /api/upload/init, so these
+    // two checks are only a fast path that rejects an obviously oversized upload
+    // before any chunk is read. The binding limits are the ones passed to the
+    // assembly helpers below, which count the bytes actually stored.
     const maxParseBytes = getMaxSyncUploadParseBytes();
     const estimatedSize = fileSize ?? totalChunks * CHUNK_SIZE;
     if (estimatedSize > MAX_FILE_SIZE) {
@@ -99,6 +106,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(createUploadTooLargeResponse(estimatedSize), { status: 413 });
     }
 
+    // QuakeML is parsed from a file stream, so it only has to satisfy the
+    // absolute cap; every other format is parsed synchronously in memory and
+    // must also stay inside the synchronous-parse budget.
+    const assemblyLimit = isQuakeMLFile(fileName)
+      ? MAX_FILE_SIZE
+      : Math.min(MAX_FILE_SIZE, maxParseBytes);
+
     logger.info('Finalising chunked upload', { sessionId, fileName, totalChunks });
 
     let pendingUploadId: string | undefined;
@@ -109,8 +123,9 @@ export async function POST(request: NextRequest) {
       tempFilePath = path.join(tmpdir(), `catalog-upload-${sessionId}-${Date.now()}.${getExtension(fileName) || 'xml'}`);
 
       const assembleStart = performance.now();
-      const assembled = await assembleChunksToFile(sessionId, totalChunks, tempFilePath);
-      responseFileSize = fileSize ?? assembled.bytesWritten;
+      const assembled = await assembleChunksToFile(sessionId, totalChunks, tempFilePath, assemblyLimit);
+      // Report the bytes that were actually stored, not the declared size.
+      responseFileSize = assembled.bytesWritten;
       logger.info('Assembled chunked upload to temp file', {
         sessionId,
         fileName,
@@ -150,8 +165,9 @@ export async function POST(request: NextRequest) {
       });
     } else {
       const assembleStart = performance.now();
-      const content = await assembleChunks(sessionId, totalChunks);
-      responseFileSize = fileSize ?? content.length;
+      const content = await assembleChunks(sessionId, totalChunks, assemblyLimit);
+      // Report the bytes that were actually stored, not the declared size.
+      responseFileSize = Buffer.byteLength(content, 'utf-8');
       logger.info('Assembled chunked upload in memory', {
         sessionId,
         fileName,
@@ -206,6 +222,26 @@ export async function POST(request: NextRequest) {
       ...(pendingUploadId ? { pendingUploadId } : {}),
     });
   } catch (error) {
+    if (error instanceof UploadSizeLimitError) {
+      // The stored bytes exceeded the cap regardless of what init was told.
+      // Drop the chunks now so an under-declared upload cannot sit in MongoDB
+      // until its TTL expires.
+      logger.warn('Rejected oversized chunked upload', {
+        sessionId: uploadSessionId,
+        bytesRead: error.bytesRead,
+        limit: error.limit,
+      });
+      if (uploadSessionId) {
+        deleteUploadSession(uploadSessionId).catch(() => {/* TTL fallback */});
+      }
+      return error.limit >= MAX_FILE_SIZE
+        ? NextResponse.json(
+            { error: `File size exceeds maximum of ${MAX_FILE_SIZE / 1024 / 1024}MB` },
+            { status: 400 },
+          )
+        : NextResponse.json(createUploadTooLargeResponse(error.bytesRead), { status: 413 });
+    }
+
     logger.error('Failed to finalise chunked upload', error);
     const msg = error instanceof Error ? error.message : 'Failed to process upload';
     return NextResponse.json({ error: msg, code: 'FINALIZE_ERROR' }, { status: 500 });

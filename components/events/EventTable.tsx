@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import { sortTableEvents } from '@/lib/event-table-sort';
 import {
   Table,
   TableBody,
@@ -29,7 +30,7 @@ interface Event {
   time: string;
   latitude: number;
   longitude: number;
-  depth: number;
+  depth: number | null;
   magnitude: number;
   magnitude_type?: string | null;
   location_name?: string | null;
@@ -59,6 +60,24 @@ interface EventTableProps {
   virtualizationThreshold?: number; // Use virtualization if events > this number
 }
 
+/**
+ * Origin times are UTC by definition (QuakeML 1.2 / ISO 8601 "Z"), so they are rendered
+ * in UTC with the zone shown - formatting them in the browser's zone puts an event on the
+ * wrong calendar day for 13 of every 24 hours under NZDT (UTC+13).
+ *
+ * Hoisted to module scope on purpose: this renders once per row over thousands of events,
+ * and constructing an Intl.DateTimeFormat per row costs ~82 ms per 1000 rows.
+ */
+const UTC_MINUTE_FORMAT = new Intl.DateTimeFormat('en-GB', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  timeZone: 'UTC',
+  timeZoneName: 'short',
+});
+
 export function EventTable({
   events,
   onEventClick,
@@ -73,48 +92,9 @@ export function EventTable({
 
   // Sort events
   const sortedEvents = useMemo(() => {
-    const sorted = [...events].sort((a, b) => {
-      let aValue: number;
-      let bValue: number;
-
-      switch (sortField) {
-        case 'time':
-          aValue = new Date(a.time).getTime();
-          bValue = new Date(b.time).getTime();
-          break;
-        case 'magnitude':
-          aValue = a.magnitude || 0;
-          bValue = b.magnitude || 0;
-          break;
-        case 'depth':
-          aValue = a.depth || 0;
-          bValue = b.depth || 0;
-          break;
-        case 'quality':
-          aValue = a.quality_score || 0;
-          bValue = b.quality_score || 0;
-          break;
-        case 'latitude':
-          aValue = a.latitude;
-          bValue = b.latitude;
-          break;
-        case 'longitude':
-          aValue = a.longitude;
-          bValue = b.longitude;
-          break;
-        default:
-          return 0;
-      }
-
-      if (sortDirection === 'asc') {
-        return aValue > bValue ? 1 : aValue < bValue ? -1 : 0;
-      } else {
-        return aValue < bValue ? 1 : aValue > bValue ? -1 : 0;
-      }
-    });
-
-    return sorted;
-  }, [events, sortField, sortDirection]);
+    if (events.length > virtualizationThreshold) return events;
+    return sortTableEvents(events, sortField, sortDirection);
+  }, [events, sortField, sortDirection, virtualizationThreshold]);
 
   // Use virtualized table for large datasets (after hooks are called)
   if (events.length > virtualizationThreshold) {
@@ -153,13 +133,8 @@ export function EventTable({
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleString('en-GB', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    if (Number.isNaN(date.getTime())) return dateString;
+    return UTC_MINUTE_FORMAT.format(date);
   };
 
   const getMagnitudeColor = (magnitude: number) => {
@@ -299,7 +274,7 @@ export function EventTable({
                 <TableCell>
                   <div className="flex items-center gap-2">
                     <Layers className="h-4 w-4 text-muted-foreground" />
-                    <span>{event.depth.toFixed(1)}</span>
+                    <span>{event.depth?.toFixed(1) ?? '—'}</span>
                   </div>
                 </TableCell>
                 <TableCell>

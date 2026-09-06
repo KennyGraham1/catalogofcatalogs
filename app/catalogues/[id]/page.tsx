@@ -26,6 +26,7 @@ import {
 import { EventTable } from '@/components/events/EventTable';
 import { toast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useCatalogueEvents } from '@/hooks/use-catalogue-events';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
 import { useAuth, usePermission } from '@/lib/auth/hooks';
 import { Permission } from '@/lib/auth/types';
@@ -35,7 +36,7 @@ interface Event {
   time: string;
   latitude: number;
   longitude: number;
-  depth: number;
+  depth: number | null;
   magnitude: number;
   magnitude_type?: string | null;
   location_name?: string | null;
@@ -71,11 +72,8 @@ export default function CatalogueDetailPage() {
     { cacheTime: 5 * 60 * 1000 } // 5 minutes
   );
 
-  // Use cached fetch for events
-  const { data: eventsData, loading: eventsLoading, error: eventsError } = useCachedFetch<Event[] | { data: Event[] }>(
-    catalogueId ? `/api/catalogues/${catalogueId}/events` : null,
-    { cacheTime: 2 * 60 * 1000 } // 2 minutes
-  );
+  const availableCatalogues = useMemo(() => Array.isArray(catalogues) ? catalogues : [], [catalogues]);
+  const { events, loading: eventsLoading, complete, loadedCount, error: eventsError, retry } = useCatalogueEvents(availableCatalogues, catalogueId);
 
   // Find current catalogue from the list
   const catalogue = useMemo(() => {
@@ -83,23 +81,24 @@ export default function CatalogueDetailPage() {
     return catalogues.find((c: Catalogue) => c.id === catalogueId) || null;
   }, [catalogues, catalogueId]);
 
-  // Extract events array from response
-  const events = useMemo(() => {
-    if (!eventsData) return [];
-    if (Array.isArray(eventsData)) return eventsData;
-    if ('data' in eventsData && Array.isArray(eventsData.data)) return eventsData.data;
-    return [];
-  }, [eventsData]);
-
-  const loading = cataloguesLoading || eventsLoading;
-  const error = cataloguesError || eventsError;
+  const loading = cataloguesLoading || (eventsLoading && events.length === 0);
+  const error = cataloguesError?.message || eventsError;
+  const stats = useMemo(() => {
+    const depths = events.filter(event => event.depth != null);
+    return {
+      total: events.length,
+      avgMagnitude: events.length ? (events.reduce((sum, event) => sum + event.magnitude, 0) / events.length).toFixed(2) : '—',
+      avgDepth: depths.length ? (depths.reduce((sum, event) => sum + event.depth!, 0) / depths.length).toFixed(1) : '—',
+      withQuality: events.filter(event => (event as typeof event & { quality_score?: number }).quality_score != null).length,
+    };
+  }, [events]);
 
   // Show error toast if there's an error
   useEffect(() => {
     if (error) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to load catalogue data. Please try again.',
+        description: error || 'Failed to load catalogue data. Please try again.',
         variant: 'destructive',
       });
     }
@@ -183,12 +182,13 @@ export default function CatalogueDetailPage() {
     );
   }
 
-  if (error || !catalogue) {
+  if ((error && events.length === 0) || !catalogue) {
     return (
       <div className="container mx-auto py-6">
         <Card className="border-destructive">
           <CardContent className="pt-6">
-            <p className="text-destructive">{error?.message || 'Catalogue not found'}</p>
+            <p className="text-destructive">{error || 'Catalogue not found'}</p>
+            {eventsError && <Button onClick={retry}>Retry loading events</Button>}
             <Button onClick={() => router.push('/catalogues')} className="mt-4">
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back to Catalogues
@@ -199,16 +199,6 @@ export default function CatalogueDetailPage() {
     );
   }
 
-  const stats = {
-    total: events.length,
-    avgMagnitude: events.length > 0 
-      ? (events.reduce((sum, e) => sum + e.magnitude, 0) / events.length).toFixed(2)
-      : '0',
-    avgDepth: events.length > 0
-      ? (events.reduce((sum, e) => sum + e.depth, 0) / events.length).toFixed(1)
-      : '0',
-    withQuality: events.filter(e => e.quality_score).length,
-  };
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -289,8 +279,13 @@ export default function CatalogueDetailPage() {
         </div>
       </div>
 
+      {!complete && <div className="rounded-lg border p-3" role={eventsError ? 'alert' : 'status'}>
+        {eventsError || `Preview · ${loadedCount.toLocaleString()} events received. Loading remaining events...`}
+        {eventsError && <Button variant="outline" onClick={retry}>Retry loading events</Button>}
+      </div>}
+
       {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {complete && <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Events</CardTitle>
@@ -335,7 +330,7 @@ export default function CatalogueDetailPage() {
             </div>
           </CardContent>
         </Card>
-      </div>
+      </div>}
 
       {/* Events Table */}
       <Card>

@@ -1,24 +1,29 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo, memo, useCallback } from 'react';
-import { dedupeById } from '@/lib/utils';
+import { useMapEventSelection } from '@/hooks/use-map-event-selection';
+import { MapViewportObserver } from '@/components/map/MapViewportObserver';
+import { MapDetailControl } from '@/components/map/MapDetailControl';
+import type { MapDetail } from '@/lib/map-event-selection';
+
+import { useEffect, useState, useMemo, memo } from 'react';
+import type { CircleMapEvent } from '@/components/map/EarthquakeCircleMap';
+import { EarthquakeMarkerLayer } from '@/components/map/EarthquakeMarkerLayer';
+import { useEventMapPopup } from '@/hooks/use-event-map-popup';
 import L from 'leaflet';
-import { MapContainer, GeoJSON, FeatureGroup, Circle, CircleMarker, Popup, Marker } from 'react-leaflet';
+import { MapContainer, GeoJSON, FeatureGroup, Popup, useMap } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { EditControl } from 'react-leaflet-draw';
-import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Calendar, Ruler, Activity, Zap, Layers, MapPin, Info } from 'lucide-react';
 import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
-import { useCachedFetch } from '@/hooks/use-cached-fetch';
+import { useCatalogueEvents } from '@/hooks/use-catalogue-events';
 import { useNearbyFaults } from '@/hooks/use-nearby-faults';
 import { useMapColors } from '@/hooks/use-map-theme';
 import { calculateQualityScore, getQualityColor, metricsFromEvent } from '@/lib/quality-scoring';
-import { getMagnitudeRadius, getMagnitudePixelRadius, getMagnitudeColor, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
+import { getMagnitudeColor, getEarthquakeColor } from '@/lib/earthquake-utils';
 import { loadFaultData, FaultCollection } from '@/lib/fault-data';
 import type { PathOptions } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -39,39 +44,43 @@ interface MapViewProps {
   onShapeDrawn?: (shape: any) => void;
 }
 
+// Subscribe inside the map context: MapContainer's forwarded ref is still null
+// during the parent's initial effect, so an outer ref-based subscription is lost.
+export function MapBoundsObserver({ onBoundsChange }: Pick<MapViewProps, 'onBoundsChange'>) {
+  const map = useMap();
+  useEffect(() => {
+    if (!onBoundsChange) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const update = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => onBoundsChange(map.getBounds()), 300);
+    };
+    onBoundsChange(map.getBounds());
+    map.on('moveend', update);
+    return () => { clearTimeout(timer); map.off('moveend', update); };
+  }, [map, onBoundsChange]);
+  return null;
+}
+
 // Memoized MapView component for better performance
 export const MapView = memo(function MapView({ catalogueId, events: propEvents, onBoundsChange, onShapeDrawn }: MapViewProps) {
-  const mapRef = useRef<L.Map>(null);
   const [showActiveFaults, setShowActiveFaults] = useState(true);
   const [colorMode, setColorMode] = useState<'magnitude' | 'depth' | 'quality'>('magnitude');
   const [faultData, setFaultData] = useState<FaultCollection | null>(null);
-  const [sampleSize, setSampleSize] = useState<number>(1000);
-  const clickSeqRef = useRef(0);
-  const [activePopup, setActivePopup] = useState<{ event: any; seq: number } | null>(null);
+  const [sampleSize, setSampleSize] = useState<MapDetail>('auto');
 
   // Dark mode support for marker colors
   const mapColors = useMapColors();
 
-  // Use cached fetch for events if catalogueId is provided
-  const { data: eventsData, loading } = useCachedFetch<any[] | { data: any[] }>(
-    catalogueId && !propEvents ? `/api/catalogues/${catalogueId}/events` : null,
-    { cacheTime: 2 * 60 * 1000 } // 2 minutes
-  );
-
-  // Extract events array from response or use propEvents
-  const events = useMemo(() => {
-    if (propEvents) return propEvents;
-    if (!eventsData) return [];
-    if (Array.isArray(eventsData)) return eventsData;
-    if ('data' in eventsData && Array.isArray(eventsData.data)) return eventsData.data;
-    return [];
-  }, [eventsData, propEvents]);
+  const sourceCatalogues = useMemo(() => catalogueId && !propEvents
+    ? [{ id: catalogueId, name: 'Catalogue' }] : [], [catalogueId, propEvents]);
+  const { events: loadedEvents, loading, complete, loadedCount, error, retry: reload } = useCatalogueEvents(sourceCatalogues, catalogueId || '');
+  const events: CircleMapEvent[] = propEvents ?? loadedEvents;
 
   // Sample events for performance
-  const { sampled: sampledEvents, total, displayCount, isSampled } = useMemo(
-    () => sampleEarthquakeEvents(events, sampleSize),
-    [events, sampleSize]
-  );
+  const { sampled: sampledEvents, displayCount, visibleCount, isSampled, onViewportChange } = useMapEventSelection(events, sampleSize);
+
+  const { activePopup, onEventClick } = useEventMapPopup(events);
 
   // Load fault data
   useEffect(() => {
@@ -92,11 +101,12 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
 
   // Calculate quality scores (memoized for performance, use sampled events)
   const qualityScores = useMemo(() => {
+    if (colorMode !== 'quality') return [];
     return sampledEvents.map(event => ({
       eventId: event.id,
       score: calculateQualityScore(metricsFromEvent(event))
     }));
-  }, [sampledEvents]);
+  }, [sampledEvents, colorMode]);
 
   // Memoize quality score lookup map for O(1) access
   const qualityScoreMap = useMemo(() => {
@@ -104,15 +114,6 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
     qualityScores.forEach(qs => map.set(qs.eventId, qs.score));
     return map;
   }, [qualityScores]);
-
-  // Memoize color functions for better performance
-  const getDepthColor = useMemo(() => (depth: number): string => {
-    if (depth >= 40) return '#000080'; // Navy
-    if (depth >= 30) return '#0000FF'; // Blue
-    if (depth >= 20) return '#4169E1'; // Royal blue
-    if (depth >= 10) return '#87CEEB'; // Sky blue
-    return '#ADD8E6'; // Light blue
-  }, []);
 
   // Get event color based on selected mode (optimized with Map lookup)
   const getEventColor = useMemo(() => (event: any) => {
@@ -125,36 +126,6 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
     return getMagnitudeColor(event.magnitude);
   }, [colorMode, qualityScoreMap, mapColors.isDark]);
 
-  const getMagnitudeLabel = useMemo(() => (magnitude: number): string => {
-    if (magnitude >= 6.0) return 'Major';
-    if (magnitude >= 5.0) return 'Moderate';
-    if (magnitude >= 4.0) return 'Light';
-    if (magnitude >= 3.0) return 'Minor';
-    return 'Micro';
-  }, []);
-
-  // Debounced bounds change handler for better performance
-  useEffect(() => {
-    if (mapRef.current && onBoundsChange) {
-      const map = mapRef.current;
-      let timeoutId: NodeJS.Timeout;
-
-      const updateBounds = () => {
-        // Debounce bounds updates to avoid excessive calls during panning/zooming
-        clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => {
-          onBoundsChange(map.getBounds());
-        }, 300); // 300ms debounce
-      };
-
-      map.on('moveend', updateBounds);
-      return () => {
-        clearTimeout(timeoutId);
-        map.off('moveend', updateBounds);
-      };
-    }
-  }, [onBoundsChange]);
-
   const handleShapeCreated = (e: any) => {
     if (onShapeDrawn) {
       onShapeDrawn(e.layer.toGeoJSON());
@@ -163,6 +134,10 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
 
   return (
     <div className="h-[calc(100vh-12rem)] w-full relative">
+      {!propEvents && !complete && (loading || error) && <Card className="absolute bottom-4 left-4 z-[1000] p-3" role={error ? 'alert' : 'status'}>
+        <p className="text-sm">{error || `Preview · ${loadedCount.toLocaleString()} events received. Loading...`}</p>
+        {error && <button className="underline" onClick={reload}>Retry loading events</button>}
+      </Card>}
       {/* Control Panel */}
       <Card className="absolute top-4 right-4 z-[1000] p-4 bg-background/95 backdrop-blur-sm shadow-lg max-w-[280px]">
         <div className="space-y-3">
@@ -222,21 +197,7 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
           </div>
 
           <div className="pt-2 border-t">
-            <Label htmlFor="sampleSize" className="text-xs font-medium mb-2 block">
-              Max Events to Display
-            </Label>
-            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(value === 'all' ? Infinity : Number(value))}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent position="popper" className="z-[10000]">
-                <SelectItem value="500">500</SelectItem>
-                <SelectItem value="1000">1,000</SelectItem>
-                <SelectItem value="2000">2,000</SelectItem>
-                <SelectItem value="5000">5,000</SelectItem>
-                <SelectItem value="Infinity">All</SelectItem>
-              </SelectContent>
-            </Select>
+            <MapDetailControl value={sampleSize} onChange={setSampleSize} />
           </div>
         </div>
       </Card>
@@ -248,13 +209,13 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
             <Info className="h-4 w-4 text-blue-500" />
             <span>
               Displaying <strong>{displayCount.toLocaleString()}</strong> of{' '}
-              <strong>{total.toLocaleString()}</strong> events
+              <strong>{visibleCount.toLocaleString()}</strong> visible events. Zoom in for more.
             </span>
           </div>
         </Card>
       )}
 
-      {loading && (
+      {loading && events.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-[1000]">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-2"></div>
@@ -266,11 +227,12 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
         key={`map-view-${catalogueId || 'default'}`}
         center={[0, 0]}
         zoom={2}
-        ref={mapRef}
         className="h-full w-full"
         preferCanvas={true}
       >
         <MapLayerControl position="topright" />
+        <MapViewportObserver onChange={onViewportChange} />
+        <MapBoundsObserver onBoundsChange={onBoundsChange} />
 
         {/* NZ Active Faults from Local GeoJSON */}
         {showActiveFaults && faultData && (
@@ -302,38 +264,7 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
           />
         </FeatureGroup>
 
-        {/* Earthquake markers - using intelligent sampling for performance */}
-        {/* Sort by magnitude (small to large) so larger events render on top */}
-        {dedupeById(sampledEvents).sort((a, b) => a.magnitude - b.magnitude).map((event) => {
-          const eventDate = new Date(event.time).toLocaleDateString('en-GB', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-          });
-          const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
-
-          return (
-            <CircleMarker
-              key={event.id}
-              center={[event.latitude, event.longitude]}
-              radius={getMagnitudePixelRadius(event.magnitude)}
-              pathOptions={{
-                color: getEventColor(event),
-                fillColor: getEventColor(event),
-                fillOpacity: mapColors.markerOpacity,
-                weight: 1,
-                // Add title for accessibility (shows on hover)
-                title: ariaLabel,
-              } as any}
-              eventHandlers={{
-                click: () => {
-                  clickSeqRef.current += 1;
-                  setActivePopup({ event, seq: clickSeqRef.current });
-                },
-              }}
-            />
-          );
-        })}
+        <EarthquakeMarkerLayer events={sampledEvents} getColor={getEventColor} opacity={mapColors.markerOpacity} onEventClick={onEventClick} />
 
         {/* One popup, rendered only for the clicked event, so the nearby-faults fetch
             in EventPopupWithFaults fires once per click instead of once per plotted
@@ -341,7 +272,7 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
         {activePopup && (
           <Popup
             key={activePopup.seq}
-            position={[activePopup.event.latitude, activePopup.event.longitude]}
+            position={activePopup.position}
           >
             <EventPopupWithFaults event={activePopup.event} qualityScores={qualityScores} />
           </Popup>
@@ -463,7 +394,9 @@ const LegendPanel = memo(function LegendPanel({ colorMode, showFaults, faultCoun
 
 // Event popup component with nearby faults (memoized)
 const EventPopupWithFaults = memo(function EventPopupWithFaults({ event, qualityScores }: { event: any; qualityScores: any[] }) {
-  const quality = qualityScores.find(q => q.eventId === event.id);
+  const quality = useMemo(() => qualityScores.find(q => q.eventId === event.id) ?? {
+    eventId: event.id, score: calculateQualityScore(metricsFromEvent(event)),
+  }, [event, qualityScores]);
 
   // Fetch nearby faults for this event
   const { faults, loading: faultsLoading, count: faultCount } = useNearbyFaults({

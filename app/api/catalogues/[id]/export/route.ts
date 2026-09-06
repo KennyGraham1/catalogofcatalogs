@@ -5,10 +5,14 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
-import { eventsToGeoJSON, eventsToKML, eventsToJSON } from '@/lib/exporters';
+import {
+  eventsToCSVChunks,
+  eventsToGeoJSONChunks,
+  eventsToJSONChunks,
+  eventsToKMLChunks,
+} from '@/lib/exporters';
 import { eventsToQuakeMLDocument } from '@/lib/quakeml-exporter';
-import { generateExportFilename, createDownloadHeaders, csvField } from '@/lib/export-utils';
-import { safeJSONParse } from '@/lib/errors';
+import { generateExportFilename, createDownloadHeaders } from '@/lib/export-utils';
 import { requireViewer } from '@/lib/auth/middleware';
 
 // Force dynamic rendering for this API route
@@ -42,6 +46,15 @@ export async function GET(
       );
     }
 
+    // `metadata=comments` opts the CSV export into the `#`-prefixed metadata prologue.
+    // The default is a plain RFC 4180 file, because RFC 4180 has no comment convention: with a
+    // prologue, line 1 becomes the header record for pandas.read_csv, R's read.csv, ZMAP and
+    // this platform's own parseCSV, and none of them can read the file back. The metadata is
+    // served instead from GET /api/catalogues/{id} (see the Link header on the response) and
+    // is embedded in the JSON and GeoJSON exports.
+    const metadataMode = (searchParams.get('metadata') || '').toLowerCase();
+    const metadataComments = metadataMode === 'comments' || metadataMode === 'true' || metadataMode === '1';
+
     if (!dbQueries) {
       return NextResponse.json(
         { error: 'Database not initialized' },
@@ -62,17 +75,23 @@ export async function GET(
 
     // An empty catalogue is valid — export an empty file rather than a 404
 
-    // Calculate time period (guard against empty array)
+    // Calculate time period in a single linear pass. Math.min(...times) pushes one argument
+    // per event onto the call stack and throws RangeError: Maximum call stack size exceeded
+    // above roughly 1.3e5 arguments — i.e. exactly on the national-scale catalogues this
+    // endpoint exists to serve, where it surfaced as an opaque 500.
     let minTime: string | undefined;
     let maxTime: string | undefined;
-    if (events.length > 0) {
-      const times = events
-        .map((e) => new Date(e.time).getTime())
-        .filter(Number.isFinite);
-      if (times.length > 0) {
-        minTime = new Date(Math.min(...times)).toISOString();
-        maxTime = new Date(Math.max(...times)).toISOString();
-      }
+    let minEpoch = Infinity;
+    let maxEpoch = -Infinity;
+    for (const event of events) {
+      const epoch = new Date(event.time).getTime();
+      if (!Number.isFinite(epoch)) continue;
+      if (epoch < minEpoch) minEpoch = epoch;
+      if (epoch > maxEpoch) maxEpoch = epoch;
+    }
+    if (Number.isFinite(minEpoch)) {
+      minTime = new Date(minEpoch).toISOString();
+      maxTime = new Date(maxEpoch).toISOString();
     }
 
     // Parse data quality if stored as JSON
@@ -111,6 +130,18 @@ export async function GET(
           ? JSON.parse(catalogue.source_catalogues)
           : catalogue.source_catalogues;
       } catch { sourceCatalogues = undefined; }
+    }
+
+    // Parse merge_config so the exported file records which merge strategy and thresholds
+    // produced this catalogue. This is catalogue-level provenance only: MergedEvent stores no
+    // per-event merge strategy or quality score, so neither can appear in the export.
+    let mergeConfig: unknown;
+    if (catalogue.merge_config) {
+      try {
+        mergeConfig = typeof catalogue.merge_config === 'string'
+          ? JSON.parse(catalogue.merge_config)
+          : catalogue.merge_config;
+      } catch { mergeConfig = undefined; }
     }
 
     // Preserve declared catalogue coverage when present; otherwise derive the
@@ -157,39 +188,44 @@ export async function GET(
       mergeUseCase: catalogue.merge_use_case || undefined,
       mergeMethodology: catalogue.merge_methodology || undefined,
       mergeQualityAssessment: catalogue.merge_quality_assessment || undefined,
+      mergeConfig,
       // Provenance
       createdBy: catalogue.created_by || undefined,
       modifiedAt: catalogue.modified_at || undefined,
       sourceCatalogues,
     };
 
-    let content: string;
+    let chunks: Generator<string>;
     let fileExtension: string;
 
-    // Generate content based on format
+    // Generate content based on format. Every exporter yields chunks rather than one string:
+    // V8 caps a JS string at 536,870,888 characters, which a national-scale catalogue exceeds
+    // (~1.8 kB/event for GeoJSON, so ~290k events), and the resulting
+    // "RangeError: Invalid string length" could only be reported as a generic 500.
     switch (format) {
       case 'csv':
-        content = generateCSV(events, metadata);
+        chunks = eventsToCSVChunks(events, metadata, { metadataComments });
         fileExtension = 'csv';
         break;
 
       case 'json':
-        content = eventsToJSON(events, metadata);
+        chunks = eventsToJSONChunks(events, metadata);
         fileExtension = 'json';
         break;
 
       case 'geojson':
-        content = eventsToGeoJSON(events, metadata);
+        chunks = eventsToGeoJSONChunks(events, metadata);
         fileExtension = 'geojson';
         break;
 
       case 'kml':
-        content = eventsToKML(events, metadata);
+        chunks = eventsToKMLChunks(events, metadata);
         fileExtension = 'kml';
         break;
 
       case 'quakeml':
-        content = eventsToQuakeMLDocument(events, catalogue.name, metadata);
+        // lib/quakeml-exporter has no chunked form yet, so this one is still built whole.
+        chunks = singleChunk(eventsToQuakeMLDocument(events, catalogue.name, metadata));
         fileExtension = 'xml';
         break;
 
@@ -207,10 +243,18 @@ export async function GET(
       format === 'quakeml' ? { prefix: 'quakeml' } : undefined
     );
 
+    const headers = new Headers(createDownloadHeaders(filename, fileExtension));
+    // The full catalogue metadata is not embedded in the CSV (see the `metadata` query
+    // parameter above); point at the JSON resource that carries it (RFC 8288 Link relation).
+    headers.set(
+      'Link',
+      `</api/catalogues/${encodeURIComponent(catalogueId)}>; rel="describedby"; type="application/json"`
+    );
+
     // Return file
-    return new NextResponse(content, {
+    return new NextResponse(toByteStream(chunks), {
       status: 200,
-      headers: createDownloadHeaders(filename, fileExtension),
+      headers,
     });
 
   } catch (error) {
@@ -246,7 +290,9 @@ async function getAllEventsForExport(catalogueId: string, expectedCount?: number
       return pageResult;
     }
 
-    allEvents.push(...pageResult.data);
+    // Appended one at a time: allEvents.push(...page) is an argument spread, which throws
+    // RangeError above ~131,000 arguments if the page size is ever raised.
+    for (const pageEvent of pageResult.data) allEvents.push(pageEvent);
     totalPages = pageResult.pagination.totalPages;
     page += 1;
   } while (page <= totalPages);
@@ -254,189 +300,29 @@ async function getAllEventsForExport(catalogueId: string, expectedCount?: number
   return allEvents;
 }
 
+/** Wrap a single already-built document as a one-chunk stream. */
+function* singleChunk(content: string): Generator<string> {
+  yield content;
+}
+
 /**
- * Generate CSV content from events
+ * Adapt a chunk generator to the ReadableStream the response body needs, pulling one chunk
+ * per demand so the whole document is never resident as a single string or buffer.
  */
-function generateCSV(events: any[], metadata: any): string {
-  const metadataLines: string[] = [];
-  const commentValue = (value: unknown): string => {
-    const str = typeof value === 'string' ? value : JSON.stringify(value);
-    return csvField(str ?? '').replace(/\r?\n|\r/g, ' ');
-  };
-  const addMetadataLine = (label: string, value: unknown) => {
-    if (value === null || value === undefined || value === '') return;
-    if (Array.isArray(value) && value.length === 0) return;
-    metadataLines.push(`# ${label}: ${commentValue(value)}`);
-  };
-
-  // Add metadata as comments
-  addMetadataLine('Catalogue', metadata.catalogueName);
-  addMetadataLine('Description', metadata.description);
-  addMetadataLine('Source', metadata.source);
-  addMetadataLine('Provider', metadata.provider);
-  addMetadataLine('Region', metadata.region);
-  if (metadata.timePeriodStart || metadata.timePeriodEnd) {
-    addMetadataLine('Time Period', `${metadata.timePeriodStart ?? '?'} to ${metadata.timePeriodEnd ?? '?'}`);
-  }
-  metadataLines.push(`# Event Count: ${events.length}`);
-  metadataLines.push(`# Generated: ${new Date().toISOString()}`);
-
-  addMetadataLine('License', metadata.license);
-  addMetadataLine('Citation', metadata.citation);
-  addMetadataLine('DOI', metadata.doi);
-  addMetadataLine('Version', metadata.version);
-  addMetadataLine('Contact Name', metadata.contactName);
-  addMetadataLine('Contact Email', metadata.contactEmail);
-  addMetadataLine('Contact Organization', metadata.contactOrganization);
-  if (metadata.dataQuality) {
-    addMetadataLine('Data Quality', metadata.dataQuality);
-  }
-  addMetadataLine('Quality Notes', metadata.qualityNotes);
-  addMetadataLine('Keywords', metadata.keywords);
-  addMetadataLine('References', metadata.referenceLinks);
-  addMetadataLine('Usage Terms', metadata.usageTerms);
-  addMetadataLine('Notes', metadata.notes);
-  // Geographic bounds
-  if (metadata.boundingBox) {
-    const bb = metadata.boundingBox;
-    metadataLines.push(
-      `# Bounding Box: lat [${bb.minLatitude ?? '?'}, ${bb.maxLatitude ?? '?'}], ` +
-      `lon [${bb.minLongitude ?? '?'}, ${bb.maxLongitude ?? '?'}]`
-    );
-  }
-  addMetadataLine('Merge Description', metadata.mergeDescription);
-  addMetadataLine('Merge Use Case', metadata.mergeUseCase);
-  addMetadataLine('Merge Methodology', metadata.mergeMethodology);
-  addMetadataLine('Merge Quality Assessment', metadata.mergeQualityAssessment);
-  addMetadataLine('Created By', metadata.createdBy);
-  addMetadataLine('Modified At', metadata.modifiedAt);
-  addMetadataLine('Source Catalogues', metadata.sourceCatalogues);
-
-  metadataLines.push('#');
-  // Note: complex nested fields (origins, magnitudes, picks, arrivals, focal_mechanisms,
-  // amplitudes, station_magnitudes, event_descriptions, comments, creation_info, source_events)
-  // cannot be represented in flat CSV format; use JSON or QuakeML export for full fidelity.
-
-  // Define CSV headers — all scalar event fields
-  const headers = [
-    'ID',
-    'CatalogueID',
-    'Time',
-    'CreatedAt',
-    'Latitude',
-    'Longitude',
-    'Depth',
-    'Magnitude',
-    'MagnitudeType',
-    'EventType',
-    'EventTypeCertainty',
-    'Region',
-    'LocationName',
-    'Source',
-    'SourceEventsJSON',
-    'SourceID',
-    'PublicID',
-    // Location uncertainties
-    'TimeUncertainty',
-    'LatitudeUncertainty',
-    'LongitudeUncertainty',
-    'DepthUncertainty',
-    'HorizontalUncertainty',
-    'MagnitudeUncertainty',
-    // Origin metadata
-    'DepthType',
-    'EarthModelID',
-    'MethodID',
-    'AgencyID',
-    'Author',
-    // Magnitude details
-    'MagnitudeStationCount',
-    'MagnitudeMethodID',
-    'MagnitudeEvaluationMode',
-    'MagnitudeEvaluationStatus',
-    // Quality metrics
-    'AzimuthalGap',
-    'UsedStationCount',
-    'UsedPhaseCount',
-    'StandardError',
-    'MinimumDistance',
-    'MaximumDistance',
-    'AssociatedPhaseCount',
-    'AssociatedStationCount',
-    'DepthPhaseCount',
-    // Evaluation metadata
-    'EvaluationMode',
-    'EvaluationStatus',
-    'PreferredOriginID',
-    'PreferredMagnitudeID',
-  ];
-
-  // Helper: emit a nullable number/string as empty string when null/undefined
-  const n = (v: number | string | null | undefined) => (v !== null && v !== undefined ? v : '');
-
-  // Convert events to CSV rows
-  const rows = events.map((event: any) => {
-    const sourceEvents = safeJSONParse<Array<{ source?: string }>>(event.source_events, []);
-    const source = sourceEvents[0]?.source || 'unknown';
-
-    return [
-      csvField(event.id),
-      csvField(event.catalogue_id),
-      csvField(event.time),
-      csvField(event.created_at),
-      csvField(event.latitude),
-      csvField(event.longitude),
-      csvField(n(event.depth)),
-      csvField(event.magnitude),
-      csvField(event.magnitude_type),
-      csvField(event.event_type),
-      csvField(event.event_type_certainty),
-      // Region: prefer region, fall back to location_name
-      csvField(event.region || event.location_name || ''),
-      csvField(event.location_name),
-      csvField(source),
-      csvField(event.source_events),
-      csvField(event.source_id),
-      csvField(event.event_public_id),
-      // Location uncertainties
-      csvField(n(event.time_uncertainty)),
-      csvField(n(event.latitude_uncertainty)),
-      csvField(n(event.longitude_uncertainty)),
-      csvField(n(event.depth_uncertainty)),
-      csvField(n(event.horizontal_uncertainty)),
-      csvField(n(event.magnitude_uncertainty)),
-      // Origin metadata
-      csvField(event.depth_type),
-      csvField(event.earth_model_id),
-      csvField(event.method_id),
-      csvField(event.agency_id),
-      csvField(event.author),
-      // Magnitude details
-      csvField(n(event.magnitude_station_count)),
-      csvField(event.magnitude_method_id),
-      csvField(event.magnitude_evaluation_mode),
-      csvField(event.magnitude_evaluation_status),
-      // Quality metrics
-      csvField(n(event.azimuthal_gap)),
-      csvField(n(event.used_station_count)),
-      csvField(n(event.used_phase_count)),
-      csvField(n(event.standard_error)),
-      csvField(n(event.minimum_distance)),
-      csvField(n(event.maximum_distance)),
-      csvField(n(event.associated_phase_count)),
-      csvField(n(event.associated_station_count)),
-      csvField(n(event.depth_phase_count)),
-      // Evaluation metadata
-      csvField(event.evaluation_mode),
-      csvField(event.evaluation_status),
-      csvField(event.preferred_origin_id),
-      csvField(event.preferred_magnitude_id),
-    ].join(',');
+function toByteStream(chunks: Generator<string>): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      const step = chunks.next();
+      if (step.done) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(encoder.encode(step.value));
+    },
+    cancel() {
+      // Client aborted the download — let the generator release the events it holds.
+      chunks.return(undefined);
+    },
   });
-
-  return [
-    ...metadataLines,
-    headers.join(','),
-    ...rows
-  ].join('\n');
 }

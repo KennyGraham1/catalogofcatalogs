@@ -32,6 +32,12 @@ const indexes: IndexDefinition[] = [
   // Events collection indexes
   {
     collection: 'merged_events',
+    name: 'catalogue_time_id_idx',
+    keys: { catalogue_id: 1, time: -1, id: -1 },
+    options: { background: true },
+  },
+  {
+    collection: 'merged_events',
     name: 'idx_events_catalogue_time',
     keys: { catalogue_id: 1, time: -1 },
     options: { background: true },

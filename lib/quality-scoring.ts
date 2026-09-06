@@ -28,13 +28,6 @@ export interface QualityMetrics {
 
 /**
  * Build QualityMetrics (camelCase) from a raw snake_case DB event row.
- *
- * Callers must NOT do `calculateQualityScore(event as QualityMetrics)` on a raw DB
- * event: the DB uses snake_case (horizontal_uncertainty, azimuthal_gap, ...), so the
- * camelCase metric lookups would all read undefined and the score would always take
- * the "no data" penalty branch. Use this adapter instead. Horizontal uncertainty is
- * resolved from the km column when present, else derived from the lat/lon degree
- * uncertainties (km). All length values are km, angles degrees, time seconds.
  */
 export function metricsFromEvent(event: unknown): QualityMetrics {
   if (!event || typeof event !== 'object') return {};
@@ -158,6 +151,12 @@ export function calculateQualityScore(
 }
 
 /**
+ * Event-level quality index Q (0-100, paper Eq. 1): how well an origin is constrained AND
+ * documented. It is not an admissibility verdict — that gate lives in
+ * lib/data-quality-checker.ts and deliberately does not depend on Q.
+ */
+
+/**
  * Calculate location quality score (0-100)
  */
 function calculateLocationScore(metrics: QualityMetrics): { score: number; weight: number } {
@@ -165,32 +164,32 @@ function calculateLocationScore(metrics: QualityMetrics): { score: number; weigh
   const weight = 0.35; // 35% of total score
   
   // Horizontal uncertainty (max -40 points)
-  const horizUncertainty = Math.max(
-    metrics.horizontalUncertainty || 0,
-    0
-  );
-  if (horizUncertainty > 0) {
-    // Input is in km (QualityMetrics.horizontalUncertainty). Excellent: < 1 km, Poor: >= 10 km.
-    // Linear penalty reaching the -40 cap at 10 km (40 / 10 = 4 points per km).
+  const horizUncertainty = metrics.horizontalUncertainty;
+  if (typeof horizUncertainty === 'number' && Number.isFinite(horizUncertainty) && horizUncertainty >= 0) {
+    // Input is in km (QualityMetrics.horizontalUncertainty; resolved by metricsFromEvent
+    // from the horizontal_uncertainty km column, else from the lat/lon degree pair).
+    // Excellent: < 1 km, Poor: >= 10 km. Linear penalty reaching the -40 cap at 10 km
+    // (40 / 10 = 4 points per km). A reported 0 km takes no penalty; it is only an ABSENT
+    // value (or a nonsensical negative one) that takes the no-data branch.
     score -= Math.min(40, horizUncertainty * 4);
   } else {
-    score -= 20; // No data penalty
+    score -= 40; // No data penalty = the >= 10 km cap (see missing-data convention above)
   }
   
   // Depth uncertainty (max -30 points)
   if (metrics.depthUncertainty !== null && metrics.depthUncertainty !== undefined) {
-    // Excellent: < 1km, Poor: > 10km
+    // Input is in km (DB convention, lib/db.ts:104). Excellent: < 1km, Poor: >= 10km.
     score -= Math.min(30, metrics.depthUncertainty * 3);
   } else {
-    score -= 15; // No data penalty
+    score -= 30; // No data penalty = the >= 10 km cap
   }
   
   // Time uncertainty (max -30 points)
   if (metrics.timeUncertainty !== null && metrics.timeUncertainty !== undefined) {
-    // Excellent: < 0.1s, Poor: > 1s
+    // Input is in seconds (QuakeML BED time.uncertainty). Excellent: < 0.1s, Poor: >= 1s.
     score -= Math.min(30, metrics.timeUncertainty * 30);
   } else {
-    score -= 10; // No data penalty
+    score -= 30; // No data penalty = the >= 1 s cap
   }
   
   return { score: Math.max(0, score), weight };
@@ -214,7 +213,7 @@ function calculateNetworkScore(metrics: QualityMetrics): { score: number; weight
       score -= 45 + Math.min(5, (metrics.azimuthalGap - 180) / 18); // 45-50 points
     }
   } else {
-    score -= 25; // No data penalty
+    score -= 50; // No data penalty = the >= 270 deg cap
   }
   
   // Station count (max -30 points)
@@ -230,7 +229,7 @@ function calculateNetworkScore(metrics: QualityMetrics): { score: number; weight
       score -= 25 + (5 - metrics.usedStationCount); // 25-30 points
     }
   } else {
-    score -= 15; // No data penalty
+    score -= 30; // No data penalty = the 0-station floor
   }
   
   // Phase count (max -20 points)
@@ -246,7 +245,7 @@ function calculateNetworkScore(metrics: QualityMetrics): { score: number; weight
       score -= 13 + Math.min(7, 8 - metrics.usedPhaseCount); // 13-20 points
     }
   } else {
-    score -= 10; // No data penalty
+    score -= 20; // No data penalty = the <= 1-phase floor
   }
   
   return { score: Math.max(0, score), weight };
@@ -272,7 +271,7 @@ function calculateSolutionScore(metrics: QualityMetrics): { score: number; weigh
       score -= 50 + Math.min(50, (metrics.standardError - 1.0) * 50); // 50-100 points
     }
   } else {
-    score -= 30; // No data penalty
+    score -= 100; // No data penalty = the >= 2 s cap (RMS is the only term in this dimension)
   }
   
   return { score: Math.max(0, score), weight };
@@ -287,10 +286,10 @@ function calculateMagnitudeScore(metrics: QualityMetrics): { score: number; weig
   
   // Magnitude uncertainty (max -60 points)
   if (metrics.magnitudeUncertainty !== null && metrics.magnitudeUncertainty !== undefined) {
-    // Excellent: < 0.1, Good: < 0.2, Poor: > 0.5
+    // Excellent: < 0.1, Good: < 0.2, Poor: >= 0.5 (magnitude units)
     score -= Math.min(60, metrics.magnitudeUncertainty * 120);
   } else {
-    score -= 20; // No data penalty
+    score -= 60; // No data penalty = the >= 0.5 cap
   }
   
   // Magnitude station count (max -40 points)
@@ -303,10 +302,12 @@ function calculateMagnitudeScore(metrics: QualityMetrics): { score: number; weig
     } else if (metrics.magnitudeStationCount >= 3) {
       score -= 20 + (5 - metrics.magnitudeStationCount) * 5; // 20-30 points
     } else {
-      score -= 30 + (3 - metrics.magnitudeStationCount) * 5; // 30-40 points
+      // Capped at the documented -40 maximum: the uncapped form reached -45 at zero
+      // stations, i.e. worse than the dimension's own stated worst case.
+      score -= Math.min(40, 30 + (3 - metrics.magnitudeStationCount) * 5); // 30-40 points
     }
   } else {
-    score -= 20; // No data penalty
+    score -= 40; // No data penalty = the 0-station floor
   }
   
   return { score: Math.max(0, score), weight };
@@ -319,20 +320,39 @@ function calculateEvaluationScore(metrics: QualityMetrics): { score: number; wei
   let score = 100;
   const weight = 0.10; // 10% of total score
   
-  // Evaluation mode bonus/penalty
-  if (metrics.evaluationMode === 'manual') {
+  // The QuakeML 1.2 BED enumerations are lower-case, but not every writer normalises:
+  // lib/quakeml-to-db.ts and lib/parsed-event-to-db.ts lower-case the value while
+  // lib/geojson-parser.ts and lib/merge.ts store the source string verbatim, so
+  // "Preliminary" used to match no branch and score an unpenalised 100.
+  const mode = typeof metrics.evaluationMode === 'string'
+    ? metrics.evaluationMode.toLowerCase().trim() : null;
+  const status = typeof metrics.evaluationStatus === 'string'
+    ? metrics.evaluationStatus.toLowerCase().trim() : null;
+
+  // Evaluation mode (max -20). EvaluationMode enumeration: manual | automatic.
+  if (mode === 'manual') {
     score += 0; // Manual is good
-  } else if (metrics.evaluationMode === 'automatic') {
+  } else if (mode === 'automatic') {
     score -= 20; // Automatic is less reliable
+  } else {
+    score -= 20; // No data penalty: unknown provenance is scored as automatic
   }
-  
-  // Evaluation status bonus/penalty
-  if (metrics.evaluationStatus === 'reviewed' || metrics.evaluationStatus === 'final') {
+
+  // Evaluation status (max -30 for a graded status). EvaluationStatus enumeration:
+  // preliminary | confirmed | reviewed | final | rejected (QuakeML 1.2 BED, sec. 3.4.5).
+  if (status === 'reviewed' || status === 'final') {
     score += 0; // Reviewed/final is best
-  } else if (metrics.evaluationStatus === 'confirmed') {
+  } else if (status === 'confirmed') {
     score -= 10;
-  } else if (metrics.evaluationStatus === 'preliminary') {
+  } else if (status === 'preliminary') {
     score -= 30;
+  } else if (status === 'rejected') {
+    // A rejected origin is one the reporting agency has explicitly discarded, so it earns
+    // no credit on this dimension. It previously matched no branch and scored 100 — the
+    // same as 'final', and above 'preliminary'.
+    score -= 100;
+  } else {
+    score -= 30; // No data penalty = the worst graded status ('preliminary')
   }
   
   return { score: Math.max(0, Math.min(100, score)), weight };
@@ -388,12 +408,17 @@ function generateQualityDetails(
     weaknesses.push('Large magnitude uncertainty');
   }
   
-  // Evaluation assessment
-  if (metrics.evaluationStatus === 'reviewed' || metrics.evaluationStatus === 'final') {
+  // Evaluation assessment (status compared case-insensitively, as in calculateEvaluationScore)
+  const evalStatus = typeof metrics.evaluationStatus === 'string'
+    ? metrics.evaluationStatus.toLowerCase().trim() : null;
+  if (evalStatus === 'reviewed' || evalStatus === 'final') {
     strengths.push('Solution has been reviewed by analyst');
-  } else if (metrics.evaluationStatus === 'preliminary') {
+  } else if (evalStatus === 'preliminary') {
     weaknesses.push('Preliminary solution (not yet reviewed)');
     recommendations.push('Wait for reviewed solution for critical applications');
+  } else if (evalStatus === 'rejected') {
+    weaknesses.push('Solution rejected by the reporting agency');
+    recommendations.push('Do not use a rejected origin; look for a superseding solution');
   }
   
   return { strengths, weaknesses, recommendations };

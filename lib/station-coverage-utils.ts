@@ -13,22 +13,52 @@ export interface Station {
 
 export interface StationCoverage {
   stations: Station[];
-  azimuthalGap: number;
-  stationCount: number;
+  /**
+   * Arrival azimuths actually present in the data (degrees clockwise from
+   * north). Empty when the arrivals carry no azimuth element — consumers must
+   * not substitute synthetic azimuths for these.
+   */
+  azimuths: number[];
+  /** Largest azimuthal gap in degrees, or null when it cannot be determined. */
+  azimuthalGap: number | null;
+  /** Provenance of azimuthalGap. */
+  azimuthalGapSource: 'origin-quality' | 'arrivals' | null;
+  /** Distinct recording stations, or null when the data does not say. */
+  stationCount: number | null;
+  /** Provenance of stationCount. */
+  stationCountSource: 'origin-quality' | 'picks' | null;
   averageDistance: number;
   minDistance: number;
   maxDistance: number;
-  coverageQuality: 'excellent' | 'good' | 'fair' | 'poor';
+  coverageQuality: 'excellent' | 'good' | 'fair' | 'poor' | 'unknown';
 }
 
 /**
- * Parse station data from picks/arrivals JSON
+ * Authoritative origin-quality values stored on the event record
+ * (OriginQuality.azimuthalGap / usedStationCount). When supplied they are
+ * preferred over the values derived from the picks/arrivals arrays, which are
+ * often incomplete.
+ */
+export interface OriginQualityCoverage {
+  azimuthalGap?: number | null;
+  usedStationCount?: number | null;
+}
+
+function finiteInRange(value: unknown, min: number, max: number): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
+    ? value
+    : null;
+}
+
+/**
+ * Parse station data from picks/arrivals JSON.
  */
 export function parseStationData(
   picksJson: string | null | undefined,
   arrivalsJson: string | null | undefined,
   eventLat: number,
-  eventLon: number
+  eventLon: number,
+  originQuality?: OriginQualityCoverage | null
 ): StationCoverage | null {
   if (!picksJson && !arrivalsJson) return null;
   
@@ -36,11 +66,13 @@ export function parseStationData(
     const stations: Station[] = [];
     const azimuths: number[] = [];
     const distances: number[] = [];
+    let picksParsed = false;
     
     // Parse picks to get station information
     if (picksJson) {
       const picks = JSON.parse(picksJson);
       if (Array.isArray(picks)) {
+        picksParsed = true;
         picks.forEach(pick => {
           if (pick.waveformID) {
             const station: Station = {
@@ -75,8 +107,18 @@ export function parseStationData(
       }
     }
     
-    // Calculate azimuthal gap
-    const azimuthalGap = calculateAzimuthalGap(azimuths);
+    // Azimuthal gap: stored OriginQuality value first, arrivals second.
+    const storedGap = finiteInRange(originQuality?.azimuthalGap, 0, 360);
+    const derivedGap = calculateAzimuthalGapDetail(azimuths).gap;
+    const azimuthalGap = storedGap ?? derivedGap;
+    const azimuthalGapSource: StationCoverage['azimuthalGapSource'] =
+      storedGap !== null ? 'origin-quality' : derivedGap !== null ? 'arrivals' : null;
+    
+    // Station count: stored OriginQuality value first, distinct picks second.
+    const storedCount = finiteInRange(originQuality?.usedStationCount, 0, Number.MAX_SAFE_INTEGER);
+    const stationCount = storedCount ?? (picksParsed ? stations.length : null);
+    const stationCountSource: StationCoverage['stationCountSource'] =
+      storedCount !== null ? 'origin-quality' : picksParsed ? 'picks' : null;
     
     // Calculate distance statistics
     const averageDistance = distances.length > 0
@@ -86,12 +128,15 @@ export function parseStationData(
     const maxDistance = distances.length > 0 ? Math.max(...distances) : 0;
     
     // Determine coverage quality
-    const coverageQuality = determineCoverageQuality(azimuthalGap, stations.length);
+    const coverageQuality = determineCoverageQuality(azimuthalGap, stationCount);
     
     return {
       stations,
+      azimuths,
       azimuthalGap,
-      stationCount: stations.length,
+      azimuthalGapSource,
+      stationCount,
+      stationCountSource,
       averageDistance,
       minDistance,
       maxDistance,
@@ -103,42 +148,71 @@ export function parseStationData(
   }
 }
 
+export interface AzimuthalGapDetail {
+  /** Largest gap in degrees, or null when there are no azimuths to measure. */
+  gap: number | null;
+  /** Azimuth of the last station before the gap (where the gap starts, clockwise). */
+  startAzimuth: number | null;
+  /** Azimuth of the first station after the gap (where the gap ends, clockwise). */
+  endAzimuth: number | null;
+}
+
 /**
- * Calculate azimuthal gap from array of azimuths
+ * Largest azimuthal gap AND the pair of azimuths that bound it, so a directional
+ * coverage diagram can be drawn at the real azimuths instead of an assumed one.
+ */
+export function calculateAzimuthalGapDetail(azimuths: number[]): AzimuthalGapDetail {
+  const sorted = azimuths
+    .filter(a => typeof a === 'number' && Number.isFinite(a))
+    .map(a => ((a % 360) + 360) % 360)
+    .sort((a, b) => a - b);
+
+  if (sorted.length === 0) return { gap: null, startAzimuth: null, endAzimuth: null };
+  // A single azimuth leaves the whole circle uncovered on one side of it.
+  if (sorted.length === 1) return { gap: 360, startAzimuth: sorted[0], endAzimuth: sorted[0] };
+
+  let gap = -1;
+  let startAzimuth = sorted[0];
+  let endAzimuth = sorted[0];
+
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const candidate = sorted[i + 1] - sorted[i];
+    if (candidate > gap) {
+      gap = candidate;
+      startAzimuth = sorted[i];
+      endAzimuth = sorted[i + 1];
+    }
+  }
+
+  // Don't forget the gap between last and first (wrapping around)
+  const wrapGap = 360 - sorted[sorted.length - 1] + sorted[0];
+  if (wrapGap > gap) {
+    gap = wrapGap;
+    startAzimuth = sorted[sorted.length - 1];
+    endAzimuth = sorted[0];
+  }
+
+  return { gap, startAzimuth, endAzimuth };
+}
+
+/**
+ * Calculate azimuthal gap from array of azimuths.
+ * Returns 360 when there is nothing to measure (0 or 1 azimuth); use
+ * calculateAzimuthalGapDetail when "unknown" has to be distinguished from 360.
  */
 export function calculateAzimuthalGap(azimuths: number[]): number {
-  if (azimuths.length === 0) return 360;
-  if (azimuths.length === 1) return 360;
-  
-  // Sort azimuths
-  const sorted = [...azimuths].sort((a, b) => a - b);
-  
-  // Calculate gaps between consecutive azimuths
-  const gaps: number[] = [];
-  for (let i = 0; i < sorted.length - 1; i++) {
-    gaps.push(sorted[i + 1] - sorted[i]);
-  }
-  
-  // Don't forget the gap between last and first (wrapping around)
-  gaps.push(360 - sorted[sorted.length - 1] + sorted[0]);
-  
-  // Return the largest gap
-  return Math.max(...gaps);
+  return calculateAzimuthalGapDetail(azimuths).gap ?? 360;
 }
 
 /**
  * Determine coverage quality based on azimuthal gap and station count.
- *
- * NOTE: the 90/180/270-degree thresholds below are project HEURISTICS, not the
- * formal network-quality criteria of Bondar et al. (2004) (whose ground-truth
- * criteria combine primary AND secondary azimuthal gap, nearest-station distance,
- * and station count). Treat the returned label as an indicative coverage class,
- * not a Bondar-conformant location-quality grade.
  */
 export function determineCoverageQuality(
-  azimuthalGap: number,
-  stationCount: number
-): 'excellent' | 'good' | 'fair' | 'poor' {
+  azimuthalGap: number | null,
+  stationCount: number | null
+): 'excellent' | 'good' | 'fair' | 'poor' | 'unknown' {
+  if (azimuthalGap === null || stationCount === null) return 'unknown';
+
   // Excellent: gap < 90° and >= 10 stations
   if (azimuthalGap < 90 && stationCount >= 10) return 'excellent';
   
@@ -155,12 +229,13 @@ export function determineCoverageQuality(
 /**
  * Get color for coverage quality visualization
  */
-export function getCoverageQualityColor(quality: 'excellent' | 'good' | 'fair' | 'poor'): string {
+export function getCoverageQualityColor(quality: 'excellent' | 'good' | 'fair' | 'poor' | 'unknown'): string {
   switch (quality) {
     case 'excellent': return '#22c55e'; // Green
     case 'good': return '#84cc16'; // Light green
     case 'fair': return '#eab308'; // Yellow
     case 'poor': return '#ef4444'; // Red
+    case 'unknown': return '#9ca3af'; // Gray - not enough data to judge
   }
 }
 
@@ -195,8 +270,10 @@ export function generateAzimuthalCoverageSectors(
  * Calculate station distribution ratio
  * Measures how evenly stations are distributed around the event
  */
-export function calculateStationDistributionRatio(azimuths: number[]): number {
-  if (azimuths.length < 2) return 0;
+export function calculateStationDistributionRatio(azimuths: number[]): number | null {
+  // Fewer than two azimuths says nothing about the distribution — returning 0
+  // here would report "perfectly even" for events with no azimuth data at all.
+  if (azimuths.length < 2) return null;
   
   const gaps = [];
   const sorted = [...azimuths].sort((a, b) => a - b);

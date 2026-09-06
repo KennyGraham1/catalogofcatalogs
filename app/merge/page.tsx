@@ -1606,7 +1606,7 @@ export default function MergePage() {
                           <p className="text-xs text-muted-foreground">
                             {mergeStrategy === 'quality' && 'Select events with best quality metrics (station count, azimuthal gap, location error, magnitude uncertainty). Uses seismological best practices.'}
                             {mergeStrategy === 'priority' && 'Use data from higher priority sources when conflicts occur.'}
-                            {mergeStrategy === 'average' && 'Average numerical values (magnitude, depth) from all sources. Uses magnitude hierarchy (Mw > Ms > mb > ML).'}
+                            {mergeStrategy === 'average' && 'Averages only the epicentre (uncertainty-weighted) across sources. Magnitude is selected by type hierarchy (Mw > Ms > mb > ML) and depth by lowest uncertainty — neither is averaged. Time is the earliest reported origin time.'}
                             {mergeStrategy === 'newest' && 'Prefer the most recently updated event data.'}
                             {mergeStrategy === 'complete' && 'Use the record with the most complete information.'}
                           </p>
@@ -1655,10 +1655,22 @@ export default function MergePage() {
                               Enhanced Merge Algorithm
                             </h4>
                             <ul className="text-xs text-green-800 leading-relaxed space-y-1 list-disc list-inside">
-                              <li><strong>Magnitude Hierarchy:</strong> Uses ISC standard (Mw &gt; Ms &gt; mb &gt; ML) to prevent saturation errors</li>
+                              {/*
+                                Only the 'average' strategy calls selectBestMagnitude / selectBestDepth
+                                (lib/merge.ts). The other strategies copy one source record wholesale, so
+                                the magnitude hierarchy and depth-uncertainty selection genuinely do not
+                                apply to them and must not be advertised as if they did.
+                              */}
+                              {mergeStrategy === 'average' ? (
+                                <>
+                                  <li><strong>Magnitude Hierarchy:</strong> Uses ISC standard (Mw &gt; Ms &gt; mb &gt; ML) to choose which reported magnitude to keep, avoiding saturated scales</li>
+                                  <li><strong>Depth Uncertainty:</strong> Selects depths with lower uncertainty and better station coverage</li>
+                                </>
+                              ) : (
+                                <li><strong>Magnitude Scale:</strong> The merged magnitude is kept unchanged from the selected source, together with its magnitude type — values are not converted to a common scale, so a merged catalogue may mix ML, mb and Mw</li>
+                              )}
                               <li><strong>Date Line Handling:</strong> Correctly matches events across the International Date Line (Pacific region)</li>
-                              <li><strong>Depth Uncertainty:</strong> Selects depths with lower uncertainty and better station coverage</li>
-                              <li><strong>Validation:</strong> Prevents merging physically inconsistent events (e.g., M4.0 with M7.0)</li>
+                              <li><strong>Validation:</strong> Prevents merging physically inconsistent events (e.g., M4.0 with M7.0); magnitudes are compared on a common Mw scale when every source reports a magnitude type</li>
                               {/* <li><strong>Performance:</strong> 15-30% faster with latitude-aware spatial indexing</li> */}
                             </ul>
                           </div>

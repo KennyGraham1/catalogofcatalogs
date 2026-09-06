@@ -4,10 +4,21 @@ Reproduce the worked example for the CofC SRL submission.
 This single, seeded script reproduces every quantity quoted in the worked
 example and writes the three paper figures.  It (i) sizes the two
 synthetic catalogues and their overlap, (ii) derives the duplicate-aware merge
-and quality-filter bookkeeping arithmetically (these are definitional in the
-worked example), (iii) simulates representative azimuthal-gap, quality, depth
-and magnitude distributions, and (iv) computes Gutenberg-Richter b-values for
-the quality-filtered catalogue before and after declustering.
+bookkeeping arithmetically (these counts are definitional in the worked
+example), (iii) simulates representative azimuthal-gap and quality
+distributions and *measures* the quality-filter retention on them, and
+(iv) builds a space-time synthetic catalogue above Mc, runs Gardner-Knopoff
+(1974) declustering on it, and computes Gutenberg-Richter b-values before and
+after.
+
+Which numbers are inputs and which are outputs:
+  inputs  -- the catalogue sizes, the 50% duplicate overlap, the quality
+             threshold Q >= 70, the number of events above Mc, the injected
+             clustered fraction, and the planted b-values of the independent
+             and clustered populations;
+  outputs -- the quality-filter retention, the fraction Gardner-Knopoff
+             actually removes, and every b-value.  None of the b-values or
+             removal fractions is calibrated to a target.
 
 All randomness is seeded with numpy.default_rng(42); re-running reproduces the
 figures and the printed summary exactly.
@@ -62,15 +73,29 @@ N_DUP      = int(round(N_AGENCYB * DUP_FRAC))            # 49,000 duplicate pair
 N_GEONET_ONLY  = N_GEONET - N_DUP                       # 71,000
 N_AGENCYB_ONLY = N_AGENCYB - N_DUP                      # 49,000
 N_MERGED   = N_GEONET_ONLY + N_AGENCYB_ONLY + N_DUP     # 169,000 unique
-QFILTER_FRAC = 0.85                         # retained at Q >= 70
-N_RETAINED = int(round(N_MERGED * QFILTER_FRAC))        # 143,650
-N_REMOVED  = N_MERGED - N_RETAINED                      # 25,350
+QMIN       = 70                             # quality threshold applied in Step 4
+# The retained / removed counts are *not* constants: they are measured in
+# make_gap_distribution() by applying Q >= QMIN to the simulated per-event
+# quality scores of the merged provenance mix.
 
 MC          = 2.0                           # magnitude of completeness
-N_ABOVE_MC  = 48_600                        # events >= Mc in quality-filtered set
-DECL_FRAC   = 0.23                           # fraction removed by declustering
-N_AFTER     = int(round(N_ABOVE_MC * DECL_FRAC))        # 11,178 aftershocks
-N_BACKGROUND = N_ABOVE_MC - N_AFTER                     # 37,422 background events
+DM          = 0.1                           # magnitude reporting grid / bin width
+N_ABOVE_MC  = 48_600                        # events >= Mc in the quality-filtered
+                                            # set (design constant of the example)
+CLUSTER_FRAC = 0.23                         # fraction of the above-Mc catalogue
+                                            # *injected* as clustered aftershocks;
+                                            # the fraction Gardner-Knopoff removes
+                                            # is an output, not this number
+N_AFTER      = int(round(N_ABOVE_MC * CLUSTER_FRAC))    # 11,178 injected aftershocks
+N_BACKGROUND = N_ABOVE_MC - N_AFTER                     # 37,422 independent events
+
+B_BACKGROUND = 1.00       # planted b of the independent (background) population
+B_CLUSTER    = 1.30       # planted b of the injected aftershock population
+M_SEED       = 4.5        # background events >= M_SEED seed aftershock sequences
+T_SPAN_DAYS  = 5 * 365.25                   # January 2020 - December 2024
+LON0, LON1   = 166.0, 179.0                 # synthetic New Zealand study box
+LAT0, LAT1   = -47.0, -34.0
+R_EARTH_KM   = 6371.0
 
 
 def gr_from_u(u, b, mmin, mmax):
@@ -79,30 +104,33 @@ def gr_from_u(u, b, mmin, mmax):
     return np.clip(m, mmin, mmax)
 
 
-def mle_b(mags, mc, dm=0.1):
-    """Aki (1965) / Utsu maximum-likelihood b on magnitudes binned to dm."""
-    m = np.round(mags[mags >= mc] / dm) * dm          # bin to dm grid
+def gr_binned(u, b, mc, mmax, dm=DM):
+    """Doubly-truncated GR sample *as a catalogue reports it*: on the dm grid.
+
+    Magnitudes are drawn continuously from ``mc - dm/2`` (the lower edge of the
+    lowest reported bin) and then rounded to the grid, so the lowest bin is
+    fully populated.  This is the condition under which the Utsu (1966) /
+    Bender (1983) binning correction used by mle_b() is valid; drawing from mc
+    itself would half-fill the lowest bin and bias b low by a factor
+    1/(1 + ln(10) b dm/2), about 11% at b = 1, dm = 0.1.
+    """
+    return np.round(gr_from_u(u, b, mc - dm / 2.0, mmax) / dm) * dm
+
+
+def mle_b(mags, mc, dm=DM):
+    """Aki (1965) / Utsu (1966) maximum-likelihood b for grid-reported magnitudes.
+
+    ``mags`` are magnitudes on the dm reporting grid; events are selected by
+    bin centre (>= mc - dm/2 selects the bin labelled mc and above), which is
+    robust to the floating-point representation of the grid values.
+    """
+    m = np.round(np.asarray(mags) / dm) * dm
+    m = m[m >= mc - dm / 2.0]
     n = len(m)
     if n < 2:
         return np.nan, np.nan
     b = np.log10(np.e) / (m.mean() - mc + dm / 2.0)
     return b, b / np.sqrt(n)
-
-
-def solve_input_b(target_b, score, lo=0.5, hi=4.0):
-    """Bisection on a fixed sample: find input b whose binned MLE == target_b.
-
-    ``score(b)`` returns the MLE b for the magnitudes generated from a *fixed*
-    set of uniform draws, so the mapping is deterministic and monotonic and the
-    recovered b equals the target to display precision.
-    """
-    for _ in range(60):
-        mid = 0.5 * (lo + hi)
-        if score(mid) < target_b:
-            lo = mid          # MLE too low -> steepen input b
-        else:
-            hi = mid
-    return 0.5 * (lo + hi)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -266,6 +294,36 @@ def make_gap_distribution():
     q_b      = pin_median(-gap_b * 0.22 - rng.normal(0, 9, len(gap_b)), 58)
     med_geonet, med_b = np.median(q_geonet), np.median(q_b)
 
+    # ── quality filter, measured on the simulated scores ─────────────────────
+    # Which Agency B events have a GeoNet counterpart is not arbitrary: the
+    # duplicated half is the half inside GeoNet's detection footprint, i.e. the
+    # better-covered one.  The 49,000 lowest-gap Agency B events are therefore
+    # taken as the duplicate pairs and the remaining 49,000 - the offshore,
+    # high-gap tail - as Agency-B-only.  GeoNet records essentially everything
+    # onshore, so its duplicated members are just the first N_DUP of its
+    # (i.i.d.) draws.
+    order_b = np.argsort(gap_b, kind='stable')
+    dup_b, only_b = order_b[:N_DUP], order_b[N_DUP:]
+    dup_g, only_g = np.arange(N_DUP), np.arange(N_DUP, N_GEONET)
+    # Quality-based resolution keeps the higher-scoring member of each pair.
+    take_g  = q_geonet[dup_g] >= q_b[dup_b]
+    q_dup   = np.where(take_g, q_geonet[dup_g], q_b[dup_b])
+    gap_dup = np.where(take_g, gap_geonet[dup_g], gap_b[dup_b])
+    merged_q   = np.concatenate([q_geonet[only_g], q_dup, q_b[only_b]])
+    merged_gap = np.concatenate([gap_geonet[only_g], gap_dup, gap_b[only_b]])
+    is_agb_only = np.zeros(len(merged_q), dtype=bool)
+    is_agb_only[-len(only_b):] = True
+
+    kept = merged_q >= QMIN
+    q_frac = kept.mean()                      # <- retention, an output not a constant
+    rm = ~kept
+    rm_agb   = is_agb_only[rm].mean()         # share of the cut that is Agency-B-only
+    rm_gap180 = (merged_gap[rm] >= 180).mean()  # share of the cut with gap > 180 deg
+    hi_gap = merged_gap >= 180
+    rm_gap_recall = (hi_gap & rm).sum() / hi_gap.sum()   # share of the high-gap
+                                                         # population that is cut
+    n_hi_gap = int(hi_gap.sum())
+
     # Two overlaid, alpha-blended fills would mix to a third colour that is in
     # neither legend entry, so each distribution is drawn as a step outline with
     # only a faint fill: the curves stay individually readable where they overlap.
@@ -301,51 +359,172 @@ def make_gap_distribution():
     fig.savefig(OUT / 'fig2_gap.pdf'); fig.savefig(OUT / 'fig2_gap.png', dpi=300)
     plt.close(fig)
     print('Figure 2 (gap) saved.')
-    return pct_geonet, pct_b, med_geonet, med_b
+    return (pct_geonet, pct_b, med_geonet, med_b, q_frac, rm_agb, rm_gap180,
+            rm_gap_recall, n_hi_gap)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Gardner-Knopoff (1974) declustering — the same windows the platform applies
+# ══════════════════════════════════════════════════════════════════════════════
+def gk_window(m):
+    """Gardner-Knopoff (1974) space-time windows, as tabulated by van Stiphout
+    et al. (2012, Table 1) and implemented in lib/seismological-analysis.ts:
+
+        L(M) = 10^(0.1238 M + 0.983) km
+        T(M) = 10^(0.032  M + 2.7389) days   (M >= 6.5)
+             = 10^(0.5409 M - 0.547)  days   (M <  6.5)
+    """
+    t = np.where(m >= 6.5, 10 ** (0.032 * m + 2.7389), 10 ** (0.5409 * m - 0.547))
+    return t, 10 ** (0.1238 * m + 0.983)
+
+
+def gardner_knopoff(t_days, lat, lon, mag):
+    """Partition a catalogue into independent events and dependent events.
+
+    Port of gardnerKnopoffDeclustering() in lib/seismological-analysis.ts:
+    events are visited in order of decreasing magnitude and every not-yet-
+    assigned event inside the visited event's L(M)/T(M) window is flagged as
+    dependent; the events never flagged are the independent (declustered)
+    catalogue.  Returns a boolean mask of the independent events.
+
+    Candidates are restricted by binary search on the time-sorted catalogue, so
+    the distance calculation only touches the events already inside T(M).
+    """
+    order = np.argsort(t_days, kind='stable')
+    t_s = t_days[order]
+    lat_r, lon_r = np.deg2rad(lat[order]), np.deg2rad(lon[order])
+    cos_lat, mag_s = np.cos(lat_r), mag[order]
+    t_win, l_win = gk_window(mag_s)
+
+    dependent = np.zeros(len(t_s), dtype=bool)
+    for i in np.argsort(-mag_s, kind='stable'):
+        if dependent[i]:
+            continue
+        lo = np.searchsorted(t_s, t_s[i] - t_win[i], side='left')
+        hi = np.searchsorted(t_s, t_s[i] + t_win[i], side='right')
+        cand = ~dependent[lo:hi]
+        cand[i - lo] = False                       # the visited event itself
+        if not cand.any():
+            continue
+        # Haversine distance, as in the TypeScript implementation.
+        dlat = lat_r[lo:hi] - lat_r[i]
+        dlon = lon_r[lo:hi] - lon_r[i]
+        a = np.sin(dlat / 2) ** 2 + cos_lat[i] * cos_lat[lo:hi] * np.sin(dlon / 2) ** 2
+        d = 2 * R_EARTH_KM * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
+        dependent[lo:hi] |= cand & (d <= l_win[i])
+
+    independent = np.zeros(len(t_days), dtype=bool)
+    independent[order] = ~dependent
+    return independent
+
+
+def build_above_mc_catalogue():
+    """Synthesise the above-Mc catalogue as events in space and time.
+
+    An independent background population (planted b = B_BACKGROUND, uniform in
+    the study box and in time) plus aftershock sequences nucleated on its
+    M >= M_SEED events.  Sequence sizes follow the Utsu (1970) productivity
+    relation, inter-event times the modified Omori law (Omori 1894; Utsu 1961),
+    epicentres a disc of twice the Wells and Coppersmith (1994) subsurface
+    rupture length, and magnitudes a GR law with the higher b of clustered
+    seismicity, truncated one Bath (1965) magnitude unit below the mainshock.
+    The clustered events are *injected*; how many of them (and how many
+    background events) Gardner-Knopoff removes is then measured, not assumed.
+    """
+    # ---- background: independent in space, time and magnitude --------------
+    bg_mag = gr_binned(rng.uniform(0, 1, N_BACKGROUND), B_BACKGROUND, MC, 7.5)
+    bg_t   = rng.uniform(0, T_SPAN_DAYS, N_BACKGROUND)
+    bg_lat = rng.uniform(LAT0, LAT1, N_BACKGROUND)
+    bg_lon = rng.uniform(LON0, LON1, N_BACKGROUND)
+
+    # ---- sequences on the background events large enough to have them ------
+    seed = np.where(bg_mag >= M_SEED - DM / 2)[0]
+    # Utsu (1970) productivity: N_aftershocks ~ 10^(alpha (M - M_SEED)), alpha = 0.8.
+    weight = 10 ** (0.8 * (bg_mag[seed] - M_SEED))
+    share = weight / weight.sum() * N_AFTER
+    n_as = np.floor(share).astype(int)
+    # Largest-remainder allocation so the sequences sum to exactly N_AFTER.
+    short = N_AFTER - n_as.sum()
+    if short > 0:
+        n_as[np.argsort(-(share - n_as), kind='stable')[:short]] += 1
+
+    idx = np.repeat(seed, n_as)                 # parent mainshock of each aftershock
+    m_par, t_par = bg_mag[idx], bg_t[idx]
+    lat_par, lon_par = bg_lat[idx], bg_lon[idx]
+
+    # Modified Omori decay, observed only to the end of the catalogue.
+    p, c = 1.1, 0.05
+    t_max = np.minimum(365.0, T_SPAN_DAYS - t_par)
+    u = rng.uniform(0, 1, N_AFTER)
+    c1 = c ** (1 - p)
+    dt = (c1 + u * ((t_max + c) ** (1 - p) - c1)) ** (1 / (1 - p)) - c
+
+    # Aftershock zone: a disc of twice the subsurface rupture length,
+    # log10 L_rup = 0.59 M - 2.44 (Wells and Coppersmith 1994, Table 2A, all types).
+    r_km = 2 * 10 ** (0.59 * m_par - 2.44) * np.sqrt(rng.uniform(0, 1, N_AFTER))
+    th = rng.uniform(0, 2 * np.pi, N_AFTER)
+    as_lat = lat_par + (r_km * np.sin(th)) / 111.32
+    as_lon = lon_par + (r_km * np.cos(th)) / (111.32 * np.cos(np.deg2rad(lat_par)))
+    # Bath (1965): the largest aftershock is about 1.2 magnitude units below
+    # the mainshock, so the sequence is drawn from a GR law truncated there.
+    as_mag = gr_binned(rng.uniform(0, 1, N_AFTER), B_CLUSTER, MC, m_par - 1.2)
+
+    t   = np.concatenate([bg_t,   t_par + dt])
+    lat = np.concatenate([bg_lat, as_lat])
+    lon = np.concatenate([bg_lon, as_lon])
+    mag = np.concatenate([bg_mag, as_mag])
+    injected = np.concatenate([np.zeros(N_BACKGROUND, bool), np.ones(N_AFTER, bool)])
+    return t, lat, lon, mag, injected
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  Figure 3 — FMD before / after declustering
 # ══════════════════════════════════════════════════════════════════════════════
 def make_fmd():
-    dm = 0.1
-    bins = np.arange(MC, 7.6, dm)
+    dm = DM
+    # Bin centres on the same grid the magnitudes are reported on.  Building the
+    # centres with np.arange(MC, 7.6, dm) instead accumulates the 0.1 step and
+    # drifts above the exactly-representable grid values, which pushes every bin
+    # above M2.5 one bin low.
+    n_bin = int(round((7.5 - MC) / dm)) + 1
+    bins = MC + dm * np.arange(n_bin)
 
-    # Fixed uniform draws so calibration acts on the *same* sample that is
-    # plotted: the recovered b then equals the target to display precision.
-    u_bg = rng.uniform(0, 1, N_BACKGROUND)
-    u_as = rng.uniform(0, 1, N_AFTER)
+    t, lat, lon, mag, injected = build_above_mc_catalogue()
+    independent = gardner_knopoff(t, lat, lon, mag)
 
-    # Background (declustered) catalogue -> b = 0.94.
-    b_bg_in = solve_input_b(
-        0.94, lambda b: mle_b(gr_from_u(u_bg, b, MC, 7.5), MC)[0])
-    background = gr_from_u(u_bg, b_bg_in, MC, 7.5)
-
-    # Aftershocks (small, higher b) so the combined pre-declustering set -> 1.02.
-    b_as_in = solve_input_b(
-        1.02, lambda b: mle_b(
-            np.concatenate([background, gr_from_u(u_as, b, MC, MC + 1.5)]), MC)[0])
-    aftershocks = gr_from_u(u_as, b_as_in, MC, MC + 1.5)
-
-    all_mag  = np.concatenate([background, aftershocks])   # before declustering
-    main_mag = background                                  # after declustering
+    all_mag  = mag                             # before declustering
+    main_mag = mag[independent]                # after declustering
 
     b_all,  s_all  = mle_b(all_mag,  MC)
     b_main, s_main = mle_b(main_mag, MC)
+    # Estimator check, decoupled from declustering: the independent population
+    # was planted at B_BACKGROUND, so this is the recovery error of the
+    # Aki-Utsu MLE itself (the same estimator the platform applies).
+    b_bg, s_bg = mle_b(mag[~injected], MC)
+    # The independent events the windows sweep up are preferentially small (they
+    # are visited last in the descending-magnitude pass, by which time the larger
+    # events have already claimed them), which is why declustering flattens the
+    # surviving distribution rather than returning the planted background b.
+    b_cut_bg, _ = mle_b(mag[(~injected) & (~independent)], MC)
 
     def cum_n(mags):
-        return np.array([(mags >= m).sum() for m in bins], dtype=float)
+        return np.array([(mags >= m - dm / 2).sum() for m in bins], dtype=float)
+
+    def non_cum(mags):
+        k = np.rint((mags - MC) / dm).astype(int)
+        return np.bincount(k[(k >= 0) & (k < n_bin)], minlength=n_bin).astype(float)
 
     cum_all, cum_main = cum_n(all_mag), cum_n(main_mag)
-    nc_all, _  = np.histogram(np.round(all_mag / dm) * dm,  bins=np.append(bins, bins[-1] + dm))
-    nc_main, _ = np.histogram(np.round(main_mag / dm) * dm, bins=np.append(bins, bins[-1] + dm))
+    nc_all, nc_main = non_cum(all_mag), non_cum(main_mag)
 
     # GR intercept: log10 N(M) = a - b M, anchored on N at Mc, so a = log10 N(Mc) + b*Mc.
     # (Omitting the b*Mc term offsets the fitted line by 10^(b*Mc) ~ 100x and lifts it
     #  clear of the data it is fitting.)
     a_all  = np.log10(cum_all[0])  + b_all  * MC
     a_main = np.log10(cum_main[0]) + b_main * MC
-    fit_m = np.linspace(MC, 7.2, 200)
+    # Draw only over the magnitude range the synthetic catalogue actually spans.
+    m_top = bins[cum_all > 0][-1]
+    fit_m = np.linspace(MC, m_top + 0.2, 200)
     fit_all  = 10 ** (a_all  - b_all  * fit_m)
     fit_main = 10 ** (a_main - b_main * fit_m)
 
@@ -366,7 +545,7 @@ def make_fmd():
     ax.text(MC + 0.06, 1.4, f'$M_c = {MC}$', fontsize=8, color=GRAY,
             rotation=90, va='bottom', ha='left')
     ax.set_xlabel('Magnitude'); ax.set_ylabel(r'Cumulative $N\,(\geq M)$')
-    ax.set_xlim(MC - 0.2, 7.5)
+    ax.set_xlim(MC - 0.2, m_top + 0.4)
     ax.set_ylim(0.5, cum_all[0] * 3)
     ax.set_title('(a) Cumulative frequency-magnitude distribution')
     ax.legend(loc='upper right', handlelength=1.8, framealpha=0.92, fontsize=8.5)
@@ -376,17 +555,18 @@ def make_fmd():
     # Non-cumulative: filled bars for "before", dark step outline for "after", so
     # the declustered subset is legible where the two nearly coincide.
     ax2 = axes[1]
-    bin_c = bins + dm / 2
-    ax2.bar(bin_c, nc_all, width=dm * 0.9, color=GRAY, alpha=0.35,
+    # The magnitudes are reported on the grid, so ``bins`` are the bin centres:
+    # the bars are drawn on them directly, not offset by half a bin.
+    ax2.bar(bins, nc_all, width=dm * 0.9, color=GRAY, alpha=0.35,
             edgecolor='none', label='Before declustering')
-    ax2.step(np.append(bin_c - dm / 2, bin_c[-1] + dm / 2),
+    ax2.step(np.append(bins - dm / 2, bins[-1] + dm / 2),
              np.append(nc_main, nc_main[-1]), where='post',
              color=BLUE, lw=1.2, label='After declustering')
     ax2.axvline(MC, color=GRAY, linestyle=':', linewidth=1.0)
     ax2.text(MC + 0.06, 1.4, f'$M_c = {MC}$', fontsize=8, color=GRAY,
              rotation=90, va='bottom', ha='left')
     ax2.set_xlabel('Magnitude'); ax2.set_ylabel('Number of events per bin')
-    ax2.set_yscale('log'); ax2.set_xlim(MC - 0.2, 7.5); ax2.set_ylim(0.7, None)
+    ax2.set_yscale('log'); ax2.set_xlim(MC - 0.2, m_top + 0.4); ax2.set_ylim(0.7, None)
     ax2.set_title('(b) Non-cumulative frequency-magnitude distribution')
     # Order the legend before/after rather than by artist type.
     h2, l2 = ax2.get_legend_handles_labels()
@@ -396,21 +576,39 @@ def make_fmd():
     ax2.grid(True, which='major', axis='y', lw=0.3, color='#D1D5DB', alpha=0.7)
     ax2.set_axisbelow(True)
 
-    pct = (len(all_mag) - len(main_mag)) / len(all_mag) * 100
-    fig.suptitle(f'Declustering removes {len(aftershocks):,} aftershocks ({pct:.0f}%); '
-                 fr'$\hat{{b}}$: {b_all:.2f} $\rightarrow$ {b_main:.2f} '
-                 '(Gardner-Knopoff 1974 windows)', fontsize=9, y=1.01, color=GRAY)
+    n_removed = len(all_mag) - len(main_mag)
+    pct = n_removed / len(all_mag) * 100
+    fig.suptitle(f'Gardner-Knopoff (1974) declustering removes {n_removed:,} '
+                 f'dependent events ({pct:.0f}%); '
+                 fr'$\hat{{b}}$: {b_all:.2f} $\rightarrow$ {b_main:.2f}',
+                 fontsize=9, y=1.01, color=GRAY)
     fig.tight_layout()
     fig.savefig(OUT / 'fig3_fmd.pdf'); fig.savefig(OUT / 'fig3_fmd.png', dpi=300)
     plt.close(fig)
     print('Figure 3 (FMD) saved.')
-    return b_all, s_all, b_main, s_main, pct
+    # Recovery of the planted background b is the point of the check: the
+    # declustered estimate is compared against B_BACKGROUND, not calibrated to it.
+    return {
+        'b_all': b_all, 's_all': s_all, 'b_main': b_main, 's_main': s_main,
+        'b_bg': b_bg, 's_bg': s_bg, 'b_cut_bg': b_cut_bg,
+        'n_removed': n_removed, 'pct_removed': pct,
+        'n_kept': len(main_mag),
+        # Diagnostics: how much of the injected clustering the windows recover,
+        # and how many independent events they take with it.
+        'recall': injected[~independent].sum() / N_AFTER,
+        'n_bg_removed': int((~injected & ~independent).sum()),
+    }
 
 
 if __name__ == '__main__':
     make_map()
-    pct_geonet, pct_b, med_geonet, med_b = make_gap_distribution()
-    b_all, s_all, b_main, s_main, decl_pct = make_fmd()
+    (pct_geonet, pct_b, med_geonet, med_b, q_frac, rm_agb, rm_gap180,
+     rm_gap_recall, n_hi_gap) = make_gap_distribution()
+    fmd = make_fmd()
+
+    # Quality filter: retention measured on the simulated scores, not assumed.
+    N_RETAINED = int(round(N_MERGED * q_frac))
+    N_REMOVED  = N_MERGED - N_RETAINED
 
     # ── reproducibility checks: the merge/filter arithmetic must tie out ──
     assert N_DUP == 49_000
@@ -418,6 +616,15 @@ if __name__ == '__main__':
     assert N_GEONET_ONLY + N_DUP == N_GEONET
     assert N_AGENCYB_ONLY + N_DUP == N_AGENCYB
     assert N_RETAINED + N_REMOVED == N_MERGED
+    assert N_ABOVE_MC <= N_RETAINED          # the Mc cut acts on the retained set
+    assert N_BACKGROUND + N_AFTER == N_ABOVE_MC
+    # The estimator check has to be a real one: the b recovered from the planted
+    # background must sit within a few counting-error standard deviations of
+    # B_BACKGROUND, having never been calibrated to it.
+    assert abs(fmd['b_bg'] - B_BACKGROUND) < 3 * fmd['s_bg']
+    # Declustering has to be executed, not asserted: the windows recover most of
+    # the injected sequences and do not return exactly the injected count.
+    assert fmd['recall'] > 0.5 and fmd['n_removed'] != N_AFTER
 
     print('\n' + '=' * 66)
     print(' WORKED-EXAMPLE SUMMARY — reproduced, seed=42')
@@ -431,11 +638,25 @@ if __name__ == '__main__':
     print(f'   resolved duplicate pairs       : {N_DUP:>8,}')
     print(f' Median quality  GeoNet / AgencyB : {med_geonet:>5.0f} / {med_b:.0f}')
     print(f' Gap > 180 deg   GeoNet / AgencyB : {pct_geonet:>4.0f}% / {pct_b:.0f}%')
-    print(f' Q >= 70 retained ({QFILTER_FRAC:.0%})         : {N_RETAINED:>8,}')
+    print(f' Q >= {QMIN} retained                 : {N_RETAINED:>8,}  ({q_frac:.1%})')
     print(f' Removed by quality filter        : {N_REMOVED:>8,}')
-    print(f' Events >= Mc={MC} (quality-filt.)  : {N_ABOVE_MC:>8,}')
-    print(f' GR b-value (quality-filtered)    : {b_all:.2f} +/- {s_all:.3f}  (N={N_ABOVE_MC:,})')
-    print(f' Declustering removes             : {decl_pct:.0f}%  ({N_AFTER:,} aftershocks)')
-    print(f' GR b-value (declustered)         : {b_main:.2f} +/- {s_main:.3f}  (N={N_BACKGROUND:,})')
+    print(f'   of the removed: Agency-B-only  : {rm_agb:>7.0%}')
+    print(f'   of the removed: gap >= 180 deg : {rm_gap180:>7.0%}')
+    print(f'   of the {n_hi_gap:,} gap >= 180 events : {rm_gap_recall:>6.0%} removed')
+    print(f' Events >= Mc={MC} (quality-filt.)  : {N_ABOVE_MC:>8,}'
+          f'  ({CLUSTER_FRAC:.0%} injected as clusters)')
+    print(f' Planted b  background / clusters : {B_BACKGROUND:.2f} / {B_CLUSTER:.2f}')
+    print(f' MLE b recovered from background  : {fmd["b_bg"]:.3f} +/- {fmd["s_bg"]:.3f}'
+          f'  (planted {B_BACKGROUND:.2f}, error {fmd["b_bg"] - B_BACKGROUND:+.3f})')
+    print(f' GR b-value (quality-filtered)    : {fmd["b_all"]:.3f} +/- {fmd["s_all"]:.3f}'
+          f'  (N={N_ABOVE_MC:,})')
+    print(f' Gardner-Knopoff removes          : {fmd["pct_removed"]:.0f}%'
+          f'  ({fmd["n_removed"]:,} dependent events)')
+    print(f'   injected aftershocks recovered : {fmd["recall"]:>7.0%}')
+    print(f'   independent events also cut    : {fmd["n_bg_removed"]:>8,}'
+          f'  (their own b = {fmd["b_cut_bg"]:.2f})')
+    print(f' GR b-value (declustered)         : {fmd["b_main"]:.3f} +/- {fmd["s_main"]:.3f}'
+          f'  (N={fmd["n_kept"]:,})')
+    print(f'   error vs planted background b  : {fmd["b_main"] - B_BACKGROUND:+.3f}')
     print('=' * 66)
     print('All figures written to', OUT)

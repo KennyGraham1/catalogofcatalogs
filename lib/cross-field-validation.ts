@@ -175,28 +175,53 @@ export function validateQualityMetricsConsistency(event: any): DataQualityCheck[
     }
   }
 
-  // Azimuthal gap and station count relationship
-  if (event.azimuthal_gap !== undefined && event.used_station_count !== undefined) {
-    // With many stations, gap should be small
-    if (event.used_station_count >= 10 && event.azimuthal_gap > 180) {
+  // Azimuthal gap checks.
+  // The gap is diagnostic on its own, so this must NOT be gated on a station count being
+  // reported: an epicentre with more than half the compass unsampled is poorly constrained
+  // whether or not the depositor supplied used_station_count, and the offshore NZ events that
+  // carry the largest gaps are precisely the ones whose station counts are most often absent.
+  if (event.azimuthal_gap !== null && event.azimuthal_gap !== undefined) {
+    // Gap > 180 deg means the station network spans less than half the azimuth range around
+    // the epicentre, the classic station-clustering / outside-the-network geometry that
+    // degrades epicentre and depth control (Bondar et al., 2004, "Epicentre accuracy based on
+    // seismic network criteria", Geophys. J. Int. 156(3), 483-496; the bondar2004 entry in
+    // paper/references.bib, cited for the same criterion in paper/srl_paper.tex).
+    if (event.azimuthal_gap > 180) {
+      const stationNote = event.used_station_count !== undefined
+        ? (event.used_station_count >= 10
+            ? ` despite ${event.used_station_count} stations`
+            : ` with only ${event.used_station_count} stations`)
+        : '';
       checks.push({
         passed: false,
         severity: 'warning',
-        message: `Large azimuthal gap (${event.azimuthal_gap}°) despite ${event.used_station_count} stations`,
+        message: `Large azimuthal gap (${event.azimuthal_gap}°)${stationNote}`,
         field: 'azimuthal_gap',
         suggestion: 'Stations may be poorly distributed - consider using more distant stations'
       });
     }
 
-    // With few stations, a very small gap suggests stations are clustered rather than distributed
-    if (event.used_station_count < 6 && event.azimuthal_gap < 90) {
-      checks.push({
-        passed: false,
-        severity: 'info',
-        message: `Small azimuthal gap (${event.azimuthal_gap}°) with only ${event.used_station_count} stations suggests station clustering`,
-        field: 'azimuthal_gap',
-        suggestion: 'Stations may all be in one direction — verify azimuthal gap calculation and station distribution'
-      });
+    // Geometric floor. The N azimuthal separations between N stations sum to 360 deg, so the
+    // largest of them - the azimuthal gap - can never be smaller than 360/N, and that minimum
+    // is reached only for stations spaced perfectly evenly in azimuth. A reported gap below
+    // 360/N is therefore impossible and indicates a corrupt, mis-scaled or swapped field.
+    // (Clustering makes the gap LARGER, never smaller; the rule that previously stood here
+    // flagged small gaps with few stations as "station clustering", which is backwards -
+    // 80 deg with 5 stations is close to the 72 deg geometric optimum, and the quality scorer
+    // awards full network-geometry marks for gaps <= 90 deg.)
+    // The 0.5 deg allowance absorbs gap values that agencies round to whole degrees.
+    const n = event.used_station_count;
+    if (typeof n === 'number' && n > 0) {
+      const gapFloor = 360 / n;
+      if (event.azimuthal_gap < gapFloor - 0.5) {
+        checks.push({
+          passed: false,
+          severity: 'warning',
+          message: `Azimuthal gap (${event.azimuthal_gap}°) is below the 360/N = ${gapFloor.toFixed(1)}° minimum attainable with ${n} stations`,
+          field: 'azimuthal_gap',
+          suggestion: 'This gap is geometrically impossible for the reported station count - verify the azimuthal gap and used station count fields'
+        });
+      }
     }
   }
 

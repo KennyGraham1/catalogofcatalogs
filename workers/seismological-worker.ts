@@ -19,7 +19,7 @@ interface EarthquakeEvent {
 // Message types
 type WorkerMessage = 
   | { type: 'gutenberg-richter'; events: EarthquakeEvent[]; minMagnitude?: number; binWidth?: number }
-  | { type: 'completeness'; events: EarthquakeEvent[] }
+  | { type: 'completeness'; events: EarthquakeEvent[]; binWidth?: number }
   | { type: 'temporal'; events: EarthquakeEvent[] }
   | { type: 'moment'; events: EarthquakeEvent[] }
   | { type: 'statistics'; events: EarthquakeEvent[] };
@@ -55,6 +55,35 @@ function setCache(key: string, result: any): void {
   cache.set(key, { result, timestamp: Date.now() });
 }
 
+/**
+ * Numeric helpers kept deliberately identical to lib/seismological-analysis.ts.
+ */
+const BIN_EPSILON = 1e-9;
+
+function minOf(values: number[]): number {
+  let min = Infinity;
+  for (const value of values) {
+    if (value < min) min = value;
+  }
+  return min;
+}
+
+function maxOf(values: number[]): number {
+  let max = -Infinity;
+  for (const value of values) {
+    if (value > max) max = value;
+  }
+  return max;
+}
+
+function binLowerEdge(magnitude: number, binWidth: number): number {
+  return Math.floor(magnitude / binWidth + BIN_EPSILON) * binWidth;
+}
+
+function binKey(edge: number): number {
+  return Number(edge.toFixed(4));
+}
+
 // Gutenberg-Richter calculation
 function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: number, binWidth = 0.1) {
   const filteredEvents = minMagnitude != null
@@ -66,19 +95,18 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
   }
 
   const magnitudes = filteredEvents.map(e => e.magnitude);
-  const minMag = Math.floor(Math.min(...magnitudes) / binWidth) * binWidth;
-  const maxMag = Math.ceil(Math.max(...magnitudes) / binWidth) * binWidth;
+  const minMag = binLowerEdge(minOf(magnitudes), binWidth);
+  const maxMag = Math.ceil(maxOf(magnitudes) / binWidth - BIN_EPSILON) * binWidth;
 
   const bins = new Map<number, number>();
   // Index-based iteration so floating-point drift cannot drop the top bin.
   const nBins = Math.round((maxMag - minMag) / binWidth) + 1;
   for (let i = 0; i < nBins; i++) {
-    bins.set(Number((minMag + i * binWidth).toFixed(2)), 0);
+    bins.set(binKey(minMag + i * binWidth), 0);
   }
 
   filteredEvents.forEach(event => {
-    const bin = Math.floor(event.magnitude / binWidth) * binWidth;
-    const roundedBin = Number(bin.toFixed(2));
+    const roundedBin = binKey(binLowerEdge(event.magnitude, binWidth));
     bins.set(roundedBin, (bins.get(roundedBin) || 0) + 1);
   });
 
@@ -98,7 +126,16 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
   }
 
   const n = cumulativeCounts.length;
-  if (n < 3) return { error: 'Insufficient magnitude bins' };
+  // Hard floor: a fit needs at least three POPULATED magnitude bins.
+  // `cumulativeCounts.length` counts every bin from minMag up to the largest
+  // populated one, so two populated bins far apart used to slip through.
+  const populatedBins = sortedBins.reduce(
+    (count, [, binCount]) => (binCount > 0 ? count + 1 : count),
+    0
+  );
+  if (populatedBins < 3) {
+    return { error: 'Insufficient magnitude bins for regression (need at least 3 populated bins)' };
+  }
 
   // Completeness magnitude Mc (MAXC; Wiemer & Wyss 2000, with the +0.2 correction
   // of Woessner & Wiemer 2005) when no explicit cut-off is supplied. The Aki-Utsu
@@ -117,10 +154,15 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
     }
     mc = Number((peakMag + MAXC_CORRECTION).toFixed(2));
   }
-  let magsAboveMc = magnitudes.filter(m => m >= mc);
+  const magsAboveMc = magnitudes.filter(m => m >= mc);
+  // Hard floor: fewer than 10 events above Mc means the estimate is WITHHELD, not
+  // reported. Falling back to the catalogue floor (the old behaviour) anchored the
+  // MLE at a magnitude the catalogue is not complete above and reported that floor
+  // as the completeness magnitude. Matches lib/seismological-analysis.ts.
   if (magsAboveMc.length < 10) {
-    mc = minMag;
-    magsAboveMc = magnitudes.filter(m => m >= mc);
+    return {
+      error: `Insufficient data above the completeness magnitude (need at least 10 events above Mc=${mc})`
+    };
   }
 
   // Maximum-likelihood b-value (Aki, 1965) with the Utsu binning correction.
@@ -157,25 +199,33 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
 }
 
 // Completeness magnitude estimation
-function estimateCompleteness(events: EarthquakeEvent[]) {
+// `binWidth` mirrors lib/seismological-analysis.ts estimateCompletenessMagnitude,
+// which the caller can parameterise; it used to be hard-coded here, so the two
+// copies could only agree at the default 0.1.
+function estimateCompleteness(events: EarthquakeEvent[], binWidth = 0.1) {
   if (events.length < 50) {
     return { error: 'Insufficient data (need at least 50 events)' };
   }
 
-  const binWidth = 0.1;
   const magnitudes = events.map(e => e.magnitude);
-  const minMag = Math.floor(Math.min(...magnitudes) / binWidth) * binWidth;
-  const maxMag = Math.ceil(Math.max(...magnitudes) / binWidth) * binWidth;
+  const minMag = binLowerEdge(minOf(magnitudes), binWidth);
+  const maxMag = Math.ceil(maxOf(magnitudes) / binWidth - BIN_EPSILON) * binWidth;
 
-  const distribution: { magnitude: number; count: number }[] = [];
+  // Bin once rather than re-filtering the whole catalogue per bin: the old loop
+  // was O(bins x N), and its `m >= edge && m < edge + binWidth` test put M0.3 in
+  // the 0.2 bin because 0.2 + 0.1 is 0.30000000000000004.
+  const counts = new Map<number, number>();
   const nBins = Math.round((maxMag - minMag) / binWidth) + 1;
   for (let i = 0; i < nBins; i++) {
-    const mag = Number((minMag + i * binWidth).toFixed(2));
-    const count = events.filter(e =>
-      e.magnitude >= mag && e.magnitude < mag + binWidth
-    ).length;
-    distribution.push({ magnitude: mag, count });
+    counts.set(binKey(minMag + i * binWidth), 0);
   }
+  for (const event of events) {
+    const key = binKey(binLowerEdge(event.magnitude, binWidth));
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const distribution: { magnitude: number; count: number }[] = Array.from(counts.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([magnitude, count]) => ({ magnitude, count }));
 
   // Find Mc using the maximum-curvature method (peak of the non-cumulative FMD).
   let maxCount = 0;
@@ -216,6 +266,21 @@ function getGardnerKnopoffWindow(magnitude: number): { timeWindowDays: number; d
   // Gardner & Knopoff (1974) distance relation
   const distanceWindowKm = Math.pow(10, 0.1238 * magnitude + 0.983);
   return { timeWindowDays, distanceWindowKm };
+}
+
+/**
+ * ISO-8601 week start (the Monday, in UTC) of the day containing `date`, as a
+ * `YYYY-MM-DD` string. Identical to lib/seismological-analysis.ts.
+ *
+ * Weekly time-series bins used to be keyed `YYYY-Www` ("2016-W47"), which is not
+ * a date `new Date()` can parse, so the temporal chart rendered "NaN/aN" ticks
+ * and "Invalid Date" tooltips for every catalogue spanning more than a year.
+ */
+function isoWeekStartUTC(date: Date): string {
+  const dayStartMs = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  // getUTCDay() is 0 for Sunday; ISO weeks run Monday (0 here) to Sunday (6).
+  const mondayOffset = (new Date(dayStartMs).getUTCDay() + 6) % 7;
+  return new Date(dayStartMs - mondayOffset * 86400000).toISOString().split('T')[0];
 }
 
 /**
@@ -351,6 +416,14 @@ function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): SeismicCluster[]
       clusterType = 'mainshock-aftershock';
     }
 
+    // Per-sequence b-value, as lib/seismological-analysis.ts buildClusterInfo does;
+    // withheld (left undefined) whenever the fit does not meet the hard floors.
+    let bValue: number | undefined;
+    if (clusterEvents.length >= 10) {
+      const gr = calculateGutenbergRichter(clusterEvents) as { error?: string; bValue?: number };
+      if (!gr.error) bValue = gr.bValue;
+    }
+
     clusterInfo.push({
       id: clusterId++,
       startDate: sorted[0].time,
@@ -371,15 +444,19 @@ function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): SeismicCluster[]
       spatialExtentKm: maxDist,
       centerLatitude: sumLat / clusterEvents.length,
       centerLongitude: sumLon / clusterEvents.length,
-      clusterType
+      clusterType,
+      bValue
     });
   });
 
-  // Sort by mainshock magnitude and return top clusters
+  // Every significant cluster, sorted by mainshock magnitude. This used to end in
+  // `.slice(0, 20)`: a rendering cap applied inside the scientific routine, which
+  // the caller then reported as the number of clusters detected (a catalogue with
+  // 137 clusters displayed "20 clusters detected"). Truncation for display belongs
+  // in the presentation layer, and lib/seismological-analysis.ts returns them all.
   return clusterInfo
     .filter(c => c.eventCount >= 3)
-    .sort((a, b) => b.maxMagnitude - a.maxMagnitude)
-    .slice(0, 20);
+    .sort((a, b) => b.maxMagnitude - a.maxMagnitude);
 }
 
 // Temporal pattern analysis with Gardner-Knopoff declustering
@@ -402,14 +479,12 @@ function analyzeTemporalPattern(events: EarthquakeEvent[]) {
   const bins = new Map<string, number>();
   sortedEvents.forEach(event => {
     const eventDate = new Date(event.time);
-    let binKey: string;
-    if (useWeeklyBins) {
-      const startOfYear = new Date(eventDate.getFullYear(), 0, 1);
-      const weekNum = Math.ceil((((eventDate.getTime() - startOfYear.getTime()) / 86400000) + startOfYear.getDay() + 1) / 7);
-      binKey = `${eventDate.getFullYear()}-W${weekNum.toString().padStart(2, '0')}`;
-    } else {
-      binKey = eventDate.toISOString().split('T')[0];
-    }
+    // Both branches emit a parseable ISO calendar date: the event's UTC day, or
+    // the Monday starting its ISO week. (Weekly bins were keyed "YYYY-Www", which
+    // no date formatter can parse.)
+    const binKey = useWeeklyBins
+      ? isoWeekStartUTC(eventDate)
+      : eventDate.toISOString().split('T')[0];
     bins.set(binKey, (bins.get(binKey) || 0) + 1);
   });
 
@@ -512,7 +587,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
         );
         break;
       case 'completeness':
-        result = estimateCompleteness(events);
+        result = estimateCompleteness(events, (e.data as any).binWidth);
         break;
       case 'temporal':
         result = analyzeTemporalPattern(events);

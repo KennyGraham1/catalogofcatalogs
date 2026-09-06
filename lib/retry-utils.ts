@@ -136,27 +136,9 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Retry a function with exponential backoff
- * 
- * @example
- * ```typescript
- * const result = await retry(
- *   async () => {
- *     const response = await fetch('https://api.example.com/data');
- *     if (!response.ok) throw new Error(`HTTP ${response.status}`);
- *     return response.json();
- *   },
- *   {
- *     maxAttempts: 3,
- *     initialDelay: 1000,
- *     onRetry: (error, attempt, delay) => {
- *       console.log(`Retry attempt ${attempt} after ${delay}ms: ${error.message}`);
- *     }
- *   }
- * );
- * ```
  */
 export async function retry<T>(
-  fn: () => Promise<T>,
+  fn: (signal?: AbortSignal) => Promise<T>,
   options: RetryOptions = {}
 ): Promise<T> {
   const {
@@ -173,17 +155,27 @@ export async function retry<T>(
   let lastError: any;
   
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // One AbortController per attempt. Promise.race only decides which promise the
+    // CALLER observes - it does not cancel the loser - so without an abort a timed-out
+    // request keeps running to completion while the next attempt opens a second socket
+    // to the same endpoint (up to maxAttempts concurrent duplicates per logical call).
+    // `fn` receives the signal and is expected to pass it to whatever it starts.
+    const controller = new AbortController();
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
     try {
-      // Create timeout promise
+      // Create timeout promise. The handle is cleared in `finally` so a fast success
+      // does not leave a `timeout`-long timer holding the event loop open.
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => {
+        timeoutHandle = setTimeout(() => {
+          controller.abort();
           reject(new Error(`Request timeout after ${timeout}ms`));
         }, timeout);
       });
 
       // Race between function execution and timeout
       const result = await Promise.race([
-        fn(),
+        fn(controller.signal),
         timeoutPromise,
       ]);
 
@@ -212,6 +204,10 @@ export async function retry<T>(
         // Don't retry, throw the error
         throw error;
       }
+    } finally {
+      if (timeoutHandle !== undefined) {
+        clearTimeout(timeoutHandle);
+      }
     }
   }
 
@@ -224,7 +220,7 @@ export async function retry<T>(
  * Useful when you want to handle errors without try/catch
  */
 export async function retryWithResult<T>(
-  fn: () => Promise<T>,
+  fn: (signal?: AbortSignal) => Promise<T>,
   options: RetryOptions = {}
 ): Promise<RetryResult<T>> {
   const startTime = Date.now();
@@ -232,9 +228,9 @@ export async function retryWithResult<T>(
 
   try {
     const data = await retry(
-      async () => {
+      async (signal) => {
         attempts++;
-        return fn();
+        return fn(signal);
       },
       options
     );
@@ -256,8 +252,68 @@ export async function retryWithResult<T>(
 }
 
 /**
+ * Combine a caller-supplied AbortSignal with the per-attempt timeout signal so either
+ * can cancel the request. Uses AbortSignal.any where the runtime provides it
+ * (Node >= 20 / modern browsers) and falls back to a manual relay otherwise.
+ */
+function combineAbortSignals(
+  external?: AbortSignal | null,
+  attempt?: AbortSignal
+): AbortSignal | undefined {
+  if (!external) return attempt;
+  if (!attempt) return external;
+
+  const anyOf = (AbortSignal as unknown as {
+    any?: (signals: AbortSignal[]) => AbortSignal;
+  }).any;
+  if (typeof anyOf === 'function') {
+    return anyOf.call(AbortSignal, [external, attempt]);
+  }
+
+  const controller = new AbortController();
+  if (external.aborted || attempt.aborted) {
+    controller.abort();
+  } else {
+    const abort = () => controller.abort();
+    external.addEventListener('abort', abort, { once: true });
+    attempt.addEventListener('abort', abort, { once: true });
+  }
+  return controller.signal;
+}
+
+/**
+ * One fetch attempt: passes the per-attempt abort signal through so a timed-out
+ * attempt actually cancels its socket, and turns a non-ok response into a retryable
+ * error carrying `status` (which callers such as the GeoNet chunker test for 413).
+ */
+async function fetchOrThrow(
+  url: string,
+  init: RequestInit | undefined,
+  signal?: AbortSignal
+): Promise<Response> {
+  const response = await fetch(url, {
+    ...init,
+    signal: combineAbortSignals(init?.signal, signal),
+  });
+
+  // Throw error for non-ok responses so they can be retried
+  if (!response.ok) {
+    const error: any = new Error(`HTTP ${response.status}: ${response.statusText}`);
+    error.status = response.status;
+    error.response = response;
+    throw error;
+  }
+
+  return response;
+}
+
+/**
  * Retry a fetch request with exponential backoff
  * Convenience wrapper around retry() for fetch calls
+ *
+ * NOTE: this resolves as soon as the response headers arrive, so a caller that then
+ * awaits `response.text()` reads the body OUTSIDE the per-attempt timeout. Use
+ * `retryFetchText` when the body is what you want.
  */
 export async function retryFetch(
   url: string,
@@ -265,18 +321,44 @@ export async function retryFetch(
   options: RetryOptions = {}
 ): Promise<Response> {
   return retry(
-    async () => {
-      const response = await fetch(url, init);
-      
-      // Throw error for non-ok responses so they can be retried
-      if (!response.ok) {
-        const error: any = new Error(`HTTP ${response.status}: ${response.statusText}`);
-        error.status = response.status;
-        error.response = response;
-        throw error;
-      }
-      
-      return response;
+    async (signal) => fetchOrThrow(url, init, signal),
+    {
+      ...options,
+      onRetry: (error, attempt, delay) => {
+        console.log(`[RetryFetch] Attempt ${attempt} failed for ${url}: ${error.message}. Retrying in ${delay}ms...`);
+        options.onRetry?.(error, attempt, delay);
+      },
+    }
+  );
+}
+
+export interface RetryFetchTextResult {
+  status: number;
+  /** Response `content-type` header, or '' when absent. */
+  contentType: string;
+  text: string;
+}
+
+/**
+ * Retry a fetch request and read its text body INSIDE the retried attempt, so the
+ * per-attempt timeout and its abort cover the body download as well as the header
+ * exchange. With `retryFetch` a stalled body download is unbounded: the timeout has
+ * already been cleared by the time the caller awaits `response.text()`.
+ */
+export async function retryFetchText(
+  url: string,
+  init?: RequestInit,
+  options: RetryOptions = {}
+): Promise<RetryFetchTextResult> {
+  return retry(
+    async (signal) => {
+      const response = await fetchOrThrow(url, init, signal);
+      return {
+        status: response.status,
+        contentType: response.headers?.get('content-type') || '',
+        // A 204 has no body; text() yields '' for it.
+        text: await response.text(),
+      };
     },
     {
       ...options,

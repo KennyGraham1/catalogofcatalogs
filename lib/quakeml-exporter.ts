@@ -87,9 +87,9 @@ function formatCreationInfo(info: CreationInfo, indent: string = '    '): string
   const parts: string[] = [];
 
   if (info.agencyID) parts.push(`${indent}<agencyID>${escapeXml(info.agencyID)}</agencyID>`);
-  if (info.agencyURI) parts.push(`${indent}<agencyURI>${escapeXml(info.agencyURI)}</agencyURI>`);
+  if (info.agencyURI) parts.push(`${indent}<agencyURI>${escapeXml(toResourceID(info.agencyURI, 'agency'))}</agencyURI>`);
   if (info.author) parts.push(`${indent}<author>${escapeXml(info.author)}</author>`);
-  if (info.authorURI) parts.push(`${indent}<authorURI>${escapeXml(info.authorURI)}</authorURI>`);
+  if (info.authorURI) parts.push(`${indent}<authorURI>${escapeXml(toResourceID(info.authorURI, 'author'))}</authorURI>`);
   if (info.creationTime) parts.push(`${indent}<creationTime>${info.creationTime}</creationTime>`);
   if (info.version) parts.push(`${indent}<version>${escapeXml(info.version)}</version>`);
 
@@ -177,10 +177,12 @@ function formatOriginUncertainty(uncertainty: OriginUncertainty, indent: string 
  * Format Comment element
  */
 function formatComment(comment: Comment, indent: string = '    '): string {
-  let xml = `${indent}<comment>\n`;
+  // QuakeML BED 1.2 Comment: text (+ optional creationInfo) are the only child
+  // elements; the identifier is the `id` ATTRIBUTE (type ResourceReference).
+  const idAttr = comment.id ? ` id="${escapeXml(toResourceID(comment.id, 'comment'))}"` : '';
+  let xml = `${indent}<comment${idAttr}>\n`;
   xml += `${indent}  <text>${escapeXml(comment.text)}</text>\n`;
 
-  if (comment.id) xml += `${indent}  <id>${escapeXml(comment.id)}</id>\n`;
   if (comment.creationInfo) {
     xml += formatCreationInfo(comment.creationInfo, indent + '  ') + '\n';
   }
@@ -204,7 +206,7 @@ function formatEventDescription(desc: EventDescription, indent: string = '    ')
  * Format Origin element
  */
 function formatOrigin(origin: Origin, indent: string = '    '): string {
-  let xml = `${indent}<origin publicID="${escapeXml(origin.publicID)}">\n`;
+  let xml = `${indent}<origin publicID="${escapeXml(toResourceID(origin.publicID, 'origin'))}">\n`;
 
   xml += formatComments(origin.comment, indent + '  ');
 
@@ -276,13 +278,13 @@ function formatOrigin(origin: Origin, indent: string = '    '): string {
     xml += `${indent}  <epicenterFixed>${origin.epicenterFixed}</epicenterFixed>\n`;
   }
   if (origin.referenceSystemID) {
-    xml += `${indent}  <referenceSystemID>${escapeXml(origin.referenceSystemID)}</referenceSystemID>\n`;
+    xml += `${indent}  <referenceSystemID>${escapeXml(toResourceID(origin.referenceSystemID, 'referenceSystem'))}</referenceSystemID>\n`;
   }
   if (origin.methodID) {
-    xml += `${indent}  <methodID>${escapeXml(origin.methodID)}</methodID>\n`;
+    xml += `${indent}  <methodID>${escapeXml(toResourceID(origin.methodID, 'method'))}</methodID>\n`;
   }
   if (origin.earthModelID) {
-    xml += `${indent}  <earthModelID>${escapeXml(origin.earthModelID)}</earthModelID>\n`;
+    xml += `${indent}  <earthModelID>${escapeXml(toResourceID(origin.earthModelID, 'earthModel'))}</earthModelID>\n`;
   }
 
   // Quality
@@ -360,7 +362,7 @@ function formatOrigin(origin: Origin, indent: string = '    '): string {
  * Format Magnitude element
  */
 function formatMagnitude(magnitude: Magnitude, indent: string = '    '): string {
-  let xml = `${indent}<magnitude publicID="${escapeXml(magnitude.publicID)}">\n`;
+  let xml = `${indent}<magnitude publicID="${escapeXml(toResourceID(magnitude.publicID, 'magnitude'))}">\n`;
 
   xml += formatComments(magnitude.comment, indent + '  ');
 
@@ -392,17 +394,17 @@ function formatMagnitude(magnitude: Magnitude, indent: string = '    '): string 
 
   // Origin ID
   if (magnitude.originID) {
-    xml += `${indent}  <originID>${escapeXml(magnitude.originID)}</originID>\n`;
+    xml += `${indent}  <originID>${escapeXml(toResourceID(magnitude.originID, 'origin'))}</originID>\n`;
   }
 
   if (magnitude.methodID) {
-    xml += `${indent}  <methodID>${escapeXml(magnitude.methodID)}</methodID>\n`;
+    xml += `${indent}  <methodID>${escapeXml(toResourceID(magnitude.methodID, 'method'))}</methodID>\n`;
   }
 
   if (magnitude.stationMagnitudeContributions && magnitude.stationMagnitudeContributions.length > 0) {
     magnitude.stationMagnitudeContributions.forEach(contribution => {
       xml += `${indent}  <stationMagnitudeContribution>\n`;
-      xml += `${indent}    <stationMagnitudeID>${escapeXml(contribution.stationMagnitudeID)}</stationMagnitudeID>\n`;
+      xml += `${indent}    <stationMagnitudeID>${escapeXml(toResourceID(contribution.stationMagnitudeID, 'stationMagnitude'))}</stationMagnitudeID>\n`;
       if (contribution.residual !== undefined) {
         xml += `${indent}    <residual>${contribution.residual}</residual>\n`;
       }
@@ -444,7 +446,7 @@ function formatWaveformID(waveformID: WaveformStreamID, indent: string = '    ')
     xml += ` channelCode="${escapeXml(waveformID.channelCode)}"`;
   }
   if (waveformID.resourceURI) {
-    xml += `>${escapeXml(waveformID.resourceURI)}</waveformID>`;
+    xml += `>${escapeXml(toResourceID(waveformID.resourceURI, 'waveform'))}</waveformID>`;
   } else {
     xml += '/>';
   }
@@ -481,7 +483,7 @@ function formatRealQuantityElement(
  * Format Pick element
  */
 function formatPick(pick: Pick, indent: string = '    '): string {
-  let xml = `${indent}<pick publicID="${escapeXml(pick.publicID)}">\n`;
+  let xml = `${indent}<pick publicID="${escapeXml(toResourceID(pick.publicID, 'pick'))}">\n`;
 
   xml += formatComments(pick.comment, indent + '  ');
 
@@ -499,13 +501,13 @@ function formatPick(pick: Pick, indent: string = '    '): string {
 
   // Optional elements
   if (pick.filterID) {
-    xml += `${indent}  <filterID>${escapeXml(pick.filterID)}</filterID>\n`;
+    xml += `${indent}  <filterID>${escapeXml(toResourceID(pick.filterID, 'filter'))}</filterID>\n`;
   }
   if (pick.methodID) {
-    xml += `${indent}  <methodID>${escapeXml(pick.methodID)}</methodID>\n`;
+    xml += `${indent}  <methodID>${escapeXml(toResourceID(pick.methodID, 'method'))}</methodID>\n`;
   }
   if (pick.slownessMethodID) {
-    xml += `${indent}  <slownessMethodID>${escapeXml(pick.slownessMethodID)}</slownessMethodID>\n`;
+    xml += `${indent}  <slownessMethodID>${escapeXml(toResourceID(pick.slownessMethodID, 'slownessMethod'))}</slownessMethodID>\n`;
   }
   if (pick.horizontalSlowness) {
     xml += formatRealQuantityElement('horizontalSlowness', pick.horizontalSlowness, indent + '  ') + '\n';
@@ -542,14 +544,14 @@ function formatPick(pick: Pick, indent: string = '    '): string {
 function formatArrival(arrival: Arrival, indent: string = '      '): string {
   let xml = `${indent}<arrival`;
   if (arrival.publicID) {
-    xml += ` publicID="${escapeXml(arrival.publicID)}"`;
+    xml += ` publicID="${escapeXml(toResourceID(arrival.publicID, 'arrival'))}"`;
   }
   xml += '>\n';
 
   xml += formatComments(arrival.comment, indent + '  ');
 
   // PickID (required)
-  xml += `${indent}  <pickID>${escapeXml(arrival.pickID)}</pickID>\n`;
+  xml += `${indent}  <pickID>${escapeXml(toResourceID(arrival.pickID, 'pick'))}</pickID>\n`;
 
   // Phase (required)
   xml += `${indent}  <phase>${escapeXml(arrival.phase)}</phase>\n`;
@@ -586,7 +588,7 @@ function formatArrival(arrival: Arrival, indent: string = '      '): string {
     xml += `${indent}  <backazimuthWeight>${arrival.backazimuthWeight}</backazimuthWeight>\n`;
   }
   if (arrival.earthModelID) {
-    xml += `${indent}  <earthModelID>${escapeXml(arrival.earthModelID)}</earthModelID>\n`;
+    xml += `${indent}  <earthModelID>${escapeXml(toResourceID(arrival.earthModelID, 'earthModel'))}</earthModelID>\n`;
   }
   if (arrival.creationInfo) {
     xml += formatCreationInfo(arrival.creationInfo, indent + '  ') + '\n';
@@ -600,7 +602,7 @@ function formatArrival(arrival: Arrival, indent: string = '      '): string {
  * Format Amplitude element
  */
 function formatAmplitude(amplitude: Amplitude, indent: string = '    '): string {
-  let xml = `${indent}<amplitude publicID="${escapeXml(amplitude.publicID)}">\n`;
+  let xml = `${indent}<amplitude publicID="${escapeXml(toResourceID(amplitude.publicID, 'amplitude'))}">\n`;
 
   xml += formatComments(amplitude.comment, indent + '  ');
 
@@ -620,10 +622,10 @@ function formatAmplitude(amplitude: Amplitude, indent: string = '    '): string 
     xml += `${indent}  <unit>${escapeXml(amplitude.unit)}</unit>\n`;
   }
   if (amplitude.methodID) {
-    xml += `${indent}  <methodID>${escapeXml(amplitude.methodID)}</methodID>\n`;
+    xml += `${indent}  <methodID>${escapeXml(toResourceID(amplitude.methodID, 'method'))}</methodID>\n`;
   }
   if (amplitude.filterID) {
-    xml += `${indent}  <filterID>${escapeXml(amplitude.filterID)}</filterID>\n`;
+    xml += `${indent}  <filterID>${escapeXml(toResourceID(amplitude.filterID, 'filter'))}</filterID>\n`;
   }
   if (amplitude.period) {
     xml += formatRealQuantityElement('period', amplitude.period, indent + '  ') + '\n';
@@ -639,7 +641,7 @@ function formatAmplitude(amplitude: Amplitude, indent: string = '    '): string 
     xml += `${indent}  </timeWindow>\n`;
   }
   if (amplitude.pickID) {
-    xml += `${indent}  <pickID>${escapeXml(amplitude.pickID)}</pickID>\n`;
+    xml += `${indent}  <pickID>${escapeXml(toResourceID(amplitude.pickID, 'pick'))}</pickID>\n`;
   }
   if (amplitude.waveformID) {
     xml += formatWaveformID(amplitude.waveformID, indent + '  ') + '\n';
@@ -670,13 +672,13 @@ function formatAmplitude(amplitude: Amplitude, indent: string = '    '): string 
  * Format StationMagnitude element
  */
 function formatStationMagnitude(stationMag: StationMagnitude, indent: string = '    '): string {
-  let xml = `${indent}<stationMagnitude publicID="${escapeXml(stationMag.publicID)}">\n`;
+  let xml = `${indent}<stationMagnitude publicID="${escapeXml(toResourceID(stationMag.publicID, 'stationMagnitude'))}">\n`;
 
   xml += formatComments(stationMag.comment, indent + '  ');
 
   // Origin ID
   if (stationMag.originID) {
-    xml += `${indent}  <originID>${escapeXml(stationMag.originID)}</originID>\n`;
+    xml += `${indent}  <originID>${escapeXml(toResourceID(stationMag.originID, 'origin'))}</originID>\n`;
   }
 
   // Magnitude value (required)
@@ -699,12 +701,12 @@ function formatStationMagnitude(stationMag: StationMagnitude, indent: string = '
 
   // Amplitude ID
   if (stationMag.amplitudeID) {
-    xml += `${indent}  <amplitudeID>${escapeXml(stationMag.amplitudeID)}</amplitudeID>\n`;
+    xml += `${indent}  <amplitudeID>${escapeXml(toResourceID(stationMag.amplitudeID, 'amplitude'))}</amplitudeID>\n`;
   }
 
   // Method ID
   if (stationMag.methodID) {
-    xml += `${indent}  <methodID>${escapeXml(stationMag.methodID)}</methodID>\n`;
+    xml += `${indent}  <methodID>${escapeXml(toResourceID(stationMag.methodID, 'method'))}</methodID>\n`;
   }
 
   // Waveform ID
@@ -753,15 +755,15 @@ function formatAxis(axis: Axis, name: string, indent: string = '        '): stri
 function formatMomentTensor(mt: MomentTensor, indent: string = '      '): string {
   let xml = `${indent}<momentTensor`;
   if (mt.publicID) {
-    xml += ` publicID="${escapeXml(mt.publicID)}"`;
+    xml += ` publicID="${escapeXml(toResourceID(mt.publicID, 'momentTensor'))}"`;
   }
   xml += '>\n';
 
   // Derived origin ID (required)
-  xml += `${indent}  <derivedOriginID>${escapeXml(mt.derivedOriginID)}</derivedOriginID>\n`;
+  xml += `${indent}  <derivedOriginID>${escapeXml(toResourceID(mt.derivedOriginID, 'origin'))}</derivedOriginID>\n`;
 
   if (mt.momentMagnitudeID) {
-    xml += `${indent}  <momentMagnitudeID>${escapeXml(mt.momentMagnitudeID)}</momentMagnitudeID>\n`;
+    xml += `${indent}  <momentMagnitudeID>${escapeXml(toResourceID(mt.momentMagnitudeID, 'magnitude'))}</momentMagnitudeID>\n`;
   }
   if (mt.scalarMoment) {
     xml += formatRealQuantityElement('scalarMoment', mt.scalarMoment, indent + '  ') + '\n';
@@ -792,10 +794,10 @@ function formatMomentTensor(mt: MomentTensor, indent: string = '      '): string
     xml += `${indent}  <iso>${mt.iso}</iso>\n`;
   }
   if (mt.greensFunctionID) {
-    xml += `${indent}  <greensFunctionID>${escapeXml(mt.greensFunctionID)}</greensFunctionID>\n`;
+    xml += `${indent}  <greensFunctionID>${escapeXml(toResourceID(mt.greensFunctionID, 'greensFunction'))}</greensFunctionID>\n`;
   }
   if (mt.filterID) {
-    xml += `${indent}  <filterID>${escapeXml(mt.filterID)}</filterID>\n`;
+    xml += `${indent}  <filterID>${escapeXml(toResourceID(mt.filterID, 'filter'))}</filterID>\n`;
   }
   if (mt.sourceTimeFunction) {
     xml += `${indent}  <sourceTimeFunction>\n`;
@@ -829,7 +831,7 @@ function formatMomentTensor(mt: MomentTensor, indent: string = '      '): string
     });
   }
   if (mt.methodID) {
-    xml += `${indent}  <methodID>${escapeXml(mt.methodID)}</methodID>\n`;
+    xml += `${indent}  <methodID>${escapeXml(toResourceID(mt.methodID, 'method'))}</methodID>\n`;
   }
   if (mt.category) {
     xml += `${indent}  <category>${escapeXml(mt.category)}</category>\n`;
@@ -849,12 +851,12 @@ function formatMomentTensor(mt: MomentTensor, indent: string = '      '): string
  * Format FocalMechanism element
  */
 function formatFocalMechanism(fm: FocalMechanism, indent: string = '    '): string {
-  let xml = `${indent}<focalMechanism publicID="${escapeXml(fm.publicID)}">\n`;
+  let xml = `${indent}<focalMechanism publicID="${escapeXml(toResourceID(fm.publicID, 'focalMechanism'))}">\n`;
 
   xml += formatComments(fm.comment, indent + '  ');
 
   if (fm.triggeringOriginID) {
-    xml += `${indent}  <triggeringOriginID>${escapeXml(fm.triggeringOriginID)}</triggeringOriginID>\n`;
+    xml += `${indent}  <triggeringOriginID>${escapeXml(toResourceID(fm.triggeringOriginID, 'origin'))}</triggeringOriginID>\n`;
   }
 
   if (fm.waveformID && fm.waveformID.length > 0) {
@@ -902,7 +904,7 @@ function formatFocalMechanism(fm: FocalMechanism, indent: string = '    '): stri
     xml += `${indent}  <stationDistributionRatio>${fm.stationDistributionRatio}</stationDistributionRatio>\n`;
   }
   if (fm.methodID) {
-    xml += `${indent}  <methodID>${escapeXml(fm.methodID)}</methodID>\n`;
+    xml += `${indent}  <methodID>${escapeXml(toResourceID(fm.methodID, 'method'))}</methodID>\n`;
   }
 
   // Moment tensor
@@ -937,11 +939,167 @@ function escapeXml(str: string): string {
 }
 
 /**
+ * QuakeML BED 1.2 ResourceIdentifier grammar (QuakeML-BED-1.2.xsd, simpleType
+ * ResourceIdentifier, which ResourceReference also derives from):
+ * (smi|quakeml):[\w\d][\w\d\-\.\*\(\)_~']{2,}/[\w\d\-\.\*\(\)_~'][\w\d\-\.\*\(\)\+\?_~'=,;#/&]*
+ * Every publicID attribute and every *ID / *URI reference element is constrained
+ * by it, so a bare identifier carried over from a CSV/GeoJSON upload (e.g.
+ * "2016p858000") or a bare method name (e.g. "NonLinLoc") makes the exported
+ */
+const BED_RESOURCE_ID_PATTERN =
+  /^(?:smi|quakeml):[A-Za-z0-9_][A-Za-z0-9_\-.*()~']{2,}\/[A-Za-z0-9_\-.*()~'][A-Za-z0-9_\-.*()+?~'=,;#/&]*$/;
+
+/**
+ * Coerce an identifier to a conformant QuakeML ResourceIdentifier.
+ */
+function toResourceID(
+  value: string | null | undefined,
+  kind: string,
+  fallbackID: string = 'unknown'
+): string {
+  const raw = (value ?? '').trim();
+  if (BED_RESOURCE_ID_PATTERN.test(raw)) return raw;
+  const source = raw || String(fallbackID ?? '').trim();
+  const sanitised = source.replace(/[^A-Za-z0-9_\-.*()~']/g, '_') || 'unknown';
+  return `smi:local/${kind}/${sanitised}`;
+}
+
+/**
+ * True when the row is the product of merging two or more source events.
+ */
+function isMultiSourceMerge(event: MergedEvent): boolean {
+  if (!event.source_events) return false;
+  try {
+    const sources = JSON.parse(event.source_events);
+    return Array.isArray(sources) && sources.length > 1;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Rebuild a QuakeML quantity around a merged scalar.
+ *
+ * TimeQuantity/RealQuantity carry uncertainty, lowerUncertainty, upperUncertainty and
+ * confidenceLevel, and every one of them describes the SOURCE solution's value. Once
+ * that value has been replaced by the merged scalar none of them still applies, so the
+ * quantity is rebuilt rather than spread and only the merged row's own uncertainty
+ * (when it has one) is re-attached.
+ */
+function mergedQuantity<T extends number | string>(
+  value: T,
+  uncertainty: number | null | undefined
+): { value: T; uncertainty?: number } {
+  return uncertainty != null ? { value, uncertainty } : { value };
+}
+
+/**
+ * Rewrite the preferred origin of a merged row with the authoritative merged
+ * hypocentre from the scalar columns, so the QuakeML export agrees with the
+ * CSV/JSON/GeoJSON exports of the same row (those read the scalars directly).
+ * Non-preferred origins are left untouched — they remain the contributing
+ * source solutions.
+ */
+function applyMergedOriginValues(origins: Origin[], event: MergedEvent): Origin[] {
+  const preferredIndex = Math.max(
+    0,
+    origins.findIndex(o => o.publicID === event.preferred_origin_id)
+  );
+
+  return origins.map((origin, index) => {
+    if (index !== preferredIndex) return origin;
+
+    const merged: Origin = { ...origin };
+
+    // Each scalar below REPLACES the contributing source's value, so the source's
+    // uncertainty for it no longer describes what is emitted. lib/merge.ts nulls
+    // LOCATION_META_FIELDS/DEPTH_META_FIELDS whenever no source reports the merged
+    // value, exactly so an averaged hypocentre is not labelled with one contributor's
+    // error estimate; carrying the blob's uncertainty over would re-attach here what
+    // that nulling removed.
+    merged.time = mergedQuantity(event.time, event.time_uncertainty);
+    merged.latitude = mergedQuantity(event.latitude, event.latitude_uncertainty);
+    merged.longitude = mergedQuantity(event.longitude, event.longitude_uncertainty);
+
+    if (event.depth != null) {
+      // QuakeML spec: depth value and its uncertainty in metres; DB stores km.
+      merged.depth = mergedQuantity(
+        event.depth * 1000,
+        event.depth_uncertainty != null ? event.depth_uncertainty * 1000 : null
+      );
+      // depthType states how THAT solution's depth was determined, so it travels with
+      // the depth value: a merged depth with no merged depth type must not inherit the
+      // source's "operator assigned"/"from location" label either.
+      if (event.depth_type) {
+        merged.depthType = event.depth_type as Origin['depthType'];
+      } else {
+        delete merged.depthType;
+      }
+    } else if (event.depth_type) {
+      merged.depthType = event.depth_type as Origin['depthType'];
+    }
+
+    // OriginUncertainty describes the error ellipse of the SOURCE's epicentre, which
+    // has just been replaced: emit only the merged row's own horizontal uncertainty,
+    // and drop the element entirely when the merged row has none.
+    if (event.horizontal_uncertainty != null) {
+      // horizontalUncertainty in QuakeML is in metres; DB stores km.
+      merged.uncertainty = { horizontalUncertainty: event.horizontal_uncertainty * 1000 };
+    } else {
+      delete merged.uncertainty;
+    }
+
+    return merged;
+  });
+}
+
+/**
+ * Rewrite the preferred magnitude of a merged row with the authoritative merged
+ * magnitude and magnitude type from the scalar columns (see
+ * applyMergedOriginValues). The merge strategies pick the magnitude by hierarchy
+ * rather than by source event, so the blob's value and SCALE can both differ.
+ */
+function applyMergedMagnitudeValues(magnitudes: Magnitude[], event: MergedEvent): Magnitude[] {
+  const preferredIndex = Math.max(
+    0,
+    magnitudes.findIndex(m => m.publicID === event.preferred_magnitude_id)
+  );
+
+  return magnitudes.map((magnitude, index) => {
+    if (index !== preferredIndex || event.magnitude == null) return magnitude;
+
+    // Same rule as applyMergedOriginValues: the merged magnitude replaces the source's,
+    // so the scale, uncertainty and station count that describe the SOURCE magnitude go
+    // with it. lib/merge.ts fills MAGNITUDE_META_FIELDS only from a source reporting the
+    // same value on the same scale, precisely so an ML value is never stamped 'Mw' or
+    // given another solution's error estimate — the blob must not put them back.
+    const merged: Magnitude = {
+      ...magnitude,
+      mag: mergedQuantity(event.magnitude, event.magnitude_uncertainty),
+    };
+
+    if (event.magnitude_type) {
+      merged.type = event.magnitude_type;
+    } else {
+      delete merged.type;
+    }
+
+    if (event.magnitude_station_count != null) {
+      merged.stationCount = event.magnitude_station_count;
+    } else {
+      delete merged.stationCount;
+    }
+
+    return merged;
+  });
+}
+
+/**
  * Convert a MergedEvent to QuakeML Event element
  */
 export function eventToQuakeML(event: MergedEvent): string {
   // Build QuakeML from stored data
-  const publicID = event.event_public_id || `smi:local/event/${event.id}`;
+  const publicID = toResourceID(event.event_public_id, 'event', event.id);
 
   let xml = `  <event publicID="${escapeXml(publicID)}">\n`;
 
@@ -1015,13 +1173,16 @@ export function eventToQuakeML(event: MergedEvent): string {
     }
   }
   if (parsedMagnitudes && parsedMagnitudes.length > 0) {
-    parsedMagnitudes.forEach(magnitude => {
+    const magnitudesToEmit = isMultiSourceMerge(event)
+      ? applyMergedMagnitudeValues(parsedMagnitudes, event)
+      : parsedMagnitudes;
+    magnitudesToEmit.forEach(magnitude => {
       xml += formatMagnitude(magnitude) + '\n';
     });
   } else {
     // Fallback: reconstruct Magnitude from scalar database fields.
     {
-      const magnitudeID = event.preferred_magnitude_id || `smi:local/magnitude/${event.id}`;
+      const magnitudeID = toResourceID(event.preferred_magnitude_id, 'magnitude', event.id);
       xml += `    <magnitude publicID="${escapeXml(magnitudeID)}">\n`;
 
       xml += `      <mag>\n        <value>${event.magnitude}</value>\n`;
@@ -1037,10 +1198,10 @@ export function eventToQuakeML(event: MergedEvent): string {
         xml += `      <stationCount>${event.magnitude_station_count}</stationCount>\n`;
       }
       if (event.preferred_origin_id) {
-        xml += `      <originID>${escapeXml(event.preferred_origin_id)}</originID>\n`;
+        xml += `      <originID>${escapeXml(toResourceID(event.preferred_origin_id, 'origin', event.id))}</originID>\n`;
       }
       if (event.magnitude_method_id) {
-        xml += `      <methodID>${escapeXml(event.magnitude_method_id)}</methodID>\n`;
+        xml += `      <methodID>${escapeXml(toResourceID(event.magnitude_method_id, 'method'))}</methodID>\n`;
       }
       // Prefer magnitude-specific evaluation fields; fall back to origin-level fields.
       const magEvalMode = event.magnitude_evaluation_mode || event.evaluation_mode;
@@ -1092,7 +1253,10 @@ export function eventToQuakeML(event: MergedEvent): string {
     }
   }
   if (parsedOrigins && parsedOrigins.length > 0) {
-    parsedOrigins.forEach((origin, index) => {
+    const originsToEmit = isMultiSourceMerge(event)
+      ? applyMergedOriginValues(parsedOrigins, event)
+      : parsedOrigins;
+    originsToEmit.forEach((origin, index) => {
       const originWithArrivals = (!origin.arrivals || origin.arrivals.length === 0) &&
         index === 0 && standaloneArrivals.length > 0
         ? { ...origin, arrivals: standaloneArrivals }
@@ -1102,7 +1266,7 @@ export function eventToQuakeML(event: MergedEvent): string {
   } else {
     // Fallback: reconstruct Origin from scalar database fields.
     {
-      const originID = event.preferred_origin_id || `smi:local/origin/${event.id}`;
+      const originID = toResourceID(event.preferred_origin_id, 'origin', event.id);
       xml += `    <origin publicID="${escapeXml(originID)}">\n`;
 
       // Time
@@ -1142,10 +1306,10 @@ export function eventToQuakeML(event: MergedEvent): string {
 
       // Velocity model and location method
       if (event.method_id) {
-        xml += `      <methodID>${escapeXml(event.method_id)}</methodID>\n`;
+        xml += `      <methodID>${escapeXml(toResourceID(event.method_id, 'method'))}</methodID>\n`;
       }
       if (event.earth_model_id) {
-        xml += `      <earthModelID>${escapeXml(event.earth_model_id)}</earthModelID>\n`;
+        xml += `      <earthModelID>${escapeXml(toResourceID(event.earth_model_id, 'earthModel'))}</earthModelID>\n`;
       }
 
       // Quality metrics — all available fields
@@ -1219,10 +1383,10 @@ export function eventToQuakeML(event: MergedEvent): string {
 
   // Preferred IDs (schema order: after origin/magnitude elements)
   if (event.preferred_origin_id) {
-    xml += `    <preferredOriginID>${escapeXml(event.preferred_origin_id)}</preferredOriginID>\n`;
+    xml += `    <preferredOriginID>${escapeXml(toResourceID(event.preferred_origin_id, 'origin', event.id))}</preferredOriginID>\n`;
   }
   if (event.preferred_magnitude_id) {
-    xml += `    <preferredMagnitudeID>${escapeXml(event.preferred_magnitude_id)}</preferredMagnitudeID>\n`;
+    xml += `    <preferredMagnitudeID>${escapeXml(toResourceID(event.preferred_magnitude_id, 'magnitude', event.id))}</preferredMagnitudeID>\n`;
   }
 
   // Event type (schema order: after preferredIDs)
@@ -1274,10 +1438,11 @@ export function eventsToQuakeMLDocument(
   }
   if (metadata?.eventCount != null) descParts.push(`Event Count: ${metadata.eventCount}`);
 
+  // EventParameters/description is type="xs:string" in QuakeML-BED-1.2.xsd — a
+  // plain text element with no children. (Event/description is the complex
+  // EventDescription type with <text>/<type>; see formatEventDescription.)
   if (descParts.length > 0) {
-    xml += `    <description>\n`;
-    xml += `      <text>${escapeXml(descParts.join('; '))}</text>\n`;
-    xml += `    </description>\n`;
+    xml += `    <description>${escapeXml(descParts.join('; '))}</description>\n`;
   }
 
   // Add comments for additional metadata

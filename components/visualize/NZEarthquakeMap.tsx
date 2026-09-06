@@ -1,6 +1,12 @@
 'use client';
 
+import { useMapEventSelection } from '@/hooks/use-map-event-selection';
+import { MapViewportObserver } from '@/components/map/MapViewportObserver';
+import { MapDetailControl } from '@/components/map/MapDetailControl';
+import type { MapDetail } from '@/lib/map-event-selection';
+
 import { useState, useEffect, useMemo } from 'react';
+import { useEventMapPopup } from '@/hooks/use-event-map-popup';
 import { dedupeById } from '@/lib/utils';
 import { MapContainer, Circle, Popup, GeoJSON } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
@@ -8,14 +14,13 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Activity, Ruler, Calendar, MapPin, Layers, Info } from 'lucide-react';
 import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useMapColors } from '@/hooks/use-map-theme';
 import { calculateQualityScore, getQualityColor, metricsFromEvent } from '@/lib/quality-scoring';
-import { getMagnitudeRadius, getMagnitudeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
+import { getMagnitudeRadius, getMagnitudeColor } from '@/lib/earthquake-utils';
 import { loadFaultData, FaultCollection } from '@/lib/fault-data';
 import type { PathOptions } from 'leaflet';
 
@@ -39,16 +44,15 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
   const [showFaults, setShowFaults] = useState(true);
   const [colorMode, setColorMode] = useState<'magnitude' | 'depth' | 'quality'>(colorBy);
   const [faultData, setFaultData] = useState<FaultCollection | null>(null);
-  const [sampleSize, setSampleSize] = useState<number>(1000);
+  const [sampleSize, setSampleSize] = useState<MapDetail>('auto');
 
   // Dark mode support for marker colors
   const mapColors = useMapColors();
 
   // Sample earthquakes for performance
-  const { sampled: sampledEarthquakes, total, displayCount, isSampled } = useMemo(
-    () => sampleEarthquakeEvents(earthquakes, sampleSize),
-    [earthquakes, sampleSize]
-  );
+  const { sampled: sampledEarthquakes, displayCount, visibleCount, isSampled, onViewportChange, getPosition } = useMapEventSelection(earthquakes, sampleSize);
+
+  const { activePopup, onEventClick } = useEventMapPopup(earthquakes);
 
   // Load fault data
   useEffect(() => {
@@ -83,10 +87,12 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
     return '#ADD8E6'; // Light blue
   };
 
+  const qualityScoreMap = useMemo(() => new Map(qualityScores.map(q => [q.eventId, q.score])), [qualityScores]);
+
   const getEventColor = (eq: Earthquake): string => {
     if (colorMode === 'quality') {
-      const quality = qualityScores.find(q => q.eventId === eq.id);
-      return quality ? getQualityColor(quality.score.overall) : getMagnitudeColor(eq.magnitude);
+      const quality = qualityScoreMap.get(eq.id);
+      return quality ? getQualityColor(quality.overall) : getMagnitudeColor(eq.magnitude);
     } else if (colorMode === 'depth') {
       return getDepthColor(eq.depth);
     }
@@ -188,24 +194,7 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
           </div>
 
           <div className="pt-2 border-t">
-            <div className="flex items-center gap-1.5 mb-2">
-              <Label htmlFor="sampleSize" className="text-xs font-medium">
-                Max Events to Display
-              </Label>
-              <InfoTooltip content="Limits rendered events for performance." />
-            </div>
-            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(value === 'all' ? Infinity : Number(value))}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="500">500</SelectItem>
-                <SelectItem value="1000">1,000</SelectItem>
-                <SelectItem value="2000">2,000</SelectItem>
-                <SelectItem value="5000">5,000</SelectItem>
-                <SelectItem value="Infinity">All</SelectItem>
-              </SelectContent>
-            </Select>
+            <MapDetailControl value={sampleSize} onChange={setSampleSize} />
           </div>
         </div>
       </Card>
@@ -217,7 +206,7 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
             <Info className="h-4 w-4 text-blue-500" />
             <span>
               Displaying <strong>{displayCount.toLocaleString()}</strong> of{' '}
-              <strong>{total.toLocaleString()}</strong> events
+              <strong>{visibleCount.toLocaleString()}</strong> visible events. Zoom in for more.
             </span>
           </div>
         </Card>
@@ -232,6 +221,7 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
           scrollWheelZoom={true}
         >
           <MapLayerControl position="topright" />
+          <MapViewportObserver onChange={onViewportChange} />
 
           {/* NZ Active Faults from Local GeoJSON */}
           {showFaults && faultData && (
@@ -260,7 +250,7 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
             return (
               <Circle
                 key={eq.id}
-                center={[eq.latitude, eq.longitude]}
+                center={getPosition(eq)}
                 radius={getMagnitudeRadius(eq.magnitude)}
                 pathOptions={{
                   color: getEventColor(eq),
@@ -270,18 +260,14 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
                   // Add title for accessibility (shows on hover)
                   title: ariaLabel,
                 } as any}
-              >
-                <Popup>
-                  <EventPopup
-                    eq={eq}
-                    qualityScores={qualityScores}
-                    getMagnitudeLabel={getMagnitudeLabel}
-                    getQualityGrade={getQualityGrade}
-                  />
-                </Popup>
-              </Circle>
+                eventHandlers={{ click: () => onEventClick(eq, getPosition(eq)) }}
+              />
             );
           })}
+          {activePopup && <Popup key={activePopup.seq} position={activePopup.position}>
+            <EventPopup eq={activePopup.event} qualityScores={qualityScores}
+              getMagnitudeLabel={getMagnitudeLabel} getQualityGrade={getQualityGrade} />
+          </Popup>}
         </MapContainer>
       </div>
 

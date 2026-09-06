@@ -20,8 +20,11 @@ import type {
   TimeQuantity,
   OriginQuality,
   OriginUncertainty,
+  NodalPlane,
   NodalPlanes,
+  Axis,
   PrincipalAxes,
+  Tensor,
   MomentTensor,
   CreationInfo,
   Comment,
@@ -37,6 +40,87 @@ function nsTag(tag: string): string {
   return `(?:[\\w.-]+:)?${escapeRegex(tag)}`;
 }
 
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'"
+};
+
+/**
+ * Resolve the five XML predefined entities and numeric character references.
+ */
+function decodeXmlEntities(text: string): string {
+  if (text.indexOf('&') === -1) return text;
+  return text.replace(
+    /&(?:#([0-9]+)|#[xX]([0-9a-fA-F]+)|(amp|lt|gt|quot|apos));/g,
+    (match, dec: string | undefined, hex: string | undefined, named: string | undefined) => {
+      if (named !== undefined) return NAMED_ENTITIES[named];
+      const codePoint = dec !== undefined ? parseInt(dec, 10) : parseInt(hex as string, 16);
+      // Leave anything outside the Unicode range (or a lone surrogate) as written.
+      if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) return match;
+      if (codePoint >= 0xd800 && codePoint <= 0xdfff) return match;
+      return String.fromCodePoint(codePoint);
+    }
+  );
+}
+
+/**
+ * Escape text for re-serialisation into an XML fragment.
+ *
+ * Used by the SAX path only: sax hands over decoded text, and decodeXmlEntities()
+ * undoes this again when the fragment is read back, so the round trip is lossless.
+ */
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function isEventTagName(tagName: string): boolean {
+  return tagName === 'event' || tagName.endsWith(':event');
+}
+
+/**
+ * Remove the given child elements (with their sub-trees) from an XML fragment.
+ *
+ * The extractors below scan for the first match of a tag name, which is only
+ * correct once the sub-trees that can carry the same tag names have been taken
+ * out. QuakeML-BED-1.2.xsd puts those repeatable children FIRST in every
+ * complexType sequence, so without this the first match is always the nested one.
+ */
+function stripChildElements(xml: string, tagNames: readonly string[]): string {
+  let stripped = xml;
+  for (const tagName of tagNames) {
+    const tag = nsTag(tagName);
+    stripped = stripped.replace(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}>`, 'g'), '');
+    stripped = stripped.replace(new RegExp(`<${tag}\\b[^>]*\\/>`, 'g'), '');
+  }
+  return stripped;
+}
+
+/**
+ * The BED Event choice group: description, comment, focalMechanism, amplitude,
+ * magnitude, stationMagnitude, origin and pick all repeat ahead of the event's
+ * own preferredOriginID / preferredMagnitudeID / preferredFocalMechanismID /
+ * type / typeCertainty / creationInfo, and each of them can carry its own
+ * <type> and <creationInfo>.
+ */
+const EVENT_CHILD_ELEMENTS = [
+  'description',
+  'comment',
+  'focalMechanism',
+  'amplitude',
+  'magnitude',
+  'stationMagnitude',
+  'origin',
+  'pick'
+] as const;
+
 /**
  * Extract text content from XML tag
  */
@@ -44,7 +128,15 @@ function extractTagValue(xml: string, tagName: string): string | undefined {
   const tag = nsTag(tagName);
   const regex = new RegExp(`<${tag}\\b[^>]*>([^<]*)<\\/${tag}>`, 's');
   const match = xml.match(regex);
-  return match ? match[1].trim() : undefined;
+  return match ? decodeXmlEntities(match[1].trim()) : undefined;
+}
+
+/**
+ * Extract an attribute value from a serialised start tag (already entity-decoded)
+ */
+function extractAttribute(tagOrAttrs: string, attrName: string): string | undefined {
+  const match = tagOrAttrs.match(new RegExp(`\\b${escapeRegex(attrName)}="([^"]*)"`));
+  return match ? decodeXmlEntities(match[1]) : undefined;
 }
 
 /**
@@ -55,7 +147,7 @@ function extractNestedValue(xml: string, parentTag: string): string | undefined 
   const value = nsTag('value');
   const regex = new RegExp(`<${parent}\\b[^>]*>.*?<${value}>([^<]*)<\\/${value}>.*?<\\/${parent}>`, 's');
   const match = xml.match(regex);
-  return match ? match[1].trim() : undefined;
+  return match ? decodeXmlEntities(match[1].trim()) : undefined;
 }
 
 /**
@@ -128,16 +220,13 @@ function extractTimeQuantity(xml: string, parentTag: string): TimeQuantity | und
 function extractCreationInfo(xml: string, excludeNested: boolean = false): CreationInfo | undefined {
   let searchXML = xml;
 
-  // If excludeNested, remove nested elements that might contain creationInfo
+  // If excludeNested, remove every element of the BED Event choice group. All
+  // eight can carry their own creationInfo and all eight precede the event's own
+  // (which is the last child), so stripping only some of them still returns a
+  // child's provenance — a focalMechanism, amplitude or pick creationInfo is the
+  // normal case for SeisComP/GeoNet FDSN output.
   if (excludeNested) {
-    // Remove comment elements
-    searchXML = searchXML.replace(/<(?:[\w.-]+:)?comment\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?comment>/g, '');
-    // Remove origin elements
-    searchXML = searchXML.replace(/<(?:[\w.-]+:)?origin\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?origin>/g, '');
-    // Remove magnitude elements
-    searchXML = searchXML.replace(/<(?:[\w.-]+:)?magnitude\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?magnitude>/g, '');
-    // Remove description elements
-    searchXML = searchXML.replace(/<(?:[\w.-]+:)?description\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?description>/g, '');
+    searchXML = stripChildElements(searchXML, EVENT_CHILD_ELEMENTS);
   }
 
   const regex = /<(?:[\w.-]+:)?creationInfo\b[^>]*>(.*?)<\/(?:[\w.-]+:)?creationInfo>/s;
@@ -178,8 +267,8 @@ function extractComments(xml: string): Comment[] | undefined {
     if (text) {
       const comment: Comment = { text };
       // Preserve the comment's id attribute (e.g. id="smi:local/…")
-      const idMatch = attrs.match(/\bid="([^"]*)"/);
-      if (idMatch) comment.id = idMatch[1];
+      const id = extractAttribute(attrs, 'id');
+      if (id !== undefined) comment.id = id;
       const creationInfo = extractCreationInfo(content);
       if (creationInfo) comment.creationInfo = creationInfo;
       comments.push(comment);
@@ -283,13 +372,21 @@ function extractOriginUncertainty(xml: string): OriginUncertainty | undefined {
  * Extract Origin
  */
 function extractOrigin(xml: string): Origin | undefined {
-  const publicIDMatch = xml.match(/<(?:[\w.-]+:)?origin\b[^>]*publicID="([^"]*)"[^>]*>/);
-  if (!publicIDMatch) return undefined;
+  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?origin\b[^>]*publicID="[^"]*"[^>]*>/);
+  if (!publicIDTagMatch) return undefined;
+  const publicID = extractAttribute(publicIDTagMatch[0], 'publicID');
+  if (publicID === undefined) return undefined;
 
-  const publicID = publicIDMatch[1];
-  const time = extractTimeQuantity(xml, 'time');
-  const latitude = extractRealQuantity(xml, 'latitude');
-  const longitude = extractRealQuantity(xml, 'longitude');
+  // Arrivals, comments and compositeTimes are the repeatable children that open
+  // the BED Origin sequence, so they precede (and shadow) the origin's own
+  // earthModelID / methodID / creationInfo in a first-match scan. Pull the
+  // arrivals out of the full element, then read the scalars from what remains.
+  const arrivals = extractArrivals(xml);
+  const ownXML = stripChildElements(xml, ['arrival', 'comment', 'compositeTime']);
+
+  const time = extractTimeQuantity(ownXML, 'time');
+  const latitude = extractRealQuantity(ownXML, 'latitude');
+  const longitude = extractRealQuantity(ownXML, 'longitude');
 
   if (!time || !latitude || !longitude) return undefined;
 
@@ -300,36 +397,41 @@ function extractOrigin(xml: string): Origin | undefined {
     longitude
   };
 
-  const depth = extractRealQuantity(xml, 'depth');
+  const depth = extractRealQuantity(ownXML, 'depth');
   if (depth) origin.depth = depth;
 
-  const depthType = extractTagValue(xml, 'depthType');
+  const depthType = extractTagValue(ownXML, 'depthType');
   if (depthType) origin.depthType = depthType as any;
 
   // Extract origin metadata (QuakeML/GeoNet/ISC fields)
-  const earthModelID = extractTagValue(xml, 'earthModelID');
+  const earthModelID = extractTagValue(ownXML, 'earthModelID');
   if (earthModelID) origin.earthModelID = earthModelID;
 
-  const methodID = extractTagValue(xml, 'methodID');
+  const methodID = extractTagValue(ownXML, 'methodID');
   if (methodID) origin.methodID = methodID;
 
-  const region = extractTagValue(xml, 'region');
+  const region = extractTagValue(ownXML, 'region');
   if (region) origin.region = region;
 
-  const evaluationMode = extractTagValue(xml, 'evaluationMode');
+  const evaluationMode = extractTagValue(ownXML, 'evaluationMode');
   if (evaluationMode) origin.evaluationMode = evaluationMode as any;
 
-  const evaluationStatus = extractTagValue(xml, 'evaluationStatus');
+  const evaluationStatus = extractTagValue(ownXML, 'evaluationStatus');
   if (evaluationStatus) origin.evaluationStatus = evaluationStatus as any;
 
-  const quality = extractOriginQuality(xml);
+  const quality = extractOriginQuality(ownXML);
   if (quality) origin.quality = quality;
 
-  const uncertainty = extractOriginUncertainty(xml);
+  const uncertainty = extractOriginUncertainty(ownXML);
   if (uncertainty) origin.uncertainty = uncertainty;
 
-  const creationInfo = extractCreationInfo(xml);
+  const creationInfo = extractCreationInfo(ownXML);
   if (creationInfo) origin.creationInfo = creationInfo;
+
+  // In BED an Arrival is a child of Origin — it is the association of a pick with
+  // one specific origin, and different origins of the same event routinely use
+  // different phase sets, weights and residuals.
+  if (arrivals.length > 0) origin.arrivals = arrivals;
 
   return origin;
 }
@@ -343,16 +445,16 @@ function extractWaveformID(xml: string): WaveformStreamID | undefined {
   if (!match) return undefined;
 
   const attrs = match[1];
-  const networkCode  = (attrs.match(/\bnetworkCode="([^"]*)"/)  || [])[1];
-  const stationCode  = (attrs.match(/\bstationCode="([^"]*)"/)  || [])[1];
+  const networkCode  = extractAttribute(attrs, 'networkCode');
+  const stationCode  = extractAttribute(attrs, 'stationCode');
   if (!networkCode || !stationCode) return undefined;
 
   const waveformID: WaveformStreamID = { networkCode, stationCode };
-  const locationCode = (attrs.match(/\blocationCode="([^"]*)"/) || [])[1];
+  const locationCode = extractAttribute(attrs, 'locationCode');
   if (locationCode !== undefined) waveformID.locationCode = locationCode;
-  const channelCode  = (attrs.match(/\bchannelCode="([^"]*)"/)  || [])[1];
+  const channelCode  = extractAttribute(attrs, 'channelCode');
   if (channelCode !== undefined) waveformID.channelCode = channelCode;
-  const resourceURI  = (attrs.match(/\bresourceURI="([^"]*)"/)  || [])[1];
+  const resourceURI  = extractAttribute(attrs, 'resourceURI');
   if (resourceURI !== undefined) waveformID.resourceURI = resourceURI;
 
   return waveformID;
@@ -362,40 +464,45 @@ function extractWaveformID(xml: string): WaveformStreamID | undefined {
  * Extract Pick
  */
 function extractPick(xml: string): Pick | undefined {
-  const publicIDMatch = xml.match(/<(?:[\w.-]+:)?pick\b[^>]*publicID="([^"]*)"[^>]*>/);
-  if (!publicIDMatch) return undefined;
+  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?pick\b[^>]*publicID="[^"]*"[^>]*>/);
+  if (!publicIDTagMatch) return undefined;
+  const publicID = extractAttribute(publicIDTagMatch[0], 'publicID');
+  if (publicID === undefined) return undefined;
 
-  const publicID = publicIDMatch[1];
-  const time = extractTimeQuantity(xml, 'time');
+  // <comment> is the repeatable child that opens the BED Pick sequence and it
+  // carries its own creationInfo, so read the pick's scalars without it.
+  const ownXML = stripChildElements(xml, ['comment']);
+
+  const time = extractTimeQuantity(ownXML, 'time');
   if (!time) return undefined;
 
-  const waveformID = extractWaveformID(xml);
+  const waveformID = extractWaveformID(ownXML);
   if (!waveformID) return undefined;
 
   const pick: Pick = { publicID, time, waveformID };
 
-  const filterID = extractTagValue(xml, 'filterID');
+  const filterID = extractTagValue(ownXML, 'filterID');
   if (filterID) pick.filterID = filterID;
 
-  const methodID = extractTagValue(xml, 'methodID');
+  const methodID = extractTagValue(ownXML, 'methodID');
   if (methodID) pick.methodID = methodID;
 
-  const onset = extractTagValue(xml, 'onset');
+  const onset = extractTagValue(ownXML, 'onset');
   if (onset) pick.onset = onset as any;
 
-  const phaseHint = extractTagValue(xml, 'phaseHint');
+  const phaseHint = extractTagValue(ownXML, 'phaseHint');
   if (phaseHint) pick.phaseHint = phaseHint;
 
-  const polarity = extractTagValue(xml, 'polarity');
+  const polarity = extractTagValue(ownXML, 'polarity');
   if (polarity) pick.polarity = polarity as any;
 
-  const evaluationMode = extractTagValue(xml, 'evaluationMode');
+  const evaluationMode = extractTagValue(ownXML, 'evaluationMode');
   if (evaluationMode) pick.evaluationMode = evaluationMode as any;
 
-  const evaluationStatus = extractTagValue(xml, 'evaluationStatus');
+  const evaluationStatus = extractTagValue(ownXML, 'evaluationStatus');
   if (evaluationStatus) pick.evaluationStatus = evaluationStatus as any;
 
-  const creationInfo = extractCreationInfo(xml);
+  const creationInfo = extractCreationInfo(ownXML);
   if (creationInfo) pick.creationInfo = creationInfo;
 
   const comments = extractComments(xml);
@@ -408,11 +515,16 @@ function extractPick(xml: string): Pick | undefined {
  * Extract Magnitude
  */
 function extractMagnitude(xml: string): Magnitude | undefined {
-  const publicIDMatch = xml.match(/<(?:[\w.-]+:)?magnitude\b[^>]*publicID="([^"]*)"[^>]*>/);
-  if (!publicIDMatch) return undefined;
+  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?magnitude\b[^>]*publicID="[^"]*"[^>]*>/);
+  if (!publicIDTagMatch) return undefined;
+  const publicID = extractAttribute(publicIDTagMatch[0], 'publicID');
+  if (publicID === undefined) return undefined;
 
-  const publicID = publicIDMatch[1];
-  const mag = extractRealQuantity(xml, 'mag');
+  // comment and stationMagnitudeContribution are the repeatable children that
+  // open the BED Magnitude sequence; comment carries its own creationInfo.
+  const ownXML = stripChildElements(xml, ['comment', 'stationMagnitudeContribution']);
+
+  const mag = extractRealQuantity(ownXML, 'mag');
 
   if (!mag) return undefined;
 
@@ -421,26 +533,30 @@ function extractMagnitude(xml: string): Magnitude | undefined {
     mag
   };
 
-  const type = extractTagValue(xml, 'type');
+  const type = extractTagValue(ownXML, 'type');
   if (type) magnitude.type = type;
 
+  // The origin this network magnitude was computed for (BED Magnitude/originID)
+  const originID = extractTagValue(ownXML, 'originID');
+  if (originID) magnitude.originID = originID;
+
   // Extract magnitude method ID (QuakeML/GeoNet/ISC field)
-  const methodID = extractTagValue(xml, 'methodID');
+  const methodID = extractTagValue(ownXML, 'methodID');
   if (methodID) magnitude.methodID = methodID;
 
-  const stationCount = extractTagValue(xml, 'stationCount');
+  const stationCount = extractTagValue(ownXML, 'stationCount');
   if (stationCount) magnitude.stationCount = parseInt(stationCount);
 
-  const azimuthalGap = extractTagValue(xml, 'azimuthalGap');
+  const azimuthalGap = extractTagValue(ownXML, 'azimuthalGap');
   if (azimuthalGap) magnitude.azimuthalGap = parseFloat(azimuthalGap);
 
-  const evaluationMode = extractTagValue(xml, 'evaluationMode');
+  const evaluationMode = extractTagValue(ownXML, 'evaluationMode');
   if (evaluationMode) magnitude.evaluationMode = evaluationMode as any;
 
-  const evaluationStatus = extractTagValue(xml, 'evaluationStatus');
+  const evaluationStatus = extractTagValue(ownXML, 'evaluationStatus');
   if (evaluationStatus) magnitude.evaluationStatus = evaluationStatus as any;
 
-  const creationInfo = extractCreationInfo(xml);
+  const creationInfo = extractCreationInfo(ownXML);
   if (creationInfo) magnitude.creationInfo = creationInfo;
 
   return magnitude;
@@ -450,38 +566,45 @@ function extractMagnitude(xml: string): Magnitude | undefined {
  * Extract Arrival
  */
 function extractArrival(xml: string): Arrival | undefined {
-  const pickID = extractTagValue(xml, 'pickID');
-  const phase = extractTagValue(xml, 'phase');
+  // <comment> is the repeatable child that opens the BED Arrival sequence and it
+  // carries its own creationInfo, so read the arrival's scalars without it.
+  const ownXML = stripChildElements(xml, ['comment']);
+
+  const pickID = extractTagValue(ownXML, 'pickID');
+  const phase = extractTagValue(ownXML, 'phase');
   if (!pickID || !phase) return undefined;
 
-  const publicIDMatch = xml.match(/<(?:[\w.-]+:)?arrival\b[^>]*publicID="([^"]*)"[^>]*>/);
+  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?arrival\b[^>]*publicID="[^"]*"[^>]*>/);
   const arrival: Arrival = { pickID, phase };
-  if (publicIDMatch) arrival.publicID = publicIDMatch[1];
+  if (publicIDTagMatch) {
+    const publicID = extractAttribute(publicIDTagMatch[0], 'publicID');
+    if (publicID !== undefined) arrival.publicID = publicID;
+  }
 
-  const timeCorrection = extractTagValue(xml, 'timeCorrection');
+  const timeCorrection = extractTagValue(ownXML, 'timeCorrection');
   if (timeCorrection) arrival.timeCorrection = parseFloat(timeCorrection);
-  const azimuth = extractTagValue(xml, 'azimuth');
+  const azimuth = extractTagValue(ownXML, 'azimuth');
   if (azimuth) arrival.azimuth = parseFloat(azimuth);
-  const distance = extractTagValue(xml, 'distance');
+  const distance = extractTagValue(ownXML, 'distance');
   if (distance) arrival.distance = parseFloat(distance);
-  const takeoffAngle = extractRealQuantity(xml, 'takeoffAngle');
+  const takeoffAngle = extractRealQuantity(ownXML, 'takeoffAngle');
   if (takeoffAngle) arrival.takeoffAngle = takeoffAngle;
-  const timeResidual = extractTagValue(xml, 'timeResidual');
+  const timeResidual = extractTagValue(ownXML, 'timeResidual');
   if (timeResidual) arrival.timeResidual = parseFloat(timeResidual);
-  const horizontalSlownessResidual = extractTagValue(xml, 'horizontalSlownessResidual');
+  const horizontalSlownessResidual = extractTagValue(ownXML, 'horizontalSlownessResidual');
   if (horizontalSlownessResidual) arrival.horizontalSlownessResidual = parseFloat(horizontalSlownessResidual);
-  const backazimuthResidual = extractTagValue(xml, 'backazimuthResidual');
+  const backazimuthResidual = extractTagValue(ownXML, 'backazimuthResidual');
   if (backazimuthResidual) arrival.backazimuthResidual = parseFloat(backazimuthResidual);
-  const timeWeight = extractTagValue(xml, 'timeWeight');
+  const timeWeight = extractTagValue(ownXML, 'timeWeight');
   if (timeWeight) arrival.timeWeight = parseFloat(timeWeight);
-  const horizontalSlownessWeight = extractTagValue(xml, 'horizontalSlownessWeight');
+  const horizontalSlownessWeight = extractTagValue(ownXML, 'horizontalSlownessWeight');
   if (horizontalSlownessWeight) arrival.horizontalSlownessWeight = parseFloat(horizontalSlownessWeight);
-  const backazimuthWeight = extractTagValue(xml, 'backazimuthWeight');
+  const backazimuthWeight = extractTagValue(ownXML, 'backazimuthWeight');
   if (backazimuthWeight) arrival.backazimuthWeight = parseFloat(backazimuthWeight);
-  const earthModelID = extractTagValue(xml, 'earthModelID');
+  const earthModelID = extractTagValue(ownXML, 'earthModelID');
   if (earthModelID) arrival.earthModelID = earthModelID;
 
-  const creationInfo = extractCreationInfo(xml);
+  const creationInfo = extractCreationInfo(ownXML);
   if (creationInfo) arrival.creationInfo = creationInfo;
   const comments = extractComments(xml);
   if (comments) arrival.comment = comments;
@@ -490,48 +613,67 @@ function extractArrival(xml: string): Arrival | undefined {
 }
 
 /**
+ * Extract every <arrival> element contained in an XML fragment
+ */
+function extractArrivals(xml: string): Arrival[] {
+  const matches = Array.from(xml.matchAll(/<(?:[\w.-]+:)?arrival\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?arrival>/g));
+  const arrivals: Arrival[] = [];
+  for (let i = 0; i < matches.length; i++) {
+    const arrival = extractArrival(matches[i][0]);
+    if (arrival) arrivals.push(arrival);
+  }
+  return arrivals;
+}
+
+/**
  * Extract Amplitude
  */
 function extractAmplitude(xml: string): Amplitude | undefined {
-  const publicIDMatch = xml.match(/<(?:[\w.-]+:)?amplitude\b[^>]*publicID="([^"]*)"[^>]*>/);
-  if (!publicIDMatch) return undefined;
+  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?amplitude\b[^>]*publicID="[^"]*"[^>]*>/);
+  if (!publicIDTagMatch) return undefined;
+  const publicID = extractAttribute(publicIDTagMatch[0], 'publicID');
+  if (publicID === undefined) return undefined;
 
-  const genericAmplitude = extractRealQuantity(xml, 'genericAmplitude');
+  // <comment> is the repeatable child that opens the BED Amplitude sequence and
+  // it carries its own creationInfo, so read the amplitude's scalars without it.
+  const ownXML = stripChildElements(xml, ['comment']);
+
+  const genericAmplitude = extractRealQuantity(ownXML, 'genericAmplitude');
   if (!genericAmplitude) return undefined;
 
   const amplitude: Amplitude = {
-    publicID: publicIDMatch[1],
+    publicID,
     genericAmplitude
   };
 
-  const type = extractTagValue(xml, 'type');
+  const type = extractTagValue(ownXML, 'type');
   if (type) amplitude.type = type;
-  const category = extractTagValue(xml, 'category');
+  const category = extractTagValue(ownXML, 'category');
   if (category) amplitude.category = category as any;
-  const unit = extractTagValue(xml, 'unit');
+  const unit = extractTagValue(ownXML, 'unit');
   if (unit) amplitude.unit = unit;
-  const methodID = extractTagValue(xml, 'methodID');
+  const methodID = extractTagValue(ownXML, 'methodID');
   if (methodID) amplitude.methodID = methodID;
-  const period = extractRealQuantity(xml, 'period');
+  const period = extractRealQuantity(ownXML, 'period');
   if (period) amplitude.period = period;
-  const snr = extractTagValue(xml, 'snr');
+  const snr = extractTagValue(ownXML, 'snr');
   if (snr) amplitude.snr = parseFloat(snr);
-  const pickID = extractTagValue(xml, 'pickID');
+  const pickID = extractTagValue(ownXML, 'pickID');
   if (pickID) amplitude.pickID = pickID;
-  const waveformID = extractWaveformID(xml);
+  const waveformID = extractWaveformID(ownXML);
   if (waveformID) amplitude.waveformID = waveformID;
-  const filterID = extractTagValue(xml, 'filterID');
+  const filterID = extractTagValue(ownXML, 'filterID');
   if (filterID) amplitude.filterID = filterID;
-  const scalingTime = extractTimeQuantity(xml, 'scalingTime');
+  const scalingTime = extractTimeQuantity(ownXML, 'scalingTime');
   if (scalingTime) amplitude.scalingTime = scalingTime;
-  const magnitudeHint = extractTagValue(xml, 'magnitudeHint');
+  const magnitudeHint = extractTagValue(ownXML, 'magnitudeHint');
   if (magnitudeHint) amplitude.magnitudeHint = magnitudeHint;
-  const evaluationMode = extractTagValue(xml, 'evaluationMode');
+  const evaluationMode = extractTagValue(ownXML, 'evaluationMode');
   if (evaluationMode) amplitude.evaluationMode = evaluationMode as any;
-  const evaluationStatus = extractTagValue(xml, 'evaluationStatus');
+  const evaluationStatus = extractTagValue(ownXML, 'evaluationStatus');
   if (evaluationStatus) amplitude.evaluationStatus = evaluationStatus as any;
 
-  const creationInfo = extractCreationInfo(xml);
+  const creationInfo = extractCreationInfo(ownXML);
   if (creationInfo) amplitude.creationInfo = creationInfo;
   const comments = extractComments(xml);
   if (comments) amplitude.comment = comments;
@@ -543,29 +685,35 @@ function extractAmplitude(xml: string): Amplitude | undefined {
  * Extract StationMagnitude
  */
 function extractStationMagnitude(xml: string): StationMagnitude | undefined {
-  const publicIDMatch = xml.match(/<(?:[\w.-]+:)?stationMagnitude\b[^>]*publicID="([^"]*)"[^>]*>/);
-  if (!publicIDMatch) return undefined;
+  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?stationMagnitude\b[^>]*publicID="[^"]*"[^>]*>/);
+  if (!publicIDTagMatch) return undefined;
+  const publicID = extractAttribute(publicIDTagMatch[0], 'publicID');
+  if (publicID === undefined) return undefined;
 
-  const mag = extractRealQuantity(xml, 'mag');
+  // <comment> is the repeatable child that opens the BED StationMagnitude
+  // sequence and it carries its own creationInfo.
+  const ownXML = stripChildElements(xml, ['comment']);
+
+  const mag = extractRealQuantity(ownXML, 'mag');
   if (!mag) return undefined;
 
   const stationMagnitude: StationMagnitude = {
-    publicID: publicIDMatch[1],
+    publicID,
     mag
   };
 
-  const originID = extractTagValue(xml, 'originID');
+  const originID = extractTagValue(ownXML, 'originID');
   if (originID) stationMagnitude.originID = originID;
-  const type = extractTagValue(xml, 'type');
+  const type = extractTagValue(ownXML, 'type');
   if (type) stationMagnitude.type = type;
-  const amplitudeID = extractTagValue(xml, 'amplitudeID');
+  const amplitudeID = extractTagValue(ownXML, 'amplitudeID');
   if (amplitudeID) stationMagnitude.amplitudeID = amplitudeID;
-  const methodID = extractTagValue(xml, 'methodID');
+  const methodID = extractTagValue(ownXML, 'methodID');
   if (methodID) stationMagnitude.methodID = methodID;
-  const waveformID = extractWaveformID(xml);
+  const waveformID = extractWaveformID(ownXML);
   if (waveformID) stationMagnitude.waveformID = waveformID;
 
-  const creationInfo = extractCreationInfo(xml);
+  const creationInfo = extractCreationInfo(ownXML);
   if (creationInfo) stationMagnitude.creationInfo = creationInfo;
   const comments = extractComments(xml);
   if (comments) stationMagnitude.comment = comments;
@@ -574,50 +722,189 @@ function extractStationMagnitude(xml: string): StationMagnitude | undefined {
 }
 
 /**
+ * Extract a single NodalPlane (BED requires strike, dip and rake)
+ */
+function extractNodalPlane(xml: string, planeTag: string): NodalPlane | undefined {
+  const plane = nsTag(planeTag);
+  const match = xml.match(new RegExp(`<${plane}\\b[^>]*>([\\s\\S]*?)<\\/${plane}>`));
+  if (!match) return undefined;
+
+  const content = match[1];
+  const strike = extractRealQuantity(content, 'strike');
+  const dip = extractRealQuantity(content, 'dip');
+  const rake = extractRealQuantity(content, 'rake');
+  if (!strike || !dip || !rake) return undefined;
+
+  return { strike, dip, rake };
+}
+
+/**
+ * Extract NodalPlanes
+ */
+function extractNodalPlanes(xml: string): NodalPlanes | undefined {
+  const match = xml.match(/<(?:[\w.-]+:)?nodalPlanes\b([^>]*)>([\s\S]*?)<\/(?:[\w.-]+:)?nodalPlanes>/);
+  if (!match) return undefined;
+
+  const attrs = match[1];
+  const content = match[2];
+  const nodalPlanes: NodalPlanes = {};
+
+  const nodalPlane1 = extractNodalPlane(content, 'nodalPlane1');
+  if (nodalPlane1) nodalPlanes.nodalPlane1 = nodalPlane1;
+  const nodalPlane2 = extractNodalPlane(content, 'nodalPlane2');
+  if (nodalPlane2) nodalPlanes.nodalPlane2 = nodalPlane2;
+
+  // QuakeML-BED-1.2.xsd declares preferredPlane as an xs:integer ATTRIBUTE of
+  // <nodalPlanes>. Accept the child-element spelling as well, because
+  // lib/quakeml-exporter.ts currently writes it that way.
+  const preferredPlaneStr = extractAttribute(attrs, 'preferredPlane') ?? extractTagValue(content, 'preferredPlane');
+  if (preferredPlaneStr) {
+    const preferredPlane = parseInt(preferredPlaneStr, 10);
+    if (!isNaN(preferredPlane)) nodalPlanes.preferredPlane = preferredPlane;
+  }
+
+  return Object.keys(nodalPlanes).length > 0 ? nodalPlanes : undefined;
+}
+
+/**
+ * Extract a single principal Axis (azimuth, plunge and length)
+ */
+function extractAxis(xml: string, axisTag: string): Axis | undefined {
+  const axisName = nsTag(axisTag);
+  const match = xml.match(new RegExp(`<${axisName}\\b[^>]*>([\\s\\S]*?)<\\/${axisName}>`));
+  if (!match) return undefined;
+
+  const content = match[1];
+  const azimuth = extractRealQuantity(content, 'azimuth');
+  const plunge = extractRealQuantity(content, 'plunge');
+  if (!azimuth || !plunge) return undefined;
+
+  const axis: Axis = { azimuth, plunge };
+  const length = extractRealQuantity(content, 'length');
+  if (length) axis.length = length;
+
+  return axis;
+}
+
+/**
+ * Extract PrincipalAxes (tAxis and pAxis are required, nAxis is optional)
+ */
+function extractPrincipalAxes(xml: string): PrincipalAxes | undefined {
+  const match = xml.match(/<(?:[\w.-]+:)?principalAxes\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?principalAxes>/);
+  if (!match) return undefined;
+
+  const content = match[1];
+  const tAxis = extractAxis(content, 'tAxis');
+  const pAxis = extractAxis(content, 'pAxis');
+  if (!tAxis || !pAxis) return undefined;
+
+  const principalAxes: PrincipalAxes = { tAxis, pAxis };
+  const nAxis = extractAxis(content, 'nAxis');
+  if (nAxis) principalAxes.nAxis = nAxis;
+
+  return principalAxes;
+}
+
+/**
+ * Extract the moment tensor components (BED requires all six)
+ */
+function extractTensor(xml: string): Tensor | undefined {
+  const match = xml.match(/<(?:[\w.-]+:)?tensor\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?tensor>/);
+  if (!match) return undefined;
+
+  const content = match[1];
+  const Mrr = extractRealQuantity(content, 'Mrr');
+  const Mtt = extractRealQuantity(content, 'Mtt');
+  const Mpp = extractRealQuantity(content, 'Mpp');
+  const Mrt = extractRealQuantity(content, 'Mrt');
+  const Mrp = extractRealQuantity(content, 'Mrp');
+  const Mtp = extractRealQuantity(content, 'Mtp');
+  if (!Mrr || !Mtt || !Mpp || !Mrt || !Mrp || !Mtp) return undefined;
+
+  return { Mrr, Mtt, Mpp, Mrt, Mrp, Mtp };
+}
+
+/**
  * Extract FocalMechanism
  */
 function extractFocalMechanism(xml: string): FocalMechanism | undefined {
-  const publicIDMatch = xml.match(/<(?:[\w.-]+:)?focalMechanism\b[^>]*publicID="([^"]*)"[^>]*>/);
-  if (!publicIDMatch) return undefined;
+  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?focalMechanism\b[^>]*publicID="[^"]*"[^>]*>/);
+  if (!publicIDTagMatch) return undefined;
+  const publicID = extractAttribute(publicIDTagMatch[0], 'publicID');
+  if (publicID === undefined) return undefined;
 
   const focalMechanism: FocalMechanism = {
-    publicID: publicIDMatch[1]
+    publicID
   };
 
-  const triggeringOriginID = extractTagValue(xml, 'triggeringOriginID');
+  // waveformID, comment and momentTensor are the repeatable children that open
+  // the BED FocalMechanism sequence, so they precede (and shadow) the mechanism's
+  // own methodID / creationInfo — momentTensor carries both of those itself.
+  const ownXML = stripChildElements(xml, ['comment', 'momentTensor']);
+
+  const triggeringOriginID = extractTagValue(ownXML, 'triggeringOriginID');
   if (triggeringOriginID) focalMechanism.triggeringOriginID = triggeringOriginID;
-  const azimuthalGap = extractTagValue(xml, 'azimuthalGap');
+
+  const nodalPlanes = extractNodalPlanes(ownXML);
+  if (nodalPlanes) focalMechanism.nodalPlanes = nodalPlanes;
+
+  const principalAxes = extractPrincipalAxes(ownXML);
+  if (principalAxes) focalMechanism.principalAxes = principalAxes;
+
+  const azimuthalGap = extractTagValue(ownXML, 'azimuthalGap');
   if (azimuthalGap) focalMechanism.azimuthalGap = parseFloat(azimuthalGap);
-  const stationPolarityCount = extractTagValue(xml, 'stationPolarityCount');
+  const stationPolarityCount = extractTagValue(ownXML, 'stationPolarityCount');
   if (stationPolarityCount) focalMechanism.stationPolarityCount = parseInt(stationPolarityCount);
-  const misfit = extractTagValue(xml, 'misfit');
+  const misfit = extractTagValue(ownXML, 'misfit');
   if (misfit) focalMechanism.misfit = parseFloat(misfit);
-  const stationDistributionRatio = extractTagValue(xml, 'stationDistributionRatio');
+  const stationDistributionRatio = extractTagValue(ownXML, 'stationDistributionRatio');
   if (stationDistributionRatio) focalMechanism.stationDistributionRatio = parseFloat(stationDistributionRatio);
-  const methodID = extractTagValue(xml, 'methodID');
+  const methodID = extractTagValue(ownXML, 'methodID');
   if (methodID) focalMechanism.methodID = methodID;
-  const evaluationMode = extractTagValue(xml, 'evaluationMode');
+  const evaluationMode = extractTagValue(ownXML, 'evaluationMode');
   if (evaluationMode) focalMechanism.evaluationMode = evaluationMode as any;
-  const evaluationStatus = extractTagValue(xml, 'evaluationStatus');
+  const evaluationStatus = extractTagValue(ownXML, 'evaluationStatus');
   if (evaluationStatus) focalMechanism.evaluationStatus = evaluationStatus as any;
 
-  const momentTensorMatch = xml.match(/<(?:[\w.-]+:)?momentTensor\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?momentTensor>/);
+  const momentTensorMatch = xml.match(/<(?:[\w.-]+:)?momentTensor\b([^>]*)>([\s\S]*?)<\/(?:[\w.-]+:)?momentTensor>/);
   if (momentTensorMatch) {
     const mtXml = momentTensorMatch[0];
-    const derivedOriginID = extractTagValue(mtXml, 'derivedOriginID');
+    const mtAttrs = momentTensorMatch[1];
+    // dataUsed and comment open the BED MomentTensor sequence; comment carries
+    // its own creationInfo and dataUsed its own stationCount.
+    const mtOwnXML = stripChildElements(mtXml, ['comment', 'dataUsed']);
+    const derivedOriginID = extractTagValue(mtOwnXML, 'derivedOriginID');
     if (derivedOriginID) {
       const momentTensor: MomentTensor = { derivedOriginID };
-      const momentMagnitudeID = extractTagValue(mtXml, 'momentMagnitudeID');
+      const mtPublicID = extractAttribute(mtAttrs, 'publicID');
+      if (mtPublicID !== undefined) momentTensor.publicID = mtPublicID;
+      const momentMagnitudeID = extractTagValue(mtOwnXML, 'momentMagnitudeID');
       if (momentMagnitudeID) momentTensor.momentMagnitudeID = momentMagnitudeID;
-      const scalarMoment = extractRealQuantity(mtXml, 'scalarMoment');
+      const scalarMoment = extractRealQuantity(mtOwnXML, 'scalarMoment');
       if (scalarMoment) momentTensor.scalarMoment = scalarMoment;
-      const methodID = extractTagValue(mtXml, 'methodID');
+      const tensor = extractTensor(mtOwnXML);
+      if (tensor) momentTensor.tensor = tensor;
+      const variance = extractTagValue(mtOwnXML, 'variance');
+      if (variance) momentTensor.variance = parseFloat(variance);
+      const varianceReduction = extractTagValue(mtOwnXML, 'varianceReduction');
+      if (varianceReduction) momentTensor.varianceReduction = parseFloat(varianceReduction);
+      const doubleCouple = extractTagValue(mtOwnXML, 'doubleCouple');
+      if (doubleCouple) momentTensor.doubleCouple = parseFloat(doubleCouple);
+      const clvd = extractTagValue(mtOwnXML, 'clvd');
+      if (clvd) momentTensor.clvd = parseFloat(clvd);
+      const iso = extractTagValue(mtOwnXML, 'iso');
+      if (iso) momentTensor.iso = parseFloat(iso);
+      const greensFunctionID = extractTagValue(mtOwnXML, 'greensFunctionID');
+      if (greensFunctionID) momentTensor.greensFunctionID = greensFunctionID;
+      const filterID = extractTagValue(mtOwnXML, 'filterID');
+      if (filterID) momentTensor.filterID = filterID;
+      const methodID = extractTagValue(mtOwnXML, 'methodID');
       if (methodID) momentTensor.methodID = methodID;
-      const category = extractTagValue(mtXml, 'category');
+      const category = extractTagValue(mtOwnXML, 'category');
       if (category) momentTensor.category = category;
-      const inversionType = extractTagValue(mtXml, 'inversionType');
+      const inversionType = extractTagValue(mtOwnXML, 'inversionType');
       if (inversionType) momentTensor.inversionType = inversionType;
-      const creationInfo = extractCreationInfo(mtXml);
+      const creationInfo = extractCreationInfo(mtOwnXML);
       if (creationInfo) momentTensor.creationInfo = creationInfo;
       focalMechanism.momentTensor = momentTensor;
     }
@@ -628,7 +915,7 @@ function extractFocalMechanism(xml: string): FocalMechanism | undefined {
     .filter((item): item is WaveformStreamID => !!item);
   if (waveformIDs.length > 0) focalMechanism.waveformID = waveformIDs;
 
-  const creationInfo = extractCreationInfo(xml);
+  const creationInfo = extractCreationInfo(ownXML);
   if (creationInfo) focalMechanism.creationInfo = creationInfo;
   const comments = extractComments(xml);
   if (comments) focalMechanism.comment = comments;
@@ -642,18 +929,29 @@ function extractFocalMechanism(xml: string): FocalMechanism | undefined {
 export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
   try {
     // Extract publicID
-    const publicIDMatch = eventXML.match(/<(?:[\w.-]+:)?event\b[^>]*publicID="([^"]*)"[^>]*>/);
-    if (!publicIDMatch) return null;
+    const publicIDTagMatch = eventXML.match(/<(?:[\w.-]+:)?event\b[^>]*publicID="[^"]*"[^>]*>/);
+    if (!publicIDTagMatch) return null;
+    const eventPublicID = extractAttribute(publicIDTagMatch[0], 'publicID');
+    if (eventPublicID === undefined) return null;
 
     const event: QuakeMLEvent = {
-      publicID: publicIDMatch[1]
+      publicID: eventPublicID
     };
 
+    // The event's own type/typeCertainty/preferred*ID are the LAST children in
+    // the BED Event sequence, after the unbounded description | comment |
+    // focalMechanism | amplitude | magnitude | stationMagnitude | origin | pick
+    // choice group. description/<type> ("region name"), magnitude/<type> ("ML"),
+    // origin/<type> ("hypocenter"), amplitude/<type> and stationMagnitude/<type>
+    // therefore all precede it, so a first-match scan has to run over the
+    // event's own children only.
+    const eventOwnXML = stripChildElements(eventXML, EVENT_CHILD_ELEMENTS);
+
     // Extract event type
-    const type = extractTagValue(eventXML, 'type');
+    const type = extractTagValue(eventOwnXML, 'type');
     if (type) event.type = type as any;
 
-    const typeCertainty = extractTagValue(eventXML, 'typeCertainty');
+    const typeCertainty = extractTagValue(eventOwnXML, 'typeCertainty');
     if (typeCertainty) event.typeCertainty = typeCertainty as any;
 
     // Extract descriptions
@@ -669,13 +967,13 @@ export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
     if (creationInfo) event.creationInfo = creationInfo;
 
     // Extract preferred IDs
-    const preferredOriginID = extractTagValue(eventXML, 'preferredOriginID');
+    const preferredOriginID = extractTagValue(eventOwnXML, 'preferredOriginID');
     if (preferredOriginID) event.preferredOriginID = preferredOriginID;
 
-    const preferredMagnitudeID = extractTagValue(eventXML, 'preferredMagnitudeID');
+    const preferredMagnitudeID = extractTagValue(eventOwnXML, 'preferredMagnitudeID');
     if (preferredMagnitudeID) event.preferredMagnitudeID = preferredMagnitudeID;
 
-    const preferredFocalMechanismID = extractTagValue(eventXML, 'preferredFocalMechanismID');
+    const preferredFocalMechanismID = extractTagValue(eventOwnXML, 'preferredFocalMechanismID');
     if (preferredFocalMechanismID) event.preferredFocalMechanismID = preferredFocalMechanismID;
 
     // Extract origins
@@ -709,14 +1007,22 @@ export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
     }
     if (picks.length > 0) event.picks = picks;
 
-    // Extract arrivals (typically nested under origins)
-    const arrivalMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?arrival\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?arrival>/g));
-    const arrivals: Arrival[] = [];
-    for (let j = 0; j < arrivalMatchesArray.length; j++) {
-      const arrival = extractArrival(arrivalMatchesArray[j][0]);
-      if (arrival) arrivals.push(arrival);
+    // Arrivals are children of Origin in BED and are parsed there (origin.arrivals).
+    // The flat event-level list is kept for the flattened DB column
+    // (lib/quakeml-to-db.ts -> `arrivals`) and is defined as the PREFERRED
+    // origin's phase set, so the column can never be attributed to a different
+    // solution than the one whose quality counts are stored alongside it.
+    const preferredOrigin =
+      (event.preferredOriginID && origins.find(o => o.publicID === event.preferredOriginID)) || origins[0];
+    if (preferredOrigin?.arrivals?.length) {
+      event.arrivals = preferredOrigin.arrivals;
+    } else if (!origins.some(o => o.arrivals?.length)) {
+      // Fall back to a flat scan for documents that place <arrival> outside any
+      // <origin>; doing this only when no origin owns arrivals keeps the export
+      // from re-attaching one origin's phases to another.
+      const arrivals = extractArrivals(eventXML);
+      if (arrivals.length > 0) event.arrivals = arrivals;
     }
-    if (arrivals.length > 0) event.arrivals = arrivals;
 
     // Extract station magnitudes
     const stationMagnitudeMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?stationMagnitude\b[^>]*publicID="[^"]*"[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?stationMagnitude>/g));
@@ -789,26 +1095,6 @@ export interface QuakeMLStreamResult {
 
 /**
  * Parse QuakeML file using SAX streaming parser
- *
- * Performance Optimization: Uses SAX parser to process large QuakeML files
- * with constant memory usage. Processes events one at a time without loading
- * the entire file into memory.
- *
- * @param filePath - Path to QuakeML file
- * @param options - Streaming options
- * @returns Promise<QuakeMLStreamResult>
- *
- * @example
- * ```typescript
- * const result = await parseQuakeMLStream('large-catalog.xml', {
- *   batchSize: 100,
- *   onBatch: async (events) => {
- *     await db.bulkInsertEvents(events);
- *   },
- *   onError: (error) => console.error('Parse error:', error)
- * });
- * console.log(`Processed ${result.successfulEvents} events`);
- * ```
  */
 export async function parseQuakeMLStream(
   filePath: string,
@@ -832,103 +1118,153 @@ export async function parseQuakeMLStream(
     let insideEvent = false;
     let eventDepth = 0;
     let eventBatch: QuakeMLEvent[] = [];
+    // Callbacks may be async, but sax emits synchronously for a whole stream
+    // chunk, so the handlers below stay synchronous and hand the asynchronous
+    // work to this chain instead. Awaiting inside a handler would defer the
+    // per-event state reset to a microtask that only runs at the end of the
+    // chunk, by which point the next event has already started accumulating.
+    let pendingWrite: Promise<void> = Promise.resolve();
+    let streamFailed = false;
 
     // Create SAX parser (strict mode for valid XML)
     const parser = sax.createStream(true, {
-      trim: true,
-      normalize: true
+      trim: false,
+      normalize: false
     });
+
+    // Create read stream and pipe to SAX parser
+    const fileStream = fs.createReadStream(filePath, { encoding: 'utf8' });
+
+    // Chain callback work onto pendingWrite and pause the source while it runs,
+    // so a slow consumer applies back-pressure instead of buffering the file.
+    const enqueue = (work: () => void | Promise<void>) => {
+      fileStream.pause();
+      pendingWrite = pendingWrite
+        .then(work)
+        .finally(() => {
+          if (!streamFailed && !fileStream.destroyed) fileStream.resume();
+        });
+    };
+
+    const serializeOpenTag = (node: sax.Tag | sax.QualifiedTag): string => {
+      let out = `<${node.name}`;
+      for (const [key, value] of Object.entries(node.attributes)) {
+        out += ` ${key}="${escapeXml(String(value))}"`;
+      }
+      out += '>';
+      return out;
+    };
+
+    const handleEvent = (eventXML: string) => {
+      result.totalEvents++;
+
+      let event: QuakeMLEvent | null = null;
+      try {
+        event = parseQuakeMLEvent(eventXML);
+      } catch (error) {
+        const err = error as Error;
+        result.errors.push({
+          message: err.message,
+          eventXML: eventXML.substring(0, 200) + '...'
+        });
+        if (onError) onError(err, eventXML);
+        return;
+      }
+
+      if (!event) {
+        const error = new Error('Failed to parse event');
+        result.errors.push({
+          message: error.message,
+          eventXML: eventXML.substring(0, 200) + '...'
+        });
+        if (onError) onError(error, eventXML);
+        return;
+      }
+
+      result.successfulEvents++;
+      const parsedEvent = event;
+
+      // Call per-event callback
+      if (onEvent) {
+        enqueue(async () => {
+          try {
+            await onEvent(parsedEvent);
+          } catch (error) {
+            const err = error as Error;
+            result.errors.push({ message: err.message });
+            if (onError) onError(err);
+          }
+        });
+      }
+
+      // Add to batch
+      if (onBatch) {
+        eventBatch.push(parsedEvent);
+
+        // Process batch if it reaches the batch size
+        if (eventBatch.length >= batchSize) {
+          flushBatch();
+        }
+      }
+    };
+
+    const flushBatch = () => {
+      if (!onBatch || eventBatch.length === 0) return;
+      const batch = eventBatch;
+      eventBatch = [];
+      enqueue(async () => {
+        try {
+          await onBatch(batch);
+        } catch (error) {
+          const err = error as Error;
+          result.errors.push({ message: `Batch processing error: ${err.message}` });
+        }
+      });
+    };
 
     // Track when we enter/exit <event> tags
     parser.on('opentag', (node) => {
-      if (node.name === 'event' || node.name === 'q:event' || node.name === 'quakeml:event') {
+      if (isEventTagName(node.name)) {
         insideEvent = true;
-        eventDepth++;
-        currentEventXML = `<${node.name}`;
-
-        // Add attributes
-        for (const [key, value] of Object.entries(node.attributes)) {
-          currentEventXML += ` ${key}="${value}"`;
-        }
-        currentEventXML += '>';
-      } else if (insideEvent) {
-        currentEventXML += `<${node.name}`;
-
-        // Add attributes
-        for (const [key, value] of Object.entries(node.attributes)) {
-          currentEventXML += ` ${key}="${value}"`;
-        }
-        currentEventXML += '>';
+        eventDepth = 1;
+        currentEventXML = serializeOpenTag(node);
+        return;
       }
+
+      if (!insideEvent) return;
+      eventDepth += 1;
+      currentEventXML += serializeOpenTag(node);
     });
 
     parser.on('text', (text) => {
-      if (insideEvent && text.trim()) {
-        currentEventXML += text;
+      // sax has already resolved entity and character references; re-escape so
+      // the re-serialised fragment is well-formed XML and decodes back to the
+      // same text in parseQuakeMLEvent. Without this a <text>a &lt; b</text>
+      // becomes a literal '<' and the element is silently unreadable.
+      if (insideEvent && text.length > 0) {
+        currentEventXML += escapeXml(text);
       }
     });
 
-    parser.on('closetag', async (tagName) => {
+    parser.on('cdata', (text) => {
       if (insideEvent) {
-        currentEventXML += `</${tagName}>`;
-
-        if (tagName === 'event' || tagName === 'q:event' || tagName === 'quakeml:event') {
-          eventDepth--;
-
-          if (eventDepth === 0) {
-            insideEvent = false;
-            result.totalEvents++;
-
-            // Parse the complete event XML
-            try {
-              const event = parseQuakeMLEvent(currentEventXML);
-
-              if (event) {
-                result.successfulEvents++;
-
-                // Call per-event callback
-                if (onEvent) {
-                  await onEvent(event);
-                }
-
-                // Add to batch
-                if (onBatch) {
-                  eventBatch.push(event);
-
-                  // Process batch if it reaches the batch size
-                  if (eventBatch.length >= batchSize) {
-                    await onBatch(eventBatch);
-                    eventBatch = [];
-                  }
-                }
-              } else {
-                const error = new Error('Failed to parse event');
-                result.errors.push({
-                  message: error.message,
-                  eventXML: currentEventXML.substring(0, 200) + '...'
-                });
-
-                if (onError) {
-                  onError(error, currentEventXML);
-                }
-              }
-            } catch (error) {
-              const err = error as Error;
-              result.errors.push({
-                message: err.message,
-                eventXML: currentEventXML.substring(0, 200) + '...'
-              });
-
-              if (onError) {
-                onError(err, currentEventXML);
-              }
-            }
-
-            // Reset for next event
-            currentEventXML = '';
-          }
-        }
+        currentEventXML += `<![CDATA[${text}]]>`;
       }
+    });
+
+    parser.on('closetag', (tagName) => {
+      if (!insideEvent) return;
+      currentEventXML += `</${tagName}>`;
+      eventDepth -= 1;
+
+      if (eventDepth !== 0) return;
+
+      // Capture and reset synchronously, before any callback can yield.
+      const eventXML = currentEventXML;
+      currentEventXML = '';
+      insideEvent = false;
+
+      handleEvent(eventXML);
     });
 
     parser.on('error', (error) => {
@@ -940,24 +1276,15 @@ export async function parseQuakeMLStream(
       parser.resume();
     });
 
-    parser.on('end', async () => {
-      // Process any remaining events in the batch
-      if (onBatch && eventBatch.length > 0) {
-        try {
-          await onBatch(eventBatch);
-        } catch (error) {
-          const err = error as Error;
-          result.errors.push({ message: `Batch processing error: ${err.message}` });
-        }
-      }
-
-      resolve(result);
+    parser.on('end', () => {
+      // Process any remaining events in the batch, then wait for every queued
+      // callback to settle before reporting the result.
+      flushBatch();
+      pendingWrite.then(() => resolve(result), reject);
     });
 
-    // Create read stream and pipe to SAX parser
-    const fileStream = fs.createReadStream(filePath, { encoding: 'utf8' });
-
     fileStream.on('error', (error) => {
+      streamFailed = true;
       reject(error);
     });
 

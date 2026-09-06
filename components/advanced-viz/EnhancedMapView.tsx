@@ -1,6 +1,12 @@
 'use client';
 
+import { useMapEventSelection } from '@/hooks/use-map-event-selection';
+import { MapViewportObserver } from '@/components/map/MapViewportObserver';
+import { MapDetailControl } from '@/components/map/MapDetailControl';
+import type { MapDetail } from '@/lib/map-event-selection';
+
 import { useState, useEffect, useMemo } from 'react';
+import { useEventMapPopup } from '@/hooks/use-event-map-popup';
 import { dedupeById } from '@/lib/utils';
 import { MapContainer, Circle, Popup, Polyline } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
@@ -8,7 +14,6 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Activity, Ruler, Calendar, MapPin, Layers, Target, Radio, Info } from 'lucide-react';
 import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import L from 'leaflet';
@@ -21,7 +26,7 @@ import { calculateUncertaintyEllipse, UncertaintyData } from '@/lib/uncertainty-
 import { parseFocalMechanism } from '@/lib/focal-mechanism-utils';
 import { calculateDistance } from '@/lib/station-coverage-utils';
 import { calculateQualityScore, getQualityColor, metricsFromEvent } from '@/lib/quality-scoring';
-import { getMagnitudeColor, getMagnitudeRadius, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
+import { getMagnitudeColor, getMagnitudeRadius, getEarthquakeColor } from '@/lib/earthquake-utils';
 
 interface EnhancedEvent {
   id: number | string;
@@ -93,16 +98,16 @@ export function EnhancedMapView({
   const [showFocalMechanisms, setShowFocalMechanisms] = useState(true);
   const [showStations, setShowStations] = useState(false);
   const [showQualityColors, setShowQualityColors] = useState(false);
-  const [sampleSize, setSampleSize] = useState<number>(1000);
+  const [sampleSize, setSampleSize] = useState<MapDetail>('auto');
 
   // Dark mode support for marker colors
   const mapColors = useMapColors();
 
   // Sample events for performance
-  const { sampled: sampledEvents, total, displayCount, isSampled } = useMemo(
-    () => sampleEarthquakeEvents(events, sampleSize),
-    [events, sampleSize]
-  );
+  const { sampled: sampledEvents, displayCount, visibleCount, isSampled, onViewportChange, getPosition } = useMapEventSelection(events, sampleSize);
+
+  const { activePopup, onEventClick } = useEventMapPopup(events);
+  useEffect(() => setSelectedEvent(null), [events]);
 
   // Fix Leaflet icons
   useEffect(() => {
@@ -116,20 +121,20 @@ export function EnhancedMapView({
 
   // Calculate uncertainty ellipses (use sampled events)
   const uncertaintyEllipses = useMemo(() => {
-    return sampledEvents.map(event => ({
-      eventId: event.id,
-      ellipse: calculateUncertaintyEllipse(event as UncertaintyData)
-    })).filter(item => item.ellipse !== null);
-  }, [sampledEvents]);
+    return sampledEvents.map(event => {
+      const ellipse = calculateUncertaintyEllipse(event as UncertaintyData);
+      return { eventId: event.id, ellipse: ellipse ? { ...ellipse, center: getPosition(event) } : null };
+    }).filter(item => item.ellipse !== null);
+  }, [sampledEvents, getPosition]);
 
   // Parse focal mechanisms (use sampled events)
   const focalMechanisms = useMemo(() => {
     return sampledEvents.map(event => ({
       eventId: event.id,
-      position: [event.latitude, event.longitude] as [number, number],
+      position: getPosition(event),
       mechanism: parseFocalMechanism(event.focal_mechanisms)
     })).filter(item => item.mechanism !== null);
-  }, [sampledEvents]);
+  }, [sampledEvents, getPosition]);
 
   // Calculate quality scores (use sampled events)
   const qualityScores = useMemo(() => {
@@ -139,11 +144,13 @@ export function EnhancedMapView({
     }));
   }, [sampledEvents]);
 
+  const qualityScoreMap = useMemo(() => new Map(qualityScores.map(q => [q.eventId, q.score])), [qualityScores]);
+
   // Get event color based on quality or depth
   const getEventColor = (event: EnhancedEvent) => {
     if (showQualityColors) {
-      const quality = qualityScores.find(q => q.eventId === event.id);
-      return quality ? getQualityColor(quality.score.overall) : getEarthquakeColor(event.depth, mapColors.isDark);
+      const quality = qualityScoreMap.get(event.id);
+      return quality ? getQualityColor(quality.overall) : getEarthquakeColor(event.depth, mapColors.isDark);
     }
     return getEarthquakeColor(event.depth, mapColors.isDark);
   };
@@ -218,24 +225,7 @@ export function EnhancedMapView({
           </div>
 
           <div className="pt-2 border-t">
-            <div className="flex items-center gap-1.5 mb-2">
-              <Label htmlFor="sampleSize" className="text-sm font-medium">
-                Max Events to Display
-              </Label>
-              <InfoTooltip content="Limits the number of events rendered for performance." />
-            </div>
-            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(value === 'all' ? Infinity : Number(value))}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent position="popper" className="z-[10000]">
-                <SelectItem value="500">500</SelectItem>
-                <SelectItem value="1000">1,000</SelectItem>
-                <SelectItem value="2000">2,000</SelectItem>
-                <SelectItem value="5000">5,000</SelectItem>
-                <SelectItem value="Infinity">All</SelectItem>
-              </SelectContent>
-            </Select>
+            <MapDetailControl value={sampleSize} onChange={setSampleSize} />
           </div>
         </div>
       </Card>
@@ -247,7 +237,7 @@ export function EnhancedMapView({
             <Info className="h-4 w-4 text-blue-500" />
             <span>
               Displaying <strong>{displayCount.toLocaleString()}</strong> of{' '}
-              <strong>{total.toLocaleString()}</strong> events
+              <strong>{visibleCount.toLocaleString()}</strong> visible events. Zoom in for more.
             </span>
           </div>
         </Card>
@@ -264,6 +254,7 @@ export function EnhancedMapView({
           preferCanvas={true}
         >
           <MapLayerControl position="topright" />
+          <MapViewportObserver onChange={onViewportChange} />
 
           {/* Earthquake markers - using intelligent sampling for performance */}
           {/* Sort by magnitude (small to large) so larger events render on top */}
@@ -278,7 +269,7 @@ export function EnhancedMapView({
             return (
               <Circle
                 key={event.id}
-                center={[event.latitude, event.longitude]}
+                center={getPosition(event)}
                 radius={getMagnitudeRadius(event.magnitude)}
                 pathOptions={{
                   color: getEventColor(event),
@@ -289,15 +280,15 @@ export function EnhancedMapView({
                   title: ariaLabel,
                 } as any}
                 eventHandlers={{
-                  click: () => setSelectedEvent(event),
+                  click: () => { setSelectedEvent(event); onEventClick(event, getPosition(event)); },
                 }}
-              >
-                <Popup>
-                  <EventPopup event={event} qualityScores={qualityScores} />
-                </Popup>
-              </Circle>
+              />
             );
           })}
+
+          {activePopup && <Popup key={activePopup.seq} position={activePopup.position}>
+            <EventPopup event={activePopup.event} qualityScores={qualityScores} />
+          </Popup>}
 
           {/* Uncertainty ellipses */}
           {showUncertainty && uncertaintyEllipses.map(({ eventId, ellipse }) => (

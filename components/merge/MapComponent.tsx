@@ -1,17 +1,20 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMapEventSelection } from '@/hooks/use-map-event-selection';
+import { MapViewportObserver } from '@/components/map/MapViewportObserver';
+import { MapDetailControl } from '@/components/map/MapDetailControl';
+import type { MapDetail } from '@/lib/map-event-selection';
+
+import { useEffect, useState } from 'react';
 import { MapContainer, Circle, Popup } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Activity, Ruler, Calendar, Info } from 'lucide-react';
 import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { getMagnitudeColor, getMagnitudeRadius, getMagnitudeLabel, getEarthquakeColor, sampleEarthquakeEvents } from '@/lib/earthquake-utils';
+import { getMagnitudeColor, getMagnitudeRadius, getMagnitudeLabel, getEarthquakeColor } from '@/lib/earthquake-utils';
 import { useMapColors } from '@/hooks/use-map-theme';
 
 interface MapComponentProps {
@@ -29,13 +32,10 @@ interface MapComponentProps {
 
 export default function MapComponent({ events }: MapComponentProps) {
   const mapColors = useMapColors();
-  const [sampleSize, setSampleSize] = useState<number>(1000);
+  const [sampleSize, setSampleSize] = useState<MapDetail>('auto');
 
   // Sample events for performance
-  const { sampled: sampledEvents, total, displayCount, isSampled } = useMemo(
-    () => sampleEarthquakeEvents(events, sampleSize),
-    [events, sampleSize]
-  );
+  const { sampled: sampledEvents, total, displayCount, visibleCount, isSampled, onViewportChange, getPosition } = useMapEventSelection(events, sampleSize);
 
   // Fix for Leaflet icons in Next.js
   useEffect(() => {
@@ -56,7 +56,7 @@ export default function MapComponent({ events }: MapComponentProps) {
             <Info className="h-4 w-4 text-blue-500" />
             <span>
               Displaying <strong>{displayCount.toLocaleString()}</strong> of{' '}
-              <strong>{total.toLocaleString()}</strong> events
+              <strong>{visibleCount.toLocaleString()}</strong> visible events. Zoom in for more.
             </span>
           </div>
         </Card>
@@ -71,6 +71,7 @@ export default function MapComponent({ events }: MapComponentProps) {
         preferCanvas={true}
       >
         <MapLayerControl position="topright" />
+        <MapViewportObserver onChange={onViewportChange} />
 
         {/* Earthquake markers - using intelligent sampling for performance */}
         {/* Sort by magnitude (small to large) so larger events render on top */}
@@ -88,7 +89,7 @@ export default function MapComponent({ events }: MapComponentProps) {
               // same event.id can appear more than once — append the array index (unique per
               // render) so React keys never collide.
               key={`${event.id ?? 'evt'}-${index}`}
-              center={[event.latitude, event.longitude]}
+              center={getPosition(event)}
               radius={getMagnitudeRadius(event.magnitude)}
               pathOptions={{
                 color: getEarthquakeColor(event.depth || 0, mapColors.isDark),
@@ -193,22 +194,8 @@ export default function MapComponent({ events }: MapComponentProps) {
           <div className="text-[10px] text-muted-foreground">
             {total.toLocaleString()} total events
           </div>
-          <div className="mt-2">
-            <Label htmlFor="sampleSize-merge" className="text-[11px] font-medium mb-1 block">
-              Max Events
-            </Label>
-            <Select value={sampleSize.toString()} onValueChange={(value) => setSampleSize(value === 'all' ? Infinity : Number(value))}>
-              <SelectTrigger className="w-full h-7 text-[11px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent position="popper" className="z-[10000]">
-                <SelectItem value="500">500</SelectItem>
-                <SelectItem value="1000">1,000</SelectItem>
-                <SelectItem value="2000">2,000</SelectItem>
-                <SelectItem value="5000">5,000</SelectItem>
-                <SelectItem value="Infinity">All</SelectItem>
-              </SelectContent>
-            </Select>
+          <div className="pt-2 border-t">
+            <MapDetailControl value={sampleSize} onChange={setSampleSize} />
           </div>
         </div>
       </Card>

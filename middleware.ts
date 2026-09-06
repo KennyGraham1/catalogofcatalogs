@@ -1,16 +1,10 @@
 /**
  * Next.js Middleware for Route Protection + CSP Nonce
- *
- * Responsibilities:
- *  1. Generate a per-request CSP nonce and forward it to server components
- *     via the `x-nonce` request header.
- *  2. Set the Content-Security-Policy response header using that nonce so
- *     `unsafe-inline` is no longer required for scripts.
- *  3. Enforce authentication / role-based access control.
  */
 
 import { withAuth } from 'next-auth/middleware';
 import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { UserRole } from './lib/auth/types';
 
 // All other security headers remain in next.config.js.
@@ -35,21 +29,55 @@ function buildCsp(nonce: string): string {
   ].join('; ');
 }
 
+/**
+ * Ask the server for the session as it stands NOW.
+ */
+async function liveSessionUser(req: NextRequest): Promise<{ role?: UserRole } | null> {
+  try {
+    const response = await fetch(new URL('/api/auth/session', req.nextUrl.origin), {
+      headers: { cookie: req.headers.get('cookie') ?? '' },
+      cache: 'no-store',
+    });
+    if (!response.ok) return null;
+    const session = await response.json();
+    return session?.user ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export default withAuth(
-  function middleware(req) {
+  async function middleware(req) {
     const token = req.nextauth.token;
     const path = req.nextUrl.pathname;
 
-    // Admin-only routes
-    if (path.startsWith('/admin')) {
-      if (token?.role !== UserRole.ADMIN) {
+    const isAdminPath = path.startsWith('/admin');
+
+    // Gated routes: re-check the session against the database rather than trusting the
+    // cookie's claims (see liveSessionUser). A promotion takes effect here too, since
+    // the role reported is the stored one, not the one the token was minted with.
+    if (isAdminPath || path.startsWith('/profile')) {
+      const user = await liveSessionUser(req);
+
+      if (!user) {
+        // Account deactivated or deleted, or the token revoked by a password change.
+        const signIn = new URL('/login', req.url);
+        signIn.searchParams.set('callbackUrl', `${req.nextUrl.pathname}${req.nextUrl.search}`);
+        return NextResponse.redirect(signIn);
+      }
+
+      if (isAdminPath && user.role !== UserRole.ADMIN) {
         return NextResponse.redirect(new URL('/', req.url));
       }
     }
 
-    // Login/Register routes — redirect to home if already authenticated
+    // Login/Register routes — redirect to home if already authenticated. The live check
+    // matters here too: a cookie the server no longer honours must not bounce its owner
+    // away from the only page that can give them a valid session again.
     if ((path === '/login' || path === '/register') && token) {
-      return NextResponse.redirect(new URL('/', req.url));
+      if (await liveSessionUser(req)) {
+        return NextResponse.redirect(new URL('/', req.url));
+      }
     }
 
     // Generate a fresh nonce for every successful (non-redirect) response.

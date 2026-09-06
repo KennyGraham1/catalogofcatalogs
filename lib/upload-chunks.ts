@@ -1,28 +1,5 @@
 /**
  * Chunked Upload Storage
- *
- * Vercel Serverless Functions have a hard 4.5 MB request-body limit. Files
- * larger than that (e.g. 70 MB QuakeML catalogues) are rejected at the
- * platform level before any Next.js code runs, producing:
- *   FUNCTION_PAYLOAD_TOO_LARGE
- *
- * Architecture — three-step chunked upload:
- *   1. POST /api/upload/init        → { sessionId, chunkSize }
- *   2. POST /api/upload/chunk  × N  → { received: true }   (one per chunk)
- *   3. POST /api/upload/finalize    → same shape as /api/upload response
- *
- * Each chunk is ≤ CHUNK_SIZE bytes so it fits comfortably inside Vercel's
- * 4.5 MB limit (headers + boundary add ~1 KB of overhead).
- *
- * Chunks are stored as raw binary documents in MongoDB with a 1-hour TTL.
- * The finalize handler reassembles them in order. Stream-capable formats are
- * written to /tmp and parsed from disk; sync-parser formats still assemble into
- * memory. Parsed events are stored in the pending-upload store, then chunks are
- * deleted.
- *
- * Collection: upload_chunks
- *   { session_id, chunk_index, total_chunks, file_name, data: Binary,
- *     delimiter?, date_format?, expires_at }
  */
 
 import { Binary } from 'mongodb';
@@ -39,6 +16,26 @@ export const CHUNK_SIZE = 3 * 1024 * 1024;
 export const LARGE_FILE_THRESHOLD = 3.5 * 1024 * 1024;
 
 const CHUNK_TTL_HOURS = 1;
+
+/**
+ * Raised when the bytes actually stored for a session exceed the caller's cap.
+ *
+ * The `file_size` recorded at /api/upload/init is declared by the client, so it
+ * cannot be used to enforce an upload limit. Assembly counts the real bytes and
+ * aborts as soon as the cap is passed, so neither the heap nor /tmp grows beyond
+ * it.
+ */
+export class UploadSizeLimitError extends Error {
+  readonly bytesRead: number;
+  readonly limit: number;
+
+  constructor(bytesRead: number, limit: number) {
+    super(`Upload exceeds the maximum of ${limit} bytes (read at least ${bytesRead} bytes)`);
+    this.name = 'UploadSizeLimitError';
+    this.bytesRead = bytesRead;
+    this.limit = limit;
+  }
+}
 
 let indexesEnsured = false;
 
@@ -155,42 +152,54 @@ export async function countReceivedChunks(sessionId: string): Promise<number> {
 /**
  * Reassemble all chunks in order and return the complete file content as a string.
  * Throws if any chunk is missing.
+ *
+ * `maxBytes`, when given, is enforced against the bytes actually stored: the walk
+ * stops and throws UploadSizeLimitError as soon as the running total passes the
+ * cap, so an upload that under-declared its size at init cannot be concatenated
+ * into memory.
  */
 export async function assembleChunks(
   sessionId: string,
   totalChunks: number,
+  maxBytes?: number,
 ): Promise<string> {
-  const col  = await getCollection(COLLECTIONS.UPLOAD_CHUNKS);
-  const docs = await col
+  const col = await getCollection(COLLECTIONS.UPLOAD_CHUNKS);
+  const cursor = col
     .find({ session_id: sessionId, chunk_index: { $gte: 0 } })
-    .sort({ chunk_index: 1 })
-    .toArray();
+    .sort({ chunk_index: 1 });
 
-  if (docs.length !== totalChunks) {
-    throw new Error(
-      `Incomplete upload: expected ${totalChunks} chunks, found ${docs.length}`
-    );
+  const buffers: Buffer[] = [];
+  let bytesRead = 0;
+
+  for await (const doc of cursor) {
+    const bin = doc.data as Binary;
+    const buffer = Buffer.isBuffer(bin.buffer) ? bin.buffer : Buffer.from(bin.buffer);
+    bytesRead += buffer.length;
+
+    if (maxBytes !== undefined && bytesRead > maxBytes) {
+      throw new UploadSizeLimitError(bytesRead, maxBytes);
+    }
+
+    buffers.push(buffer);
   }
 
-  const buffers: Buffer[] = docs.map(doc => {
-    const bin = doc.data as Binary;
-    return Buffer.isBuffer(bin.buffer) ? bin.buffer : Buffer.from(bin.buffer);
-  });
+  if (buffers.length !== totalChunks) {
+    throw new Error(
+      `Incomplete upload: expected ${totalChunks} chunks, found ${buffers.length}`
+    );
+  }
 
   return Buffer.concat(buffers).toString('utf-8');
 }
 
 /**
  * Reassemble chunks directly into a file on disk.
- *
- * This is the large-file path used by finalize handlers that can parse from a
- * stream. It avoids loading every chunk into an array, avoids Buffer.concat(),
- * and avoids materialising a second full UTF-8 string copy of the upload.
  */
 export async function assembleChunksToFile(
   sessionId: string,
   totalChunks: number,
   outputPath: string,
+  maxBytes?: number,
 ): Promise<{ bytesWritten: number }> {
   const col = await getCollection(COLLECTIONS.UPLOAD_CHUNKS);
   const cursor = col
@@ -212,6 +221,11 @@ export async function assembleChunksToFile(
       const bin = doc.data as Binary;
       const buffer = Buffer.isBuffer(bin.buffer) ? bin.buffer : Buffer.from(bin.buffer);
       bytesWritten += buffer.length;
+
+      // Cap on the real byte count, not on the size the client declared at init.
+      if (maxBytes !== undefined && bytesWritten > maxBytes) {
+        throw new UploadSizeLimitError(bytesWritten, maxBytes);
+      }
 
       if (!stream.write(buffer)) {
         await once(stream, 'drain');

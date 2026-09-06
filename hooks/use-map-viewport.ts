@@ -1,13 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useMap } from 'react-leaflet';
-import type { LatLngBounds, Map as LeafletMap } from 'leaflet';
-
-interface ViewportBounds {
-  north: number;
-  south: number;
-  east: number;
-  west: number;
-}
+import { isEventInBounds, normalizeSampleLimit, type ViewportBounds } from '@/lib/earthquake-utils';
 
 interface UseMapViewportOptions {
   /**
@@ -15,7 +8,7 @@ interface UseMapViewportOptions {
    */
   debounceDelay?: number;
   /**
-   * Padding factor to extend bounds (1.1 = 10% padding on each side)
+   * Padding factor to extend bounds (1.1 = 5% padding on each side)
    */
   paddingFactor?: number;
 }
@@ -27,7 +20,7 @@ export function useMapViewport(options: UseMapViewportOptions = {}) {
   const { debounceDelay = 150, paddingFactor = 1.1 } = options;
   const map = useMap();
   const [bounds, setBounds] = useState<ViewportBounds | null>(null);
-  const [zoom, setZoom] = useState<number>(map?.getZoom() || 6);
+  const [zoom, setZoom] = useState<number>(map?.getZoom() ?? 6);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const updateBounds = useCallback(() => {
@@ -46,7 +39,10 @@ export function useMapViewport(options: UseMapViewportOptions = {}) {
       west: center.lng - (lngSpan / 2) * paddingFactor,
     };
 
-    setBounds(paddedBounds);
+    setBounds(previous => previous &&
+      previous.north === paddedBounds.north && previous.south === paddedBounds.south &&
+      previous.east === paddedBounds.east && previous.west === paddedBounds.west
+      ? previous : paddedBounds);
     setZoom(map.getZoom());
   }, [map, paddingFactor]);
 
@@ -66,10 +62,12 @@ export function useMapViewport(options: UseMapViewportOptions = {}) {
     // Listen for map events
     map.on('moveend', debouncedUpdateBounds);
     map.on('zoomend', debouncedUpdateBounds);
+    map.on('resize', debouncedUpdateBounds);
 
     return () => {
       map.off('moveend', debouncedUpdateBounds);
       map.off('zoomend', debouncedUpdateBounds);
+      map.off('resize', debouncedUpdateBounds);
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
@@ -89,12 +87,7 @@ export function isInViewport(
 ): boolean {
   if (!bounds) return true; // Show all if no bounds
 
-  return (
-    lat >= bounds.south &&
-    lat <= bounds.north &&
-    lng >= bounds.west &&
-    lng <= bounds.east
-  );
+  return isEventInBounds({ latitude: lat, longitude: lng }, bounds);
 }
 
 /**
@@ -126,27 +119,19 @@ export function useViewportFilteredEvents<T extends { latitude: number; longitud
   const { events, maxEvents = 2000, enabled = true } = options;
   const { bounds, zoom } = useMapViewport();
 
+  const inViewport = useMemo(() => enabled
+    ? filterEventsInViewport(events, bounds) : events, [events, bounds, enabled]);
   const filteredEvents = useMemo(() => {
-    if (!enabled || !bounds) return events.slice(0, maxEvents);
-
-    // Filter to viewport
-    let inViewport = filterEventsInViewport(events, bounds);
-
-    // If still too many, prioritize by magnitude
-    if (inViewport.length > maxEvents) {
-      inViewport = [...inViewport]
-        .sort((a, b) => b.magnitude - a.magnitude)
-        .slice(0, maxEvents);
-    }
-
-    return inViewport;
-  }, [events, bounds, maxEvents, enabled]);
+    const limit = normalizeSampleLimit(maxEvents, inViewport.length);
+    return inViewport.length <= limit ? inViewport : [...inViewport]
+      .sort((a, b) => b.magnitude - a.magnitude).slice(0, limit);
+  }, [inViewport, maxEvents]);
 
   return {
     events: filteredEvents,
     bounds,
     zoom,
-    totalInViewport: filteredEvents.length,
+    totalInViewport: inViewport.length,
     totalEvents: events.length,
   };
 }

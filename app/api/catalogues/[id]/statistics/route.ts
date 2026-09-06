@@ -4,12 +4,19 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { dbQueries, MergedEvent } from '@/lib/db';
+import { dbQueries } from '@/lib/db';
 import { Logger, NotFoundError, formatErrorResponse } from '@/lib/errors';
 import { requireViewer } from '@/lib/auth/middleware';
 
 const logger = new Logger('CatalogueStatisticsAPI');
 
+/**
+ * The nullable members are genuinely absent, not merely unset: an empty catalogue is
+ * answered with every range null, and the aggregation's $min/$max/$avg yield null
+ * whenever no event carries the field (all times unparseable, no magnitudes at all).
+ * They are typed that way so a consumer is forced to guard instead of dereferencing a
+ * value the endpoint never promised.
+ */
 export interface CatalogueStatistics {
   catalogueId: string;
   eventCount: number;
@@ -17,29 +24,31 @@ export interface CatalogueStatistics {
     earliest: string;
     latest: string;
     spanDays: number;
-  };
+  } | null;
   magnitudeRange: {
     min: number;
     max: number;
     average: number;
     median: number;
-  };
+  } | null;
   depthRange: {
     min: number;
     max: number;
     average: number;
-  };
+  } | null;
   magnitudeTypes: {
     type: string;
     count: number;
   }[];
-  qualityMetrics?: {
+  qualityMetrics: {
     averageAzimuthalGap?: number;
     averageStationCount?: number;
     eventsWithUncertainty: number;
     eventsWithFocalMechanism: number;
-  };
+  } | null;
 }
+
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
 export async function GET(
   request: NextRequest,
@@ -67,12 +76,14 @@ export async function GET(
       throw new NotFoundError('Catalogue');
     }
 
-    // Get all events for this catalogue
-    const eventsResult = await dbQueries.getEventsByCatalogueId(catalogueId);
-    const events: MergedEvent[] = Array.isArray(eventsResult) ? eventsResult : eventsResult.data;
+    // Aggregate the statistics in MongoDB. Reducing them in Node meant loading
+    // every event (~1.3 kB each) into memory, and Math.min(...magnitudes) threw
+    // RangeError — HTTP 500 — once a catalogue passed ~125,000 events, which
+    // several of the New Zealand catalogues do.
+    const stats = await dbQueries.getCatalogueEventStatistics(catalogueId);
 
-    if (!events || events.length === 0) {
-      return NextResponse.json({
+    if (stats.eventCount === 0) {
+      const empty: CatalogueStatistics = {
         catalogueId,
         eventCount: 0,
         dateRange: null,
@@ -80,86 +91,63 @@ export async function GET(
         depthRange: null,
         magnitudeTypes: [],
         qualityMetrics: null
-      });
+      };
+      return NextResponse.json(empty);
     }
 
-    // Calculate date range
-    const dates = events.map(e => new Date(e.time).getTime()).filter(d => !isNaN(d));
-    const earliestDate = new Date(Math.min(...dates));
-    const latestDate = new Date(Math.max(...dates));
-    const spanDays = Math.ceil((latestDate.getTime() - earliestDate.getTime()) / (1000 * 60 * 60 * 24));
+    // Times are stored as normalised ISO-8601 UTC strings, so the lexicographic
+    // min/max the aggregation returns is also the chronological one.
+    const earliestMs = stats.earliestTime ? Date.parse(stats.earliestTime) : NaN;
+    const latestMs = stats.latestTime ? Date.parse(stats.latestTime) : NaN;
+    const dateRange = Number.isFinite(earliestMs) && Number.isFinite(latestMs)
+      ? {
+          earliest: new Date(earliestMs).toISOString(),
+          latest: new Date(latestMs).toISOString(),
+          spanDays: Math.ceil((latestMs - earliestMs) / MS_PER_DAY)
+        }
+      : null;
 
-    // Calculate magnitude statistics
-    const magnitudes = events.map(e => e.magnitude).filter(m => m !== null && m !== undefined);
-    const sortedMagnitudes = [...magnitudes].sort((a, b) => a - b);
-    const medianMagnitude = sortedMagnitudes.length > 0
-      ? sortedMagnitudes[Math.floor(sortedMagnitudes.length / 2)]
-      : 0;
-
-    // Calculate depth statistics
-    const depths = events.map(e => e.depth).filter((d): d is number => d !== null && d !== undefined);
-
-    // Count magnitude types
-    const magnitudeTypeCounts = events.reduce((acc, event) => {
-      const type = event.magnitude_type || 'Unknown';
-      acc[type] = (acc[type] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const magnitudeTypes = Object.entries(magnitudeTypeCounts)
-      .map(([type, count]) => ({ type, count }))
-      .sort((a, b) => b.count - a.count);
-
-    // Calculate quality metrics
-    const azimuthalGaps = events
-      .map(e => e.azimuthal_gap)
-      .filter((g): g is number => g !== null && g !== undefined);
-
-    const stationCounts = events
-      .map(e => e.used_station_count)
-      .filter((c): c is number => c !== null && c !== undefined);
-
-    const eventsWithUncertainty = events.filter(e =>
-      e.latitude_uncertainty != null || e.longitude_uncertainty != null
-    ).length;
-
-    const eventsWithFocalMechanism = events.filter(e =>
-      e.focal_mechanisms !== null && e.focal_mechanisms !== undefined
-    ).length;
+    // $min/$max/$avg skip events with no magnitude, so a catalogue whose events all
+    // lack one leaves every magnitude statistic null. Report that as "no magnitude
+    // range" rather than casting the nulls into numbers a consumer would dereference.
+    const magnitudeRange =
+      stats.minMagnitude != null &&
+      stats.maxMagnitude != null &&
+      stats.averageMagnitude != null &&
+      stats.medianMagnitude != null
+        ? {
+            min: stats.minMagnitude,
+            max: stats.maxMagnitude,
+            average: stats.averageMagnitude,
+            median: stats.medianMagnitude
+          }
+        : null;
 
     const statistics: CatalogueStatistics = {
       catalogueId,
-      eventCount: events.length,
-      dateRange: {
-        earliest: earliestDate.toISOString(),
-        latest: latestDate.toISOString(),
-        spanDays
-      },
-      magnitudeRange: {
-        min: Math.min(...magnitudes),
-        max: Math.max(...magnitudes),
-        average: magnitudes.reduce((a, b) => a + b, 0) / magnitudes.length,
-        median: medianMagnitude
-      },
-      depthRange: depths.length > 0 ? {
-        min: Math.min(...depths),
-        max: Math.max(...depths),
-        average: depths.reduce((a, b) => a + b, 0) / depths.length
-      } : {
-        min: 0,
-        max: 0,
-        average: 0
-      },
-      magnitudeTypes,
+      eventCount: stats.eventCount,
+      dateRange,
+      magnitudeRange,
+      // No depth on any event keeps the historical all-zero placeholder rather
+      // than nulls, so existing clients render the same thing as before.
+      depthRange:
+        stats.minDepth != null && stats.maxDepth != null && stats.averageDepth != null
+          ? {
+              min: stats.minDepth,
+              max: stats.maxDepth,
+              average: stats.averageDepth
+            }
+          : {
+              min: 0,
+              max: 0,
+              average: 0
+            },
+      magnitudeTypes: stats.magnitudeTypes,
       qualityMetrics: {
-        averageAzimuthalGap: azimuthalGaps.length > 0
-          ? azimuthalGaps.reduce((a, b) => a + b, 0) / azimuthalGaps.length
-          : undefined,
-        averageStationCount: stationCounts.length > 0
-          ? stationCounts.reduce((a, b) => a + b, 0) / stationCounts.length
-          : undefined,
-        eventsWithUncertainty,
-        eventsWithFocalMechanism
+        averageAzimuthalGap: stats.averageAzimuthalGap ?? undefined,
+        averageStationCount: stats.averageStationCount ?? undefined,
+        eventsWithUncertainty: stats.eventsWithUncertainty,
+        eventsWithFocalMechanism: stats.eventsWithFocalMechanism
       }
     };
 

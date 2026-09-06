@@ -3,6 +3,7 @@ import { dbQueries } from '@/lib/db';
 import { Logger, formatErrorResponse } from '@/lib/errors';
 import { eventCache, generateCacheKey } from '@/lib/cache';
 import { requireViewer } from '@/lib/auth/middleware';
+import { decodeEventCursor } from '@/lib/event-cursor';
 
 // Force dynamic rendering for this API route
 export const dynamic = 'force-dynamic';
@@ -34,6 +35,11 @@ export async function GET(
 
     const catalogueId = id;
     const { searchParams } = new URL(request.url);
+    const view = searchParams.get('view');
+    if (view && view !== 'summary') {
+      return NextResponse.json({ error: 'Invalid event view' }, { status: 400 });
+    }
+    const summary = view === 'summary';
 
     // Parse pagination parameters
     const page = searchParams.get('page');
@@ -60,10 +66,11 @@ export async function GET(
     let cacheKey: string;
 
     // Performance Optimization: Prefer cursor-based pagination for better performance
-    if (cursor !== null || (limit && !page && !pageSize && !offset)) {
+    if (summary || cursor !== null || (limit && !page && !pageSize && !offset)) {
       // Cursor-based pagination (most efficient for large datasets)
       const rawLimit = limit ? parseInt(limit, 10) : 100;
-      const limitNum = Math.min(rawLimit, HARD_LIMIT);
+      const limitNum = Math.min(rawLimit, HARD_LIMIT,
+        summary && MAX_EVENTS_REQUEST_LIMIT > 0 ? MAX_EVENTS_REQUEST_LIMIT : HARD_LIMIT);
 
       if (isNaN(rawLimit) || rawLimit < 1) {
         return NextResponse.json(
@@ -79,12 +86,14 @@ export async function GET(
       }
 
       const validDirection = direction === 'asc' || direction === 'desc' ? direction : 'desc';
+      if (cursor) decodeEventCursor(cursor);
 
       cacheKey = generateCacheKey('events-cursor', {
         catalogueId,
         cursor: cursor || 'start',
         limit: limitNum,
-        direction: validDirection
+        direction: validDirection,
+        summary
       });
 
       // Try cache first
@@ -95,7 +104,8 @@ export async function GET(
         events = await dbQueries.getEventsByCatalogueIdCursor(catalogueId, {
           cursor: cursor || undefined,
           limit: limitNum,
-          direction: validDirection
+          direction: validDirection,
+          summary
         });
         eventCache.set(cacheKey, events);
       }
@@ -162,9 +172,6 @@ export async function GET(
         );
       }
 
-      // Convert limit/offset to page-based
-      const page = Math.floor(offsetNum / limitNum) + 1;
-
       cacheKey = generateCacheKey('events', { catalogueId, limit: limitNum, offset: offsetNum });
 
       // Try cache first
@@ -172,8 +179,13 @@ export async function GET(
       if (cached) {
         events = cached;
       } else {
+        // Pass the offset through as an absolute skip. Converting it to a page
+        // number first (Math.floor(offset / limit) + 1) rounded it down to a
+        // multiple of the limit, so e.g. limit=100&offset=150 returned rows
+        // 100-199 instead of the documented 150-249 — half the window duplicated
+        // from the previous page and half never returned.
         events = await dbQueries.getEventsByCatalogueId(catalogueId, {
-          page,
+          offset: offsetNum,
           pageSize: limitNum
         });
         eventCache.set(cacheKey, events);

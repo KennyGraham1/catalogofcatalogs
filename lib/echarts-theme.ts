@@ -12,7 +12,7 @@ import type { EChartsOption } from 'echarts';
 import { SEISMIC_COLORS, CATEGORICAL_COLORS } from './chart-config';
 
 /** Resolved per-theme colours used across all charts. */
-export function chartColors(isDark: boolean) {
+function createChartColors(isDark: boolean) {
   return {
     text: isDark ? '#e5e7eb' : '#374151',
     subtext: isDark ? '#9ca3af' : '#6b7280',
@@ -27,7 +27,21 @@ export function chartColors(isDark: boolean) {
   };
 }
 
+const LIGHT_CHART_COLORS = createChartColors(false);
+const DARK_CHART_COLORS = createChartColors(true);
+
+export function chartColors(isDark: boolean) {
+  return isDark ? DARK_CHART_COLORS : LIGHT_CHART_COLORS;
+}
+
 export type ChartColors = ReturnType<typeof chartColors>;
+
+/** Labels can contain catalogue/region names supplied by an uploader. */
+function escapeHtml(value: string): string {
+  return String(value).replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[character]!));
+}
 
 const FONT_FAMILY =
   'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
@@ -68,16 +82,16 @@ export function tooltip(c: ChartColors, extra: Record<string, unknown> = {}) {
  * values, and an optional coloured note/badge line.
  */
 export function ttHeader(c: ChartColors, title: string): string {
-  return `<div style="font-weight:600;font-size:12px;margin-bottom:6px;padding-bottom:5px;border-bottom:1px solid ${c.tooltipBorder};color:${c.text}">${title}</div>`;
+  return `<div style="font-weight:600;font-size:12px;margin-bottom:6px;padding-bottom:5px;border-bottom:1px solid ${c.tooltipBorder};color:${c.text}">${escapeHtml(title)}</div>`;
 }
 export function ttRow(c: ChartColors, label: string, value: string, color?: string): string {
   const marker = color
     ? `<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${color};margin-right:7px;vertical-align:middle"></span>`
     : '';
-  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:20px;line-height:1.65;font-size:12px"><span style="color:${c.subtext}">${marker}${label}</span><span style="color:${c.text};font-weight:600;font-variant-numeric:tabular-nums">${value}</span></div>`;
+  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:20px;line-height:1.65;font-size:12px"><span style="color:${c.subtext}">${marker}${escapeHtml(label)}</span><span style="color:${c.text};font-weight:600;font-variant-numeric:tabular-nums">${escapeHtml(value)}</span></div>`;
 }
 export function ttBadge(c: ChartColors, text: string, color: string): string {
-  return `<div style="margin-top:6px"><span style="display:inline-block;font-size:10.5px;font-weight:600;letter-spacing:.02em;padding:1px 7px;border-radius:9999px;color:${color};background:${color}22;border:1px solid ${color}55">${text}</span></div>`;
+  return `<div style="margin-top:6px"><span style="display:inline-block;font-size:10.5px;font-weight:600;letter-spacing:.02em;padding:1px 7px;border-radius:9999px;color:${color};background:${color}22;border:1px solid ${color}55">${escapeHtml(text)}</span></div>`;
 }
 
 /** Legend styling. */
