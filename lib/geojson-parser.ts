@@ -276,7 +276,9 @@ function parseGeoJSONFeature(
     latitude,
     depth,
     time: props.time || props.datetime || props.date || props.origin_time || props.origintime,
-    magnitude: props.magnitude || props.mag || props.m,
+    // `||` treats a magnitude of 0.0 as absent; M0.0 is a real value in microseismic
+    // catalogues, so pick the first field that is genuinely present.
+    magnitude: firstPresent(props.magnitude, props.mag, props.m),
   };
 
   // Add optional fields
@@ -358,4 +360,12 @@ function parseGeoJSONFeature(
   validationAccumulator.failures.push(...validation.failures);
   appendCrossFieldFailures(validationAccumulator, event, context);
   return event;
+}
+
+/** First argument that is neither undefined, null, nor the empty string. */
+function firstPresent(...values: unknown[]): any {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  return undefined;
 }

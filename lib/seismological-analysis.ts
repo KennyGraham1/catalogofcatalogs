@@ -492,8 +492,18 @@ export function estimateCompletenessMagnitude(
 }
 
 /**
- * Gardner-Knopoff (1974) space-time window parameters
- * These are the standard parameters used for earthquake declustering
+ * Gardner-Knopoff (1974) space-time window parameters, as tabulated in
+ * van Stiphout et al. (2012), CORSSA, Table 1.
+ *
+ * NOTE: the windows are canonical, but this codebase APPLIES them symmetrically
+ * (|t - t_mainshock| <= T(M); see gardnerKnopoffDeclustering below), so events before the
+ * mainshock are removed as well as after. Classical Gardner-Knopoff is a forward/aftershock
+ * window - OpenQuake's hmtk exposes the backward extent as fs_time_prop and defaults it to 0.
+ * Symmetric application is a deliberate choice, not the reference behaviour, and it changes
+ * the declustered b-value by an amount that is not stable across catalogues (measured at
+ * 0.005-0.05 on two different synthetics). Report results as "independent events" rather
+ * than "mainshocks", and do not describe the output as classical Gardner-Knopoff without
+ * stating the symmetry.
  */
 export function getGardnerKnopoffWindow(magnitude: number): { timeWindowDays: number; distanceWindowKm: number } {
   const timeWindowDays = magnitude >= 6.5

@@ -119,14 +119,24 @@ export const authOptions: NextAuthOptions = {
       if (token.id) {
         const current = await getSessionUserState(token.id as string);
 
-        // Account deleted or deactivated -> destroy the session immediately.
-        if (!current || !current.isActive) return null as any;
+        // Account deleted or deactivated -> revoke. Returning null here does NOT reliably
+        // destroy the session: the session callback still receives the prebuilt `session`
+        // and returns it, so getServerSession() answers with a truthy user. Mark the token
+        // instead and let the session callback refuse it.
+        if (!current || !current.isActive) {
+          (token as Record<string, unknown>).revoked = true;
+          return token;
+        }
 
         // Password change/reset bumps jwt_version; tokens issued before the bump
         // are revoked. A token without a version predates the field and is
         // treated as version 0.
         const tokenVersion = typeof token.jwtVersion === 'number' ? token.jwtVersion : 0;
-        if (tokenVersion < current.jwtVersion) return null as any;
+        if (tokenVersion < current.jwtVersion) {
+          (token as Record<string, unknown>).revoked = true;
+          return token;
+        }
+        delete (token as Record<string, unknown>).revoked;
 
         // Role changes (demotion or promotion) take effect on the next request.
         if (current.role) token.role = current.role;
@@ -136,7 +146,13 @@ export const authOptions: NextAuthOptions = {
     },
 
     async session({ session, token }) {
-      if (token && session.user) {
+      // A revoked or missing token must not yield a usable session. Every consumer
+      // (middleware, getServerSession callers, useSession) tests session.user, so
+      // clearing it is what actually closes the gate.
+      if (!token || (token as Record<string, unknown>).revoked) {
+        return { ...session, user: undefined } as unknown as typeof session;
+      }
+      if (session.user) {
         session.user.id = token.id as string;
         session.user.role = token.role as UserRole;
       }

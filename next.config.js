@@ -73,42 +73,11 @@ const nextConfig = {
         },
       };
 
-      // Optimize chunks for better caching
-      config.optimization = {
-        ...config.optimization,
-        moduleIds: 'deterministic',
-        runtimeChunk: 'single',
-        splitChunks: {
-          chunks: 'all',
-          cacheGroups: {
-            default: false,
-            vendors: false,
-            // Vendor chunk for node_modules
-            vendor: {
-              name: 'vendor',
-              chunks: 'all',
-              test: /node_modules/,
-              priority: 20
-            },
-            // Common chunk for shared code
-            common: {
-              name: 'common',
-              minChunks: 2,
-              chunks: 'all',
-              priority: 10,
-              reuseExistingChunk: true,
-              enforce: true
-            },
-            // Leaflet and map libraries in separate chunk
-            maps: {
-              name: 'maps',
-              test: /[\\/]node_modules[\\/](leaflet|react-leaflet)[\\/]/,
-              chunks: 'all',
-              priority: 30
-            }
-          }
-        }
-      };
+      // Next.js already splits chunks per route with a shared framework chunk. The
+      // override that used to live here forced ALL of node_modules into one `vendor`
+      // cacheGroup with chunks:'all' and disabled Next's own default/vendors groups, so
+      // every route paid for every dependency: /login shipped 834 kB First Load for 1.38 kB
+      // of its own code, and the full ECharts build reached routes with no charts.
     } else {
       // Disable cache in development to prevent ENOENT errors
       config.cache = false;

@@ -627,11 +627,11 @@ magnitude and whose colour can encode focal depth, quality grade, or source
 catalogue (the last is used in Figure~\ref{fig:map}).  Events are drawn on a
 single canvas layer (Leaflet \texttt{preferCanvas}) and, for very large
 catalogues, sub-sampled to maintain browser responsiveness.  The sample is
-magnitude-stratified rather than spatial: the largest events are always
-retained and the remaining display budget is spread over magnitude bins and
-over time, so the plotted set is deliberately not proportional to the
-catalogue's magnitude--frequency distribution and should not be read as a
-density map.  Two additional overlays are available on demand: (i)
+\emph{spatial}: the visible extent is divided into screen cells and the largest
+event in each occupied cell is retained as its representative.  The plotted set
+is therefore deliberately not proportional to the catalogue's
+magnitude--frequency distribution, and neither the symbol density nor the
+magnitude mix should be read quantitatively.  Two additional overlays are available on demand: (i)
 \emph{uncertainty ellipses}, which draw the horizontal location error as a
 scaled ellipse derived from the latitude and longitude uncertainty fields,
 giving an immediate visual indication of poorly-constrained events; and (ii)
@@ -1022,7 +1022,12 @@ interaction zone is:
 \end{align}
 the two-branch time window $T(M)$ following the larger-magnitude relation for
 $M \geq 6.5$ and the small-magnitude relation otherwise.  Events falling within
-$L(M)$ and $T(M)$ of a larger mainshock are flagged as aftershocks.  The Reasenberg \citeyearpar{reasenberg1985} algorithm, which
+$L(M)$ and $T(M)$ of a larger mainshock are assigned to its cluster.  Note that
+CofC applies $T(M)$ \emph{symmetrically} about the mainshock, so events in the
+window both before and after it are removed; the original \citet{gardner1974}
+procedure applies the window forward in time only, and a symmetric window
+therefore also removes foreshocks and yields a slightly larger declustered
+fraction.  The Reasenberg \citeyearpar{reasenberg1985} algorithm, which
 uses an interaction zone based on the Omori--Utsu law
 \citep{omori1894,utsu1961} and adapts to the local seismicity rate, is
 implemented in the analysis library as an alternative, though the browser
@@ -1030,12 +1035,11 @@ worker currently exposes only the Gardner-Knopoff method.
 
 Declustering returns a mainshock/aftershock partition for the events under
 analysis; writing that partition back as a separate, tagged catalogue within the
-platform is specified but not yet implemented.  Window-based methods such as
-Gardner-Knopoff do not prospectively identify foreshocks; events preceding
-a larger mainshock within the interaction zone may be retrospectively
-reclassified as \texttt{foreshock} by a post-processing pass, but this
-reclassification is not applied by default because it is history-dependent
-and therefore not reproducible in real-time analysis \citep{vanstiphout2012}.
+platform is specified but not yet implemented.  Because the window is
+symmetric, events preceding a larger mainshock are removed as dependent rather
+than retained; they are not separately labelled as foreshocks, so the
+declustered set should be read as \emph{independent events} rather than as
+mainshocks in the strict sense \citep{vanstiphout2012}.
 
 \subsection{Cumulative seismic moment}
 
@@ -1518,7 +1522,9 @@ above it, the 23\% of those injected as clustered sequences, and the planted
 $b$-values of the two populations are all \emph{inputs} of the synthetic
 construction.  The quality-filter retention, the fraction that Gardner-Knopoff
 declustering removes, and every $b$-value quoted are \emph{outputs} computed
-from them; no quantity in the script is calibrated to a target value.  The
+from them.  The two median quality scores (72 and 58) are the exception: the
+simulated score distributions are shifted so that their medians take those
+values, so they are stipulated inputs rather than emergent results.  The
 \emph{platform's own} estimators and merge engine are exercised separately by two
 tests.  \texttt{\_\_tests\_\_/paper/worked-example.test.ts} runs the CofC
 Gutenberg-Richter, completeness, and Gardner-Knopoff routines on a seeded

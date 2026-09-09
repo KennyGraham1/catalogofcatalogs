@@ -357,6 +357,9 @@ function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): SeismicCluster[]
       if (event.id === mainshock.id || clusterAssignment.has(event.id)) continue;
 
       const eventTime = new Date(event.time).getTime();
+      // Symmetric window: removes foreshocks as well as aftershocks. This is a deliberate
+      // deviation from classical forward-only Gardner-Knopoff (hmtk fs_time_prop = 0);
+      // see the note on getGardnerKnopoffWindow in lib/seismological-analysis.ts.
       const timeDiffDays = Math.abs(eventTime - mainshockTime) / (1000 * 60 * 60 * 24);
       if (timeDiffDays > timeWindowDays) continue;
 

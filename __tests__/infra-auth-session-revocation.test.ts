@@ -120,32 +120,44 @@ describe('jwt callback — authorisation state is re-read, not trusted', () => {
     expect(token.role).toBe('editor');
   });
 
+
+  /**
+   * Revocation is only real if the SESSION ends up with no user. Returning null from the
+   * jwt callback does not achieve that on its own: the session callback still receives the
+   * prebuilt session and hands it back, so getServerSession() answers with a truthy user and
+   * the middleware gate admits. Assert the end-to-end property, not the intermediate value.
+   */
+  const expectRevoked = async (token: any) => {
+    const next = await jwtCallback({ token } as any);
+    const session: any = await sessionCallback({
+      session: { user: { name: 'A', email: 'a@example.com' }, expires: '' },
+      token: next,
+    } as any);
+    expect(session.user).toBeUndefined();
+  };
+
   it('destroys the session when the account has been deactivated', async () => {
     mockStoredUser({ role: 'admin', is_active: false, jwt_version: 0 });
 
-    expect(await jwtCallback({ token: adminToken() } as any)).toBeNull();
+    await expectRevoked(adminToken());
   });
 
   it('destroys the session when the account has been deleted', async () => {
     mockStoredUser(null);
 
-    expect(await jwtCallback({ token: adminToken() } as any)).toBeNull();
+    await expectRevoked(adminToken());
   });
 
   it('destroys the session when jwt_version has been bumped past the token', async () => {
     mockStoredUser({ role: 'admin', is_active: true, jwt_version: 1 });
 
-    expect(await jwtCallback({ token: adminToken() } as any)).toBeNull();
+    await expectRevoked(adminToken());
   });
 
   it('destroys a legacy token with no version once jwt_version has been bumped', async () => {
     mockStoredUser({ role: 'admin', is_active: true, jwt_version: 1 });
 
-    const token = await jwtCallback({
-      token: { id: 'u1', role: UserRole.ADMIN } as any,
-    } as any);
-
-    expect(token).toBeNull();
+    await expectRevoked({ id: 'u1', role: UserRole.ADMIN });
   });
 
   it('keeps a token whose version still matches the stored version', async () => {

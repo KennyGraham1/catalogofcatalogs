@@ -1361,8 +1361,10 @@ function assessMagnitudeConsistency(events: EventData[]): MagnitudeConsistency {
     let hi = mwPoints[0];
     let sum = 0;
     for (const point of mwPoints) {
-      if (point.value < lo.value) lo = point;
-      if (point.value > hi.value) hi = point;
+      // Ties are broken toward the LARGER conversion uncertainty so the chosen extremes -
+      // and therefore the widened threshold - do not depend on the order members arrive in.
+      if (point.value < lo.value || (point.value === lo.value && point.sigma > lo.sigma)) lo = point;
+      if (point.value > hi.value || (point.value === hi.value && point.sigma > hi.sigma)) hi = point;
       sum += point.value;
     }
     const conversionSigma = Math.sqrt(lo.sigma * lo.sigma + hi.sigma * hi.sigma);

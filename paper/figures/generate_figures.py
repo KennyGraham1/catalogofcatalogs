@@ -57,6 +57,11 @@ plt.rcParams.update({
     'savefig.bbox': 'tight',
     'savefig.pad_inches': 0.05,
 })
+# Matplotlib stamps a CreationDate into PDF metadata, so identical content
+# produced different bytes on every run and any rerun appeared to modify the
+# committed figures.  Suppressing it makes the seeded script byte-reproducible.
+PDF_META = {'CreationDate': None}
+
 BLUE   = '#2563EB'
 ORANGE = '#EA580C'
 GREEN  = '#16A34A'
@@ -264,7 +269,7 @@ def make_map():
     fig.text(0.5, 0.005, 'Synthetic data for illustration; marker size $\\propto$ magnitude.',
              ha='center', fontsize=7, color=GRAY, style='italic')
     fig.tight_layout(rect=[0, 0.02, 1, 1])
-    fig.savefig(OUT / 'fig1_map.pdf', bbox_inches='tight', dpi=150)
+    fig.savefig(OUT / 'fig1_map.pdf', bbox_inches='tight', dpi=150, metadata=PDF_META)
     fig.savefig(OUT / 'fig1_map.png', dpi=300, bbox_inches='tight')
     plt.close(fig)
     print('Figure 1 (merge map) saved.')
@@ -356,7 +361,7 @@ def make_gap_distribution():
     ax.set_axisbelow(True)
 
     fig.tight_layout()
-    fig.savefig(OUT / 'fig2_gap.pdf'); fig.savefig(OUT / 'fig2_gap.png', dpi=300)
+    fig.savefig(OUT / 'fig2_gap.pdf', metadata=PDF_META); fig.savefig(OUT / 'fig2_gap.png', dpi=300)
     plt.close(fig)
     print('Figure 2 (gap) saved.')
     return (pct_geonet, pct_b, med_geonet, med_b, q_frac, rm_agb, rm_gap180,
@@ -583,7 +588,7 @@ def make_fmd():
                  fr'$\hat{{b}}$: {b_all:.2f} $\rightarrow$ {b_main:.2f}',
                  fontsize=9, y=1.01, color=GRAY)
     fig.tight_layout()
-    fig.savefig(OUT / 'fig3_fmd.pdf'); fig.savefig(OUT / 'fig3_fmd.png', dpi=300)
+    fig.savefig(OUT / 'fig3_fmd.pdf', metadata=PDF_META); fig.savefig(OUT / 'fig3_fmd.png', dpi=300)
     plt.close(fig)
     print('Figure 3 (FMD) saved.')
     # Recovery of the planted background b is the point of the check: the
