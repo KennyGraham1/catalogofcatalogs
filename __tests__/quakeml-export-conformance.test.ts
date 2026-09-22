@@ -126,7 +126,11 @@ describe('ResourceIdentifier grammar for CSV/GeoJSON-derived identifiers', () =>
     expect(xml).toContain('<methodID>smi:local/method/NonLinLoc</methodID>');
     expect(xml).toContain('<earthModelID>smi:local/earthModel/nz3d</earthModelID>');
     // A space is outside the grammar's path character class → '_'.
-    expect(xml).toContain('<methodID>smi:local/method/weighted_mean</methodID>');
+    // Illegal characters are escaped INJECTIVELY (~XX hex), not flattened to "_": that
+    // flattening mapped distinct identifiers ("a/b", "a:b") onto one and merged event
+    // identities on export. A space is U+0020 -> ~20.
+    expect(xml).toContain('<methodID>smi:local/method/weighted~20mean</methodID>');
+    expect(xml).not.toContain('weighted_mean');
   });
 
   it('leaves identifiers that already satisfy the grammar untouched', () => {
@@ -254,8 +258,14 @@ describe('merged catalogue rows export the merged solution, not the source one',
     expect(xml).toContain('<value>7.9</value>');
     expect(xml).toContain('<type>Mw</type>');
     expect(xml).toContain('<uncertainty>0.05</uncertainty>');
-    expect(xml).not.toContain('<value>7.8</value>');
-    expect(xml).not.toContain('MLv');
+    // The source measurement remains intact as an alternative; the authoritative
+    // merged value has its own ID and is the preferred magnitude.
+    expect(xml).toContain('<value>7.8</value>');
+    expect(xml).toContain('<type>MLv</type>');
+    const preferredId = xml.match(/<preferredMagnitudeID>([^<]+)<\/preferredMagnitudeID>/)?.[1];
+    expect(preferredId).toBeDefined();
+    expect(preferredId).not.toBe('smi:nz.org.geonet/magnitude/1');
+    expect(xml).toContain(`<magnitude publicID="${preferredId}">`);
   });
 
   it('keeps the source identifiers so provenance is still resolvable', () => {

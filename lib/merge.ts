@@ -270,6 +270,24 @@ function buildMergedEventFields(
     }
   }
 
+  // A merged catalogue combines agencies whose source_id spaces are independent, so a
+  // raw source_id is not unique under one catalogue_id: GeoNet "123" and ISC "123" are
+  // different earthquakes, and the (catalogue_id, source_id) unique index silently
+  // dropped the second. Qualify by the winning agency; the un-prefixed id survives in
+  // source_events for provenance. Leave an already-qualified id alone (re-merge).
+  // The qualifying agency is the one the id CAME FROM: for `average` the record's
+  // `source` is 'merged', so the base event's source is remembered separately.
+  const rawSourceId = fields.source_id;
+  const idAgency = (event as { _sourceIdAgency?: string })._sourceIdAgency ?? event.source;
+  if (typeof rawSourceId === 'string' && rawSourceId && idAgency && idAgency !== 'merged') {
+    const prefix = `${idAgency}:`;
+    // Already qualified by ANY agency in this record's provenance (re-merge): leave it.
+    const knownAgencies = new Set<string>([idAgency]);
+    for (const s of event.sourceEvents ?? []) if (s && typeof s.source === 'string') knownAgencies.add(s.source);
+    const alreadyQualified = Array.from(knownAgencies).some((agency) => rawSourceId.startsWith(`${agency}:`));
+    if (!alreadyQualified && !rawSourceId.startsWith(prefix)) fields.source_id = prefix + rawSourceId;
+  }
+
   if (quakeml) {
     fields.event_public_id = quakeml.publicID;
     fields.event_type = quakeml.type;
@@ -287,6 +305,10 @@ function buildMergedEventFields(
       if (preferredOrigin.uncertainty?.horizontalUncertainty) {
         fields.horizontal_uncertainty = preferredOrigin.uncertainty.horizontalUncertainty / 1000;
       }
+      const ou = preferredOrigin.uncertainty;
+      if (ou?.minHorizontalUncertainty != null) fields.min_horizontal_uncertainty = ou.minHorizontalUncertainty / 1000;
+      if (ou?.maxHorizontalUncertainty != null) fields.max_horizontal_uncertainty = ou.maxHorizontalUncertainty / 1000;
+      if (ou?.azimuthMaxHorizontalUncertainty != null) fields.azimuth_max_horizontal_uncertainty = ou.azimuthMaxHorizontalUncertainty;
 
       // Origin metadata
       fields.depth_type = preferredOrigin.depthType;
@@ -317,7 +339,11 @@ function buildMergedEventFields(
       fields.evaluation_status = preferredOrigin.evaluationStatus;
     }
 
-    if (preferredMagnitude) {
+    // Re-derive magnitude metadata from the base event's QuakeML only when the merge did
+    // not already resolve it: for a multi-source merge the hierarchy picked one specific
+    // measurement, and its metadata must travel with it rather than be replaced by
+    // whatever the base event happened to prefer.
+    if (preferredMagnitude && !(event as { _magnitudeResolved?: boolean })._magnitudeResolved) {
       fields.magnitude_type = preferredMagnitude.type;
       fields.magnitude_uncertainty = preferredMagnitude.mag.uncertainty;
       fields.magnitude_station_count = preferredMagnitude.stationCount;
@@ -421,11 +447,13 @@ async function executeMergeOperation(
       const events = await dbQueries.getEventsByCatalogueId(catalogueIdStr);
       const eventsArray = Array.isArray(events) ? events : events.data || [];
 
-      allEvents.push(...eventsArray.map(e => ({
-        ...e,
-        source: catalogue.source || catalogue.name || 'unknown',
-        catalogueId: catalogueIdStr,
-      } as EventData)));
+      // A loop, not push(...spread): spreading a whole source catalogue as function
+      // arguments throws RangeError past the V8 argument limit (~131k), so a
+      // national-scale source could not be merged at all.
+      const source = catalogue.source || catalogue.name || 'unknown';
+      for (const e of eventsArray) {
+        allEvents.push({ ...e, source, catalogueId: catalogueIdStr } as EventData);
+      }
     }
 
     // Perform the merge
@@ -437,6 +465,7 @@ async function executeMergeOperation(
       'event_public_id', 'event_type', 'event_type_certainty',
       'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty',
       'depth_uncertainty', 'horizontal_uncertainty',
+      'min_horizontal_uncertainty', 'max_horizontal_uncertainty', 'azimuth_max_horizontal_uncertainty',
       'depth_type', 'earth_model_id', 'method_id',
       'agency_id', 'author',
       'magnitude_type', 'magnitude_uncertainty', 'magnitude_station_count',
@@ -445,7 +474,7 @@ async function executeMergeOperation(
       'minimum_distance', 'maximum_distance',
       'associated_phase_count', 'associated_station_count', 'depth_phase_count',
       'evaluation_mode', 'evaluation_status',
-      'preferred_origin_id', 'preferred_magnitude_id',
+      'preferred_origin_id', 'preferred_magnitude_id', 'preferred_focal_mechanism_id',
       'origin_quality', 'origins', 'magnitudes', 'picks', 'arrivals',
       'focal_mechanisms', 'amplitudes', 'station_magnitudes',
       'event_descriptions', 'comments', 'creation_info',
@@ -740,30 +769,31 @@ function splitNode(
   const midLat = (minLat + maxLat) / 2;
   const midLon = (minLon + maxLon) / 2;
 
-  // Create 4 child nodes (quadtree-style split)
+  // A node whose extent has collapsed to a point (many events at one location)
+  // cannot be split by position: quartering it put every event into all four
+  // children, so a query returned each record 4^depth times.
+  if (maxLat - minLat <= 0 && maxLon - minLon <= 0) {
+    return;
+  }
+
+  // Create 4 child nodes (quadtree-style split). Each event goes to exactly ONE
+  // child: below the midpoint to the lower quadrant, at or above it to the upper.
   const childBounds: BoundingBox[] = [
     { minLat, maxLat: midLat, minLon, maxLon: midLon },       // SW
     { minLat, maxLat: midLat, minLon: midLon, maxLon },       // SE
     { minLat: midLat, maxLat, minLon, maxLon: midLon },       // NW
     { minLat: midLat, maxLat, minLon: midLon, maxLon },       // NE
   ];
+  const childIndexLists: number[][] = [[], [], [], []];
+  for (const i of node.eventIndices) {
+    const e = events[i];
+    const upperLat = e.latitude >= midLat ? 1 : 0;
+    const upperLon = e.longitude >= midLon ? 1 : 0;
+    childIndexLists[upperLat * 2 + upperLon].push(i);
+  }
 
-  for (const bounds of childBounds) {
-    // Use half-open intervals [min, mid) for the lower quadrants and [mid, max] for the
-    // upper quadrants.  The strict `< bounds.maxLat/Lon` check previously dropped events
-    // whose coordinate exactly equalled the node's maximum boundary — they were assigned
-    // to no child and silently lost when eventIndices was cleared below.
-    // The fix: when a child's upper bound matches the *parent's* upper bound, use `<=`
-    // (inclusive) so those boundary events are captured by the upper-bound child.
-    const childIndices = node.eventIndices.filter(i => {
-      const e = events[i];
-      const latOk = e.latitude >= bounds.minLat &&
-        (bounds.maxLat === maxLat ? e.latitude <= bounds.maxLat : e.latitude < bounds.maxLat);
-      const lonOk = e.longitude >= bounds.minLon &&
-        (bounds.maxLon === maxLon ? e.longitude <= bounds.maxLon : e.longitude < bounds.maxLon);
-      return latOk && lonOk;
-    });
-
+  childBounds.forEach((bounds, k) => {
+    const childIndices = childIndexLists[k];
     if (childIndices.length > 0) {
       const child: HierarchicalNode = {
         bounds,
@@ -774,7 +804,7 @@ function splitNode(
       node.children.push(child);
       splitNode(child, events, maxEventsPerNode, maxDepth);
     }
-  }
+  });
 
   // Clear event indices from non-leaf nodes to save memory
   if (node.children.length > 0) {
@@ -791,7 +821,9 @@ function queryHierarchicalIndex(
 ): number[] {
   const results: number[] = [];
   queryNode(index.root, searchBox, results);
-  return results;
+  // Leaves are disjoint by construction; the de-duplication guards any index
+  // built by an older layout that stored an event in more than one leaf.
+  return results.length > 1 ? Array.from(new Set(results)) : results;
 }
 
 /**
@@ -808,7 +840,7 @@ function queryNode(
 
   // If leaf node, add all event indices
   if (node.children.length === 0) {
-    results.push(...node.eventIndices);
+    for (const index of node.eventIndices) results.push(index);
     return;
   }
 
@@ -860,9 +892,12 @@ function getHierarchicalIndexStats(index: HierarchicalSpatialIndex): {
  * Get grid cell key for a coordinate
  */
 function getGridKey(lat: number, lon: number, cellSize: number): string {
+  // Storage keys live in [-180, 180): +180 is the same meridian as -180 and must
+  // share its cell, otherwise a +180 event sits in a cell no neighbourhood query
+  // ever visits and its -180 twin is never paired.
   const normalizedLon = normalizeLongitude(lon);
   const latCell = Math.floor(lat / cellSize);
-  const lonCell = Math.floor(normalizedLon / cellSize);
+  const lonCell = Math.floor((normalizedLon >= 180 ? -180 : normalizedLon) / cellSize);
   return `${latCell},${lonCell}`;
 }
 
@@ -920,6 +955,10 @@ function getNearbyCells(lat: number, lon: number, cellSize: number, radiusCells:
 // neighbourhood so it always covers the widest threshold eventsMatchAdaptive can accept.
 const MAX_DISTANCE_MULTIPLIER = 4.0;
 const MAX_DEPTH_MULTIPLIER = 1.5;
+/** Largest value getTimeMultiplier can return (M >= 7). Keep in sync with that function. */
+const MAX_TIME_MULTIPLIER = 3.0;
+/** Beyond this latitude the longitude cell neighbourhood is not used as a filter. */
+const POLAR_LATITUDE_DEG = 80;
 
 function getDistanceMultiplier(magnitude: number): number {
   // Guard non-finite magnitude (null coerces to 0, undefined to NaN): fall back to the
@@ -1156,7 +1195,14 @@ function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGro
     ...e,
     _timestamp: new Date(e.time).getTime(),
   }));
-  const sortedEvents = eventsWithTimestamps.sort((a, b) => a._timestamp - b._timestamp);
+  // Anchor order decides how a non-transitive chain (L~M, M~R, not L~R) is cut, so
+  // equal timestamps must not fall back to input order: tie-break on source and id
+  // so the same catalogues merge the same way whichever way they were fetched.
+  const sortedEvents = eventsWithTimestamps.sort((a, b) =>
+    a._timestamp - b._timestamp ||
+    String(a.source ?? '').localeCompare(String(b.source ?? '')) ||
+    String(a.id).localeCompare(String(b.id))
+  );
 
   const spatialIndex = createSpatialIndex(sortedEvents, config.distanceThreshold);
 
@@ -1170,7 +1216,9 @@ function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGro
   // events too — an event poleward of the average needs more E-W cells, and under-sizing
   // here would silently drop its true duplicates.
   const maxAbsLatDeg = sortedEvents.reduce((max, e) => Math.max(max, Math.abs(e.latitude)), 0);
-  const lonCoverageFactor = 1 / Math.max(Math.cos((maxAbsLatDeg * Math.PI) / 180), 0.1);
+  // cos(latitude) is clamped at POLAR_LATITUDE_DEG; anchors beyond it bypass the cell
+  // test entirely (see `polar` below) so the clamp cannot drop a valid pair.
+  const lonCoverageFactor = 1 / Math.max(Math.cos((maxAbsLatDeg * Math.PI) / 180), Math.cos((POLAR_LATITUDE_DEG * Math.PI) / 180));
   const distCells = Math.max(
     1,
     Math.ceil(MAX_DISTANCE_MULTIPLIER * MAX_DEPTH_MULTIPLIER * lonCoverageFactor)
@@ -1181,6 +1229,9 @@ function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGro
 
     const currentEvent = sortedEvents[i];
     const matchingEvents: EventData[] = [currentEvent];
+    // Keyed by object identity: ids are optional and may repeat in caller-supplied
+    // input, and a member released by id could then vanish from the output.
+    const matchedIndex = new Map<EventData, number>();
     processedIndices.add(i);
 
     const nearbyCells = getNearbyCells(
@@ -1190,14 +1241,55 @@ function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGro
       distCells
     );
 
+    // The cell neighbourhood is sized for the widest pair ANY anchor could form
+    // (M>=7, deepest, highest latitude), so it admits ~13% of a national catalogue
+    // per anchor and the per-anchor sort below went quadratic. Prune with a cheap
+    // bounding box on THIS anchor's widest possible reach before anything is sorted.
+    // The pair distance window uses the pair's AVERAGE magnitude and MAX depth, so the
+    // anchor alone cannot bound it; the global multipliers stay as the ceiling, but the
+    // box is still far tighter than the cell neighbourhood in degrees.
+    const reachKm =
+      config.distanceThreshold * MAX_DISTANCE_MULTIPLIER * MAX_DEPTH_MULTIPLIER;
+    const reachLatDeg = reachKm / 111;
+    const maxTimeWindowMs = config.timeThreshold * MAX_TIME_MULTIPLIER * 1000;
+    // Past the latitude where the neighbourhood cell count was clamped, a fixed
+    // longitude box cannot bound the reach (39 km at 89N spans 20 degrees); there
+    // the exact haversine test in eventsMatchAdaptive is the only spatial filter.
+    const polar = Math.abs(currentEvent.latitude) + reachLatDeg >= POLAR_LATITUDE_DEG;
+    // cos is taken at the poleward edge of the reach, where a degree of longitude is
+    // shortest, so the box is a superset of the great-circle window at every latitude.
+    const reachLonDeg = polar
+      ? 180
+      : reachKm / (111 * Math.cos(((Math.abs(currentEvent.latitude) + reachLatDeg) * Math.PI) / 180));
+    // sortedEvents is time-ordered, so every candidate inside the widest possible time
+    // window is a CONTIGUOUS slice starting at i+1. Walk that slice and filter by the
+    // spatial reach box, instead of touching every entry of a 361-cell neighbourhood and
+    // rejecting ~99.9% of them on time afterwards. Cells are still consulted only as a
+    // membership test so the antimeridian/polar coverage logic above stays authoritative.
+    // The cell set is only built once a candidate passes the time and box tests: on a
+    // sparse catalogue most anchors never get that far, and the 361+ key set was the
+    // dominant cost of grouping.
+    let nearbyCellSet: Set<string> | null = null;
     const candidateIndices = new Set<number>();
-    for (const cellKey of nearbyCells) {
-      const cellIndices = spatialIndex.grid.get(cellKey) || [];
-      for (const idx of cellIndices) {
-        if (idx > i && !processedIndices.has(idx)) {
-          candidateIndices.add(idx);
-        }
+    const timeCeiling = currentEvent._timestamp + maxTimeWindowMs;
+    for (let idx = i + 1; idx < sortedEvents.length; idx++) {
+      const c = sortedEvents[idx];
+      if (c._timestamp > timeCeiling) break;
+      if (processedIndices.has(idx)) continue;
+      // A group never holds two records from one source (validateEventGroup rejects
+      // it as network_mismatch), so same-source candidates are not gathered. Doing so
+      // turned a dense single-agency swarm into repeated salvage passes over the same
+      // members: quartic in the swarm size.
+      if (currentEvent.source !== undefined && c.source === currentEvent.source) continue;
+      if (Math.abs(c.latitude - currentEvent.latitude) > reachLatDeg) continue;
+      // Longitude difference on the shorter arc, so a seam pair (+180/-180) is kept.
+      const dLon = Math.abs(((c.longitude - currentEvent.longitude + 540) % 360) - 180);
+      if (dLon > reachLonDeg) continue;
+      if (!polar) {
+        if (nearbyCellSet === null) nearbyCellSet = new Set(nearbyCells);
+        if (!nearbyCellSet.has(getGridKey(c.latitude, c.longitude, spatialIndex.cellSize))) continue;
       }
+      candidateIndices.add(idx);
     }
 
     // Sort candidates by timestamp so the early-termination break below is safe.
@@ -1209,21 +1301,32 @@ function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGro
       const j = candidateArray[k];
       const candidateEvent = sortedEvents[j];
 
-      // Early termination uses max magnitude (coerced finite) so we never break before
-      // eventsMatchAdaptive (which uses the average) would accept a higher-magnitude candidate.
+      // Early termination is only safe against the WIDEST window any later candidate
+      // could earn, i.e. the global maximum multiplier - not the current pair's. The
+      // allowed window grows with the candidate's own magnitude, so breaking on a small
+      // unrelated event at 16 s used to skip a large true duplicate at 18 s whose own
+      // window was still open. Candidates are time-sorted, so once even the
+      // maximal window is exceeded every remaining candidate is out of reach.
       const timeDiff = Math.abs(currentEvent._timestamp - candidateEvent._timestamp) / 1000;
+      if (timeDiff > config.timeThreshold * MAX_TIME_MULTIPLIER) {
+        break;
+      }
+      // Within the maximal window, a candidate outside ITS OWN pair window can still be
+      // skipped cheaply before the full adaptive match - as a skip, not a break, so it
+      // cannot hide a later candidate with a wider window.
       const maxMagnitude = Math.max(
         Number.isFinite(currentEvent.magnitude) ? currentEvent.magnitude : 0,
         Number.isFinite(candidateEvent.magnitude) ? candidateEvent.magnitude : 0
       );
       if (timeDiff > config.timeThreshold * getTimeMultiplier(maxMagnitude)) {
-        break; // Safe: candidates are time-sorted, so all remaining also exceed threshold
+        continue;
       }
 
       if (
         eventsMatchAdaptive(currentEvent, candidateEvent, config.timeThreshold, config.distanceThreshold)
       ) {
         matchingEvents.push(candidateEvent);
+        matchedIndex.set(candidateEvent, j);
         processedIndices.add(j);
       }
     }
@@ -1231,7 +1334,17 @@ function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGro
     // Validate before merging; on failure salvage valid sub-groups instead of one big
     // (or all-singleton) group. Done here so preview and persist behave identically.
     if (matchingEvents.length > 1 && !validateEventGroup(matchingEvents)) {
+      // Members that the salvage leaves as singletons are NOT consumed: a rejected
+      // provisional group must not prevent a later anchor from forming the valid pair
+      // it would otherwise have found. Only members placed into a surviving
+      // multi-event sub-group are final. The anchor itself stays consumed so it is
+      // not re-emitted, and it is emitted here as its own singleton.
       for (const subGroup of regroupFailedEvents(matchingEvents, config)) {
+        if (subGroup.length === 1 && subGroup[0] !== currentEvent) {
+          const idx = matchedIndex.get(subGroup[0]);
+          if (idx !== undefined) processedIndices.delete(idx);
+          continue;
+        }
         groups.push({ events: subGroup, regrouped: true });
       }
     } else {
@@ -1645,8 +1758,8 @@ function validateEventGroup(events: EventData[], logConflicts: boolean = true): 
 const UNION_SCALAR_FIELDS: ReadonlyArray<keyof MergedEvent> = [
   'region',
   'location_name',
-  'source_id',
-  'event_public_id',
+  // source_id / event_public_id are IDENTITY, not description: a record without one
+  // must not borrow another agency's, or it collides with that agency's real event.
   'event_type',
   'event_type_certainty',
   'time_uncertainty',
@@ -1685,6 +1798,9 @@ const LOCATION_META_FIELDS: ReadonlyArray<keyof MergedEvent> = [
   'latitude_uncertainty',
   'longitude_uncertainty',
   'horizontal_uncertainty',
+  'min_horizontal_uncertainty',
+  'max_horizontal_uncertainty',
+  'azimuth_max_horizontal_uncertainty',
 ] as const;
 
 // Depth-metadata fields that must travel with the DEPTH VALUE. depth_type states how THAT
@@ -2118,7 +2234,10 @@ function mergeFocalMechanisms(events: EventData[]): {
 /**
  * Magnitude type enumeration for conversion functions
  */
-type MagnitudeType = 'Mw' | 'Ms' | 'mb' | 'ML' | 'Md';
+// 'mB' (broadband body-wave) and 'mbLg' (Lg-phase regional) are distinct scales that ISC
+// reports separately from short-period mb. They share mb's priority tier but have no
+// calibrated Mw relation here, so they are never converted.
+type MagnitudeType = 'Mw' | 'Ms' | 'mb' | 'mB' | 'mbLg' | 'ML' | 'Md';
 
 /**
  * Magnitude conversion result
@@ -2179,19 +2298,26 @@ function convertMstoMw(ms: number): MagnitudeConversionResult {
   let mw: number;
   let method: string;
 
+  // Scordilis (2006) is calibrated for 3.0 <= Ms <= 6.1 and 6.2 <= Ms <= 8.2. Outside
+  // those ranges the relation is an extrapolation: report it as such with a wider
+  // uncertainty so the merge gate does not treat Ms 1.0 -> "Mw 2.74" as a precise
+  // measurement.
+  const outOfRange = ms < 3.0 || ms > 8.2;
   if (ms < 6.2) {
-    // Scordilis (2006) for smaller events
     mw = 0.67 * ms + 2.07;
-    method = 'Scordilis (2006): Mw = 0.67*Ms + 2.07 (Ms < 6.2)';
+    method = outOfRange
+      ? 'Scordilis (2006): Mw = 0.67*Ms + 2.07 (EXTRAPOLATED below calibrated Ms 3.0)'
+      : 'Scordilis (2006): Mw = 0.67*Ms + 2.07 (3.0 <= Ms <= 6.1)';
   } else {
-    // Scordilis (2006) for larger events
     mw = 0.99 * ms + 0.08;
-    method = 'Scordilis (2006): Mw = 0.99*Ms + 0.08 (Ms ≥ 6.2)';
+    method = outOfRange
+      ? 'Scordilis (2006): Mw = 0.99*Ms + 0.08 (EXTRAPOLATED above calibrated Ms 8.2)'
+      : 'Scordilis (2006): Mw = 0.99*Ms + 0.08 (6.2 <= Ms <= 8.2)';
   }
 
   return {
     value: Math.round(mw * 100) / 100,
-    uncertainty: 0.2, // Ms to Mw is more reliable
+    uncertainty: outOfRange ? 0.5 : 0.2,
     method,
     isExact: false,
   };
@@ -2226,7 +2352,14 @@ function getMagnitudeTypeCategory(magType: string | undefined): MagnitudeType | 
 
   if (lower.startsWith('mw')) return 'Mw';
   if (lower.startsWith('ms')) return 'Ms';
-  if (lower.startsWith('mb')) return 'mb'; // mb, mb_lg, mbb, mblg, mB, ...
+  // Body-wave family. Case matters here: ISC's broadband 'mB' is not short-period 'mb',
+  // and 'mb_Lg'/'mbLg' is the regional Lg-phase scale. Lowercasing merged all three into
+  // one Scordilis relation calibrated only on short-period mb.
+  if (/^mb[_ ]?lg/.test(lower)) return 'mbLg';
+  // Only the mixed-case 'mB' spelling denotes ISC's broadband body-wave scale; an
+  // all-caps 'MB' is the ordinary short-period mb written in upper case.
+  if (magType.startsWith('mB')) return 'mB';
+  if (lower.startsWith('mb')) return 'mb';
   if (lower.startsWith('ml')) return 'ML';
   if (lower === 'md' || lower === 'mc') return 'Md';
 
@@ -2256,6 +2389,11 @@ function convertToMw(value: number, magType: string | undefined): MagnitudeConve
       return convertMstoMw(value);
     case 'mb':
       return convertMbtoMw(value);
+    case 'mB':
+    case 'mbLg':
+      // No calibrated relation to Mw in this codebase; the short-period Scordilis
+      // formula does not apply. Leave these to raw same-scale comparison.
+      return null;
     case 'ML':
       return convertMLtoMw(value);
     case 'Md':
@@ -2516,7 +2654,9 @@ function getMagnitudePriority(magType: string | undefined): number {
   switch (getMagnitudeTypeCategory(magType)) {
     case 'Mw': return 1;
     case 'Ms': return 2;
-    case 'mb': return 3;
+    case 'mb':
+    case 'mB':
+    case 'mbLg': return 3;
     case 'ML': return 4;
     case 'Md': return 5;
     default: return 100; // Genuinely unknown type
@@ -2526,13 +2666,27 @@ function getMagnitudePriority(magType: string | undefined): number {
 /**
  * Select the best magnitude from a group of events using magnitude type hierarchy
  */
-function selectBestMagnitude(events: EventData[]): { value: number; type: string } {
+/** The measurement the hierarchy selected, with the metadata that belongs to IT. */
+interface SelectedMagnitude {
+  value: number;
+  type: string;
+  /** publicID of the QuakeML entry the value came from; null for a scalar column. */
+  publicID: string | null;
+  uncertainty: number | null;
+  stationCount: number | null;
+  methodID: string | null;
+  evaluationMode: string | null;
+  evaluationStatus: string | null;
+}
+
+function selectBestMagnitude(events: EventData[]): SelectedMagnitude {
   // Collect all magnitude candidates with their priorities
   const candidates: Array<{
     value: number;
     type: string;
     priority: number;
     uncertainty: number;
+    meta: Omit<SelectedMagnitude, 'value' | 'type'>;
   }> = [];
 
   for (const event of events) {
@@ -2540,18 +2694,49 @@ function selectBestMagnitude(events: EventData[]): { value: number; type: string
     // that duplicates a QuakeML entry is not double-counted.
     const seen = new Set<string>();
 
-    if (event.quakeml?.magnitudes && event.quakeml.magnitudes.length > 0) {
-      for (const mag of event.quakeml.magnitudes) {
-        if (mag.mag?.value != null) {
-          const type = mag.type || 'unknown';
-          seen.add(`${mag.mag.value}|${type.toLowerCase()}`);
-          candidates.push({
-            value: mag.mag.value,
-            type,
-            priority: getMagnitudePriority(mag.type),
-            uncertainty: mag.mag.uncertainty ?? 999,
-          });
-        }
+    // The full magnitude list is available either as parsed QuakeML (first export-only
+    // merge) or, after storage, ONLY as the `magnitudes` JSON column - upload strips the
+    // parsed object. Reading just the former made a stored alternative Mw 5.9 invisible
+    // and the selector fell back to the preferred ML 5.4. Use whichever is present.
+    let magnitudeList: Array<{ mag?: { value?: number | null; uncertainty?: number | null }; type?: string }> | undefined =
+      event.quakeml?.magnitudes;
+    if ((!magnitudeList || magnitudeList.length === 0) && typeof (event as { magnitudes?: unknown }).magnitudes === 'string') {
+      try {
+        const parsed = JSON.parse((event as { magnitudes?: string }).magnitudes as string);
+        if (Array.isArray(parsed)) magnitudeList = parsed;
+      } catch {
+        // unparseable column; fall through to the scalar
+      }
+    }
+
+    if (magnitudeList && magnitudeList.length > 0) {
+      // The column is user-supplied text (CSV/JSON pass-through), not guaranteed to be
+      // QuakeML-shaped: only finite numeric values with string types are candidates.
+      const finite = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+      for (const mag of magnitudeList) {
+        if (!mag || typeof mag !== 'object') continue;
+        const value = finite(mag.mag?.value);
+        // Same physical range the insert validator enforces; a stray 99 in the blob
+        // must not be selected and then fail the whole batch on insert.
+        if (value === null || value < -3 || value > 10) continue;
+        const type = typeof mag.type === 'string' && mag.type ? mag.type : 'unknown';
+        seen.add(`${value}|${type.toLowerCase()}`);
+        const m = mag as { publicID?: unknown; stationCount?: unknown; methodID?: unknown; evaluationMode?: unknown; evaluationStatus?: unknown };
+        const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+        candidates.push({
+          value,
+          type,
+          priority: getMagnitudePriority(type === 'unknown' ? undefined : type),
+          uncertainty: finite(mag.mag?.uncertainty) ?? 999,
+          meta: {
+            publicID: str(m.publicID),
+            uncertainty: finite(mag.mag?.uncertainty),
+            stationCount: finite(m.stationCount),
+            methodID: str(m.methodID),
+            evaluationMode: str(m.evaluationMode),
+            evaluationStatus: str(m.evaluationStatus),
+          },
+        });
       }
     }
 
@@ -2568,6 +2753,14 @@ function selectBestMagnitude(events: EventData[]): { value: number; type: string
           type,
           priority: getMagnitudePriority(event.magnitude_type),
           uncertainty: event.magnitude_uncertainty ?? 999,
+          meta: {
+            publicID: null,
+            uncertainty: event.magnitude_uncertainty ?? null,
+            stationCount: event.magnitude_station_count ?? null,
+            methodID: event.magnitude_method_id ?? null,
+            evaluationMode: event.magnitude_evaluation_mode ?? null,
+            evaluationStatus: event.magnitude_evaluation_status ?? null,
+          },
         });
       }
     }
@@ -2582,14 +2775,17 @@ function selectBestMagnitude(events: EventData[]): { value: number; type: string
   });
 
   if (candidates.length > 0) {
-    return { value: candidates[0].value, type: candidates[0].type };
+    const best = candidates[0];
+    return { value: best.value, type: best.type, ...best.meta };
   }
 
   // Fallback: use simple magnitude field from first event with magnitude
   const eventWithMag = events.find(e => e.magnitude != null);
   return {
     value: eventWithMag?.magnitude || 0,
-    type: 'unknown'
+    type: 'unknown',
+    publicID: null,
+    uncertainty: null, stationCount: null, methodID: null, evaluationMode: null, evaluationStatus: null,
   };
 }
 
@@ -2720,10 +2916,13 @@ function getLocationWeight(event: EventData): number {
     return 1.0;
   }
 
-  // Weight = 1 / uncertainty (with minimum to prevent extreme weights)
   // Clamp uncertainty to reasonable range (0.1 km to 100 km)
   const clampedUncertainty = Math.max(0.1, Math.min(horizontalUncertainty, 100));
-  return 1.0 / clampedUncertainty;
+  // Inverse-VARIANCE weighting: the minimum-variance unbiased combination of
+  // independent location estimates is sum(x_i / s_i^2) / sum(1 / s_i^2). The
+  // earlier 1/s weight under-weighted well-constrained solutions relative to
+  // poorly constrained ones by a factor of s.
+  return 1.0 / (clampedUncertainty * clampedUncertainty);
 }
 
 /**
@@ -2828,6 +3027,8 @@ function mergeByAverage(events: EventData[]): MergedEventData {
     source: 'merged',
     sourceEvents: buildSourceEvents(events)
   };
+  // The source_id kept from the base event is qualified by ITS agency, not by 'merged'.
+  (merged as { _sourceIdAgency?: string })._sourceIdAgency = bestQualityEvent.source;
 
   // The spread above carries bestQualityEvent's OWN magnitude, location and depth metadata.
   // Every one of those three quantities has just been replaced by something that event did
@@ -2841,10 +3042,21 @@ function mergeByAverage(events: EventData[]): MergedEventData {
     for (const field of DEPTH_META_FIELDS) (merged as any)[field] = null;
   }
 
-  // Set after the clear: the selected magnitude's own type. An 'unknown' type means the
-  // donor genuinely reported none, so it stays null rather than inheriting a type from a
-  // different measurement.
+  // Set after the clear: the selected magnitude's OWN metadata, from the measurement the
+  // hierarchy actually chose. Nulling these lost real data; and copying them from the
+  // base event stamped a different measurement's ±0.30 / 4 stations onto a selection
+  // that came from a ±0.05 / 12-station solution with the same value.
   merged.magnitude_type = bestMagnitude.type !== 'unknown' ? bestMagnitude.type : null;
+  merged.magnitude_uncertainty = bestMagnitude.uncertainty;
+  merged.magnitude_station_count = bestMagnitude.stationCount;
+  merged.magnitude_method_id = bestMagnitude.methodID;
+  merged.magnitude_evaluation_mode = bestMagnitude.evaluationMode;
+  merged.magnitude_evaluation_status = bestMagnitude.evaluationStatus;
+  // The preferred-magnitude pointer follows the selected measurement: left pointing at
+  // the base's own preferred entry, the exporter rewrote THAT entry (an ML) with the
+  // selected Mw value and emitted the real Mw entry beside it.
+  merged.preferred_magnitude_id = bestMagnitude.publicID;
+  (merged as { _magnitudeResolved?: boolean })._magnitudeResolved = true;
 
   return merged;
 }
@@ -2906,7 +3118,6 @@ function mergeByCompleteness(events: EventData[]): MergedEventData {
  */
 function calculateQualityScore(event: EventData): number {
   let score = 0;
-  let maxPossibleScore = 0;
 
   // Try to get preferred origin for quality metrics
   const origin = event.quakeml?.origins?.find(o =>
@@ -2936,7 +3147,6 @@ function calculateQualityScore(event: EventData): number {
   // 6 stations = 50%, 15 stations = 80%, 30+ stations = 100%
   // Using logarithmic scale because quality improvement diminishes with more stations
   if (stationCount > 0) {
-    maxPossibleScore += 25;
     // log2(6) ≈ 2.58, log2(30) ≈ 4.9
     score += Math.min(25, 25 * (Math.log2(stationCount + 1) / Math.log2(32)));
   }
@@ -2945,7 +3155,6 @@ function calculateQualityScore(event: EventData): number {
   // Gap < 120° = excellent (full score), gap > 270° = poor
   // ISC-GEM considers < 180° as acceptable
   if (azimuthalGap != null) {
-    maxPossibleScore += 20;
     if (azimuthalGap <= 120) {
       score += 20;
     } else if (azimuthalGap <= 180) {
@@ -2959,7 +3168,6 @@ function calculateQualityScore(event: EventData): number {
   // Standard error / RMS residual (0-15 points, lower is better)
   // RMS < 0.3s = excellent, RMS > 1.0s = poor (based on ISC standards)
   if (standardError != null) {
-    maxPossibleScore += 15;
     if (standardError <= 0.3) {
       score += 15;
     } else if (standardError <= 0.5) {
@@ -2975,7 +3183,6 @@ function calculateQualityScore(event: EventData): number {
   // Magnitude uncertainty (0-15 points, lower is better)
   // Uncertainty < 0.1 = excellent, > 0.3 = poor
   if (magUncertainty != null) {
-    maxPossibleScore += 15;
     if (magUncertainty <= 0.1) {
       score += 15;
     } else if (magUncertainty <= 0.2) {
@@ -2992,26 +3199,25 @@ function calculateQualityScore(event: EventData): number {
   // Based on ISC-GEM hierarchy: Mw > Ms > mb > ML > Md
   // Mw (moment magnitude) is most reliable and physically meaningful
   if (magTypeRaw) {
-    maxPossibleScore += 15;
-    const magType = magTypeRaw.toLowerCase();
-    if (magType === 'mw' || magType === 'mww' || magType === 'mwc' || magType === 'mwb') {
-      score += 15; // Moment magnitude variants
-    } else if (magType === 'ms' || magType === 'ms_20') {
-      score += 12; // Surface wave magnitude
-    } else if (magType === 'mb' || magType === 'mbb') {
-      score += 9; // Body wave magnitude
-    } else if (magType === 'ml' || magType === 'mlv') {
-      score += 6; // Local magnitude
-    } else if (magType === 'md' || magType === 'mc') {
-      score += 3; // Duration/coda magnitude
+    // Same prefix classifier getMagnitudePriority uses, so the Quality strategy
+    // ranks a solution by the same magnitude family the rest of the merge does.
+    // The exact-match whitelist this replaced scored GeoNet's "MLv"/"mB"/"Mw(mB)"
+    // variants as unknown (0) while getMagnitudePriority already recognised them.
+    switch (getMagnitudeTypeCategory(magTypeRaw)) {
+      case 'Mw': score += 15; break; // Moment magnitude
+      case 'Ms': score += 12; break; // Surface wave magnitude
+      case 'mb':
+      case 'mB':
+      case 'mbLg': score += 9; break;  // Body wave family
+      case 'ML': score += 6; break;  // Local magnitude
+      case 'Md': score += 3; break;  // Duration/coda magnitude
+      default: break;                // Unknown types = 0 points
     }
-    // Unknown types = 0 points
   }
 
   // Evaluation status (0-10 points)
   // final/reviewed > confirmed > preliminary
   if (evaluationStatus) {
-    maxPossibleScore += 10;
     const status = evaluationStatus.toLowerCase();
     if (status === 'final' || status === 'reviewed') {
       score += 10;
@@ -3023,19 +3229,12 @@ function calculateQualityScore(event: EventData): number {
     // rejected/unknown = 0 points
   }
 
-  // If no quality metrics at all were available, fall back to basic completeness scoring.
-  if (maxPossibleScore === 0) {
-    let basicScore = 0;
-    if (event.depth != null) basicScore += 10;
-    if (event.magnitude != null) basicScore += 10;
-    if (event.time != null) basicScore += 5;
-    return basicScore;
-  }
-
-  // Normalize against the FIXED 100-point budget (25+20+15+15+15+10), NOT just the metrics
-  // that happen to be present. Otherwise an event reporting a single favourable metric and
-  // nothing else scores ~100% and outranks a fully-documented, better-constrained event.
-  // `score` is already on a 0–100 scale; maxPossibleScore is used only for the fallback above.
+  // Every event is scored on the same fixed 100-point budget (25+20+15+15+15+10), never
+  // against only the metrics it happens to report. A record with NO quality metadata used
+  // to take a separate 25-point "basic completeness" branch, which outranked a documented
+  // event scoring below 25 on the real scale - so stripping metadata raised a source's rank.
+  // Now an event that reports nothing scores 0: absence of evidence earns no points, and
+  // having a depth, magnitude and time is the admission ticket, not a quality signal.
   return score;
 }
 
@@ -3045,9 +3244,18 @@ function calculateQualityScore(event: EventData): number {
 function mergeByQuality(events: EventData[]): MergedEventData {
   // Pre-score all events once to avoid O(n²) recalculation of the accumulator
   // on every iteration of a plain reduce.
+  // Equal scores (two metadata-free records) are broken by how much of the core
+  // record is populated, then by time, never by input order: the twin that reports a
+  // depth must win over the one that does not, whichever arrived first.
+  const populated = (e: EventData) => [e.depth, e.magnitude, e.magnitude_type].filter((v) => v != null).length;
   const bestEvent = events
     .map(e => ({ event: e, score: calculateQualityScore(e) }))
-    .reduce((best, curr) => curr.score > best.score ? curr : best)
+    .reduce((best, curr) => {
+      if (curr.score !== best.score) return curr.score > best.score ? curr : best;
+      const p = populated(curr.event) - populated(best.event);
+      if (p !== 0) return p > 0 ? curr : best;
+      return new Date(curr.event.time).getTime() < new Date(best.event.time).getTime() ? curr : best;
+    })
     .event;
 
   return {
@@ -3118,12 +3326,17 @@ export async function previewMerge(
     // Assign color to catalogue
     catalogueColors[catalogueIdStr] = colors[i % colors.length];
 
-    allEvents.push(...eventsArray.map(e => ({
-      ...e,
-      source: catalogue.source || catalogue.name || 'unknown',
-      catalogueId: catalogueIdStr,
-      catalogueName: catalogue.name,
-    } as EventData)));
+    // A loop, not push(...spread): the spread hits the engine's argument limit at
+    // ~125k events.
+    const previewSource = catalogue.source || catalogue.name || 'unknown';
+    for (const e of eventsArray) {
+      allEvents.push({
+        ...e,
+        source: previewSource,
+        catalogueId: catalogueIdStr,
+        catalogueName: catalogue.name,
+      } as EventData);
+    }
   }
 
   console.log(`[Preview] Loaded ${allEvents.length} events from ${sourceCatalogues.length} catalogues`);
@@ -3248,15 +3461,20 @@ function performMergeWithGroups(
     // earliest event's timestamp). For all other strategies a single source event is
     // selected wholesale, so all three fields must agree.
     const mergedEvent = mergeEventGroup(matchingEvents, config);
-    let selectedEventIndex: number;
-    if (config.mergeStrategy === 'average') {
-      selectedEventIndex = matchingEvents.findIndex(e => e.time === mergedEvent.time);
-    } else {
-      selectedEventIndex = matchingEvents.findIndex(e =>
-        e.time === mergedEvent.time &&
-        e.latitude === mergedEvent.latitude &&
-        e.longitude === mergedEvent.longitude
-      );
+    // The selected source keeps its id on the merged record, so match on that
+    // first; comparing time/coordinates picked the wrong twin when two sources
+    // reported identical origins with different quality.
+    let selectedEventIndex = matchingEvents.findIndex(e => e.id === mergedEvent.id);
+    if (selectedEventIndex < 0) {
+      if (config.mergeStrategy === 'average') {
+        selectedEventIndex = matchingEvents.findIndex(e => e.time === mergedEvent.time);
+      } else {
+        selectedEventIndex = matchingEvents.findIndex(e =>
+          e.time === mergedEvent.time &&
+          e.latitude === mergedEvent.latitude &&
+          e.longitude === mergedEvent.longitude
+        );
+      }
     }
 
     return {
@@ -3296,6 +3514,7 @@ export {
   UNION_SCALAR_FIELDS,
   UNION_BLOB_FIELDS,
   regroupFailedEvents,
+  buildMergedEventFields,
   groupMatchingEvents,
   performMergeWithGroups,
   mergeEventGroup,

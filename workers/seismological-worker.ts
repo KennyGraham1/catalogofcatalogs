@@ -28,13 +28,62 @@ type WorkerMessage =
 const cache = new Map<string, { result: any; timestamp: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-function getCacheKey(type: string, events: EarthquakeEvent[]): string {
-  // Use a fast hash based on event count and a sample of IDs
-  const eventCount = events.length;
-  const sampleIds = events.length > 100 
-    ? [events[0]?.id, events[Math.floor(events.length/2)]?.id, events[events.length-1]?.id].join('_')
-    : events.map(e => e.id).join('_');
-  return `${type}_${eventCount}_${sampleIds}`;
+
+/**
+ * Mean longitude of a compact cluster, taken around the circle so members either
+ * side of the antimeridian (179.99 and -179.99) average to -179.993, not to -60.
+ */
+function meanLongitude(longitudes: number[]): number {
+  let x = 0, y = 0;
+  for (const lon of longitudes) {
+    x += Math.cos((lon * Math.PI) / 180);
+    y += Math.sin((lon * Math.PI) / 180);
+  }
+  if (x === 0 && y === 0) return longitudes.reduce((a, b) => a + b, 0) / longitudes.length;
+  return (Math.atan2(y, x) * 180) / Math.PI;
+}
+
+/**
+ * Cache key over the analysis type, its parameters and the event CONTENT the
+ * analyses read. Sampling three ids let an edited magnitude, a re-import keeping
+ * its ids, or a changed minimum-magnitude cutoff be answered from a stale result;
+ * a content hash costs a few milliseconds even for national catalogues.
+ */
+function getCacheKey(type: string, events: EarthquakeEvent[], params: Record<string, unknown> = {}): string {
+  const paramKey = Object.keys(params).sort().map((k) => `${k}=${String(params[k])}`).join(',');
+  return `${type}_${eventsContentHash(events)}_${paramKey}`;
+}
+
+/**
+ * Order-independent content hash of the fields the analyses read. Numbers are mixed
+ * from their IEEE-754 words and strings character by character, without building a
+ * per-event string or allocating per event.
+ */
+function eventsContentHash(events: EarthquakeEvent[]): string {
+  const buf = new Float64Array(1);
+  const words = new Uint32Array(buf.buffer);
+  let sum1 = 0, sum2 = 0, xor = 0; // commutative accumulators: input order does not matter
+  for (let k = 0; k < events.length; k++) {
+    const e = events[k];
+    let h = 0x811c9dc5;
+    const id = e.id == null ? '' : String(e.id);
+    for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 0x01000193) >>> 0;
+    h = Math.imul(h ^ 0x1f, 0x01000193) >>> 0;
+    const time = e.time == null ? '' : String(e.time);
+    for (let i = 0; i < time.length; i++) h = Math.imul(h ^ time.charCodeAt(i), 0x01000193) >>> 0;
+    h = Math.imul(h ^ 0x1f, 0x01000193) >>> 0;
+    const type = e.magnitude_type == null ? '' : String(e.magnitude_type);
+    for (let i = 0; i < type.length; i++) h = Math.imul(h ^ type.charCodeAt(i), 0x01000193) >>> 0;
+    h = Math.imul(h ^ 0x1f, 0x01000193) >>> 0;
+    buf[0] = e.magnitude; h = Math.imul(h ^ words[0], 0x01000193) >>> 0; h = Math.imul(h ^ words[1], 0x01000193) >>> 0;
+    buf[0] = e.latitude; h = Math.imul(h ^ words[0], 0x01000193) >>> 0; h = Math.imul(h ^ words[1], 0x01000193) >>> 0;
+    buf[0] = e.longitude; h = Math.imul(h ^ words[0], 0x01000193) >>> 0; h = Math.imul(h ^ words[1], 0x01000193) >>> 0;
+    buf[0] = e.depth == null ? NaN : e.depth; h = Math.imul(h ^ words[0], 0x01000193) >>> 0; h = Math.imul(h ^ words[1], 0x01000193) >>> 0;
+    sum1 = (sum1 + h) >>> 0;
+    sum2 = (sum2 + Math.imul(h, 0x9e3779b1)) >>> 0;
+    xor ^= h;
+  }
+  return `${events.length}:${sum1.toString(16)}${sum2.toString(16)}${(xor >>> 0).toString(16)}`;
 }
 
 function getFromCache(key: string): any | null {
@@ -348,6 +397,8 @@ function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): SeismicCluster[]
 
   for (const mainshock of byMagnitude) {
     if (clusterAssignment.has(mainshock.id)) continue;
+    // Reserve heads too, including independent events with no dependents.
+    clusterAssignment.set(mainshock.id, mainshock.id);
 
     const { timeWindowDays, distanceWindowKm } = getGardnerKnopoffWindow(mainshock.magnitude);
     const mainshockTime = new Date(mainshock.time).getTime();
@@ -357,11 +408,9 @@ function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): SeismicCluster[]
       if (event.id === mainshock.id || clusterAssignment.has(event.id)) continue;
 
       const eventTime = new Date(event.time).getTime();
-      // Symmetric window: removes foreshocks as well as aftershocks. This is a deliberate
-      // deviation from classical forward-only Gardner-Knopoff (hmtk fs_time_prop = 0);
-      // see the note on getGardnerKnopoffWindow in lib/seismological-analysis.ts.
-      const timeDiffDays = Math.abs(eventTime - mainshockTime) / (1000 * 60 * 60 * 24);
-      if (timeDiffDays > timeWindowDays) continue;
+      // Forward window only; must match lib/seismological-analysis.ts.
+      const timeDiffDays = (eventTime - mainshockTime) / (1000 * 60 * 60 * 24);
+      if (timeDiffDays < 0 || timeDiffDays > timeWindowDays) continue;
 
       const distance = haversineDistance(
         mainshock.latitude, mainshock.longitude,
@@ -394,12 +443,11 @@ function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): SeismicCluster[]
     const aftershocks = sorted.filter(e => e.id !== mainshockId && new Date(e.time).getTime() >= mainshockTime);
 
     // Calculate spatial extent
-    let maxDist = 0, sumLat = 0, sumLon = 0;
+    let maxDist = 0, sumLat = 0;
     clusterEvents.forEach(e => {
       const dist = haversineDistance(mainshock.latitude, mainshock.longitude, e.latitude, e.longitude);
       if (dist > maxDist) maxDist = dist;
       sumLat += e.latitude;
-      sumLon += e.longitude;
     });
 
     const startTime = new Date(sorted[0].time);
@@ -446,7 +494,7 @@ function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): SeismicCluster[]
       durationDays,
       spatialExtentKm: maxDist,
       centerLatitude: sumLat / clusterEvents.length,
-      centerLongitude: sumLon / clusterEvents.length,
+      centerLongitude: meanLongitude(clusterEvents.map((e) => e.longitude)),
       clusterType,
       bValue
     });
@@ -509,14 +557,37 @@ function analyzeTemporalPattern(events: EarthquakeEvent[]) {
     eventsPerDay: events.length / timeSpanDays,
     eventsPerMonth: (events.length / timeSpanDays) * 30.44,
     eventsPerYear: (events.length / timeSpanDays) * 365.25,
-    timeSeries: timeSeries.length > 500
-      ? timeSeries.filter((_, i) => i % Math.ceil(timeSeries.length / 500) === 0)
-      : timeSeries,
+    // Preserve period counts and the final cumulative total. Chart rendering
+    // may sample points, but analysis results and exports need every period.
+    timeSeries,
     clusters
   };
 }
 
 // Seismic moment calculation
+/**
+ * Which magnitudes may enter the Hanks-Kanamori relation M0 = 10^(1.5*Mw + 9.1).
+ * It is defined for MOMENT magnitude only. ML/Mb/Ms saturate (mb hard above ~6), so
+ * treating them as Mw misstates the moment of large events by orders of magnitude.
+ *   'exact'    Mw family - used as-is.
+ *   'assumed'  ML - used under the ML ~ Mw approximation this codebase already labels
+ *              generic; counted so the result can say how much rests on it.
+ *   'excluded' mb, Ms, Md, unknown - not summed; counted.
+ */
+function momentEligibility(magType: string | null | undefined): 'exact' | 'assumed' | 'excluded' {
+  // An UNTYPED magnitude (plain CSV, historical bulletins) is almost always a local
+  // magnitude; treat it like ML - counted under the assumption, never silently exact
+  // and never silently dropped, since dropping it would empty the moment tab for the
+  // catalogues this platform exists to serve.
+  if (!magType) return 'assumed';
+  const t = magType.trim().toLowerCase();
+  if (t.startsWith('mw')) return 'exact';
+  // ML, MLv and GeoNet's bare 'M' (the SeisComP summary magnitude, which for most of
+  // the NZ catalogue is a network-weighted local magnitude) share the ML assumption.
+  if (t.startsWith('ml') || t === 'm') return 'assumed';
+  return 'excluded';
+}
+
 function calculateSeismicMoment(events: EarthquakeEvent[]) {
   if (events.length === 0) {
     return { error: 'No events to analyze' };
@@ -528,10 +599,17 @@ function calculateSeismicMoment(events: EarthquakeEvent[]) {
   let totalMoment = 0;
   let largestMoment = 0;
   let largestMag = 0;
+  let assumedCount = 0;
+  let excludedCount = 0;
+  let usedCount = 0;
 
   const momentByMagBin = new Map<number, { moment: number; count: number }>();
 
   events.forEach(event => {
+    const eligibility = momentEligibility(event.magnitude_type);
+    if (eligibility === 'excluded') { excludedCount++; return; }
+    if (eligibility === 'assumed') assumedCount++;
+    usedCount++;
     const moment = momentForMagnitude(event.magnitude);
     totalMoment += moment;
 
@@ -540,7 +618,7 @@ function calculateSeismicMoment(events: EarthquakeEvent[]) {
       largestMag = event.magnitude;
     }
 
-    const bin = Math.floor(event.magnitude);
+    const bin = Math.floor(event.magnitude * 2) / 2; // 0.5 magnitude bins, as the library
     const existing = momentByMagBin.get(bin) || { moment: 0, count: 0 };
     momentByMagBin.set(bin, {
       moment: existing.moment + moment,
@@ -554,9 +632,15 @@ function calculateSeismicMoment(events: EarthquakeEvent[]) {
     .map(([magnitude, { moment, count }]) => ({ magnitude, moment, count }))
     .sort((a, b) => a.magnitude - b.magnitude);
 
+  if (usedCount === 0) {
+    return { error: 'No Mw or ML magnitudes to compute seismic moment from (mb/Ms/Md are excluded because they saturate)' };
+  }
+
   return {
     totalMoment,
     totalMomentMagnitude,
+    assumedMwCount: assumedCount,
+    excludedCount,
     momentByMagnitude,
     largestEvent: {
       magnitude: largestMag,
@@ -569,8 +653,11 @@ function calculateSeismicMoment(events: EarthquakeEvent[]) {
 // Handle messages from main thread
 self.onmessage = (e: MessageEvent<WorkerMessage>) => {
   const { type, events } = e.data as { type: string; events: EarthquakeEvent[] };
+  const { minMagnitude, binWidth, declusterMethod } = e.data as {
+    minMagnitude?: number; binWidth?: number; declusterMethod?: string;
+  };
 
-  const cacheKey = getCacheKey(type, events);
+  const cacheKey = getCacheKey(type, events, { minMagnitude, binWidth, declusterMethod });
   const cached = getFromCache(cacheKey);
 
   if (cached) {
@@ -617,4 +704,3 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
 };
 
 export {};
-

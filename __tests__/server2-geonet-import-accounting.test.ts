@@ -33,6 +33,7 @@ jest.mock('@/lib/db', () => {
       getCatalogueById: jest.fn(),
       insertCatalogue: jest.fn(),
       getEventsBySourceIds: jest.fn(),
+      getEventCoordinatesByIds: jest.fn(),
       bulkInsertEvents: jest.fn(),
       insertEvent: jest.fn(),
       updateEvent: jest.fn(),
@@ -99,6 +100,7 @@ beforeEach(() => {
     max_longitude: null,
   });
   db.getEventsBySourceIds.mockResolvedValue(new Map());
+  db.getEventCoordinatesByIds.mockResolvedValue([]);
   // The real bulkInsertEvents returns the number of documents MongoDB wrote.
   db.bulkInsertEvents.mockImplementation(async (rows: unknown[]) => rows.length);
   db.countEventsByCatalogue.mockResolvedValue(0);
@@ -172,6 +174,7 @@ describe('server2 :: GeoNet import new-event accounting', () => {
       )
     );
     db.bulkInsertEvents.mockResolvedValue(3);
+    db.getEventCoordinatesByIds.mockImplementation(async () => db.bulkInsertEvents.mock.calls[0][0].slice(0, 3));
 
     const result = await new GeoNetImportService().importEvents({
       hours: 1,
@@ -181,6 +184,7 @@ describe('server2 :: GeoNet import new-event accounting', () => {
     expect(db.bulkInsertEvents).toHaveBeenCalledTimes(1);
     expect(db.bulkInsertEvents.mock.calls[0][0]).toHaveLength(5);
     expect(result.newEvents).toBe(3);
+    expect(result.success).toBe(true);
     // The import history records the same figure.
     expect(db.insertImportHistory.mock.calls[0][5]).toBe(3);
   });
@@ -193,6 +197,10 @@ describe('server2 :: GeoNet import new-event accounting', () => {
       )
     );
     db.bulkInsertEvents.mockImplementation(async (rows: unknown[]) => rows.length - 1);
+    db.getEventCoordinatesByIds.mockImplementation(async () => {
+      const calls = db.bulkInsertEvents.mock.calls;
+      return calls[calls.length - 1][0].slice(0, -1);
+    });
 
     const result = await new GeoNetImportService().importEvents({
       hours: 1,
@@ -202,5 +210,7 @@ describe('server2 :: GeoNet import new-event accounting', () => {
     const submitted = db.bulkInsertEvents.mock.calls.map((c) => c[0].length);
     expect(submitted).toEqual([1000, 1000, 500]);
     expect(result.newEvents).toBe(999 + 999 + 499);
+    expect(result.success).toBe(true);
+    expect(db.getEventCoordinatesByIds).toHaveBeenCalledTimes(3);
   });
 });

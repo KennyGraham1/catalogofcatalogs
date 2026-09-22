@@ -238,7 +238,7 @@ describe('event-level quality index Q: documented scale reference points', () =>
 
     expect(bare.overall).toBe(5);
     expect(allPoor.overall).toBe(5);
-    // The invariant the audit finding was about: withholding metadata must never pay.
+    // The invariant: withholding metadata must never pay.
     expect(bare.overall).toBeLessThanOrEqual(allPoor.overall);
   });
 
@@ -315,35 +315,40 @@ describe('catalogue admissibility does not hinge on optional instrument metadata
     expect(meetsMinimumQuality(result)).toBe(false);
   });
 
-  it('refuses a catalogue whose integrity terms are jointly below 60, with no hard error', () => {
-    // Constructed so that the gate — not an error check — is what refuses it:
-    //   completeness = 50 (50/100 carry a magnitude; the ERROR branch is `< 50`, so this is
-    //                      only a warning)
-    //   consistency  = 100 - 10 (every timestamp duplicated) - 5 (a shallow M8.5) = 85
-    //   accuracy     = 100 - round(30 * 0.99) (99/100 report no uncertainty) = 70,
-    //                  then - 30 because the single reported value, 40 km, exceeds 10 km and
-    //                  is a majority of the reported ones = 40
-    //   integrity    = (50 + 85 + 40) / 3 = 58.33 -> below 60
+  it('admits a mediocre-but-honest catalogue: the integrity mean cannot fall below 60 without a hard error', () => {
+    // The accuracy term is proportional and its only
+    // penalty is capped at 30, so accuracy >= 70 for any catalogue. Completeness below 50
+    // is an ERROR-severity check. Therefore, with no hard error, the three-term mean is
+    // bounded below by (50 + consistency + 70) / 3, and consistency would have to be
+    // under 60 for the mean to dip below 60 - which the consistency checks do not produce
+    // for a structurally sound catalogue. The former version of this test refused such a
+    // catalogue only because ONE reported 40 km value was "a majority of the reported
+    // ones" and triggered a flat -30: the exact defect that was removed.
+    //
+    //   completeness = 50 (50/100 carry a magnitude; ERROR branch is `< 50`)
+    //   consistency  = 100 - 10 (duplicated timestamps) - 5 (a shallow M8.5) = 85
+    //   accuracy     = 100 - round(30 * 1.00) = 70 (every event reports a poor 40 km)
+    //   integrity    = (50 + 85 + 70) / 3 = 68.3 -> admitted, correctly: honest and mediocre
     const events = Array.from({ length: 100 }, (_, i) => {
       const event: any = {
-        time: '2024-01-01T00:00:00.000Z', // every timestamp duplicated
+        time: '2024-01-01T00:00:00.000Z',
         latitude: -41.2,
         longitude: 174.8,
         depth: 12,
+        horizontal_uncertainty: 40,
       };
       if (i < 50) event.magnitude = 4.5;
-      if (i === 0) { event.depth = 2; event.magnitude = 8.5; } // shallow M>8
-      if (i === 1) event.horizontal_uncertainty = 40;
+      if (i === 0) { event.depth = 2; event.magnitude = 8.5; }
       return event;
     });
 
     const result = performQualityCheck(events);
     expect(result.report.completeness).toBe(50);
     expect(result.report.consistency).toBe(85);
-    expect(result.report.accuracy).toBe(40);
+    expect(result.report.accuracy).toBe(70);
     expect(result.report.checks.some(c => c.severity === 'error')).toBe(false);
-    expect(result.passed).toBe(false);
-    expect(meetsMinimumQuality(result)).toBe(false);
+    expect(result.passed).toBe(true);
+    expect(meetsMinimumQuality(result)).toBe(true);
   });
 
   it('rewards a fully documented QuakeML catalogue on both the score and the accuracy term', () => {

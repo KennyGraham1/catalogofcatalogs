@@ -28,10 +28,6 @@ interface RegionSelectorMapProps {
 
 const clampValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-const normalizeLongitude360 = (value: number) => ((value % 360) + 360) % 360;
-
-const normalizeLongitude180 = (value: number) => (value > 180 ? value - 360 : value);
-
 const collectLatLngs = (latlngs: any): L.LatLng[] => {
   const result: L.LatLng[] = [];
   const visit = (item: any) => {
@@ -47,6 +43,21 @@ const collectLatLngs = (latlngs: any): L.LatLng[] => {
 
   visit(latlngs);
   return result;
+};
+
+/**
+ * Bounds of a drawn polygon. Leaflet reports unwrapped longitudes when the user
+ * draws across the antimeridian or on a world copy (177..184, 537..544,
+ * -183..-176 are all the same rectangle), so the extent is measured in the
+ * unwrapped frame and only then wrapped to [-180, 180]. A result whose west is
+ * greater than its east crosses the antimeridian (RFC 7946 section 5.2), which
+ * is the convention pointInBounds/boundsOverlap already use. Clamping each
+ * endpoint separately turned those three rectangles into three different boxes,
+ * one of them the empty 180..180.
+ */
+const wrapLongitude180 = (value: number) => {
+  const wrapped = ((((value + 180) % 360) + 360) % 360) - 180;
+  return wrapped === -180 && value > 0 ? 180 : wrapped;
 };
 
 const getPolygonBounds = (layer: L.Polygon): GeographicBounds => {
@@ -65,33 +76,19 @@ const getPolygonBounds = (layer: L.Polygon): GeographicBounds => {
   const lons = latlngs.map((point) => point.lng);
   const minLat = clampValue(Math.min(...lats), -90, 90);
   const maxLat = clampValue(Math.max(...lats), -90, 90);
-  const minLon = clampValue(Math.min(...lons), -180, 180);
-  const maxLon = clampValue(Math.max(...lons), -180, 180);
-  const span = maxLon - minLon;
+  const minLonRaw = Math.min(...lons);
+  const maxLonRaw = Math.max(...lons);
 
-  const lons360 = lons.map(normalizeLongitude360);
-  const minLon360 = Math.min(...lons360);
-  const maxLon360 = Math.max(...lons360);
-  const span360 = maxLon360 - minLon360;
-
-  const hasDatelineEdge = lons.some((lon) => lon >= 150) && lons.some((lon) => lon <= -150);
-  const crossesDateline = span > 180 && span360 < span && span360 <= 180 && hasDatelineEdge;
-
-  if (crossesDateline) {
-    return {
-      minLatitude: minLat,
-      maxLatitude: maxLat,
-      minLongitude: normalizeLongitude180(minLon360),
-      maxLongitude: normalizeLongitude180(maxLon360),
-    };
+  if (maxLonRaw - minLonRaw >= 360) {
+    return { minLatitude: minLat, maxLatitude: maxLat, minLongitude: -180, maxLongitude: 180 };
   }
 
-  return {
-    minLatitude: minLat,
-    maxLatitude: maxLat,
-    minLongitude: minLon,
-    maxLongitude: maxLon,
-  };
+  let minLongitude = wrapLongitude180(minLonRaw);
+  let maxLongitude = wrapLongitude180(maxLonRaw);
+  if (minLongitude === 180) minLongitude = -180;
+  if (maxLongitude === -180 && minLongitude !== -180) maxLongitude = 180;
+
+  return { minLatitude: minLat, maxLatitude: maxLat, minLongitude, maxLongitude };
 };
 
 // Memoized component for better performance

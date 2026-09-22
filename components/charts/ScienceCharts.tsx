@@ -173,13 +173,12 @@ export const TemporalSeriesChart = memo(function TemporalSeriesChart({
 }) {
   const { resolvedTheme } = useTheme();
   const c = chartColors(resolvedTheme === 'dark');
-  // The temporal analysis emits ISO day keys ('2024-03-05') for catalogues
-  // spanning up to a year and week keys ('2019-W07') beyond that. Week keys are
-  // not parseable dates, so show the bin label itself instead of the 'NaN/aN'
-  // ticks and 'Invalid Date' tooltips a bare `new Date(key)` produces. Day keys
-  // parse as UTC midnight and are formatted in UTC to match that binning.
-  const fmtDate = (v: string) => {
-    const t = Date.parse(v);
+  // Current day/week bins use UTC dates. Preserve elapsed time between occupied
+  // bins; a category axis makes a quiet year look as short as a quiet day.
+  // Older saved results may still have week labels, so retain their fallback.
+  const timeAxis = data.every(d => Number.isFinite(Date.parse(d.date)));
+  const fmtDate = (v: string | number) => {
+    const t = typeof v === 'number' ? v : Date.parse(v);
     if (!Number.isFinite(t)) return v;
     const d = new Date(t);
     return `${d.getUTCMonth() + 1}/${d.getUTCFullYear().toString().slice(-2)}`;
@@ -206,7 +205,12 @@ export const TemporalSeriesChart = memo(function TemporalSeriesChart({
           return html;
         },
       }),
-      xAxis: { ...axis(c, { type: 'category' }), boundaryGap: false, data: data.map((d) => d.date), axisLabel: { ...axis(c).axisLabel, formatter: fmtDate } },
+      xAxis: {
+        ...axis(c, { type: timeAxis ? 'time' : 'category' }),
+        boundaryGap: false,
+        ...(timeAxis ? {} : { data: data.map(d => d.date) }),
+        axisLabel: { ...axis(c).axisLabel, formatter: fmtDate },
+      },
       yAxis: axis(c, { name: 'Cumulative events', nameGap: 46 }),
       dataZoom: [
         { type: 'inside' },
@@ -217,6 +221,7 @@ export const TemporalSeriesChart = memo(function TemporalSeriesChart({
           type: 'line',
           name: 'Cumulative Events',
           smooth: false,
+          step: 'end',
           sampling: 'lttb',
           showSymbol: false,
           lineStyle: { color: SEISMIC_COLORS.time.dark, width: 2 },
@@ -230,11 +235,11 @@ export const TemporalSeriesChart = memo(function TemporalSeriesChart({
               ],
             },
           },
-          data: data.map((d) => d.cumulativeCount),
+          data: data.map(d => timeAxis ? [Date.parse(d.date), d.cumulativeCount] : d.cumulativeCount),
         },
       ],
     }),
-    [data, c]
+    [data, c, timeAxis]
   );
   return <EChart option={option} height={height} exportData={data} exportName="cumulative-time-series" aria-label="Cumulative event time series" />;
 });
@@ -339,9 +344,10 @@ export const MFDComparisonChart = memo(function MFDComparisonChart({
   );
 
   const option = useMemo<EChartsOption>(() => {
-    // On a log axis, zero counts cannot be plotted, so drop them.
+    // A zero is a gap on a log axis. Dropping it would connect occupied bins
+    // across an empty interval and falsely draw nonzero event counts there.
     const pts = (arr: { magnitude: number; count: number }[]) =>
-      (logScale ? arr.filter((d) => d.count > 0) : arr).map((d) => [d.magnitude, d.count]);
+      arr.map(d => [d.magnitude, logScale && d.count === 0 ? null : d.count]);
     const series: any[] = [];
     // Incremental N(M) and cumulative N(>=M) are different quantities, so they
     // must not share a series name: ECharts keys legend items by name, and the
@@ -350,15 +356,22 @@ export const MFDComparisonChart = memo(function MFDComparisonChart({
     // tooltip rows holding different numbers.
     if (showHistogram) {
       for (const cat of catalogues) {
+        // The library returns sparse histogram counts and a complete cumulative
+        // bin grid. Restore the empty bins before connecting histogram points.
+        const counts = new Map(cat.histogram.map(d => [d.magnitude, d.count]));
+        const histogram = cat.cumulative.length
+          ? cat.cumulative.map(d => ({ magnitude: d.magnitude, count: counts.get(d.magnitude) ?? 0 }))
+          : cat.histogram;
         series.push({
           type: 'line',
           name: `${cat.catalogueName} N(M)`,
           step: 'end',
+          connectNulls: false,
           showSymbol: false,
           lineStyle: { color: cat.color, width: 1 },
           itemStyle: { color: cat.color },
           areaStyle: { color: cat.color, opacity: 0.18 },
-          data: pts(cat.histogram),
+          data: pts(histogram),
         });
       }
     }

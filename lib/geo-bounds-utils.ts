@@ -209,6 +209,23 @@ function lonIntervals(west: number, east: number): Array<[number, number]> {
 }
 
 /**
+ * lonIntervals for MEMBERSHIP tests. +180 and -180 are the same meridian, so an
+ * interval that touches one spelling of the seam must also contain the other, or
+ * a stored longitude of exactly 180 is invisible to a viewport that starts at
+ * -180. Not used for unions, where a degenerate seam interval would re-express
+ * a plain 170..180 box as a crossing one.
+ */
+function lonIntervalsForMembership(west: number, east: number): Array<[number, number]> {
+  const intervals = lonIntervals(west, east);
+  const touchesSeam = intervals.some(([a, b]) => a === -180 || b === 180);
+  if (touchesSeam) {
+    if (!intervals.some(([a]) => a === -180)) intervals.push([-180, -180]);
+    if (!intervals.some(([, b]) => b === 180)) intervals.push([180, 180]);
+  }
+  return intervals;
+}
+
+/**
  * Check if two bounding boxes overlap (antimeridian-aware).
  */
 export function boundsOverlap(
@@ -220,8 +237,8 @@ export function boundsOverlap(
     bounds1.minLatitude <= bounds2.maxLatitude;
   if (!latOverlap) return false;
 
-  for (const [a0, a1] of lonIntervals(bounds1.minLongitude, bounds1.maxLongitude)) {
-    for (const [b0, b1] of lonIntervals(bounds2.minLongitude, bounds2.maxLongitude)) {
+  for (const [a0, a1] of lonIntervalsForMembership(bounds1.minLongitude, bounds1.maxLongitude)) {
+    for (const [b0, b1] of lonIntervalsForMembership(bounds2.minLongitude, bounds2.maxLongitude)) {
       if (a1 >= b0 && a0 <= b1) return true;
     }
   }
@@ -237,11 +254,7 @@ export function pointInBounds(
   bounds: GeographicBounds
 ): boolean {
   if (latitude < bounds.minLatitude || latitude > bounds.maxLatitude) return false;
-  if (bounds.minLongitude <= bounds.maxLongitude) {
-    return longitude >= bounds.minLongitude && longitude <= bounds.maxLongitude;
-  }
-  // Dateline-crossing box: inside if east of the west edge OR west of the east edge.
-  return longitude >= bounds.minLongitude || longitude <= bounds.maxLongitude;
+  return lonIntervalsForMembership(bounds.minLongitude, bounds.maxLongitude).some(([a, b]) => longitude >= a && longitude <= b);
 }
 
 /**

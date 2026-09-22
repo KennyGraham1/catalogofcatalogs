@@ -1,5 +1,5 @@
 /**
- * Regression test for GeoNet 10,000-event / HTTP 413 pagination (audit finding #11).
+ * Regression test for GeoNet 10,000-event / HTTP 413 pagination.
  *
  * The importer must subdivide a too-large time window (GeoNet returns HTTP 413
  * above 10,000 events) and de-duplicate boundary events by id. Tests the

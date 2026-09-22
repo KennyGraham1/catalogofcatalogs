@@ -23,15 +23,17 @@ export interface QuakeMLValidationResult {
  * Check that element start and end tags nest correctly.
  */
 function findStructuralError(xmlContent: string): string | null {
+  // One alternation, left to right, so a CDATA section containing "<!--" (or a
+  // comment containing "<![CDATA[") is consumed as the construct that starts first.
   const markup = xmlContent
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, '')
+    .replace(/<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->/g, '')
     .replace(/<\?[\s\S]*?\?>/g, '')
     .replace(/<!DOCTYPE[^>]*>/gi, '');
 
   // Attribute values may legally contain '>', so quoted runs are matched as units.
   const tagPattern = /<(\/?)([A-Za-z_][\w.:-]*)((?:"[^"]*"|'[^']*'|[^>"'])*?)(\/?)>/g;
   const stack: string[] = [];
+  let rootCount = 0;
 
   let match: RegExpExecArray | null;
   while ((match = tagPattern.exec(markup)) !== null) {
@@ -44,13 +46,17 @@ function findStructuralError(xmlContent: string): string | null {
           ? `XML document is malformed (unexpected closing tag </${name}>)`
           : `XML document is malformed (</${name}> closes <${open}>)`;
       }
-    } else if (!selfClosing) {
-      stack.push(name);
+    } else {
+      if (stack.length === 0) rootCount++;
+      if (!selfClosing) stack.push(name);
     }
   }
 
   if (stack.length > 0) {
     return `XML document is malformed (unclosed element <${stack[stack.length - 1]}>)`;
+  }
+  if (rootCount > 1) {
+    return `XML document is malformed (${rootCount} root elements; a document has exactly one)`;
   }
 
   return null;
@@ -63,8 +69,13 @@ export function validateQuakeMLStructure(xmlContent: string): QuakeMLValidationR
   const errors: QuakeMLValidationError[] = [];
   const warnings: QuakeMLValidationError[] = [];
 
-  // Check for basic XML structure
-  if (!xmlContent.includes('<quakeml') && !xmlContent.includes('<q:quakeml')) {
+  // Comments and CDATA are not markup: strip them before any counting so a
+  // commented-out <event> is not counted and a CDATA '<' does not open a tag.
+  const markup = xmlContent.replace(/<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->/g, '');
+
+  // Check for basic XML structure. Any namespace prefix is legal for the root
+  // (q:, qml:, or none): the local name is what the schema fixes.
+  if (!/<(?:[\w.-]+:)?quakeml\b/.test(markup)) {
     errors.push({
       type: 'error',
       path: 'root',
@@ -86,7 +97,7 @@ export function validateQuakeMLStructure(xmlContent: string): QuakeMLValidationR
   // otherwise the mandatory <eventParameters> container — every QuakeML 1.2 BED
   // document has exactly one — is counted as an event. Mirrors the event tag
   // pattern used by the QuakeML reader in lib/parsers.ts.
-  const eventMatches = xmlContent.match(/<(?:[\w.-]+:)?event\b(?![\w-])[^>]*>/g);
+  const eventMatches = markup.match(/<(?:[\w.-]+:)?event\b(?![\w-])[^>]*>/g);
   const eventCount = eventMatches ? eventMatches.length : 0;
 
   if (eventCount === 0) {
@@ -97,7 +108,8 @@ export function validateQuakeMLStructure(xmlContent: string): QuakeMLValidationR
     });
   }
 
-  // Check that element start/end tags nest correctly
+  // Check that element start/end tags nest correctly and that there is exactly
+  // one document element.
   const structuralError = findStructuralError(xmlContent);
   if (structuralError) {
     errors.push({
@@ -282,7 +294,14 @@ function validateOrigin(origin: Origin, path: string): QuakeMLValidationError[] 
     });
   } else {
     const lat = origin.latitude.value;
-    if (lat < -90 || lat > 90) {
+    if (!Number.isFinite(lat)) {
+      errors.push({
+        type: 'error',
+        path: `${path}.latitude.value`,
+        message: 'Latitude must be a finite number',
+        value: lat
+      });
+    } else if (lat < -90 || lat > 90) {
       errors.push({
         type: 'error',
         path: `${path}.latitude.value`,
@@ -301,7 +320,14 @@ function validateOrigin(origin: Origin, path: string): QuakeMLValidationError[] 
     });
   } else {
     const lon = origin.longitude.value;
-    if (lon < -180 || lon > 180) {
+    if (!Number.isFinite(lon)) {
+      errors.push({
+        type: 'error',
+        path: `${path}.longitude.value`,
+        message: 'Longitude must be a finite number',
+        value: lon
+      });
+    } else if (lon < -180 || lon > 180) {
       errors.push({
         type: 'error',
         path: `${path}.longitude.value`,
@@ -363,7 +389,14 @@ function validateMagnitude(magnitude: Magnitude, path: string): QuakeMLValidatio
     });
   } else {
     const mag = magnitude.mag.value;
-    if (mag < -2 || mag > 10) {
+    if (!Number.isFinite(mag)) {
+      errors.push({
+        type: 'error',
+        path: `${path}.mag.value`,
+        message: 'Magnitude must be a finite number',
+        value: mag
+      });
+    } else if (mag < -2 || mag > 10) {
       errors.push({
         type: 'warning',
         path: `${path}.mag.value`,

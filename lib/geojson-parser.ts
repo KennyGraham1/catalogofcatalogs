@@ -247,6 +247,11 @@ function parseGeoJSONFeature(
   const [longitude, latitude, thirdCoord] = feature.geometry.coordinates;
   const props = feature.properties || {};
 
+  // Features that identify as USGS/ComCat or GeoNet output follow those producers'
+  // conventions (time in milliseconds, third coordinate in km).
+  const knownProducer = /earthquake\.usgs\.gov|geonet\.org\.nz/i.test(String(props.url ?? props.detail ?? '')) ||
+    (typeof props.net === 'string' && typeof props.mag === 'number' && typeof props.time === 'number');
+
   // Resolve depth (km, positive down). The GeoJSON third coordinate is ambiguous across producers:
   //   * RFC 7946 §3.1.1 (and this app's own GeoJSON exporter): elevation in METRES, positive up —
   //     so a hypocentre at depth d km is encoded as -d*1000.
@@ -267,6 +272,16 @@ function parseGeoJSONFeature(
       // |z| > 1000 -> deeper than any earthquake (~700 km max); elevation in metres, convert.
       // otherwise  -> km depth as written. This keeps the USGS/GeoNet -5..0 km band (events
       depth = (z < -5 || Math.abs(z) > 1000) ? -z / 1000 : z;
+      // Inside the km-depth band the reading is a convention, not a fact. A feature
+      // that identifies itself as USGS/ComCat or GeoNet output states that convention
+      // (depth in km); for anything else say so once per file so an RFC 7946
+      // producer (elevation in metres) is not silently read as kilometres.
+      if (!knownProducer && !(z < -5 || Math.abs(z) > 1000) && z !== 0 && !warnings.some(w => w.message.startsWith(THIRD_COORDINATE_NOTE))) {
+        warnings.push({
+          line: lineNumber,
+          message: `${THIRD_COORDINATE_NOTE} (first seen on feature ${lineNumber}, z=${z}). Add a "depth" property in km to state the unit explicitly.`,
+        });
+      }
     }
   }
 
@@ -275,7 +290,11 @@ function parseGeoJSONFeature(
     longitude,
     latitude,
     depth,
-    time: props.time || props.datetime || props.date || props.origin_time || props.origintime,
+    // USGS/ComCat GeoJSON writes `time` as milliseconds since the epoch (and 0 is a
+    // real instant), so a self-identified USGS/GeoNet feature converts as milliseconds;
+    // any other producer's bare number is classified by magnitude (seconds below
+    // 1e11), which is what Python/GeoPandas exports carry.
+    time: epochToIso(firstPresent(props.time, props.datetime, props.date, props.origin_time, props.origintime), knownProducer),
     // `||` treats a magnitude of 0.0 as absent; M0.0 is a real value in microseismic
     // catalogues, so pick the first field that is genuinely present.
     magnitude: firstPresent(props.magnitude, props.mag, props.m),
@@ -292,8 +311,10 @@ function parseGeoJSONFeature(
     detectedFields.add('region');
   }
 
-  if (props.eventId || props.id || feature.id) {
-    event.eventId = String(props.eventId || props.id || feature.id);
+  // RFC 7946 3.3 allows a number as the Feature id, and 0 is a valid one.
+  const featureId = firstPresent(props.eventId, props.id, feature.id);
+  if (featureId !== undefined) {
+    event.eventId = String(featureId);
     detectedFields.add('eventId');
   }
 
@@ -313,6 +334,18 @@ function parseGeoJSONFeature(
   if (props.rms        != null) { event.standard_error          = Number(props.rms);        detectedFields.add('standard_error'); }
   if (props.status)             { event.evaluation_status       = String(props.status);     detectedFields.add('evaluation_status'); }
   if (props.type)               { event.event_type              = String(props.type);       detectedFields.add('event_type'); }
+
+  // Properties written by this platform's own GeoJSON exporter (camelCase) map back to
+  // the snake_case names the DB adapter reads, so an export re-imports without loss:
+  // identifiers, uncertainties, quality metrics and nested QuakeML data all used to
+  // spill into the bag under names nothing downstream recognised.
+  for (const [property, field] of Object.entries(OWN_EXPORT_PROPERTY_FIELDS)) {
+    const value = props[property];
+    if (value === undefined || value === null || value === '') continue;
+    if (event[field] !== undefined) continue;
+    event[field] = typeof value === 'object' ? JSON.stringify(value) : value;
+    detectedFields.add(field);
+  }
 
   // Add all other properties to the event.
   // Fields already resolved above are skipped so the properties bag cannot overwrite them.
@@ -360,6 +393,78 @@ function parseGeoJSONFeature(
   validationAccumulator.failures.push(...validation.failures);
   appendCrossFieldFailures(validationAccumulator, event, context);
   return event;
+}
+
+/**
+ * Property names emitted by lib/exporters.ts eventsToGeoJSON, keyed to the DB field
+ * each one came from. Nested QuakeML data is re-serialised to the JSON string the DB
+ * stores.
+ */
+const OWN_EXPORT_PROPERTY_FIELDS: Record<string, string> = {
+  publicId: 'event_public_id',
+  sourceId: 'source_id',
+  depthType: 'depth_type',
+  locationName: 'location_name',
+  eventType: 'event_type',
+  eventTypeCertainty: 'event_type_certainty',
+  magnitudeUncertainty: 'magnitude_uncertainty',
+  magnitudeStationCount: 'magnitude_station_count',
+  magnitudeMethodId: 'magnitude_method_id',
+  magnitudeEvaluationMode: 'magnitude_evaluation_mode',
+  magnitudeEvaluationStatus: 'magnitude_evaluation_status',
+  timeUncertainty: 'time_uncertainty',
+  latitudeUncertainty: 'latitude_uncertainty',
+  longitudeUncertainty: 'longitude_uncertainty',
+  depthUncertainty: 'depth_uncertainty',
+  horizontalUncertainty: 'horizontal_uncertainty',
+  minHorizontalUncertainty: 'min_horizontal_uncertainty',
+  maxHorizontalUncertainty: 'max_horizontal_uncertainty',
+  azimuthMaxHorizontalUncertainty: 'azimuth_max_horizontal_uncertainty',
+  earthModelId: 'earth_model_id',
+  methodId: 'method_id',
+  agencyId: 'agency_id',
+  author: 'author',
+  azimuthalGap: 'azimuthal_gap',
+  usedPhaseCount: 'used_phase_count',
+  usedStationCount: 'used_station_count',
+  standardError: 'standard_error',
+  minimumDistance: 'minimum_distance',
+  maximumDistance: 'maximum_distance',
+  associatedPhaseCount: 'associated_phase_count',
+  associatedStationCount: 'associated_station_count',
+  depthPhaseCount: 'depth_phase_count',
+  evaluationMode: 'evaluation_mode',
+  evaluationStatus: 'evaluation_status',
+  preferredOriginId: 'preferred_origin_id',
+  preferredMagnitudeId: 'preferred_magnitude_id',
+  preferredFocalMechanismId: 'preferred_focal_mechanism_id',
+  origins: 'origins',
+  magnitudes: 'magnitudes',
+  picks: 'picks',
+  arrivals: 'arrivals',
+  focalMechanisms: 'focal_mechanisms',
+  amplitudes: 'amplitudes',
+  stationMagnitudes: 'station_magnitudes',
+  eventDescriptions: 'event_descriptions',
+  comments: 'comments',
+  creationInfo: 'creation_info',
+  originQuality: 'origin_quality',
+};
+
+const THIRD_COORDINATE_NOTE =
+  'Third coordinate between -5 and 1000 read as depth in km (USGS/GeoNet convention), not RFC 7946 elevation in metres';
+
+/**
+ * A numeric GeoJSON time: milliseconds for a known producer, otherwise seconds when
+ * its magnitude is below 1e11 (the same rule as normalizeTimestamp). Strings pass through.
+ */
+function epochToIso(value: unknown, knownMillisecondsProducer: boolean): any {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const ms = knownMillisecondsProducer || Math.abs(value) >= 100000000000 ? value : value * 1000;
+    const date = new Date(ms);
+    return isNaN(date.getTime()) ? value : date.toISOString();
+  }
+  return value;
 }
 
 /** First argument that is neither undefined, null, nor the empty string. */

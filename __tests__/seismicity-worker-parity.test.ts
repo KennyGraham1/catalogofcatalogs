@@ -20,7 +20,9 @@ import {
   calculateGutenbergRichter,
   estimateCompletenessMagnitude,
   analyzeTemporalPattern,
+  gardnerKnopoffDeclustering,
   type EarthquakeEvent,
+  calculateSeismicMoment,
 } from '../lib/seismological-analysis';
 
 const WORKER_PATH = path.join(__dirname, '..', 'workers', 'seismological-worker.ts');
@@ -65,6 +67,47 @@ function eventsWithMagnitudes(magnitudes: number[]): EarthquakeEvent[] {
     magnitude,
   }));
 }
+
+describe('Gardner-Knopoff cluster ownership', () => {
+  const event = (id: string, day: number, magnitude: number): EarthquakeEvent => ({
+    id, time: new Date(Date.UTC(2020, 0, 1) + day * 86400000).toISOString(),
+    latitude: -41, longitude: 174, depth: 10, magnitude,
+  });
+
+  it('keeps a mainshock and its cluster separate from an earlier smaller event', () => {
+    const events = [event('fore', -.1, 3), event('main', 0, 5), event('after-1', .1, 2), event('after-2', .2, 2)];
+    const result = gardnerKnopoffDeclustering(events);
+    expect(result.mainshocks.map(e => e.id)).toEqual(['fore', 'main']);
+    expect(Array.from(result.clusters.values()).map(c => c.map(e => e.id))).toEqual([['main', 'after-1', 'after-2']]);
+    const worker = loadWorker()({ type: 'temporal', events });
+    expect(worker.clusters).toHaveLength(1);
+    expect(worker.clusters[0]).toMatchObject({ eventCount: 3, maxMagnitude: 5, mainshock: { id: 'main' } });
+  });
+
+  it('assigns each event once across the 6.5 magnitude window discontinuity', () => {
+    const events = [
+      event('early', 0, 6.49), event('early-1', .1, 2), event('early-2', .2, 2),
+      event('late', 900, 6.5), event('late-1', 900.1, 2), event('late-2', 900.2, 2),
+    ];
+    const result = gardnerKnopoffDeclustering(events);
+    const members = Array.from(result.clusters.values()).flat();
+    expect(members).toHaveLength(events.length);
+    expect(new Set(members.map(e => e.id)).size).toBe(events.length);
+    expect(result.mainshocks.map(e => e.id)).toEqual(['early', 'late']);
+    const worker = loadWorker()({ type: 'temporal', events });
+    expect(worker.clusters).toHaveLength(2);
+    expect(worker.clusters.map((c: any) => c.eventCount)).toEqual([3, 3]);
+    expect(worker.clusters.map((c: any) => [c.mainshock.id, c.maxMagnitude, c.aftershockCount]))
+      .toEqual([['late', 6.5, 2], ['early', 6.49, 2]]);
+  });
+
+  it('does not let an earlier smaller event consume an independent larger event', () => {
+    const events = [event('fore', -.1, 3), event('main', 0, 5)];
+    const result = gardnerKnopoffDeclustering(events);
+    expect(result.mainshocks.map(e => e.id)).toEqual(['fore', 'main']);
+    expect(result.clusters.size).toBe(0);
+  });
+});
 
 /**
  * A b = 1 catalogue on the 0.1 grid above M2.0 with an incomplete tail below it.
@@ -189,6 +232,19 @@ describe('worker and lib agree on the completeness magnitude', () => {
 });
 
 describe('worker and lib agree on temporal analysis', () => {
+  it('preserves all occupied periods and a burst in the last period beyond 500 bins', () => {
+    const start = Date.UTC(2000, 0, 3);
+    const events = eventsWithMagnitudes(new Array(511).fill(-1));
+    events.forEach((event, i) => {
+      event.time = new Date(start + Math.min(i, 501) * 14 * 86400_000).toISOString();
+    });
+    const actual = loadWorker()({ type: 'temporal', events });
+    expect(actual.timeSeries).toHaveLength(502);
+    expect(actual.timeSeries.reduce((sum: number, bin: { count: number }) => sum + bin.count, 0)).toBe(511);
+    expect(actual.timeSeries[501]).toMatchObject({ count: 10, cumulativeCount: 511 });
+    expect(actual.timeSeries).toEqual(analyzeTemporalPattern(events).timeSeries);
+  });
+
   /**
    * 25 isolated mainshock-aftershock sequences plus one larger sequence.
    * Sequences are 100 days apart (longer than the M4 Gardner-Knopoff time
@@ -280,5 +336,25 @@ describe('worker and lib agree on temporal analysis', () => {
     }
     // 5 Jan 2015 is itself a Monday, so the first sequence keys its own date.
     expect(actual.timeSeries[0].date).toBe('2015-01-05');
+  });
+});
+
+describe('worker and lib agree on seismic moment', () => {
+  it('returns identical totals, eligibility counts and 0.5-magnitude bins', () => {
+    const events = syntheticCatalogue().map((e, i) => ({
+      ...e,
+      // Mix the scales the eligibility rule distinguishes, including GeoNet's bare 'M'.
+      magnitude_type: (['Mw', 'ML', 'M', 'mb', 'Ms', undefined] as const)[i % 6],
+    }));
+    const expected = calculateSeismicMoment(events as any);
+    const actual = loadWorker()({ type: 'moment', events });
+    expect(actual.error).toBeUndefined();
+    expect(actual.totalMoment).toBeCloseTo(expected.totalMoment, 6);
+    expect(actual.totalMomentMagnitude).toBeCloseTo(expected.totalMomentMagnitude, 12);
+    expect([actual.assumedMwCount, actual.excludedCount]).toEqual([expected.assumedMwCount, expected.excludedCount]);
+    expect(actual.momentByMagnitude.map((b: any) => [b.magnitude, b.count])).toEqual(
+      expected.momentByMagnitude.map(b => [b.magnitude, b.count])
+    );
+    expect(actual.largestEvent.magnitude).toBe(expected.largestEvent.magnitude);
   });
 });

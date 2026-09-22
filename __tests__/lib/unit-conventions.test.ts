@@ -1,5 +1,5 @@
 /**
- * Regression tests for unit-convention correctness (audit root cause B).
+ * Regression tests for unit-convention correctness.
  *
  * Canonical DB units: depth, depth_uncertainty, horizontal_uncertainty in km;
  * latitude/longitude_uncertainty and minimum/maximum_distance in degrees;
@@ -7,7 +7,7 @@
  * uncertainties in metres, so import must convert m -> km and export km -> m.
  *
  * These tests also cover the previously-absent format round-trip checks
- * (QuakeML parse<->export, GeoJSON export->import) flagged by the audit.
+ * (QuakeML parse<->export, GeoJSON export->import).
  */
 
 import { eventsToQuakeMLDocument } from '@/lib/quakeml-exporter';

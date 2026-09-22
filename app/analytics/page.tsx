@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useDeferredValue, useTransition, memo } from 'react';
 import { useCatalogueEvents } from '@/hooks/use-catalogue-events';
 import { useEventDetails } from '@/hooks/use-event-details';
-import type { CatalogueEvent as AnalyticsEvent } from '@/lib/catalogue-event-loader';
+import { CatalogueEventCache, type CatalogueEvent as AnalyticsEvent } from '@/lib/catalogue-event-loader';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -50,7 +50,7 @@ import { QualityScoreCard } from '@/components/advanced-viz/QualityScoreCard';
 import { UncertaintyVisualization } from '@/components/advanced-viz/UncertaintyVisualization';
 import { FocalMechanismCard } from '@/components/advanced-viz/FocalMechanismCard';
 import { StationCoverageCard } from '@/components/advanced-viz/StationCoverageCard';
-import { calculateQualityScore, metricsFromEvent } from '@/lib/quality-scoring';
+import { calculateQualityScore, metricsFromEvent, scoreQualityMetrics } from '@/lib/quality-scoring';
 import { parseFocalMechanism } from '@/lib/focal-mechanism-utils';
 import { parseStationData } from '@/lib/station-coverage-utils';
 import { EventTable } from '@/components/events/EventTable';
@@ -248,8 +248,17 @@ export default function AnalyticsPage() {
     [catalogueData]
   );
 
+  const [eventCache] = useState(() => new CatalogueEventCache());
   const { events, loading, complete: eventsLoaded, loadedCount, error: eventsError,
-    cancel: cancelEventLoading, retry: reloadEvents } = useCatalogueEvents(catalogues, selectedCatalogue);
+    cancel: cancelEventLoading, retry: reloadEvents } = useCatalogueEvents(catalogues, selectedCatalogue, eventCache);
+  // Comparisons can include catalogues outside the main map selection. Fetch only
+  // those additional catalogues and reuse successful loads across both views.
+  const mfdAdditionalCatalogues = useMemo(() => catalogues.filter(catalogue =>
+    mfdSelectedCatalogues.includes(catalogue.id) && selectedCatalogue !== 'all' && catalogue.id !== selectedCatalogue
+  ), [catalogues, mfdSelectedCatalogues, selectedCatalogue]);
+  const mfdLoading = useCatalogueEvents(mfdAdditionalCatalogues,
+    activeTab === 'mfd' && mfdAdditionalCatalogues.length > 0 ? 'all' : '', eventCache);
+  const mfdReady = eventsLoaded && (mfdAdditionalCatalogues.length === 0 || mfdLoading.complete);
   const expectedEvents = catalogues.reduce((sum, catalogue) =>
     sum + (selectedCatalogue === 'all' || selectedCatalogue === catalogue.id ? catalogue.event_count || 0 : 0), 0);
   const loadingProgress = eventsLoaded ? 100 : expectedEvents > 0 ? Math.min(99, Math.round(loadedCount / expectedEvents * 100)) : 0;
@@ -450,10 +459,8 @@ export default function AnalyticsPage() {
 
     const totalEvents = displayEvents.length;
 
-    // Use sampling for quality scores (expensive calculation)
-    // Sample size: max 1000 events for quality calculation
-    const sampleSize = Math.min(1000, totalEvents);
-    const sampleStep = Math.max(1, Math.floor(totalEvents / sampleSize));
+    // Every event is scored (no subsample, so grade counts are exact); the scorer used
+    // here returns overall and grade only, which keeps the pass to ~0.25 s at 200k.
 
     // Single pass for counting and sampling
     let withUncertainty = 0;
@@ -485,14 +492,12 @@ export default function AnalyticsPage() {
         withStationData++;
       }
 
-      // Sample for quality calculation
-      if (i % sampleStep === 0) {
-        sampledEvents.push(e);
-      }
+      sampledEvents.push(e);
     }
 
-    // Calculate quality scores only for sampled events
-    const qualityScores = sampledEvents.map(e => calculateQualityScore(metricsFromEvent(e)));
+    // Overall+grade only: the full scorer's per-event narrative strings made this
+    // pass a 0.6-1 s stall on the main thread at 200k events.
+    const qualityScores = sampledEvents.map(e => scoreQualityMetrics(metricsFromEvent(e)));
     const avgQuality = qualityScores.length > 0
       ? qualityScores.reduce((sum, s) => sum + s.overall, 0) / qualityScores.length
       : 0;
@@ -501,14 +506,6 @@ export default function AnalyticsPage() {
       acc[s.grade] = (acc[s.grade] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
-
-    // Scale grade distribution back to full dataset
-    const scaleFactor = totalEvents / sampledEvents.length;
-    if (scaleFactor > 1) {
-      Object.keys(gradeDistribution).forEach(grade => {
-        gradeDistribution[grade] = Math.round(gradeDistribution[grade] * scaleFactor);
-      });
-    }
 
     return {
       totalEvents,
@@ -545,16 +542,19 @@ export default function AnalyticsPage() {
 
   // Calculate MFD comparison for selected catalogues
   const mfdComparison = useMemo((): MFDComparisonResult | null => {
-    if (!eventsLoaded || activeTab !== 'mfd' || mfdSelectedCatalogues.length === 0 || events.length === 0) {
+    if (!mfdReady || activeTab !== 'mfd' || mfdSelectedCatalogues.length === 0) {
       return null;
     }
 
-    // Group events by catalogue and prepare data for MFD calculation
+    // Group once rather than scanning every event again for each catalogue.
+    const grouped = new Map<string, AnalyticsEvent[]>();
+    for (const catalogueId of mfdSelectedCatalogues) grouped.set(catalogueId, []);
+    for (const event of events) grouped.get(event.catalogueId)?.push(event);
+    for (const event of mfdLoading.events) grouped.get(event.catalogueId)?.push(event);
     const catalogueData = mfdSelectedCatalogues.map((catalogueId, index) => {
       const catalogue = catalogues.find(c => c.id === catalogueId);
-      const catalogueEvents = events.filter(e => e.catalogueId === catalogueId);
       return {
-        events: catalogueEvents as EarthquakeEvent[],
+        events: (grouped.get(catalogueId) ?? []) as EarthquakeEvent[],
         catalogueId,
         catalogueName: catalogue?.name || `Catalogue ${index + 1}`,
         color: MFD_CATALOGUE_COLORS[index % MFD_CATALOGUE_COLORS.length],
@@ -562,7 +562,7 @@ export default function AnalyticsPage() {
     });
 
     return calculateMFDComparison(catalogueData, mfdBinWidth, mfdMinMagnitude);
-  }, [eventsLoaded, activeTab, mfdSelectedCatalogues, events, catalogues, mfdBinWidth, mfdMinMagnitude]);
+  }, [mfdReady, activeTab, mfdSelectedCatalogues, events, mfdLoading.events, catalogues, mfdBinWidth, mfdMinMagnitude]);
 
   // Handle MFD catalogue selection toggle
   const handleMfdCatalogueToggle = useCallback((catalogueId: string) => {
@@ -1455,9 +1455,15 @@ export default function AnalyticsPage() {
                 )}
 
                 {/* picks/arrivals are stripped by the summary projection: detail record only. */}
-                {parseStationData(eventDetails?.picks, eventDetails?.arrivals, selectedEvent.latitude, selectedEvent.longitude) && (
+                {parseStationData(eventDetails?.picks, eventDetails?.arrivals, selectedEvent.latitude, selectedEvent.longitude, {
+                  usedStationCount: eventDetails?.used_station_count ?? selectedEvent.used_station_count,
+                  azimuthalGap: eventDetails?.azimuthal_gap ?? selectedEvent.azimuthal_gap,
+                }) && (
                   <StationCoverageCard
-                    coverage={parseStationData(eventDetails?.picks, eventDetails?.arrivals, selectedEvent.latitude, selectedEvent.longitude)!}
+                    coverage={parseStationData(eventDetails?.picks, eventDetails?.arrivals, selectedEvent.latitude, selectedEvent.longitude, {
+                      usedStationCount: eventDetails?.used_station_count ?? selectedEvent.used_station_count,
+                      azimuthalGap: eventDetails?.azimuthal_gap ?? selectedEvent.azimuthal_gap,
+                    })!}
                   />
                 )}
               </div>
@@ -1724,11 +1730,11 @@ export default function AnalyticsPage() {
                       <ul className="space-y-2 text-sm">
                         <li className="flex items-start gap-2">
                           <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mt-2"></span>
-                          <span>Events analyzed: <strong>{displayEvents.length.toLocaleString()}</strong></span>
+                          <span>Events analyzed: <strong>{filteredEarthquakes.length.toLocaleString()}</strong></span>
                         </li>
                         <li className="flex items-start gap-2">
                           <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mt-2"></span>
-                          <span>Data points above Mc: <strong>{grAnalysis.dataPoints?.length || 0}</strong></span>
+                          <span>Data points above Mc: <strong>{grAnalysis.dataPoints?.filter((point: { magnitude: number }) => point.magnitude >= grAnalysis.completeness).length || 0}</strong></span>
                         </li>
                         <li className="flex items-start gap-2">
                           <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mt-2"></span>
@@ -1740,12 +1746,14 @@ export default function AnalyticsPage() {
                 </div>
               ) : (
                 <div className="text-center py-16 text-muted-foreground">
-                  {events.length === 0 ? (
+                  {grWorkerResult.error ? (
+                    <p role="alert">{grWorkerResult.error}</p>
+                  ) : filteredEarthquakes.length === 0 ? (
                     <div className="flex flex-col items-center gap-3">
                       <Activity className="h-12 w-12 opacity-30" />
                       <span>No events available</span>
                     </div>
-                  ) : displayEvents.length < 10 ? (
+                  ) : filteredEarthquakes.length < 10 ? (
                     <div className="flex flex-col items-center gap-3">
                       <Activity className="h-12 w-12 opacity-30" />
                       <span>Insufficient data (need at least 10 events)</span>
@@ -1898,12 +1906,14 @@ export default function AnalyticsPage() {
                 </div>
               ) : (
                 <div className="text-center py-16 text-muted-foreground">
-                  {events.length === 0 ? (
+                  {completenessWorkerResult.error ? (
+                    <p role="alert">{completenessWorkerResult.error}</p>
+                  ) : filteredEarthquakes.length === 0 ? (
                     <div className="flex flex-col items-center gap-3">
                       <Target className="h-12 w-12 opacity-30" />
                       <span>No events available</span>
                     </div>
-                  ) : displayEvents.length < 50 ? (
+                  ) : filteredEarthquakes.length < 50 ? (
                     <div className="flex flex-col items-center gap-3">
                       <Target className="h-12 w-12 opacity-30" />
                       <span>Insufficient data (need at least 50 events)</span>
@@ -2167,7 +2177,9 @@ export default function AnalyticsPage() {
                 </div>
               ) : (
                 <div className="text-center py-16 text-muted-foreground">
-                  {events.length === 0 ? (
+                  {temporalWorkerResult.error ? (
+                    <p role="alert">{temporalWorkerResult.error}</p>
+                  ) : filteredEarthquakes.length === 0 ? (
                     <div className="flex flex-col items-center gap-3">
                       <Clock className="h-12 w-12 opacity-30" />
                       <span>No events available</span>
@@ -2199,7 +2211,7 @@ export default function AnalyticsPage() {
                     <TechnicalTermTooltip term="seismicMoment" />
                   </div>
                   <CardDescription>
-                    Energy release quantification and moment magnitude distribution
+                    Seismic moment totals and magnitude distribution
                   </CardDescription>
                   <FilterScopeNote analysed={filteredEarthquakes.length} total={events.length} />
                 </div>
@@ -2225,6 +2237,16 @@ export default function AnalyticsPage() {
                           {momentAnalysis.totalMoment.toExponential(2)}
                         </div>
                         <p className="text-xs text-muted-foreground mt-2">Newton-meters (N·m)</p>
+                        {(momentAnalysis.excludedCount > 0 || momentAnalysis.assumedMwCount > 0) && (
+                          <p className="text-xs text-muted-foreground mt-1" role="note">
+                            {momentAnalysis.excludedCount > 0 && (
+                              <>{momentAnalysis.excludedCount.toLocaleString()} event{momentAnalysis.excludedCount === 1 ? '' : 's'} excluded (mb/Ms/Md: these scales saturate, so no moment relation applies). </>
+                            )}
+                            {momentAnalysis.assumedMwCount > 0 && (
+                              <>{momentAnalysis.assumedMwCount.toLocaleString()} event{momentAnalysis.assumedMwCount === 1 ? '' : 's'} with ML, GeoNet M or no stated scale counted under the ML ≈ Mw assumption.</>
+                            )}
+                          </p>
+                        )}
                       </CardContent>
                     </Card>
 
@@ -2314,7 +2336,8 @@ export default function AnalyticsPage() {
                         About Seismic Moment
                       </h4>
                       <p className="text-sm text-muted-foreground">
-                        Seismic moment (M₀) is a measure of the total energy released during an earthquake.
+                        Seismic moment (M₀) measures faulting strength: rigidity × rupture area × average slip.
+                        It is distinct from radiated seismic energy.
                         It is proportional to the fault area, average slip, and rigidity of the rock.
                         Moment magnitude (Mw) is derived from M₀ in N·m using:
                         Mw = (log₁₀(M₀) − 9.1) / 1.5, i.e. Mw = ⅔ log₁₀(M₀) − 6.07.
@@ -2326,7 +2349,9 @@ export default function AnalyticsPage() {
                 </div>
               ) : (
                 <div className="text-center py-16 text-muted-foreground">
-                  {events.length === 0 ? (
+                  {momentWorkerResult.error ? (
+                    <p role="alert">{momentWorkerResult.error}</p>
+                  ) : filteredEarthquakes.length === 0 ? (
                     <div className="flex flex-col items-center gap-3">
                       <Zap className="h-12 w-12 opacity-30" />
                       <span>No events available</span>
@@ -2335,7 +2360,7 @@ export default function AnalyticsPage() {
                     <div className="flex flex-col items-center gap-3">
                       <Loader2 className="h-10 w-10 animate-spin text-red-500" />
                       <span className="font-medium">Computing seismic moment analysis...</span>
-                      <span className="text-xs">Calculating energy release distribution</span>
+                      <span className="text-xs">Calculating seismic moment distribution</span>
                     </div>
                   )}
                 </div>
@@ -2408,7 +2433,7 @@ export default function AnalyticsPage() {
                             {catalogue.name}
                           </label>
                           <Badge variant="outline" className="text-[10px] px-1">
-                            {events.filter(e => e.catalogueId === catalogue.id).length.toLocaleString()}
+                            {catalogue.event_count?.toLocaleString() ?? '—'}
                           </Badge>
                         </div>
                       ))}
@@ -2594,6 +2619,11 @@ export default function AnalyticsPage() {
                             Choose one or more catalogues from the left panel to view their MFD
                           </p>
                         </div>
+                      ) : mfdLoading.error ? (
+                        <div className="text-center py-20 space-y-3">
+                          <p role="alert">{mfdLoading.error}</p>
+                          <Button onClick={mfdLoading.retry}>Retry comparison loading</Button>
+                        </div>
                       ) : mfdComparison ? (
                         <div>
                           <MFDComparisonChart catalogues={mfdComparison.catalogues} magnitudeRange={mfdComparison.magnitudeRange} logScale={mfdLogScale} showHistogram={mfdShowHistogram} showCumulative={mfdShowCumulative} cumulativeStyle={mfdCumulativeStyle} height={500} />
@@ -2601,7 +2631,7 @@ export default function AnalyticsPage() {
                       ) : (
                         <div className="text-center py-20 text-muted-foreground">
                           <Loader2 className="h-10 w-10 animate-spin mx-auto mb-4" />
-                          <p>Computing MFD...</p>
+                          <p role="status">{mfdReady ? 'Computing MFD...' : 'Loading comparison events...'}</p>
                         </div>
                       )}
                     </CardContent>

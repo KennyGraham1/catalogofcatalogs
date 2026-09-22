@@ -13,7 +13,7 @@ import { quakemlEventToDbFields } from './quakeml-to-db';
 import * as sax from 'sax';
 import { createReadStream } from 'fs';
 import { createInterface } from 'readline';
-import { detectDelimiter, parseLine, parseWithDelimiter, stripHeaderCommentMarker, type Delimiter } from './delimiter-detector';
+import { detectDelimiter, parseLine, parseWithDelimiter, stripHeaderCommentMarker, endsInsideQuotedField, type Delimiter } from './delimiter-detector';
 import { stripSpreadsheetFormulaGuard } from './export-utils';
 import { parseGeoJSON } from './geojson-parser';
 import { detectDateFormat, type DateFormat } from './date-format-detector';
@@ -73,7 +73,23 @@ function stripQuakeML(event: ParsedEvent): ParsedEvent {
   return rest as ParsedEvent;
 }
 
-function extractQuakeMLEventsWithSax(content: string): string[] {
+/**
+ * A bare '&' (not the start of an entity or character reference) is the one
+ * well-formedness error real bulletins commonly carry ("Cook Strait & Marlborough");
+ * escape it so the strict parser can read the file. Every other error still fails
+ * the document, as the regex path's tolerance of those is what let ghost events in.
+ */
+function escapeBareAmpersands(content: string): string {
+  if (content.indexOf('&') === -1) return content;
+  // CDATA sections and comments are literal text: leave their ampersands alone.
+  return content
+    .split(/(<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->)/)
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(/&(?!(?:[A-Za-z][A-Za-z0-9._-]*|#[0-9]+|#x[0-9A-Fa-f]+);)/g, '&amp;')))
+    .join('');
+}
+
+function extractQuakeMLEventsWithSax(rawContent: string): string[] {
+  const content = escapeBareAmpersands(rawContent);
   const parser = sax.parser(true, { trim: false, normalize: false });
   const events: string[] = [];
 
@@ -429,7 +445,8 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
   // Decide the moment-tensor unit ONCE for the whole file (see inferMomentTensorScaleForFile).
   // headers are lower-cased above, so the column lookup is too.
   const momentTensorIndices = MOMENT_TENSOR_COMPONENT_KEYS.map((key) => headers.indexOf(key.toLowerCase()));
-  const scalarMomentIndex = SCALAR_MOMENT_KEYS.reduce<number>(
+  const headerRow = Object.fromEntries(headers.map((h) => [h, '']));
+  const scalarMomentIndex = scalarMomentKeysFor(headerRow).reduce<number>(
     (found, key) => (found >= 0 ? found : headers.indexOf(key.toLowerCase())),
     -1
   );
@@ -630,7 +647,7 @@ export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult
       if (item === null || typeof item !== 'object') return null;
       return {
         components: MOMENT_TENSOR_COMPONENT_KEYS.map((key) => readRowNumber(item, [key])),
-        Mo: readRowNumber(item, SCALAR_MOMENT_KEYS),
+        Mo: readRowNumber(item, scalarMomentKeysFor(item)),
       };
     });
 
@@ -730,24 +747,14 @@ export function parseQuakeML(content: string): ParseResult {
   };
 
   try {
-    // Use SAX extraction for large payloads to avoid regex-heavy scanning.
-    let eventMatches: string[] = [];
-    if (content.length >= LARGE_QUAKEML_STREAM_THRESHOLD) {
-      eventMatches = extractQuakeMLEventsWithSax(content);
-    } else {
-      const openTagRe = /<((?:[\w.-]+:)?event)\b[^>]*>/g;
-      let openMatch: RegExpExecArray | null;
-
-      while ((openMatch = openTagRe.exec(content)) !== null) {
-        const start = openMatch.index;
-        const tagName = openMatch[1];
-        const closeTag = `</${tagName}>`;
-        const closeIdx = content.indexOf(closeTag, start + openMatch[0].length);
-        if (closeIdx === -1) break; // malformed; stop scanning
-        eventMatches.push(content.slice(start, closeIdx + closeTag.length));
-        openTagRe.lastIndex = closeIdx + closeTag.length;
-      }
-    }
+    // Always locate <event> elements with the SAX tokenizer. The regex scan this
+    // replaced only ran below LARGE_QUAKEML_STREAM_THRESHOLD, and it was not an XML
+    // parser: it matched <event> inside an XML comment (a comment-only document
+    // produced a ghost M4.5 event), broke on a '>' inside a single-quoted attribute
+    // (a valid file imported zero events), and took a </event> inside <![CDATA[ ]]>
+    // as the element's end. So the same valid document parsed differently on either
+    // side of a size threshold. SAX is fast enough that the threshold bought nothing.
+    const eventMatches: string[] = extractQuakeMLEventsWithSax(content);
 
     if (eventMatches.length === 0) {
       appendParserFailure(validationAccumulator, { line: 0 }, 'No events found in QuakeML file');
@@ -1117,11 +1124,23 @@ function readRowNumber(row: any, keys: string[]): number | null {
   for (const k of keys) {
     const v = row[k] ?? row[k.toLowerCase()] ?? row[k.toUpperCase()];
     if (v !== undefined && v !== null && String(v).trim() !== '') {
-      const n = parseFloat(String(v));
-      if (!isNaN(n)) return n;
+      // Same strict literal rule as every other numeric column.
+      const n = safeParseFloat(v);
+      if (n !== null) return n;
     }
   }
   return null;
+}
+
+/**
+ * Scalar-moment column names for a row. The lower-case 'mo' spelling is a month
+ * abbreviation in split date columns (yr/mo/dy), so it is only read as a moment when
+ * the row carries no such date components.
+ */
+function scalarMomentKeysFor(row: any): string[] {
+  const keys = Object.keys(row).map((k) => k.toLowerCase());
+  const hasDateParts = keys.some((k) => ['year', 'yr', 'yyyy'].includes(k)) && keys.some((k) => ['day', 'dy', 'dd'].includes(k));
+  return hasDateParts ? SCALAR_MOMENT_KEYS.filter((k) => k !== 'Mo' && k !== 'MO' && k !== 'mo') : SCALAR_MOMENT_KEYS;
 }
 
 /**
@@ -1144,30 +1163,42 @@ function assembleFocalMechanismFromRow(row: any, momentTensorScale?: MomentTenso
   const Nva = get(['Nva']); const Npl = get(['Npl']); const Naz = get(['Naz']);
   const Pva = get(['Pva']); const Ppl = get(['Ppl']); const Paz = get(['Paz']);
 
-  const hasFlatFM = [strike1, dip1, rake1, Mxx, Mxy, Mxz, Myy, Myz, Mzz, Taz, Paz].some(v => v !== null);
+  const hasPlane1 = strike1 !== null || dip1 !== null || rake1 !== null;
+  const hasPlane2 = strike2 !== null || dip2 !== null || rake2 !== null;
+  const hasFlatFM = [strike1, dip1, rake1, strike2, dip2, rake2, Mxx, Mxy, Mxz, Myy, Myz, Mzz, Taz, Paz].some(v => v !== null);
   if (!hasFlatFM) return null;
 
   const rq = (v: number | null) => v !== null ? { value: v } : undefined;
 
   const fm: any = { publicID: String(row.PublicID ?? row.publicID ?? row.id ?? '') };
 
-  // Nodal planes
-  if (strike1 !== null || dip1 !== null || rake1 !== null) {
+  // Nodal planes. Either plane may be present alone (QuakeML allows a lone nodalPlane2);
+  // absent angles stay absent rather than becoming a measured 0.
+  if (hasPlane1 || hasPlane2) {
     fm.nodalPlanes = {
-      nodalPlane1: { strike: rq(strike1), dip: rq(dip1), rake: rq(rake1) },
-      ...(strike2 !== null || dip2 !== null || rake2 !== null
-        ? { nodalPlane2: { strike: rq(strike2), dip: rq(dip2), rake: rq(rake2) } }
-        : {}),
+      ...(hasPlane1 ? { nodalPlane1: { strike: rq(strike1), dip: rq(dip1), rake: rq(rake1) } } : {}),
+      ...(hasPlane2 ? { nodalPlane2: { strike: rq(strike2), dip: rq(dip2), rake: rq(rake2) } } : {}),
     };
   }
+
+  // Tensor scale is decided once per file; the principal-axis eigenvalues (Tva/Nva/Pva)
+  // are in the same units as the tensor components in every source that supplies both,
+  // so they take the same factor. Without a tensor the row carries no scale evidence and
+  // the lengths are kept as given.
+  const hasTensor = Mxx !== null || Mzz !== null;
+  const Mo = get(scalarMomentKeysFor(row));
+  const scale = hasTensor
+    ? (momentTensorScale ?? inferMomentTensorScale([Mxx, Mxy, Mxz, Myy, Myz, Mzz], Mo))
+    : null;
+  const axisLength = (v: number | null) => (v !== null && scale ? { value: v * scale.tensor } : rq(v));
 
   // Principal axes (T, N, P)
   if (Taz !== null || Tpl !== null || Paz !== null || Ppl !== null) {
     fm.principalAxes = {
-      tAxis: { azimuth: rq(Taz) ?? { value: 0 }, plunge: rq(Tpl) ?? { value: 0 }, length: rq(Tva) },
-      pAxis: { azimuth: rq(Paz) ?? { value: 0 }, plunge: rq(Ppl) ?? { value: 0 }, length: rq(Pva) },
+      tAxis: { azimuth: rq(Taz) ?? { value: 0 }, plunge: rq(Tpl) ?? { value: 0 }, length: axisLength(Tva) },
+      pAxis: { azimuth: rq(Paz) ?? { value: 0 }, plunge: rq(Ppl) ?? { value: 0 }, length: axisLength(Pva) },
       ...(Naz !== null || Npl !== null
-        ? { nAxis: { azimuth: rq(Naz) ?? { value: 0 }, plunge: rq(Npl) ?? { value: 0 }, length: rq(Nva) } }
+        ? { nAxis: { azimuth: rq(Naz) ?? { value: 0 }, plunge: rq(Npl) ?? { value: 0 }, length: axisLength(Nva) } }
         : {}),
     };
   }
@@ -1181,8 +1212,7 @@ function assembleFocalMechanismFromRow(row: any, momentTensorScale?: MomentTenso
   // Verified against the GeoNet CMT CSV: decomposed as z=DOWN the tensors reproduce that
   // file's own Tpl/Taz, Npl/Naz, Ppl/Paz columns for 3690 of 3708 solutions (the rest are
   // near-vertical axes whose azimuth is ill-conditioned); as z=UP, 3690 of 3708 disagree.
-  if (Mxx !== null || Mzz !== null) {
-    const Mo = get(SCALAR_MOMENT_KEYS);
+  if (hasTensor && scale) {
     const DC = get(['DC', 'dc', 'double_couple', 'doublecouple']);
     const VR = get(['VR', 'vr', 'variance_reduction', 'variancereduction']);
 
@@ -1190,7 +1220,6 @@ function assembleFocalMechanismFromRow(row: any, momentTensorScale?: MomentTenso
     // (see inferMomentTensorScaleForFile), so a row with no Mo is converted with the rest
     // instead of being left 1e13 too small; callers that cannot see the whole file fall
     // back to this row's own evidence.
-    const scale = momentTensorScale ?? inferMomentTensorScale([Mxx, Mxy, Mxz, Myy, Myz, Mzz], Mo);
 
     const tensor = {
       ...(Mzz !== null ? { Mrr: { value:  Mzz * scale.tensor } } : {}),
@@ -1263,21 +1292,26 @@ function synthesizeTimestamp(event: any): string | null {
   const m = minute ?? 0;
   const s = second ?? 0;
 
-  // Handle fractional seconds
-  const wholeSeconds = Math.floor(s);
-  const milliseconds = Math.round((s - wholeSeconds) * 1000);
-
-  // Construct ISO 8601 timestamp
-  // Pad components appropriately
-  const yearStr = String(year).padStart(4, '0');
-  const monthStr = String(month).padStart(2, '0');
-  const dayStr = String(day).padStart(2, '0');
-  const hourStr = String(h).padStart(2, '0');
-  const minStr = String(m).padStart(2, '0');
-  const secStr = String(wholeSeconds).padStart(2, '0');
-  const msStr = String(milliseconds).padStart(3, '0');
-
-  return `${yearStr}-${monthStr}-${dayStr}T${hourStr}:${minStr}:${secStr}.${msStr}Z`;
+  // Assemble on the calendar, then add the seconds as a duration, so a fractional
+  // second rounds and carries correctly: 59.9999 s is 60.000 s, i.e. the next minute,
+  // not "59.100" from padding "1000" ms to three characters.
+  if (![year, month, day, h, m, s].every(Number.isFinite)) return null;
+  // Each component must be a valid calendar value: Date.UTC would otherwise roll
+  // month 13 into the next year and map years 0-99 to 1900-1999.
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day) ||
+      !Number.isInteger(h) || !Number.isInteger(m) ||
+      month < 1 || month > 12 || day < 1 || day > 31 || h < 0 || h > 23 || m < 0 || m > 59 || s < 0 || s >= 61) {
+    return null;
+  }
+  const base = new Date(Date.UTC(2000, month - 1, day, h, m, 0, 0));
+  base.setUTCFullYear(year);
+  // A day beyond the month's length (31 April) would have rolled over silently.
+  if (base.getUTCMonth() !== month - 1 || base.getUTCDate() !== day) return null;
+  const instant = base.getTime() + Math.round(s * 1000);
+  if (!Number.isFinite(instant)) return null;
+  const iso = new Date(instant).toISOString();
+  // Years before 1000 or after 9999 render in expanded form; keep the plain form.
+  return iso.startsWith('+') || iso.startsWith('-') ? null : iso;
 }
 
 /**
@@ -1287,6 +1321,7 @@ const NUMERIC_FIELDS = new Set([
   'latitude', 'longitude', 'depth', 'magnitude',
   'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty',
   'depth_uncertainty', 'horizontal_uncertainty', 'magnitude_uncertainty',
+  'min_horizontal_uncertainty', 'max_horizontal_uncertainty', 'azimuth_max_horizontal_uncertainty',
   'azimuthal_gap', 'used_phase_count', 'used_station_count', 'standard_error',
   'minimum_distance', 'maximum_distance', 'associated_phase_count',
   'associated_station_count', 'depth_phase_count', 'magnitude_station_count'
@@ -1324,11 +1359,20 @@ function getAliasLookup(): Map<string, { targetField: string; isExact: boolean }
  */
 function safeParseFloat(value: any): number | null {
   if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   const str = String(value).trim();
   if (str === '' || str.toLowerCase() === 'nan' || str.toLowerCase() === 'null') return null;
-  const num = parseFloat(str);
-  return isNaN(num) ? null : num;
+  // A numeric field holds a numeric literal. parseFloat's prefix tolerance turned
+  // "4.1garbage" into 4.1 without a trace; a value that is not a number is
+  // treated as absent so the row is rejected or flagged rather than silently altered.
+  // Thousands separators and a trailing '%' or unit are NOT accepted: the column's
+  // unit is decided per file (see inferDepthUnit), not per cell.
+  if (!STRICT_NUMERIC_LITERAL.test(str)) return null;
+  const num = Number(str);
+  return Number.isFinite(num) ? num : null;
 }
+
+const STRICT_NUMERIC_LITERAL = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
 
 /**
  * The length unit a file reports depths in, decided ONCE for the whole file.
@@ -1395,7 +1439,7 @@ function normalizeOptionalDepth(
   depthUnit: DepthUnitDecision = DEPTH_UNIT_KM
 ): void {
   if (depthUnit.divisor !== 1) {
-    for (const key of ['depth_uncertainty', 'horizontal_uncertainty']) {
+    for (const key of ['depth_uncertainty', 'horizontal_uncertainty', 'min_horizontal_uncertainty', 'max_horizontal_uncertainty']) {
       const raw = safeParseFloat(event[key]);
       if (raw !== null) event[key] = raw / depthUnit.divisor;
     }
@@ -1429,12 +1473,19 @@ export interface MappingReportEntry {
 function applyDateFormatHint(raw: string, hint?: 'US' | 'International'): string {
   if (!hint) return raw;
 
+  // A trailing zone designator (Z, +13:00, -0500) does not change which field is the
+  // day: with it the string used to skip this hint and fall to new Date(), which read
+  // 03/04/2024 as March 4 under a declared International format.
   const match = raw.trim().match(
-    /^(\d{1,2})([\/-])(\d{1,2})\2(\d{4})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,6}))?)?)?$/
+    /^(\d{1,2})([\/-])(\d{1,2})\2(\d{4})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,6}))?)?\s*(Z|[+-]\d{2}(?::?\d{2})?)?)?$/i
   );
   if (!match) return raw;
 
-  const [, first, , second, year, hour = '00', minute = '00', secs = '00', frac = ''] = match;
+  const [, first, , second, year, hour = '00', minute = '00', secs = '00', frac = '', zoneRaw = ''] = match;
+  const zone = zoneRaw === '' || /^z$/i.test(zoneRaw)
+    ? 'Z'
+    : zoneRaw.length === 3 ? `${zoneRaw}:00`
+    : zoneRaw.length === 5 ? `${zoneRaw.slice(0, 3)}:${zoneRaw.slice(3)}` : zoneRaw;
   const firstNum = parseInt(first, 10);
   const secondNum = parseInt(second, 10);
 
@@ -1454,7 +1505,7 @@ function applyDateFormatHint(raw: string, hint?: 'US' | 'International'): string
 
   const millis = frac ? frac.padEnd(3, '0').slice(0, 3) : '000';
   return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T` +
-         `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${secs.padStart(2, '0')}.${millis}Z`;
+         `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${secs.padStart(2, '0')}.${millis}${zone}`;
 }
 
 /**
@@ -1487,7 +1538,13 @@ function mapCommonFields(
       lookup = aliasLookup.get(sourceKey.toLowerCase());
     }
 
-    if (lookup && !setTargetFields.has(lookup.targetField)) {
+    // A blank alias column must not claim the target ahead of a populated one
+    // (`mag` empty, `magnitude` 4.1 used to reject the row).
+    const claimedByBlank =
+      lookup && setTargetFields.has(lookup.targetField) && NUMERIC_FIELDS.has(lookup.targetField) &&
+      (mapped[lookup.targetField] === null || mapped[lookup.targetField] === undefined) &&
+      value !== undefined && value !== null && String(value).trim() !== '';
+    if (lookup && (!setTargetFields.has(lookup.targetField) || claimedByBlank)) {
       const { targetField, isExact } = lookup;
 
       // Skip if target field already has a valid value (but not for numeric fields with empty values)
@@ -1545,22 +1602,45 @@ function mapCommonFields(
     }
   }
 
-  // Named-type magnitude columns: Mw/MW beats ML/ml when both are present;
-  // also auto-set magnitude_type when the column name encodes the scale.
+  // Magnitude columns are resolved from the RAW row, independent of column order:
+  // a scale-named Mw column wins, then the file's generic magnitude (with its stated
+  // type), then a scale-named ML column. Every other value present is kept as an
+  // alternative in `magnitudes`, so nothing the file reported is discarded.
   {
-    const pick = (keys: string[]) =>
-      keys.map(k => event[k]).find(v => v !== undefined && v !== null && String(v).trim() !== '');
+    const pickRaw = (keys: string[]): unknown => {
+      for (const k of keys) {
+        const v = event[k];
+        if (v !== undefined && v !== null && String(v).trim() !== '') return v;
+      }
+      return undefined;
+    };
+    const genericKeys = ['magnitude', 'Magnitude', 'MAGNITUDE', 'Mag', 'MAG', 'mag', 'm', 'M', 'mpref', 'prefmag', 'pref_magnitude'];
+    const mwRaw = pickRaw(['Mw', 'MW', 'mw']);
+    const mlRaw = pickRaw(['ML', 'ml']);
+    const genericRaw = pickRaw(genericKeys);
+    const mw = mwRaw === undefined ? null : safeParseFloat(mwRaw);
+    const ml = mlRaw === undefined ? null : safeParseFloat(mlRaw);
+    const generic = genericRaw === undefined ? null : safeParseFloat(genericRaw);
+    const explicitType = typeof mapped.magnitude_type === 'string' && mapped.magnitude_type.trim() !== ''
+      ? String(mapped.magnitude_type).trim()
+      : null;
 
-    const mwRaw = pick(['Mw', 'MW', 'mw']);
-    const mlRaw = pick(['ML', 'ml']);
-
-    if (mwRaw !== undefined) {
-      mapped.magnitude = safeParseFloat(mwRaw);
-      if (!mapped.magnitude_type) mapped.magnitude_type = 'mw';
-      if (includeMappingReport) mappingReport.push({ targetField: 'magnitude', sourceField: 'Mw', matchType: 'exact' });
-    } else if (mlRaw !== undefined && !setTargetFields.has('magnitude')) {
-      // ML already won the main loop; just ensure magnitude_type is set
-      if (!mapped.magnitude_type) mapped.magnitude_type = 'ml';
+    if (mw !== null || ml !== null) {
+      const candidates: Array<{ value: number; type: string; source: string }> = [];
+      if (mw !== null) candidates.push({ value: mw, type: 'Mw', source: 'Mw' });
+      if (generic !== null) candidates.push({ value: generic, type: explicitType ?? 'unknown', source: 'magnitude' });
+      if (ml !== null) candidates.push({ value: ml, type: 'ML', source: 'ML' });
+      const selected = candidates[0];
+      const alternatives = candidates
+        .slice(1)
+        .filter((c) => !(c.value === selected.value && c.type.toLowerCase() === selected.type.toLowerCase()))
+        .filter((c) => c.type !== 'unknown' || c.value !== selected.value)
+        .map((c) => ({ type: c.type, mag: { value: c.value } }));
+      mapped.magnitude = selected.value;
+      mapped.magnitude_type = selected.type === 'unknown' ? (explicitType ?? undefined) : selected.type;
+      if (mapped.magnitude_type === undefined) delete mapped.magnitude_type;
+      if (alternatives.length > 0 && !mapped.magnitudes) mapped.magnitudes = JSON.stringify(alternatives);
+      if (includeMappingReport) mappingReport.push({ targetField: 'magnitude', sourceField: selected.source, matchType: 'exact' });
     }
   }
 
@@ -1661,15 +1741,43 @@ export async function parseCSVStream(
     crlfDelay: Infinity // Handle both \n and \r\n
   });
 
-  for await (const line of rl) {
+  // A quoted field may continue over several physical lines (RFC 4180 2.6): buffer
+  // lines until the double quotes balance, then parse the record as one unit.
+  let pendingRecord = '';
+  let pendingStartLine = 0;
+  let pendingLines = 0;
+  const MAX_RECORD_LINES = 200;
+
+  for await (const physicalLine of rl) {
     lineNumber++;
 
-    if (!line.trim()) {
+    if (!pendingRecord && !physicalLine.trim()) {
       continue; // Skip empty lines
     }
 
+    if (pendingRecord) {
+      pendingRecord += '\n' + physicalLine;
+      pendingLines++;
+    } else {
+      pendingRecord = physicalLine;
+      pendingStartLine = lineNumber;
+      pendingLines = 1;
+    }
+    // Continue the record only while it ends inside a quoted field by the tokenizer's
+    // own rule; counting every quote mistook a literal 12" for an open field and then
+    // swallowed the rest of the file.
+    if (endsInsideQuotedField(pendingRecord, actualDelimiter)) {
+      if (pendingLines < MAX_RECORD_LINES) continue;
+      errors.push({ line: pendingStartLine, message: `Unterminated quoted field starting on line ${pendingStartLine}` });
+      pendingRecord = '';
+      continue;
+    }
+    const line = pendingRecord;
+    const recordLine = pendingStartLine;
+    pendingRecord = '';
+
     // Parse header
-    if (lineNumber === 1) {
+    if (recordLine === 1) {
       // Auto-detect delimiter from header if not specified
       if (!delimiter) {
         const detection = detectDelimiter(line);
@@ -1705,7 +1813,7 @@ export async function parseCSVStream(
 
       if (values.length !== headers.length) {
         errors.push({
-          line: lineNumber,
+          line: recordLine,
           message: `Column count mismatch: expected ${headers.length}, got ${values.length}`
         });
         continue;
@@ -1724,7 +1832,7 @@ export async function parseCSVStream(
       const validation = validateEvent(mappedEvent);
       if (!validation.valid) {
         errors.push({
-          line: lineNumber,
+          line: recordLine,
           message: `Validation failed: ${validation.errors.join(', ')}`
         });
         continue;
@@ -1734,7 +1842,7 @@ export async function parseCSVStream(
 
       // Call per-event callback if provided
       if (onEvent) {
-        await onEvent(mappedEvent, lineNumber);
+        await onEvent(mappedEvent, recordLine);
       }
 
       // Accumulate for batch processing
@@ -1753,6 +1861,12 @@ export async function parseCSVStream(
         message: `Parse error: ${error instanceof Error ? error.message : String(error)}`
       });
     }
+  }
+
+  // A record still open at end of input was never closed: report it instead of
+  // silently discarding the row (and everything it had absorbed).
+  if (pendingRecord) {
+    errors.push({ line: pendingStartLine, message: `Unterminated quoted field starting on line ${pendingStartLine}: the file ended inside it` });
   }
 
   // Process remaining batch

@@ -446,10 +446,12 @@ describe('eventsToGeoJSON', () => {
     expect(doc.metadata.timePeriod.end).toBe('2024-12-31T23:59:59Z');
   });
 
-  it('emits RFC 7946 bbox member at FeatureCollection root when all bounds are available', () => {
-    // bbox order: [west, south, east, north]
-    expect(Array.isArray(parsed.bbox)).toBe(true);
-    expect(parsed.bbox).toEqual([166, -47, 178, -34]);
+  it('omits the bbox member because the geometries are 3D (RFC 7946 §5 needs 2n values)', () => {
+    // Every event with a known depth is a 3D point, so a 4-value bbox is non-conformant
+    // and a 6-value one would need a vertical extent the streaming head does not have.
+    // The horizontal extent is still published under metadata.boundingBox.
+    expect(parsed.bbox).toBeUndefined();
+    expect(parsed.metadata.boundingBox).toMatchObject({ minLongitude: 166, minLatitude: -47, maxLongitude: 178, maxLatitude: -34 });
   });
 
   it('omits bbox when bounding box is not provided', () => {

@@ -405,7 +405,7 @@ def gardner_knopoff(t_days, lat, lon, mag):
     for i in np.argsort(-mag_s, kind='stable'):
         if dependent[i]:
             continue
-        lo = np.searchsorted(t_s, t_s[i] - t_win[i], side='left')
+        lo = np.searchsorted(t_s, t_s[i], side='left')  # forward window only, as the platform applies it
         hi = np.searchsorted(t_s, t_s[i] + t_win[i], side='right')
         cand = ~dependent[lo:hi]
         cand[i - lo] = False                       # the visited event itself

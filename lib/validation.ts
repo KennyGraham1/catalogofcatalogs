@@ -42,6 +42,9 @@ export const earthquakeEventSchema = z.object({
   longitude_uncertainty: z.number().min(0).max(10).optional(),
   depth_uncertainty: z.number().min(0).max(100).optional(),
   horizontal_uncertainty: z.number().min(0).max(100).optional(),
+  min_horizontal_uncertainty: z.number().min(0).max(100).optional(),
+  max_horizontal_uncertainty: z.number().min(0).max(100).optional(),
+  azimuth_max_horizontal_uncertainty: z.number().min(0).max(360).optional(),
   // Origin-time uncertainty in seconds. The cap must cover the pre-instrumental events this
   // schema explicitly admits (year 1000 CE onwards, see the `time` refinement above), whose
   // origin times are known only to the nearest hour or day — a 60 s cap rejected every one
@@ -780,6 +783,10 @@ export interface DataQualityReport {
 export function horizontalUncertaintyKm(event: any): number | null {
   const num = (v: unknown): number | null =>
     typeof v === 'number' && Number.isFinite(v) ? v : null;
+  // One precedence everywhere (lib/uncertainty-utils horizontalUncertaintyKm): the
+  // error-ellipse semi-major axis, then the circular radius, then the marginals.
+  const majorAxisKm = num(event?.max_horizontal_uncertainty);
+  if (majorAxisKm !== null && majorAxisKm >= 0) return majorAxisKm;
   const km = num(event?.horizontal_uncertainty);
   if (km !== null) return km;
   const latUnc = num(event?.latitude_uncertainty);
@@ -841,15 +848,22 @@ export function assessDataQuality(events: any[]): DataQualityReport {
   // it is the only horizontal column the QuakeML/GeoNet import path writes, so omitting it
   // reported "0.0% of events have uncertainty information" for those catalogues. Tested with
   // != null rather than truthiness so a genuinely reported 0 still counts as reported.
+  // Presence counts report what was PUBLISHED, separately from judging it. A reported
+  // zero is a value: `e.azimuthal_gap ||` treated gap 0 as absent, and the uncertainty
+  // test omitted the time and magnitude dimensions the schema supports.
   const eventsWithUncertainties = events.filter(e =>
     e.horizontal_uncertainty != null ||
+    e.min_horizontal_uncertainty != null ||
+    e.max_horizontal_uncertainty != null ||
     e.latitude_uncertainty != null ||
     e.longitude_uncertainty != null ||
-    e.depth_uncertainty != null
+    e.depth_uncertainty != null ||
+    e.time_uncertainty != null ||
+    e.magnitude_uncertainty != null
   ).length;
 
   const eventsWithQualityMetrics = events.filter(e =>
-    e.azimuthal_gap || e.used_phase_count || e.used_station_count
+    e.azimuthal_gap != null || e.used_phase_count != null || e.used_station_count != null
   ).length;
 
   const magnitudes = events.filter(e => typeof e.magnitude === 'number').map(e => e.magnitude);
@@ -1012,7 +1026,6 @@ export function assessDataQuality(events: any[]): DataQualityReport {
   // the reported values on their own, and penalise the un-reported fraction by the same
   // amount as the worst reported case so that withholding uncertainties can never score
   // better than publishing them.
-  let accuracyScore = 100;
   const HIGH_UNCERTAINTY_PENALTY = 30;
   const HIGH_UNCERTAINTY_KM = 10;
 
@@ -1024,11 +1037,18 @@ export function assessDataQuality(events: any[]): DataQualityReport {
     .map(e => horizontalUncertaintyKm(e))
     .filter((km): km is number => km !== null);
 
-  const missingUncertaintyFraction =
-    (events.length - reportedUncertaintiesKm.length) / events.length;
+  const missingUncertaintyEvents = events.length - reportedUncertaintiesKm.length;
+  const missingUncertaintyFraction = missingUncertaintyEvents / events.length;
+  const highUncertaintyEvents = reportedUncertaintiesKm.filter(
+    km => km > HIGH_UNCERTAINTY_KM
+  ).length;
+  // Round the combined count once. Rounding each fraction separately lets hiding
+  // one poor measurement increase the score (two poor events out of seven: 91 -> 92).
+  const accuracyScore = 100 - Math.round(
+    HIGH_UNCERTAINTY_PENALTY * (missingUncertaintyEvents + highUncertaintyEvents) / events.length
+  );
 
   if (missingUncertaintyFraction > 0) {
-    accuracyScore -= Math.round(HIGH_UNCERTAINTY_PENALTY * missingUncertaintyFraction);
     checks.push({
       passed: false,
       severity: missingUncertaintyFraction >= 0.5 ? 'warning' : 'info',
@@ -1042,15 +1062,17 @@ export function assessDataQuality(events: any[]): DataQualityReport {
     // Degrees were already converted to km by horizontalUncertaintyKm(). A degree of longitude
     // shortens by cos(latitude), so at NZ latitudes (~-41 deg) 0.1 deg of longitude is 8.4 km,
     // not 10 km — the original bare 0.1-degree threshold ignored that factor.
-    const highUncertaintyEvents = reportedUncertaintiesKm.filter(
-      km => km > HIGH_UNCERTAINTY_KM
-    ).length;
-
-    if (highUncertaintyEvents > reportedUncertaintiesKm.length * 0.5) {
-      accuracyScore -= HIGH_UNCERTAINTY_PENALTY;
+    // Proportional over ALL events, on the same scale as the missing-uncertainty penalty
+    // above. The previous flat 30-point penalty fired only past a 50% majority of the
+    // events that REPORTED an uncertainty, so removing two poor measurements from a
+    // catalogue of ten dropped it below the majority and raised accuracy 70 -> 94: the
+    // score rewarded withholding data. A bad measurement and a missing one now cost
+    // exactly the same, and there is no threshold to step around.
+    const highUncertaintyFraction = highUncertaintyEvents / events.length;
+    if (highUncertaintyEvents > 0) {
       checks.push({
         passed: false,
-        severity: 'warning',
+        severity: highUncertaintyFraction >= 0.5 ? 'warning' : 'info',
         message: `${((highUncertaintyEvents / reportedUncertaintiesKm.length) * 100).toFixed(1)}% of events with a reported uncertainty have high location uncertainty (>${HIGH_UNCERTAINTY_KM}km)`,
         field: 'location_uncertainty',
         suggestion: 'Consider improving location accuracy with more stations or better velocity models'
@@ -1097,11 +1119,13 @@ export function validateGeographicBounds(bounds: {
 }): DataQualityCheck[] {
   const checks: DataQualityCheck[] = [];
 
-  if (bounds.minLat >= bounds.maxLat) {
+  // Strictly inverted bounds are an error. Equal bounds are a single point - a valid
+  // one-event catalogue - and were wrongly rejected here with a hard error.
+  if (bounds.minLat > bounds.maxLat) {
     checks.push({
       passed: false,
       severity: 'error',
-      message: 'Minimum latitude must be less than maximum latitude',
+      message: 'Minimum latitude must not exceed maximum latitude',
       field: 'latitude_bounds'
     });
   }

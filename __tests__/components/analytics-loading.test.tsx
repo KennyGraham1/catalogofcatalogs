@@ -3,12 +3,14 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import AnalyticsPage from '@/app/analytics/page';
 
 const catalogues = [{ id: 'a', name: 'Catalogue A', event_count: 2 }];
+let mockAnalysisError: string | null = null;
 jest.mock('@/hooks/use-cached-fetch', () => ({ useCachedFetch: () => ({ data: catalogues, loading: false }) }));
 jest.mock('next/dynamic', () => () => function MockMap({ earthquakes }: any) {
   return <div data-testid="preview-map">{earthquakes.length} events on map</div>;
 });
 jest.mock('@/hooks/use-seismological-worker', () => ({ useSeismologicalAnalyses: () => ({
-  grAnalysis: { data: null }, completeness: { data: null }, temporalAnalysis: { data: null }, momentAnalysis: { data: null }, anyLoading: false,
+  grAnalysis: { data: null, error: mockAnalysisError }, completeness: { data: null, error: mockAnalysisError },
+  temporalAnalysis: { data: null, error: mockAnalysisError }, momentAnalysis: { data: null, error: mockAnalysisError }, anyLoading: false,
 }) }));
 jest.mock('@/components/charts', () => Object.fromEntries([
   'MagnitudeDistributionChart', 'DepthDistributionChart', 'RegionDistributionChart', 'CatalogueDistributionChart',
@@ -41,5 +43,29 @@ it('keeps the preview map usable while loading and unlocks analyses after comple
   } finally {
     global.fetch = originalFetch;
     global.ResizeObserver = originalResizeObserver;
+  }
+});
+
+it.each(['G-R', 'Mc', 'Temporal', 'Moment'])('shows analysis failures instead of a permanent loading indicator in %s', async tabName => {
+  const originalFetch = global.fetch;
+  const originalResizeObserver = global.ResizeObserver;
+  global.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+  mockAnalysisError = 'Only 9 complete events; at least 10 required';
+  global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({
+    data: Array.from({ length: 60 }, (_, id) => ({ id: String(id), time: '2024-01-01', magnitude: 3, depth: 10, latitude: -41, longitude: 175 })),
+    pagination: { hasMore: false, nextCursor: null },
+  }) });
+  try {
+    render(<AnalyticsPage />);
+    fireEvent.click(screen.getByRole('button', { name: /Load All Catalogues/ }));
+    await screen.findByTestId('preview-map');
+    const tab = screen.getByRole('tab', { name: new RegExp(tabName, 'i') });
+    fireEvent.mouseDown(tab, { button: 0, ctrlKey: false });
+    expect(await screen.findByRole('alert')).toHaveTextContent(mockAnalysisError);
+    expect(screen.queryByText(/^Computing .*analysis/)).not.toBeInTheDocument();
+  } finally {
+    global.fetch = originalFetch;
+    global.ResizeObserver = originalResizeObserver;
+    mockAnalysisError = null;
   }
 });

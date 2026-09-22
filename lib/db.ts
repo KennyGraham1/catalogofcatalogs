@@ -103,6 +103,11 @@ export interface MergedEvent {
   longitude_uncertainty?: number | null;
   depth_uncertainty?: number | null;
   horizontal_uncertainty?: number | null;  // Horizontal location uncertainty (km)
+  // QuakeML OriginUncertainty error ellipse: semi-minor / semi-major axes (km) and the
+  // azimuth of the semi-major axis (degrees clockwise from north).
+  min_horizontal_uncertainty?: number | null;
+  max_horizontal_uncertainty?: number | null;
+  azimuth_max_horizontal_uncertainty?: number | null;
 
   // Origin metadata (QuakeML/GeoNet/ISC)
   depth_type?: string | null;  // How depth was determined (from location, constrained by depth phases, etc.)
@@ -139,6 +144,7 @@ export interface MergedEvent {
   // Preferred IDs for QuakeML export
   preferred_origin_id?: string | null;
   preferred_magnitude_id?: string | null;
+  preferred_focal_mechanism_id?: string | null;
 
   // Complex nested data as JSON strings
   origin_quality?: string | null;
@@ -305,6 +311,9 @@ export interface DbQueries {
   getEventBySourceId: (catalogueId: string, sourceId: string) => Promise<MergedEvent | undefined>;
   // Performance Optimization: Bulk query for efficient duplicate detection
   getEventsBySourceIds: (catalogueId: string, sourceIds: string[]) => Promise<Map<string, string>>;
+  // Bounded recovery lookup for an import batch's generated IDs, excluding older
+  // records that happen to share a source_id with a rejected insertion.
+  getEventCoordinatesByIds: (catalogueId: string, eventIds: string[]) => Promise<Array<Pick<MergedEvent, 'id' | 'latitude' | 'longitude'>>>;
   updateEvent: (id: string, updates: Partial<MergedEvent>) => Promise<void>;
   insertImportHistory: (
     id: string,
@@ -423,6 +432,87 @@ export function normalizeEventType(raw: unknown): string | null {
  * Throws an Error with a descriptive message on the first violation found.
  * Call this before any insert operation to guarantee data integrity.
  */
+/**
+ * Optional numeric ranges, mirroring earthquakeEventSchema in lib/validation.ts so the
+ * two validators cannot disagree. A bare `< 0` test let Infinity and NaN through and
+ * carried no upper bound, so records the schema rejects (horizontal_uncertainty
+ * "Infinity", used_station_count 2.5, minimum_distance 181) were persisted anyway.
+ * Shared by the insert validator and updateEvent, so an update cannot persist a value
+ * an insert would reject.
+ */
+export const EVENT_OPTIONAL_RANGES: ReadonlyArray<[string, number, number, boolean]> = [
+  // field, min, max, integer
+  ['time_uncertainty', 0, 86400, false],
+  ['latitude_uncertainty', 0, 10, false],
+  ['longitude_uncertainty', 0, 10, false],
+  ['depth_uncertainty', 0, 100, false],
+  ['horizontal_uncertainty', 0, 100, false],
+  ['min_horizontal_uncertainty', 0, 100, false],
+  ['max_horizontal_uncertainty', 0, 100, false],
+  ['azimuth_max_horizontal_uncertainty', 0, 360, false],
+  ['magnitude_uncertainty', 0, 5, false],
+  ['magnitude_station_count', 0, 5000, true],
+  ['azimuthal_gap', 0, 360, false],
+  ['used_station_count', 0, 5000, true],
+  ['used_phase_count', 0, 10000, true],
+  ['associated_station_count', 0, 5000, true],
+  ['associated_phase_count', 0, 10000, true],
+  ['depth_phase_count', 0, 1000, true],
+  ['standard_error', 0, 100, false],
+  ['minimum_distance', 0, 180, false],
+  ['maximum_distance', 0, 180, false],
+];
+
+/** True when an optional numeric field's value is one the insert validator accepts. */
+export function optionalFieldInRange(field: string, value: unknown): boolean {
+  const entry = EVENT_OPTIONAL_RANGES.find(([name]) => name === field);
+  if (!entry) return typeof value === 'number' && Number.isFinite(value);
+  const [, min, max, integer] = entry;
+  return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max &&
+    (!integer || Number.isInteger(value));
+}
+
+function validateOptionalRanges(fields: Record<string, unknown>, label: string): void {
+  for (const [field, min, max, integer] of EVENT_OPTIONAL_RANGES) {
+    const value = fields[field];
+    if (value == null) continue;
+    const ok = optionalFieldInRange(field, value);
+    if (!ok) {
+      throw new Error(
+        `[Event ${label}] Invalid ${field}: ${String(value)}. Must be a finite ${integer ? 'integer' : 'number'} between ${min} and ${max}`
+      );
+    }
+  }
+  // Depth and time carry the same bounds the insert validator enforces.
+  const depth = fields.depth;
+  if (depth != null && (typeof depth !== 'number' || !Number.isFinite(depth) || depth < -5 || depth > 1000)) {
+    throw new Error(`[Event ${label}] Invalid depth: ${String(depth)}. Must be between -5 and 1000 km`);
+  }
+}
+
+/** Core-field bounds an update must respect (the insert validator checks the same). */
+function validateCoreFieldUpdates(fields: Record<string, unknown>, label: string): void {
+  const num = (key: string) => fields[key];
+  if (num('latitude') != null && !(typeof fields.latitude === 'number' && fields.latitude >= -90 && fields.latitude <= 90)) {
+    throw new Error(`[Event ${label}] Invalid latitude: ${String(fields.latitude)}`);
+  }
+  if (num('longitude') != null && !(typeof fields.longitude === 'number' && fields.longitude >= -180 && fields.longitude <= 180)) {
+    throw new Error(`[Event ${label}] Invalid longitude: ${String(fields.longitude)}`);
+  }
+  if (num('magnitude') != null && !(typeof fields.magnitude === 'number' && fields.magnitude >= -3 && fields.magnitude <= 10)) {
+    throw new Error(`[Event ${label}] Invalid magnitude: ${String(fields.magnitude)}`);
+  }
+  if (fields.time != null) {
+    const t = new Date(String(fields.time)).getTime();
+    if (isNaN(t) || t < Date.UTC(1000, 0, 1) || t > Date.now()) {
+      throw new Error(`[Event ${label}] Timestamp out of range: ${String(fields.time)}`);
+    }
+  }
+  if (fields.event_type != null && !ALLOWED_EVENT_TYPE.has(String(fields.event_type).toLowerCase())) {
+    throw new Error(`[Event ${label}] Invalid event_type: ${String(fields.event_type)}`);
+  }
+}
+
 export function validateMergedEvent(event: Partial<MergedEvent> & {
   id: string;
   catalogue_id: string;
@@ -448,6 +538,11 @@ export function validateMergedEvent(event: Partial<MergedEvent> & {
   const parsedTime = new Date(event.time);
   if (isNaN(parsedTime.getTime())) {
     throw new Error(`[Event ${event.id}] Invalid timestamp: ${event.time}`);
+  }
+  // Same window the schema enforces: historical seismology back to 1000 CE, and nothing
+  // in the future. The DB used to accept an origin time of 2099.
+  if (parsedTime.getTime() < Date.UTC(1000, 0, 1) || parsedTime.getTime() > Date.now()) {
+    throw new Error(`[Event ${event.id}] Timestamp out of range: ${event.time}. Must be between 1000-01-01 and now`);
   }
 
   // --- Optional enum fields --------------------------------------------------
@@ -517,27 +612,7 @@ export function validateMergedEvent(event: Partial<MergedEvent> & {
   if (event.longitude_uncertainty != null && event.longitude_uncertainty < 0) {
     throw new Error(`[Event ${event.id}] Invalid longitude_uncertainty: ${event.longitude_uncertainty}. Must be >= 0`);
   }
-  if (event.depth_uncertainty != null && event.depth_uncertainty < 0) {
-    throw new Error(`[Event ${event.id}] Invalid depth_uncertainty: ${event.depth_uncertainty}. Must be >= 0`);
-  }
-  if (event.horizontal_uncertainty != null && event.horizontal_uncertainty < 0) {
-    throw new Error(`[Event ${event.id}] Invalid horizontal_uncertainty: ${event.horizontal_uncertainty}. Must be >= 0`);
-  }
-  if (event.used_station_count != null && event.used_station_count < 0) {
-    throw new Error(`[Event ${event.id}] Invalid used_station_count: ${event.used_station_count}. Must be >= 0`);
-  }
-  if (event.used_phase_count != null && event.used_phase_count < 0) {
-    throw new Error(`[Event ${event.id}] Invalid used_phase_count: ${event.used_phase_count}. Must be >= 0`);
-  }
-  if (event.standard_error != null && event.standard_error < 0) {
-    throw new Error(`[Event ${event.id}] Invalid standard_error: ${event.standard_error}. Must be >= 0`);
-  }
-  if (event.minimum_distance != null && event.minimum_distance < 0) {
-    throw new Error(`[Event ${event.id}] Invalid minimum_distance: ${event.minimum_distance}. Must be >= 0`);
-  }
-  if (event.maximum_distance != null && event.maximum_distance < 0) {
-    throw new Error(`[Event ${event.id}] Invalid maximum_distance: ${event.maximum_distance}. Must be >= 0`);
-  }
+  validateOptionalRanges(event, event.id);
   if (event.maximum_distance != null &&
       event.minimum_distance != null &&
       event.maximum_distance < event.minimum_distance) {
@@ -800,17 +875,22 @@ if (typeof window === 'undefined') {
           writeErrors?: Array<{ code?: number; err?: { code?: number } }>;
         };
         const writeErrors = e?.writeErrors ?? [];
-        const onlyDuplicates =
-          e?.code === 11000 ||
-          (writeErrors.length > 0 && writeErrors.every((w) => (w?.code ?? w?.err?.code) === 11000));
+        // The driver copies the FIRST write error's code to the top level, so a batch
+        // with errors [11000, 121] reports code 11000 even though the second row failed
+        // document validation. When per-row errors are available they are the only
+        // trustworthy signal; the top-level code is a fallback for errors that carry none.
+        const onlyDuplicates = writeErrors.length > 0
+          ? writeErrors.every((w) => (w?.code ?? w?.err?.code) === 11000)
+          : e?.code === 11000;
         if (!onlyDuplicates) throw err;
         // MongoBulkWriteError still carries the partial result for the rows that succeeded.
         insertedCount = e.result?.insertedCount ?? e.insertedCount ?? 0;
+      } finally {
+        // Unordered writes can commit some rows before throwing a nonduplicate
+        // error. Those rows must not leave a previously cached page unchanged.
+        const catalogueIds = new Set(events.map(e => e.catalogue_id));
+        catalogueIds.forEach(id => invalidateCatalogueCache(id));
       }
-
-      // Invalidate caches
-      const catalogueIds = new Set(events.map(e => e.catalogue_id));
-      catalogueIds.forEach(id => invalidateCatalogueCache(id));
 
       return insertedCount;
     },
@@ -1261,18 +1341,32 @@ if (typeof window === 'undefined') {
       // bounds use. No document can satisfy {$gte: 179, $lte: -179}, so that
       // case has to be split into the two arcs either side of the dateline —
       // otherwise a Kermadec-arc filter silently returns zero events.
+      // +180 and -180 are one meridian: a box that touches either spelling of the
+      // seam must match documents stored with the other, so those get an extra arm.
+      const lonArms: Array<Record<string, unknown>> = [];
       if (
         filters.minLongitude !== undefined &&
         filters.maxLongitude !== undefined &&
         filters.minLongitude > filters.maxLongitude
       ) {
-        query.$or = [
-          { longitude: { $gte: filters.minLongitude } },
-          { longitude: { $lte: filters.maxLongitude } },
-        ];
-      } else {
-        if (filters.minLongitude !== undefined) query.longitude = { ...(query.longitude as object), $gte: filters.minLongitude };
-        if (filters.maxLongitude !== undefined) query.longitude = { ...(query.longitude as object), $lte: filters.maxLongitude };
+        lonArms.push({ longitude: { $gte: filters.minLongitude } }, { longitude: { $lte: filters.maxLongitude } });
+      } else if (filters.minLongitude !== undefined || filters.maxLongitude !== undefined) {
+        const range: Record<string, number> = {};
+        if (filters.minLongitude !== undefined) range.$gte = filters.minLongitude;
+        if (filters.maxLongitude !== undefined) range.$lte = filters.maxLongitude;
+        lonArms.push({ longitude: range });
+      }
+      if (lonArms.length > 0) {
+        // A crossing range's two arms already reach both 180 and -180; only a plain
+        // range that stops at one spelling of the seam needs the other added.
+        const crossing = lonArms.length === 2;
+        if (!crossing && filters.minLongitude === -180) lonArms.push({ longitude: 180 });
+        if (!crossing && filters.maxLongitude === 180) lonArms.push({ longitude: -180 });
+        if (lonArms.length === 1) {
+          query.longitude = lonArms[0].longitude;
+        } else {
+          query.$or = lonArms;
+        }
       }
 
       let docs: WithId<Document>[];
@@ -1443,6 +1537,14 @@ if (typeof window === 'undefined') {
       return result;
     },
 
+    getEventCoordinatesByIds: async (catalogueId: string, eventIds: string[]) => {
+      if (eventIds.length === 0) return [];
+      const collection = await getCollection(COLLECTIONS.EVENTS);
+      const docs = await collection.find({ catalogue_id: catalogueId, id: { $in: eventIds } })
+        .project<Pick<MergedEvent, 'id' | 'latitude' | 'longitude'>>({ _id: 0, id: 1, latitude: 1, longitude: 1 }).toArray();
+      return docs.map(({ id, latitude, longitude }) => ({ id, latitude, longitude }));
+    },
+
     updateEvent: async (id: string, updates: Partial<MergedEvent>): Promise<void> => {
       if (!id) {
         throw new Error('Missing event ID');
@@ -1459,8 +1561,19 @@ if (typeof window === 'undefined') {
         return;
       }
 
+      // Changed fields obey the same contract as inserts. An update used to $set a
+      // 1001 km depth the insert validator rejects, and report success.
+      validateOptionalRanges(updateFields, id);
+      validateCoreFieldUpdates(updateFields, id);
+
       const collection = await getCollection(COLLECTIONS.EVENTS);
+      const before = await collection.findOne({ id }, { projection: { catalogue_id: 1 } });
       await collection.updateOne({ id }, { $set: updateFields });
+
+      // Insert paths invalidate the catalogue's event/statistics caches; update did not,
+      // so the events API kept serving the pre-update magnitude after a re-import.
+      const catalogueId = (updateFields.catalogue_id as string | undefined) ?? before?.catalogue_id;
+      if (catalogueId) invalidateCatalogueCache(String(catalogueId));
     },
 
     insertImportHistory: async (

@@ -17,6 +17,7 @@
  */
 
 import { eventToQuakeML } from '@/lib/quakeml-exporter';
+import { parseQuakeMLEvent } from '@/lib/quakeml-parser';
 import type { MergedEvent } from '@/lib/db';
 
 /** The contributing source's origin, as lib/merge.ts copies it onto the merged row. */
@@ -101,14 +102,15 @@ describe('server2 :: merged origin does not inherit the source solution uncertai
     expect(xml).not.toContain('<preferredDescription>');
   });
 
-  it('drops the scale, uncertainty and station count of the source magnitude', () => {
+  it('keeps source magnitude metadata off the preferred merged measurement', () => {
     const xml = eventToQuakeML(mergedRow);
-
-    expect(xml).toContain('<value>7.9</value>');
-    expect(xml).not.toContain('<value>7.8</value>');
-    expect(xml).not.toContain('<uncertainty>0.2</uncertainty>');
-    expect(xml).not.toContain('<type>MLv</type>');
-    expect(xml).not.toContain('<stationCount>12</stationCount>');
+    const event = parseQuakeMLEvent(xml)!;
+    const magnitude = event.magnitudes?.find(m => m.publicID === event.preferredMagnitudeID);
+    expect(magnitude?.mag.value).toBe(7.9);
+    expect(magnitude?.mag.uncertainty).toBeUndefined();
+    expect(magnitude?.type).toBeUndefined();
+    expect(magnitude?.stationCount).toBeUndefined();
+    expect(event.magnitudes?.find(m => m.publicID === mergedRow.preferred_magnitude_id)?.mag.value).toBe(7.8);
   });
 
   it('keeps the merged magnitude metadata that the row does carry', () => {
@@ -119,11 +121,11 @@ describe('server2 :: merged origin does not inherit the source solution uncertai
       magnitude_station_count: 31,
     });
 
-    expect(xml).toContain('<uncertainty>0.05</uncertainty>');
-    expect(xml).toContain('<type>Mw</type>');
-    expect(xml).toContain('<stationCount>31</stationCount>');
-    expect(xml).not.toContain('<type>MLv</type>');
-    expect(xml).not.toContain('<stationCount>12</stationCount>');
+    const event = parseQuakeMLEvent(xml)!;
+    const magnitude = event.magnitudes?.find(m => m.publicID === event.preferredMagnitudeID);
+    expect(magnitude?.mag.uncertainty).toBe(0.05);
+    expect(magnitude?.type).toBe('Mw');
+    expect(magnitude?.stationCount).toBe(31);
   });
 
   it('leaves a single-source row byte-for-byte: its blob IS the solution', () => {

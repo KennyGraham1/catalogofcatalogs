@@ -16,13 +16,20 @@ import { calculateUncertaintyEllipse, generateEllipsePoints } from '@/lib/uncert
 
 const R = 6371000; // metres, as used by generateEllipsePoints
 
-/** Bearing (deg clockwise from north) and range (m) of a point from the ellipse centre. */
+/**
+ * Initial bearing (deg clockwise from north) and great-circle range (m) of a point from
+ * the ellipse centre: the exact inverse of the spherical destination step the renderer
+ * takes, so the check is independent of the flat-earth approximation.
+ */
 function bearingAndRange(center: [number, number], point: [number, number]) {
   const toRad = Math.PI / 180;
-  const dNorth = (point[0] - center[0]) * toRad * R;
-  const dEast = (point[1] - center[1]) * toRad * R * Math.cos(center[0] * toRad);
-  const bearing = (Math.atan2(dEast, dNorth) / toRad + 360) % 360;
-  return { bearing, range: Math.hypot(dNorth, dEast) };
+  const lat1 = center[0] * toRad, lat2 = point[0] * toRad, dLon = (point[1] - center[1]) * toRad;
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  const bearing = (Math.atan2(y, x) / toRad + 360) % 360;
+  const a = Math.sin((lat2 - lat1) / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  const range = 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return { bearing, range };
 }
 
 describe('calculateUncertaintyEllipse — real OriginUncertainty ellipse', () => {

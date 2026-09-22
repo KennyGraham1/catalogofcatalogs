@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { FocalMechanism, generateBeachBallDataURL } from '@/lib/focal-mechanism-utils';
+import { FocalMechanism, generateBeachBallDataURL, selectPlane } from '@/lib/focal-mechanism-utils';
 
 interface BeachBallMarkerProps {
   position: [number, number];
@@ -26,7 +26,7 @@ export function BeachBallMarker({
   const map = useMap();
 
   useEffect(() => {
-    if (!map || !mechanism || !mechanism.nodalPlane1) return;
+    if (!map || !mechanism || !selectPlane(mechanism)) return;
 
     // Generate beach ball icon
     const iconUrl = generateBeachBallDataURL(mechanism, size);

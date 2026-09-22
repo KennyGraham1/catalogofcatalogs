@@ -8,6 +8,7 @@ import {
   formatUncertainty,
   getUncertaintyLevel,
   calculateLocationQuality,
+  horizontalUncertaintyKm,
   UncertaintyData
 } from '@/lib/uncertainty-utils';
 import { TechnicalTermTooltip } from '@/components/ui/info-tooltip';
@@ -16,22 +17,17 @@ interface UncertaintyVisualizationProps {
   data: UncertaintyData;
 }
 
-/** Finite, non-negative number or null — anything else means "not reported". */
-function reported(value: number | null | undefined): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
-}
-
 export function UncertaintyVisualization({ data }: UncertaintyVisualizationProps) {
   const quality = calculateLocationQuality(data);
 
-  // Only fall back to a number when at least one of the two is reported;
-  // `|| 0` here would turn "no data" into "0 degrees" and print "excellent".
-  const latUnc = reported(data.latitude_uncertainty);
-  const lonUnc = reported(data.longitude_uncertainty);
-  const horizontalLevel = getUncertaintyLevel(
-    latUnc === null && lonUnc === null ? null : Math.max(latUnc ?? 0, lonUnc ?? 0),
-    'horizontal'
-  );
+  // Whichever horizontal measure the source reported: ellipse axis, circular radius or
+  // lat/lon marginals. Absence stays 'unknown' rather than becoming 0 km / 'excellent'.
+  const horizontal = horizontalUncertaintyKm(data);
+  const horizontalLevel = getUncertaintyLevel(horizontal?.km ?? null, 'horizontal-km');
+  const horizontalSourceLabel =
+    horizontal?.source === 'origin-uncertainty' ? 'error ellipse semi-major axis'
+    : horizontal?.source === 'horizontal-circle' ? 'circular horizontal uncertainty'
+    : horizontal ? 'from latitude/longitude marginals' : null;
   
   const depthLevel = getUncertaintyLevel(data.depth_uncertainty, 'depth');
   const timeLevel = getUncertaintyLevel(data.time_uncertainty, 'time');
@@ -122,6 +118,13 @@ export function UncertaintyVisualization({ data }: UncertaintyVisualizationProps
               {horizontalLevel.level}
             </Badge>
           </div>
+          {horizontal && (
+            <div className="text-sm">
+              <span className="text-muted-foreground">Horizontal:</span>
+              <span className="ml-2 font-medium">± {formatUncertainty(horizontal.km, 'km')}</span>
+              <span className="ml-2 text-xs text-muted-foreground">({horizontalSourceLabel})</span>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2 text-sm">
             <div>
               <span className="text-muted-foreground">Latitude:</span>

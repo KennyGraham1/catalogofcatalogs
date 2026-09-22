@@ -85,6 +85,8 @@ export interface SpatialClusterResult {
 export interface SeismicMomentResult {
   totalMoment: number; // N⋅m
   totalMomentMagnitude: number;
+  assumedMwCount: number;
+  excludedCount: number;
   momentByMagnitude: { magnitude: number; moment: number; count: number }[];
   largestEvent: { magnitude: number; moment: number; percentOfTotal: number };
 }
@@ -495,15 +497,10 @@ export function estimateCompletenessMagnitude(
  * Gardner-Knopoff (1974) space-time window parameters, as tabulated in
  * van Stiphout et al. (2012), CORSSA, Table 1.
  *
- * NOTE: the windows are canonical, but this codebase APPLIES them symmetrically
- * (|t - t_mainshock| <= T(M); see gardnerKnopoffDeclustering below), so events before the
- * mainshock are removed as well as after. Classical Gardner-Knopoff is a forward/aftershock
- * window - OpenQuake's hmtk exposes the backward extent as fs_time_prop and defaults it to 0.
- * Symmetric application is a deliberate choice, not the reference behaviour, and it changes
- * the declustered b-value by an amount that is not stable across catalogues (measured at
- * 0.005-0.05 on two different synthetics). Report results as "independent events" rather
- * than "mainshocks", and do not describe the output as classical Gardner-Knopoff without
- * stating the symmetry.
+ * This implementation uses a forward window (0 <= t - t_mainshock <= T(M)).
+ * Events before a mainshock are not removed by that mainshock's window.
+ * This is a method choice: OpenQuake HMTK exposes the backward fraction through
+ * fs_time_prop; choosing 0 there corresponds to this time-window policy.
  */
 export function getGardnerKnopoffWindow(magnitude: number): { timeWindowDays: number; distanceWindowKm: number } {
   const timeWindowDays = magnitude >= 6.5
@@ -562,13 +559,15 @@ export function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): {
   const clusters: Map<number | string, EarthquakeEvent[]> = new Map();
   const mainshockCandidates: Set<number | string> = new Set(sortedEvents.map(e => e.id));
 
-  // Process events in reverse time order (largest magnitude first within time windows)
-  // This ensures larger events are considered as mainshocks first
+  // Consider larger events first; equal magnitudes retain time order.
   const eventsByMagnitude = [...sortedEvents].sort((a, b) => b.magnitude - a.magnitude);
 
   for (const potentialMainshock of eventsByMagnitude) {
     // Skip if already assigned to a cluster
     if (clusterAssignment.has(potentialMainshock.id)) continue;
+    // Reserve the head as well as its dependents. A later, smaller candidate
+    // must not absorb this event, even when it has no dependents of its own.
+    clusterAssignment.set(potentialMainshock.id, potentialMainshock.id);
 
     const { timeWindowDays, distanceWindowKm } = getGardnerKnopoffWindow(potentialMainshock.magnitude);
     const mainshockTime = new Date(potentialMainshock.time).getTime();
@@ -581,10 +580,10 @@ export function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): {
       if (clusterAssignment.has(event.id)) continue;
 
       const eventTime = new Date(event.time).getTime();
-      const timeDiffDays = Math.abs(eventTime - mainshockTime) / (1000 * 60 * 60 * 24);
+      const timeDiffDays = (eventTime - mainshockTime) / (1000 * 60 * 60 * 24);
 
-      // Check time window (both before for foreshocks and after for aftershocks)
-      if (timeDiffDays > timeWindowDays) continue;
+      // Forward window only; keep the same policy in the worker implementation.
+      if (timeDiffDays < 0 || timeDiffDays > timeWindowDays) continue;
 
       // Check distance window
       const distance = haversineDistance(
@@ -629,7 +628,7 @@ export function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): {
 
     // Calculate spatial extent (max distance from mainshock)
     let maxDistance = 0;
-    let sumLat = 0, sumLon = 0;
+    let sumLat = 0;
     clusterEvents.forEach(e => {
       const dist = haversineDistance(
         mainshock.latitude, mainshock.longitude,
@@ -637,7 +636,6 @@ export function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): {
       );
       if (dist > maxDistance) maxDistance = dist;
       sumLat += e.latitude;
-      sumLon += e.longitude;
     });
 
     const startTime = new Date(sortedCluster[0].time);
@@ -690,7 +688,7 @@ export function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): {
       durationDays,
       spatialExtentKm: maxDistance,
       centerLatitude: sumLat / clusterEvents.length,
-      centerLongitude: sumLon / clusterEvents.length,
+      centerLongitude: meanLongitude(clusterEvents.map((e) => e.longitude)),
       clusterType,
       bValue
     });
@@ -731,14 +729,12 @@ function buildClusterInfo(
 
     let maxDistance = 0;
     let sumLat = 0;
-    let sumLon = 0;
     clusterEvents.forEach((e) => {
       const dist = haversineDistance(
         mainshock.latitude, mainshock.longitude, e.latitude, e.longitude
       );
       if (dist > maxDistance) maxDistance = dist;
       sumLat += e.latitude;
-      sumLon += e.longitude;
     });
 
     const startTime = new Date(sortedCluster[0].time);
@@ -785,7 +781,7 @@ function buildClusterInfo(
       durationDays,
       spatialExtentKm: maxDistance,
       centerLatitude: sumLat / clusterEvents.length,
-      centerLongitude: sumLon / clusterEvents.length,
+      centerLongitude: meanLongitude(clusterEvents.map((e) => e.longitude)),
       clusterType,
       bValue,
     });
@@ -808,6 +804,29 @@ export interface ReasenbergParams {
   xmeff?: number;
   /** Factor raising the effective magnitude within a cluster (default 0.5). */
   xk?: number;
+}
+
+/**
+ * Mean longitude of a compact cluster, taken around the circle so members either
+ * side of the antimeridian (179.99 and -179.99) average to -179.993, not to -60.
+ */
+function meanLongitude(longitudes: number[]): number {
+  let x = 0, y = 0;
+  for (const lon of longitudes) {
+    x += Math.cos((lon * Math.PI) / 180);
+    y += Math.sin((lon * Math.PI) / 180);
+  }
+  if (x === 0 && y === 0) return longitudes.reduce((a, b) => a + b, 0) / longitudes.length;
+  return (Math.atan2(y, x) * 180) / Math.PI;
+}
+
+/** Hypocentral distance (km); a missing or non-finite depth is treated as the other event's. */
+function hypocentralDistance(lat: number, lon: number, depth: number | null | undefined, other: EarthquakeEvent): number {
+  const horizontal = haversineDistance(lat, lon, other.latitude, other.longitude);
+  const d1 = typeof depth === 'number' && Number.isFinite(depth) ? depth : null;
+  const d2 = typeof other.depth === 'number' && Number.isFinite(other.depth) ? other.depth : null;
+  const vertical = d1 !== null && d2 !== null ? d1 - d2 : 0;
+  return Math.hypot(horizontal, vertical);
 }
 
 /**
@@ -851,6 +870,7 @@ export function reasenbergDeclustering(
     let mref = ei.magnitude;
     let refLat = ei.latitude;
     let refLon = ei.longitude;
+    let refDepth = ei.depth;
     let tau: number;
 
     if (clusterIdOf[i] === 0) {
@@ -864,6 +884,7 @@ export function reasenbergDeclustering(
       mref = big.magnitude;
       refLat = big.latitude;
       refLon = big.longitude;
+      refDepth = big.depth;
       const tdiff = Math.max((tms(ei) - tms(big)) / DAY, 0);
       const deltam = (1 - xk) * mref - xmeff;
       const denom = Math.pow(10, ((deltam - 1) * 2) / 3);
@@ -871,13 +892,25 @@ export function reasenbergDeclustering(
       tau = Math.min(taumax, Math.max(taumin, tauP));
     }
 
-    const r = rfact * Math.max(crackRadiusKm(mref), crackRadiusKm(ei.magnitude));
+    // Reasenberg links a later event to the cluster when it lies inside the
+    // interaction zone of EITHER the largest event in the cluster OR the most
+    // recent event (ei). Testing only the largest-event zone, with the larger of
+    // the two radii, dropped chains that propagate through a nearby aftershock
+    // beyond the mainshock's own radius.
+    const rMain = rfact * crackRadiusKm(mref);
+    const rLast = rfact * crackRadiusKm(ei.magnitude);
 
     for (let j = i + 1; j < sorted.length; j++) {
       const ej = sorted[j];
       const dtDays = (tms(ej) - tms(ei)) / DAY;
       if (dtDays > tau) break; // time-sorted: no later event can be within tau
-      if (haversineDistance(refLat, refLon, ej.latitude, ej.longitude) > r) continue;
+      // Reasenberg's interaction zone is a sphere around the hypocentre, so the test
+      // is on HYPOCENTRAL distance: a 610 km deep event is not an aftershock of a
+      // 10 km one however close the epicentres. Gardner-Knopoff keeps its
+      // epicentral windows, which is how that method was calibrated.
+      const nearMain = hypocentralDistance(refLat, refLon, refDepth, ej) <= rMain;
+      const nearLast = hypocentralDistance(ei.latitude, ei.longitude, ei.depth, ej) <= rLast;
+      if (!nearMain && !nearLast) continue;
 
       const ci = clusterIdOf[i];
       const cj = clusterIdOf[j];
@@ -1010,6 +1043,29 @@ export function analyzeTemporalPattern(
 }
 
 /**
+ * Which magnitudes may enter the Hanks-Kanamori relation M0 = 10^(1.5*Mw + 9.1).
+ * It is defined for MOMENT magnitude only. ML/Mb/Ms saturate (mb hard above ~6), so
+ * treating them as Mw misstates the moment of large events by orders of magnitude.
+ *   'exact'    Mw family - used as-is.
+ *   'assumed'  ML - used under the ML ~ Mw approximation this codebase already labels
+ *              generic; counted so the result can say how much rests on it.
+ *   'excluded' mb, Ms, Md, unknown - not summed; counted.
+ */
+function momentEligibility(magType: string | null | undefined): 'exact' | 'assumed' | 'excluded' {
+  // An UNTYPED magnitude (plain CSV, historical bulletins) is almost always a local
+  // magnitude; treat it like ML - counted under the assumption, never silently exact
+  // and never silently dropped, since dropping it would empty the moment tab for the
+  // catalogues this platform exists to serve.
+  if (!magType) return 'assumed';
+  const t = magType.trim().toLowerCase();
+  if (t.startsWith('mw')) return 'exact';
+  // ML, MLv and GeoNet's bare 'M' (the SeisComP summary magnitude, which for most of
+  // the NZ catalogue is a network-weighted local magnitude) share the ML assumption.
+  if (t.startsWith('ml') || t === 'm') return 'assumed';
+  return 'excluded';
+}
+
+/**
  * Calculate seismic moment and moment magnitude
  * M0 = 10^(1.5 * Mw + 9.1) N⋅m
  */
@@ -1018,11 +1074,19 @@ export function calculateSeismicMoment(events: EarthquakeEvent[]): SeismicMoment
     throw new Error('No events provided for seismic moment calculation');
   }
 
-  // Calculate moment for each event
-  const momentsData = events.map(event => {
-    const moment = Math.pow(10, 1.5 * event.magnitude + 9.1);
-    return { magnitude: event.magnitude, moment };
-  });
+  // Only Mw (exact) and ML (assumed ~Mw) enter the sum; other scales are excluded.
+  let assumedCount = 0;
+  let excludedCount = 0;
+  const momentsData: { magnitude: number; moment: number }[] = [];
+  for (const event of events) {
+    const eligibility = momentEligibility(event.magnitude_type);
+    if (eligibility === 'excluded') { excludedCount++; continue; }
+    if (eligibility === 'assumed') assumedCount++;
+    momentsData.push({ magnitude: event.magnitude, moment: Math.pow(10, 1.5 * event.magnitude + 9.1) });
+  }
+  if (momentsData.length === 0) {
+    throw new Error('No Mw or ML magnitudes to compute seismic moment from (mb/Ms/Md are excluded because they saturate)');
+  }
 
   const totalMoment = momentsData.reduce((sum, { moment }) => sum + moment, 0);
   const totalMomentMagnitude = (Math.log10(totalMoment) - 9.1) / 1.5;
@@ -1051,6 +1115,10 @@ export function calculateSeismicMoment(events: EarthquakeEvent[]): SeismicMoment
   return {
     totalMoment,
     totalMomentMagnitude,
+    /** Events whose magnitude entered the sum under the generic ML ~ Mw assumption. */
+    assumedMwCount: assumedCount,
+    /** Events excluded because their scale (mb/Ms/Md/untyped) has no valid moment relation here. */
+    excludedCount,
     momentByMagnitude: momentByMagnitudeArray,
     largestEvent: {
       magnitude: largestEvent.magnitude,
@@ -1065,6 +1133,47 @@ export function calculateSeismicMoment(events: EarthquakeEvent[]): SeismicMoment
  */
 
 /**
+ * Cache key over the event CONTENT the analyses read (id, time, magnitude, position),
+ * not just the ids: an edited magnitude or a re-imported catalogue keeping its ids
+ * must not be answered from the old result. Order-independent.
+ */
+function eventsContentKey(events: EarthquakeEvent[]): string {
+  return eventsContentHash(events);
+}
+
+/**
+ * Order-independent content hash of the fields the analyses read. Numbers are mixed
+ * from their IEEE-754 words and strings character by character, without building a
+ * per-event string or allocating per event.
+ */
+function eventsContentHash(events: EarthquakeEvent[]): string {
+  const buf = new Float64Array(1);
+  const words = new Uint32Array(buf.buffer);
+  let sum1 = 0, sum2 = 0, xor = 0; // commutative accumulators: input order does not matter
+  for (let k = 0; k < events.length; k++) {
+    const e = events[k];
+    let h = 0x811c9dc5;
+    const id = e.id == null ? '' : String(e.id);
+    for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 0x01000193) >>> 0;
+    h = Math.imul(h ^ 0x1f, 0x01000193) >>> 0;
+    const time = e.time == null ? '' : String(e.time);
+    for (let i = 0; i < time.length; i++) h = Math.imul(h ^ time.charCodeAt(i), 0x01000193) >>> 0;
+    h = Math.imul(h ^ 0x1f, 0x01000193) >>> 0;
+    const type = e.magnitude_type == null ? '' : String(e.magnitude_type);
+    for (let i = 0; i < type.length; i++) h = Math.imul(h ^ type.charCodeAt(i), 0x01000193) >>> 0;
+    h = Math.imul(h ^ 0x1f, 0x01000193) >>> 0;
+    buf[0] = e.magnitude; h = Math.imul(h ^ words[0], 0x01000193) >>> 0; h = Math.imul(h ^ words[1], 0x01000193) >>> 0;
+    buf[0] = e.latitude; h = Math.imul(h ^ words[0], 0x01000193) >>> 0; h = Math.imul(h ^ words[1], 0x01000193) >>> 0;
+    buf[0] = e.longitude; h = Math.imul(h ^ words[0], 0x01000193) >>> 0; h = Math.imul(h ^ words[1], 0x01000193) >>> 0;
+    buf[0] = e.depth == null ? NaN : e.depth; h = Math.imul(h ^ words[0], 0x01000193) >>> 0; h = Math.imul(h ^ words[1], 0x01000193) >>> 0;
+    sum1 = (sum1 + h) >>> 0;
+    sum2 = (sum2 + Math.imul(h, 0x9e3779b1)) >>> 0;
+    xor ^= h;
+  }
+  return `${events.length}:${sum1.toString(16)}${sum2.toString(16)}${(xor >>> 0).toString(16)}`;
+}
+
+/**
  * Memoized Gutenberg-Richter calculation
  * Cache: 50 results, 10 minute TTL
  */
@@ -1073,11 +1182,8 @@ export const calculateGutenbergRichterMemoized = memoize(
   {
     maxSize: 50,
     ttl: 10 * 60 * 1000, // 10 minutes
-    keyGenerator: (events: EarthquakeEvent[], minMagnitude: number | undefined, binWidth: number | undefined) => {
-      // Create efficient cache key from event IDs and parameters
-      const eventIds = events.map((e: EarthquakeEvent) => e.id).sort().join(',');
-      return `gr_${eventIds}_${minMagnitude ?? 'none'}_${binWidth}`;
-    }
+    keyGenerator: (events: EarthquakeEvent[], minMagnitude: number | undefined, binWidth: number | undefined) =>
+      `gr_${eventsContentKey(events)}_${minMagnitude ?? 'none'}_${binWidth}`,
   }
 );
 
@@ -1090,10 +1196,8 @@ export const estimateCompletenessMemoized = memoize(
   {
     maxSize: 50,
     ttl: 10 * 60 * 1000,
-    keyGenerator: (events: EarthquakeEvent[], binWidth: number | undefined) => {
-      const eventIds = events.map((e: EarthquakeEvent) => e.id).sort().join(',');
-      return `comp_${eventIds}_${binWidth ?? 0.1}`;
-    }
+    keyGenerator: (events: EarthquakeEvent[], binWidth: number | undefined, correction: number | undefined) =>
+      `comp_${eventsContentKey(events)}_${binWidth ?? 0.1}_${correction ?? 0.2}`,
   }
 );
 
@@ -1106,10 +1210,8 @@ export const analyzeTemporalPatternMemoized = memoize(
   {
     maxSize: 30,
     ttl: 15 * 60 * 1000, // 15 minutes
-    keyGenerator: (events: EarthquakeEvent[]) => {
-      const eventIds = events.map((e: EarthquakeEvent) => e.id).sort().join(',');
-      return `temporal_${eventIds}`;
-    }
+    keyGenerator: (events: EarthquakeEvent[], method?: DeclusterMethod) =>
+      `temporal_${method ?? 'gardner-knopoff'}_${eventsContentKey(events)}`,
   }
 );
 
@@ -1122,10 +1224,7 @@ export const calculateSeismicMomentMemoized = memoize(
   {
     maxSize: 50,
     ttl: 10 * 60 * 1000,
-    keyGenerator: (events: EarthquakeEvent[]) => {
-      const eventIds = events.map((e: EarthquakeEvent) => e.id).sort().join(',');
-      return `moment_${eventIds}`;
-    }
+    keyGenerator: (events: EarthquakeEvent[]) => `moment_${eventsContentKey(events)}`,
   }
 );
 

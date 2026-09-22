@@ -59,6 +59,12 @@ const NUMERIC_LITERAL = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
  * Numeric literals are exempt (see NUMERIC_LITERAL).
  */
 function neutralizeSpreadsheetFormula(str: string): string {
+  // A value that already reads as a guarded formula ("'=literal") gets a second
+  // apostrophe, so the reader's single strip returns the original text.
+  const core = str.replace(/^'+/, '');
+  if (str.charAt(0) === "'" && FORMULA_TRIGGER.test(core) && !NUMERIC_LITERAL.test(core)) {
+    return `'${str}`;
+  }
   if (!FORMULA_TRIGGER.test(str) || NUMERIC_LITERAL.test(str)) return str;
   return `'${str}`;
 }
@@ -69,7 +75,10 @@ function neutralizeSpreadsheetFormula(str: string): string {
 export function stripSpreadsheetFormulaGuard(value: string): string {
   if (value.charAt(0) !== "'") return value;
   const rest = value.slice(1);
-  return FORMULA_TRIGGER.test(rest) && !NUMERIC_LITERAL.test(rest) ? rest : value;
+  // Strip exactly one guard apostrophe when what follows is a formula trigger,
+  // possibly itself apostrophe-guarded ("''=literal" was written for "'=literal").
+  const core = rest.replace(/^'+/, '');
+  return FORMULA_TRIGGER.test(core) && !NUMERIC_LITERAL.test(core) ? rest : value;
 }
 
 export interface CsvFieldOptions {

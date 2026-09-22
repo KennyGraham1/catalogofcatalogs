@@ -43,6 +43,21 @@ export interface CompletenessMetrics {
 /**
  * Calculate completeness metrics for a catalogue
  */
+/**
+ * A field is present when it carries data: null, undefined, '' and an empty
+ * collection (as an array or as its JSON text '[]' / '{}') are all absent.
+ */
+function hasContent(value: unknown): boolean {
+  if (value === null || value === undefined || value === '') return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed !== '' && trimmed !== '[]' && trimmed !== '{}';
+  }
+  if (typeof value === 'object') return Object.keys(value as object).length > 0;
+  return true;
+}
+
 export function calculateCompletenessMetrics(events: any[]): CompletenessMetrics {
   if (events.length === 0) {
     return createEmptyMetrics();
@@ -65,6 +80,8 @@ export function calculateCompletenessMetrics(events: any[]): CompletenessMetrics
     { name: 'latitude_uncertainty', required: false },
     { name: 'longitude_uncertainty', required: false },
     { name: 'depth_uncertainty', required: false },
+    // The canonical horizontal column most sources fill.
+    { name: 'horizontal_uncertainty', required: false },
     { name: 'magnitude_uncertainty', required: false },
   ];
 
@@ -108,9 +125,7 @@ export function calculateCompletenessMetrics(events: any[]): CompletenessMetrics
     let presentCount = 0;
     
     for (const event of events) {
-      const value = event[fieldName];
-      // Consider field present if it's not null, undefined, or empty string
-      if (value !== null && value !== undefined && value !== '') {
+      if (hasContent(event[fieldName])) {
         presentCount++;
       }
     }
@@ -180,46 +195,47 @@ export function calculateCompletenessMetrics(events: any[]): CompletenessMetrics
   let hasArrivals = 0;
 
   for (const event of events) {
-    // Check required fields
+    // Check required fields. An incomplete record still counts towards the
+    // richness summaries below: the field table already counts its picks and
+    // uncertainties, and the two views must agree.
     const hasAllRequired = basicFields
       .filter(f => f.required)
       .every(f => event[f.name] !== null && event[f.name] !== undefined && event[f.name] !== '');
 
     if (!hasAllRequired) {
       incompleteEvents++;
-      continue;
     }
 
     // Check if event has all fields (required + optional)
-    const allFieldsPresent = fields.every(f => {
-      const value = event[f.fieldName];
-      return value !== null && value !== undefined && value !== '';
-    });
+    const allFieldsPresent = fields.every(f => hasContent(event[f.fieldName]));
 
-    if (allFieldsPresent) {
-      fullyCompleteEvents++;
-    } else {
-      minimallyCompleteEvents++;
+    if (hasAllRequired) {
+      if (allFieldsPresent) {
+        fullyCompleteEvents++;
+      } else {
+        minimallyCompleteEvents++;
+      }
     }
 
     // Check for specific data types
-    if (uncertaintyFields.some(f => event[f.name] !== null && event[f.name] !== undefined)) {
+    if (uncertaintyFields.some(f => hasContent(event[f.name]))) {
       hasUncertainties++;
     }
 
-    if (qualityFields.some(f => event[f.name] !== null && event[f.name] !== undefined)) {
+    if (qualityFields.some(f => hasContent(event[f.name]))) {
       hasQualityMetrics++;
     }
 
-    if (event.focal_mechanisms && event.focal_mechanisms !== null && event.focal_mechanisms !== '') {
+    // An empty array (or its '[]' serialisation) holds no picks.
+    if (hasContent(event.focal_mechanisms)) {
       hasFocalMechanisms++;
     }
 
-    if (event.picks && event.picks !== null && event.picks !== '') {
+    if (hasContent(event.picks)) {
       hasPicks++;
     }
 
-    if (event.arrivals && event.arrivals !== null && event.arrivals !== '') {
+    if (hasContent(event.arrivals)) {
       hasArrivals++;
     }
   }

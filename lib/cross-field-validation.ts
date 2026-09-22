@@ -111,11 +111,21 @@ export function validateUncertaintyRelationships(event: any): DataQualityCheck[]
     }
   }
 
-  // Location uncertainties should be consistent
+  // Location uncertainties should be consistent. Compare PHYSICAL distances: a degree of
+  // longitude is cos(latitude) times shorter than a degree of latitude, so comparing the
+  // raw degree values reported an isotropic 1.1 km x 1.1 km ellipse at 85 deg as 11:1
+  // asymmetric while passing a genuinely 11:1 anisotropic one - the warning was inverted
+  // at high latitude and unreliable everywhere outside the tropics.
   if (event.latitude_uncertainty != null && event.longitude_uncertainty != null &&
       event.latitude_uncertainty > 0 && event.longitude_uncertainty > 0) {
-    const ratio = Math.max(event.latitude_uncertainty, event.longitude_uncertainty) /
-                  Math.min(event.latitude_uncertainty, event.longitude_uncertainty);
+    // Without a latitude the projection cannot be done; fall back to the raw degree
+    // ratio (exact at the equator) rather than skipping the check altogether.
+    const cosLat = Number.isFinite(event.latitude)
+      ? Math.max(Math.cos((event.latitude * Math.PI) / 180), 1e-6)
+      : 1;
+    const northKm = event.latitude_uncertainty * 111.32;
+    const eastKm = event.longitude_uncertainty * 111.32 * cosLat;
+    const ratio = Math.max(northKm, eastKm) / Math.min(northKm, eastKm);
 
     if (ratio > 10) {
       checks.push({

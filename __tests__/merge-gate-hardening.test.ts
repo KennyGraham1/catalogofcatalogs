@@ -264,7 +264,16 @@ describe('performMergeWithGroups — QC statistics match the gate', () => {
 
     const ids = groups.map(g => g.events.map((e: any) => e.id));
     expect(ids.some(g => g.includes('gn') && g.includes('isc'))).toBe(false);
-    expect(groups.every(g => g.isSuspicious)).toBe(true);
+    // The rejected pair is split and the part carrying the disagreement is flagged.
+    // A member released by the split and re-processed as its own anchor is NOT stamped
+    // suspicious if it then simply matches nothing - that would mislabel a clean
+    // singleton. Here gn+oth are salvaged (oth has no magnitude, so cannot disagree)
+    // and isc stands alone.
+    const salvaged = groups.find(g => g.events.some((e: any) => e.id === 'gn'));
+    expect(salvaged?.isSuspicious).toBe(true);
+    expect(salvaged?.events.map((e: any) => e.id).sort()).toEqual(['gn', 'oth']);
+    const lone = groups.find(g => g.events.length === 1 && g.events[0].id === 'isc');
+    expect(lone).toBeDefined();
     // No group is reported as clean while carrying a magnitude warning.
     for (const g of groups) {
       if (g.validationWarnings.some(w => w.toLowerCase().includes('magnitude'))) {

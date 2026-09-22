@@ -34,6 +34,7 @@ jest.mock('@/lib/db', () => {
       getCatalogueById: jest.fn(),
       insertCatalogue: jest.fn(),
       getEventsBySourceIds: jest.fn(),
+      getEventCoordinatesByIds: jest.fn(),
       bulkInsertEvents: jest.fn(),
       insertEvent: jest.fn(),
       updateEvent: jest.fn(),
@@ -99,6 +100,7 @@ beforeEach(() => {
     max_longitude: null,
   });
   db.getEventsBySourceIds.mockResolvedValue(new Map());
+  db.getEventCoordinatesByIds.mockResolvedValue([]);
   // bulkInsertEvents resolves to the number of rows actually inserted (it drops
   // in-batch source_id repeats and lets the partial-unique index skip collisions),
   // and the importer accumulates that into ImportResult.newEvents. Resolving

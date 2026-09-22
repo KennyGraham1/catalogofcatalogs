@@ -1,5 +1,5 @@
 /**
- * Regression test for the uncertainty-ellipse orientation fix (audit finding #9).
+ * Regression test for the uncertainty-ellipse orientation fix.
  *
  * The renderer (generateEllipsePoints) puts the semi-major axis along EAST-WEST at
  * rotation 0. So a location whose dominant uncertainty is in LATITUDE (north-south)

@@ -20,7 +20,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useMapColors } from '@/hooks/use-map-theme';
 import { calculateQualityScore, getQualityColor, metricsFromEvent } from '@/lib/quality-scoring';
-import { getMagnitudeRadius, getMagnitudeColor } from '@/lib/earthquake-utils';
+import { getMagnitudeRadius, getMagnitudeColor, getMagnitudeLabel } from '@/lib/earthquake-utils';
 import { loadFaultData, FaultCollection } from '@/lib/fault-data';
 import type { PathOptions } from 'leaflet';
 
@@ -99,13 +99,6 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
     return getMagnitudeColor(eq.magnitude);
   };
 
-  const getMagnitudeLabel = (magnitude: number): string => {
-    if (magnitude >= 6.0) return 'Major';
-    if (magnitude >= 5.0) return 'Moderate';
-    if (magnitude >= 4.0) return 'Light';
-    if (magnitude >= 3.0) return 'Minor';
-    return 'Micro';
-  };
 
   // Table 2 thresholds (see lib/quality-scoring.ts scoreToGrade)
   const getQualityGrade = (score: number): string => {

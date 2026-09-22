@@ -23,7 +23,7 @@ import { useCatalogueEvents } from '@/hooks/use-catalogue-events';
 import { useNearbyFaults } from '@/hooks/use-nearby-faults';
 import { useMapColors } from '@/hooks/use-map-theme';
 import { calculateQualityScore, getQualityColor, metricsFromEvent } from '@/lib/quality-scoring';
-import { getMagnitudeColor, getEarthquakeColor } from '@/lib/earthquake-utils';
+import { getMagnitudeColor, getEarthquakeColor, getMagnitudeLabel } from '@/lib/earthquake-utils';
 import { loadFaultData, FaultCollection } from '@/lib/fault-data';
 import type { PathOptions } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -407,13 +407,6 @@ const EventPopupWithFaults = memo(function EventPopupWithFaults({ event, quality
     enabled: true,
   });
 
-  const getMagnitudeLabel = (magnitude: number): string => {
-    if (magnitude >= 6.0) return 'Major';
-    if (magnitude >= 5.0) return 'Moderate';
-    if (magnitude >= 4.0) return 'Light';
-    if (magnitude >= 3.0) return 'Minor';
-    return 'Micro';
-  };
 
   // Table 2 thresholds (see lib/quality-scoring.ts scoreToGrade)
   const getQualityGrade = (score: number): string => {

@@ -62,8 +62,12 @@ export function assessEventQuality(event: any): IntegratedQualityAssessment {
   const detailedScore = calculateQualityScore(detailedMetrics);
   const geonetQS = calculateGeoNetQS(geonetCriteria);
 
-  // Generate combined summary
-  const summary = generateCombinedSummary(detailedScore, geonetQS);
+  // Generate combined summary. A solution the agency has REJECTED is not a
+  // usable location whatever its geometry scores: the detailed rubric already
+  // says "do not use", and the integrated summary must not contradict it.
+  const rejected = typeof detailedMetrics.evaluationStatus === 'string' &&
+    detailedMetrics.evaluationStatus.toLowerCase().trim() === 'rejected';
+  const summary = generateCombinedSummary(detailedScore, geonetQS, rejected);
 
   return {
     detailedScore,
@@ -77,8 +81,26 @@ export function assessEventQuality(event: any): IntegratedQualityAssessment {
  */
 function generateCombinedSummary(
   detailedScore: QualityScore,
-  geonetQS: GeoNetQSResult
+  geonetQS: GeoNetQSResult,
+  rejected: boolean = false
 ): IntegratedQualityAssessment['summary'] {
+  if (rejected) {
+    return {
+      overallQuality: 'Unconstrained',
+      primaryScore: detailedScore.overall,
+      standardizedScore: geonetQS.qualityScore,
+      recommendation:
+        'Solution rejected by the reporting agency. Do not use this origin; look for a superseding solution. ' +
+        `(Geometry alone would have scored ${detailedScore.overall}/100, QS ${geonetQS.qualityScore}.)`,
+      useCaseGuidance: {
+        scientificResearch: false,
+        hazardAssessment: false,
+        publicInformation: false,
+        realTimeMonitoring: false,
+      },
+    };
+  }
+
   // Determine overall quality based on both systems
   let overallQuality: IntegratedQualityAssessment['summary']['overallQuality'];
   

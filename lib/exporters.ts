@@ -165,16 +165,13 @@ function buildGeoJSONHead(
   count: number,
   metadata?: ExportMetadata
 ): Record<string, unknown> {
-  // RFC 7946 §5 — emit a bbox member when all four bounds are available.
-  const bb = metadata?.boundingBox;
-  const hasBbox = bb != null &&
-    bb.minLongitude != null && bb.minLatitude != null &&
-    bb.maxLongitude != null && bb.maxLatitude != null;
-
+  // No bbox. RFC 7946 §5 requires 2n values for n-dimensional geometry, and every event
+  // with a known depth is emitted as a 3D point, so a 4-value bbox was non-conformant for
+  // almost every catalogue. The 6-value form would need a vertical extent the head does
+  // not have before streaming, and inventing one for unknown-depth events is worse than
+  // omitting the optional member. The horizontal extent stays available under metadata.
   return {
     type: 'FeatureCollection',
-    // bbox order: [west, south, east, north] (RFC 7946)
-    ...(hasBbox ? { bbox: [bb!.minLongitude, bb!.minLatitude, bb!.maxLongitude, bb!.maxLatitude] } : {}),
     metadata: {
       title: metadata?.catalogueName || 'Earthquake Catalogue',
       description: metadata?.description,
@@ -303,6 +300,10 @@ function buildGeoJSONFeature(event: MergedEvent): Record<string, unknown> {
       // Preferred IDs (for cross-referencing nested elements)
       preferredOriginId: event.preferred_origin_id,
       preferredMagnitudeId: event.preferred_magnitude_id,
+      preferredFocalMechanismId: event.preferred_focal_mechanism_id,
+      minHorizontalUncertainty: event.min_horizontal_uncertainty,
+      maxHorizontalUncertainty: event.max_horizontal_uncertainty,
+      azimuthMaxHorizontalUncertainty: event.azimuth_max_horizontal_uncertainty,
 
       // Complex nested data — parsed from JSON strings stored in the database.
       // GeoJSON properties may contain any valid JSON value (RFC 7946 §3.2).

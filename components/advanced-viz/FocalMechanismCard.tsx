@@ -7,8 +7,12 @@ import { Compass, Layers, TrendingDown } from 'lucide-react';
 import { TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import {
   FocalMechanism,
+  NodalPlane,
   getFaultType,
   computeBeachball,
+  selectPlane,
+  selectPlaneNumber,
+  isCompletePlane,
 } from '@/lib/focal-mechanism-utils';
 import { Beachball } from './Beachball';
 
@@ -17,7 +21,7 @@ interface FocalMechanismCardProps {
 }
 
 export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
-  if (!mechanism.nodalPlane1) {
+  if (!mechanism.nodalPlane1 && !mechanism.nodalPlane2) {
     return (
       <Card>
         <CardHeader>
@@ -28,33 +32,50 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
     );
   }
 
-  const faultType = getFaultType(mechanism.nodalPlane1.rake);
-  const beachball = computeBeachball(mechanism, 200);
+  // Interpretation follows the stated preferred plane; without a complete plane there is
+  // no geometry and no fault-type claim, only the angles the source actually reported.
+  const selected = selectPlane(mechanism);
+  const selectedNumber = selectPlaneNumber(mechanism);
+  const faultType = selected ? getFaultType(selected.rake) : null;
+  const beachball = selected ? computeBeachball(mechanism, 200) : null;
+  // Open on the plane the description is built from.
+  const defaultTab = selectedNumber === 2 || (!mechanism.nodalPlane1 && mechanism.nodalPlane2) ? 'plane2' : 'plane1';
+  // The description follows the stated preference only when that plane is complete;
+  // say so when it had to fall back, since lateral sense differs between the planes.
+  const preferenceHonoured = mechanism.preferredPlane !== undefined && selectedNumber === mechanism.preferredPlane;
 
   return (
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle>Focal Mechanism</CardTitle>
-          <Badge variant="outline">{faultType.type}</Badge>
+          <Badge variant="outline">{faultType ? faultType.type : 'incomplete'}</Badge>
         </div>
-        <CardDescription>{faultType.description}</CardDescription>
+        <CardDescription>
+          {faultType ? faultType.description : 'Nodal plane incomplete: fault type cannot be classified'}
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Beach Ball Diagram (lower-hemisphere equal-area, compressional shaded) */}
-        <div className="flex flex-col items-center gap-2 p-4 bg-muted rounded-lg">
-          <Beachball mechanism={mechanism} size={200} showAxes />
-          {beachball && (
-            <div className="flex gap-6 text-xs text-muted-foreground font-mono">
-              <span title="Pressure axis azimuth/plunge">P {beachball.pAxis.azimuth.toFixed(0)}°/{beachball.pAxis.plunge.toFixed(0)}°</span>
-              <span title="Tension axis azimuth/plunge">T {beachball.tAxis.azimuth.toFixed(0)}°/{beachball.tAxis.plunge.toFixed(0)}°</span>
-            </div>
-          )}
-          <p className="text-[10px] text-muted-foreground">Blue = compressional · lines = nodal planes</p>
-        </div>
+        {selected ? (
+          <div className="flex flex-col items-center gap-2 p-4 bg-muted rounded-lg">
+            <Beachball mechanism={mechanism} size={200} showAxes />
+            {beachball && (
+              <div className="flex gap-6 text-xs text-muted-foreground font-mono">
+                <span title="Pressure axis azimuth/plunge">P {beachball.pAxis.azimuth.toFixed(0)}°/{beachball.pAxis.plunge.toFixed(0)}°</span>
+                <span title="Tension axis azimuth/plunge">T {beachball.tAxis.azimuth.toFixed(0)}°/{beachball.tAxis.plunge.toFixed(0)}°</span>
+              </div>
+            )}
+            <p className="text-[10px] text-muted-foreground">Blue = compressional · lines = nodal planes</p>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground p-4 bg-muted rounded-lg">
+            Beach ball not drawn: strike, dip and rake are all required and the source reported only some of them.
+          </p>
+        )}
 
         {/* Nodal Planes */}
-        <Tabs defaultValue="plane1" className="w-full">
+        <Tabs defaultValue={defaultTab} className="w-full">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="plane1">
               Plane 1 {mechanism.preferredPlane === 1 && '⭐'}
@@ -65,99 +86,13 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
           </TabsList>
           
           <TabsContent value="plane1" className="space-y-3 mt-4">
-            {mechanism.nodalPlane1 && (
-              <>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Compass className="h-4 w-4" />
-                      <span>Strike</span>
-                      <TechnicalTermTooltip term="strike" />
-                    </div>
-                    <div className="text-2xl font-bold">
-                      {mechanism.nodalPlane1.strike.toFixed(0)}°
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Layers className="h-4 w-4" />
-                      <span>Dip</span>
-                      <TechnicalTermTooltip term="dip" />
-                    </div>
-                    <div className="text-2xl font-bold">
-                      {mechanism.nodalPlane1.dip.toFixed(0)}°
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <TrendingDown className="h-4 w-4" />
-                      <span>Rake</span>
-                      <TechnicalTermTooltip term="rake" />
-                    </div>
-                    <div className="text-2xl font-bold">
-                      {mechanism.nodalPlane1.rake.toFixed(0)}°
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="pt-2 border-t">
-                  <h4 className="font-semibold text-sm mb-2">Interpretation</h4>
-                  <p className="text-sm text-muted-foreground">
-                    {getPlaneInterpretation(mechanism.nodalPlane1)}
-                  </p>
-                </div>
-              </>
+            {mechanism.nodalPlane1 ? <PlanePanel plane={mechanism.nodalPlane1} /> : (
+              <p className="text-sm text-muted-foreground">No data for nodal plane 1</p>
             )}
           </TabsContent>
-          
+
           <TabsContent value="plane2" className="space-y-3 mt-4">
-            {mechanism.nodalPlane2 ? (
-              <>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Compass className="h-4 w-4" />
-                      <span>Strike</span>
-                      <TechnicalTermTooltip term="strike" />
-                    </div>
-                    <div className="text-2xl font-bold">
-                      {mechanism.nodalPlane2.strike.toFixed(0)}°
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Layers className="h-4 w-4" />
-                      <span>Dip</span>
-                      <TechnicalTermTooltip term="dip" />
-                    </div>
-                    <div className="text-2xl font-bold">
-                      {mechanism.nodalPlane2.dip.toFixed(0)}°
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <TrendingDown className="h-4 w-4" />
-                      <span>Rake</span>
-                      <TechnicalTermTooltip term="rake" />
-                    </div>
-                    <div className="text-2xl font-bold">
-                      {mechanism.nodalPlane2.rake.toFixed(0)}°
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="pt-2 border-t">
-                  <h4 className="font-semibold text-sm mb-2">Interpretation</h4>
-                  <p className="text-sm text-muted-foreground">
-                    {getPlaneInterpretation(mechanism.nodalPlane2)}
-                  </p>
-                </div>
-              </>
-            ) : (
+            {mechanism.nodalPlane2 ? <PlanePanel plane={mechanism.nodalPlane2} /> : (
               <p className="text-sm text-muted-foreground">No data for nodal plane 2</p>
             )}
           </TabsContent>
@@ -167,10 +102,19 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
         <div className="pt-2 border-t">
           <h4 className="font-semibold text-sm mb-2">Fault Type</h4>
           <div className="space-y-2 text-sm text-muted-foreground">
-            <p>{getFaultTypeExplanation(faultType.type)}</p>
-            {mechanism.preferredPlane && (
+            <p>{faultType ? getFaultTypeExplanation(faultType.type) : 'Fault type is not reported because at least one nodal-plane angle is missing.'}</p>
+            {mechanism.preferredPlane && preferenceHonoured ? (
               <p className="text-xs">
-                ⭐ Preferred plane: Plane {mechanism.preferredPlane} is considered the most likely fault plane based on geological or seismological evidence.
+                ⭐ Preferred plane: the source identifies Plane {mechanism.preferredPlane} as the fault plane.
+              </p>
+            ) : mechanism.preferredPlane ? (
+              <p className="text-xs">
+                ⭐ The source identifies Plane {mechanism.preferredPlane} as the fault plane, but that plane is incomplete
+                {selectedNumber ? `; the classification above follows Plane ${selectedNumber} instead` : ''}.
+              </p>
+            ) : (
+              <p className="text-xs">
+                The source states no preferred plane; the two nodal planes are equally admissible fault planes.
               </p>
             )}
           </div>
@@ -192,6 +136,52 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function angleText(value: number | null): string {
+  return value === null ? '—' : `${value.toFixed(0)}°`;
+}
+
+function PlanePanel({ plane }: { plane: NodalPlane }) {
+  return (
+    <>
+      <div className="grid grid-cols-3 gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Compass className="h-4 w-4" />
+            <span>Strike</span>
+            <TechnicalTermTooltip term="strike" />
+          </div>
+          <div className="text-2xl font-bold">{angleText(plane.strike)}</div>
+        </div>
+
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Layers className="h-4 w-4" />
+            <span>Dip</span>
+            <TechnicalTermTooltip term="dip" />
+          </div>
+          <div className="text-2xl font-bold">{angleText(plane.dip)}</div>
+        </div>
+
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <TrendingDown className="h-4 w-4" />
+            <span>Rake</span>
+            <TechnicalTermTooltip term="rake" />
+          </div>
+          <div className="text-2xl font-bold">{angleText(plane.rake)}</div>
+        </div>
+      </div>
+
+      <div className="pt-2 border-t">
+        <h4 className="font-semibold text-sm mb-2">Interpretation</h4>
+        <p className="text-sm text-muted-foreground">
+          {isCompletePlane(plane) ? getPlaneInterpretation(plane) : 'Not reported: one or more angles are missing from the source.'}
+        </p>
+      </div>
+    </>
   );
 }
 

@@ -44,7 +44,9 @@ export function UncertaintyEllipse({ ellipse, eventId }: UncertaintyEllipseProps
     const provenance =
       ellipse.source === 'origin-uncertainty'
         ? 'QuakeML OriginUncertainty horizontal error ellipse'
-        : 'Approximate: axis-aligned from independent lat/lon uncertainties (no covariance)';
+        : ellipse.source === 'horizontal-circle'
+          ? 'QuakeML OriginUncertainty circular horizontal uncertainty (radius)'
+          : 'Approximate: axis-aligned from independent lat/lon uncertainties (no covariance)';
     leafletEllipse.bindTooltip(
       `Location uncertainty extent<br/>Semi-axes: ${axes}<br/>${provenance}<br/><em>Not a 68%/95% confidence region</em>`,
       { permanent: false, direction: 'top' }

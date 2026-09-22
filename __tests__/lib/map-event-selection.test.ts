@@ -31,6 +31,11 @@ it('reveals previously omitted events when zooming into their region', () => {
   expect(selectMapEvents(events, zoomed, 1).sampled).toEqual([events[1]]);
 });
 
+it('respects very small explicit budgets on wide maps', () => {
+  const events = [event(1, 171, 2), event(2, 180, 8), event(3, 189, 4)];
+  expect(selectMapEvents(events, { ...viewport, width: 3000, height: 300 }, 1).sampled).toEqual([events[1]]);
+});
+
 it('keeps dateline and repeated-world selections equivalent', () => {
   const events = Array.from({ length: 2000 }, (_, i) => event(i, i % 2 ? 175 : -175, i % 10));
   const expected = selectMapEvents(events, viewport, 500);

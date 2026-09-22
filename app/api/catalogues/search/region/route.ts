@@ -94,8 +94,11 @@ export async function GET(request: NextRequest) {
 
     const crossesDateline = clampedMinLon > clampedMaxLon;
 
-    // Create cache key from coordinates (rounded to 2 decimal places for better cache hits)
-    const cacheKey = `region:${clampedMinLat.toFixed(2)},${clampedMaxLat.toFixed(2)},${clampedMinLon.toFixed(2)},${clampedMaxLon.toFixed(2)}:${crossesDateline ? 'wrap' : 'normal'}`;
+    // Cache key is the exact predicate. Rounding the corners to 0.01 degrees made
+    // two different queries share one answer: a catalogue whose extent lay between
+    // west 10.001 and west 10.004 was reported for both, and the cached count could
+    // not be corrected within the TTL.
+    const cacheKey = `region:${clampedMinLat},${clampedMaxLat},${clampedMinLon},${clampedMaxLon}:${crossesDateline ? 'wrap' : 'normal'}`;
 
     // Check cache first
     const cachedResult = apiCache.get<any>(cacheKey);

@@ -1,6 +1,5 @@
 /**
- * Regression tests for seismicity-statistics corrections (audit root cause C and
- * finding #1):
+ * Regression tests for seismicity-statistics corrections:
  *   - Gardner-Knopoff declustering time-window branches (were swapped).
  *   - b-value computed with a real MAXC completeness magnitude (not the catalogue
  *     floor), so the incomplete low-magnitude tail no longer biases b.

@@ -50,6 +50,12 @@ export function quakemlEventToDbFields(quakeml: QuakeMLEvent): DbEventFields {
     if (preferredOrigin.uncertainty?.horizontalUncertainty != null) {
       fields.horizontal_uncertainty = preferredOrigin.uncertainty.horizontalUncertainty / 1000;
     }
+    // The error ellipse (metres -> km, azimuth in degrees). Without these columns a
+    // parsed 4200/1100 m ellipse at 35 degrees was lost on storage.
+    const ou = preferredOrigin.uncertainty;
+    if (ou?.minHorizontalUncertainty != null) fields.min_horizontal_uncertainty = ou.minHorizontalUncertainty / 1000;
+    if (ou?.maxHorizontalUncertainty != null) fields.max_horizontal_uncertainty = ou.maxHorizontalUncertainty / 1000;
+    if (ou?.azimuthMaxHorizontalUncertainty != null) fields.azimuth_max_horizontal_uncertainty = ou.azimuthMaxHorizontalUncertainty;
 
     // Origin metadata
     if (preferredOrigin.depthType)    fields.depth_type    = preferredOrigin.depthType.toLowerCase().trim();
@@ -94,6 +100,14 @@ export function quakemlEventToDbFields(quakeml: QuakeMLEvent): DbEventFields {
     if (preferredMagnitude.methodID)                 fields.magnitude_method_id        = preferredMagnitude.methodID;
     if (preferredMagnitude.evaluationMode)           fields.magnitude_evaluation_mode   = preferredMagnitude.evaluationMode.toLowerCase().trim();
     if (preferredMagnitude.evaluationStatus)         fields.magnitude_evaluation_status = preferredMagnitude.evaluationStatus.toLowerCase().trim();
+  }
+
+  // ── Preferred focal mechanism ────────────────────────────────────────────
+  // Parsed since the BED element was added to the type, but never carried to the DB
+  // or the export, so a source's stated preference (e.g. plane 2 of two mechanisms)
+  // was lost and array order could not stand in for it.
+  if (quakeml.preferredFocalMechanismID) {
+    fields.preferred_focal_mechanism_id = quakeml.preferredFocalMechanismID;
   }
 
   // ── Complex nested arrays stored as JSON strings ──────────────────────────

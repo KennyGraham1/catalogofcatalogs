@@ -42,3 +42,4 @@ Data Processing
    merge-improvements
    upload-audit-report
    default-field-mappings
+   scientific-conventions

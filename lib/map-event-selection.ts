@@ -39,7 +39,7 @@ export function selectMapEvents<T extends MapEvent>(events: T[], viewport: MapVi
   // Keep the largest event in each screen cell. Representatives are actual events,
   // not cluster counts or an unbiased sample of the magnitude distribution.
   const aspect = Math.max(0.1, Math.min(10, viewport.width / Math.max(1, viewport.height)));
-  const columns = Math.max(1, Math.floor(Math.sqrt(budget * aspect)));
+  const columns = Math.min(budget, Math.max(1, Math.floor(Math.sqrt(budget * aspect))));
   const rows = Math.max(1, Math.floor(budget / columns));
   const cells = new Map<number, number>();
   const { west, east, north, south } = viewport.bounds;

@@ -139,7 +139,7 @@ export function StationCoverageCard({ coverage }: StationCoverageCardProps) {
               className="h-2"
             />
             <p className="text-xs text-muted-foreground">
-              {distribution.description} (from {coverage.azimuths.length} arrival azimuths)
+              {distribution.description} (from {coverage.azimuths.length} station azimuths)
             </p>
           </div>
         )}
@@ -222,7 +222,7 @@ export function StationCoverageCard({ coverage }: StationCoverageCardProps) {
               />
             </div>
             <p className="text-xs text-muted-foreground text-center mt-1">
-              Green sector: azimuths covered by the {coverage.azimuths.length} recorded arrivals. North is up.
+              Green sector: azimuths covered by the {coverage.azimuths.length} recording stations. North is up.
             </p>
           </div>
         )}

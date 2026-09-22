@@ -138,6 +138,24 @@ function formatCompositeTime(compositeTime: CompositeTime, indent: string = '   
   return xml;
 }
 
+/**
+ * The stored row's own OriginUncertainty (km -> metres). Returns undefined when the row
+ * carries neither a circular radius nor an ellipse.
+ */
+function originUncertaintyFromEvent(event: {
+  horizontal_uncertainty?: number | null;
+  min_horizontal_uncertainty?: number | null;
+  max_horizontal_uncertainty?: number | null;
+  azimuth_max_horizontal_uncertainty?: number | null;
+}): OriginUncertainty | undefined {
+  const out: OriginUncertainty = {};
+  if (event.horizontal_uncertainty != null) out.horizontalUncertainty = event.horizontal_uncertainty * 1000;
+  if (event.min_horizontal_uncertainty != null) out.minHorizontalUncertainty = event.min_horizontal_uncertainty * 1000;
+  if (event.max_horizontal_uncertainty != null) out.maxHorizontalUncertainty = event.max_horizontal_uncertainty * 1000;
+  if (event.azimuth_max_horizontal_uncertainty != null) out.azimuthMaxHorizontalUncertainty = event.azimuth_max_horizontal_uncertainty;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function formatOriginUncertainty(uncertainty: OriginUncertainty, indent: string = '    '): string {
   let xml = `${indent}<originUncertainty>\n`;
   if (uncertainty.horizontalUncertainty !== undefined) {
@@ -296,8 +314,16 @@ function formatOrigin(origin: Origin, indent: string = '    '): string {
     if (origin.quality.usedPhaseCount !== undefined) {
       xml += `${indent}    <usedPhaseCount>${origin.quality.usedPhaseCount}</usedPhaseCount>\n`;
     }
+    // BED sequence: associatedStationCount precedes usedStationCount, depthPhaseCount
+    // follows it. Both were parsed and mapped but never written, so a round trip lost them.
+    if (origin.quality.associatedStationCount !== undefined) {
+      xml += `${indent}    <associatedStationCount>${origin.quality.associatedStationCount}</associatedStationCount>\n`;
+    }
     if (origin.quality.usedStationCount !== undefined) {
       xml += `${indent}    <usedStationCount>${origin.quality.usedStationCount}</usedStationCount>\n`;
+    }
+    if (origin.quality.depthPhaseCount !== undefined) {
+      xml += `${indent}    <depthPhaseCount>${origin.quality.depthPhaseCount}</depthPhaseCount>\n`;
     }
     if (origin.quality.azimuthalGap !== undefined) {
       xml += `${indent}    <azimuthalGap>${origin.quality.azimuthalGap}</azimuthalGap>\n`;
@@ -490,7 +516,7 @@ function formatPick(pick: Pick, indent: string = '    '): string {
   // Time (required)
   if (pick.time) {
     xml += `${indent}  <time>\n`;
-    xml += `${indent}    ${formatTimeQuantity(pick.time.value, pick.time.uncertainty)}\n`;
+    xml += `${indent}    ${formatTimeQuantity(pick.time.value, pick.time.uncertainty, pick.time.lowerUncertainty, pick.time.upperUncertainty, pick.time.confidenceLevel)}\n`;
     xml += `${indent}  </time>\n`;
   }
 
@@ -648,7 +674,7 @@ function formatAmplitude(amplitude: Amplitude, indent: string = '    '): string 
   }
   if (amplitude.scalingTime) {
     xml += `${indent}  <scalingTime>\n`;
-    xml += `${indent}    ${formatTimeQuantity(amplitude.scalingTime.value, amplitude.scalingTime.uncertainty)}\n`;
+    xml += `${indent}    ${formatTimeQuantity(amplitude.scalingTime.value, amplitude.scalingTime.uncertainty, amplitude.scalingTime.lowerUncertainty, amplitude.scalingTime.upperUncertainty, amplitude.scalingTime.confidenceLevel)}\n`;
     xml += `${indent}  </scalingTime>\n`;
   }
   if (amplitude.magnitudeHint) {
@@ -850,6 +876,42 @@ function formatMomentTensor(mt: MomentTensor, indent: string = '      '): string
 /**
  * Format FocalMechanism element
  */
+/**
+ * GeoNet enrichment stores mechanisms in the simplified shape
+ * `{ nodalPlane1: { strike, dip, rake }, nodalPlane2?, preferredPlane? }`. Lift that into
+ * the QuakeML shape so the planes are exported instead of an empty <focalMechanism>.
+ */
+function liftSimplifiedFocalMechanism(fm: FocalMechanism): FocalMechanism {
+  const simple = fm as unknown as {
+    nodalPlanes?: unknown;
+    nodalPlane1?: { strike?: number | null; dip?: number | null; rake?: number | null };
+    nodalPlane2?: { strike?: number | null; dip?: number | null; rake?: number | null };
+    preferredPlane?: number;
+  };
+  if (simple.nodalPlanes || (!simple.nodalPlane1 && !simple.nodalPlane2)) return fm;
+  const plane = (p?: { strike?: number | null; dip?: number | null; rake?: number | null }) =>
+    p
+      ? {
+          ...(p.strike != null ? { strike: { value: p.strike } } : {}),
+          ...(p.dip != null ? { dip: { value: p.dip } } : {}),
+          ...(p.rake != null ? { rake: { value: p.rake } } : {}),
+        }
+      : undefined;
+  const lifted = {
+    ...fm,
+    publicID: fm.publicID || '',
+    nodalPlanes: {
+      ...(simple.nodalPlane1 ? { nodalPlane1: plane(simple.nodalPlane1) } : {}),
+      ...(simple.nodalPlane2 ? { nodalPlane2: plane(simple.nodalPlane2) } : {}),
+      ...(simple.preferredPlane === 1 || simple.preferredPlane === 2 ? { preferredPlane: simple.preferredPlane } : {}),
+    },
+  } as unknown as FocalMechanism;
+  delete (lifted as unknown as Record<string, unknown>).nodalPlane1;
+  delete (lifted as unknown as Record<string, unknown>).nodalPlane2;
+  delete (lifted as unknown as Record<string, unknown>).preferredPlane;
+  return lifted;
+}
+
 function formatFocalMechanism(fm: FocalMechanism, indent: string = '    '): string {
   let xml = `${indent}<focalMechanism publicID="${escapeXml(toResourceID(fm.publicID, 'focalMechanism'))}">\n`;
 
@@ -867,17 +929,25 @@ function formatFocalMechanism(fm: FocalMechanism, indent: string = '    '): stri
 
   // Nodal planes
   if (fm.nodalPlanes) {
-    xml += `${indent}  <nodalPlanes>\n`;
-    if (fm.nodalPlanes.nodalPlane1) {
-      xml += formatNodalPlane(fm.nodalPlanes.nodalPlane1, 'nodalPlane1', indent + '    ') + '\n';
+    // In QuakeML-BED-1.2 preferredPlane is an ATTRIBUTE of <nodalPlanes>, not a child
+    // element. Emitted as a child it was XSD-invalid and ObsPy read the preference as None.
+    // BED requires strike, dip and rake on every NodalPlane, so a partially reported
+    // plane is omitted rather than exported with invented values or as invalid XML,
+    // and a preference can only point at a plane that is actually emitted.
+    const complete = (p?: NodalPlane) => !!p && p.strike?.value != null && p.dip?.value != null && p.rake?.value != null;
+    const emitted1 = complete(fm.nodalPlanes.nodalPlane1);
+    const emitted2 = complete(fm.nodalPlanes.nodalPlane2);
+    const preferred = fm.nodalPlanes.preferredPlane;
+    const preferredAttr = (preferred === 1 && emitted1) || (preferred === 2 && emitted2) ? ` preferredPlane="${preferred}"` : '';
+    const planes = [
+      emitted1 ? formatNodalPlane(fm.nodalPlanes.nodalPlane1!, 'nodalPlane1', indent + '    ') : null,
+      emitted2 ? formatNodalPlane(fm.nodalPlanes.nodalPlane2!, 'nodalPlane2', indent + '    ') : null,
+    ].filter((p): p is string => p !== null);
+    if (planes.length > 0) {
+      xml += `${indent}  <nodalPlanes${preferredAttr}>\n`;
+      xml += planes.join('\n') + '\n';
+      xml += `${indent}  </nodalPlanes>\n`;
     }
-    if (fm.nodalPlanes.nodalPlane2) {
-      xml += formatNodalPlane(fm.nodalPlanes.nodalPlane2, 'nodalPlane2', indent + '    ') + '\n';
-    }
-    if (fm.nodalPlanes.preferredPlane !== undefined) {
-      xml += `${indent}    <preferredPlane>${fm.nodalPlanes.preferredPlane}</preferredPlane>\n`;
-    }
-    xml += `${indent}  </nodalPlanes>\n`;
   }
 
   // Principal axes
@@ -960,7 +1030,21 @@ function toResourceID(
   const raw = (value ?? '').trim();
   if (BED_RESOURCE_ID_PATTERN.test(raw)) return raw;
   const source = raw || String(fallbackID ?? '').trim();
-  const sanitised = source.replace(/[^A-Za-z0-9_\-.*()~']/g, '_') || 'unknown';
+  // Injective escaping. Mapping every disallowed character to "_" collapsed distinct
+  // identifiers ("a/b" and "a:b" both became a_b), merging two events' identities on
+  // export. Each disallowed byte is instead encoded as ~XX (hex), using "~", which the
+  // grammar permits, as the escape lead; a literal "~" is doubled so the map stays 1:1.
+  const sanitised = source
+    .replace(/~/g, '~~')
+    .replace(/[^A-Za-z0-9_\-.*()~']/gu, (ch) => {
+      // Two hex digits for a Latin-1 code point; a 'u' marker (not a hex digit, so it
+      // cannot be confused with a two-digit escape followed by literal hex characters)
+      // and exactly six digits above that. Variable widths collide: U+0100 + '00'
+      // and U+10000 must not both encode as ~u010000.
+      const cp = ch.codePointAt(0)!;
+      const hex = cp.toString(16).toUpperCase();
+      return cp < 0x100 ? '~' + hex.padStart(2, '0') : '~u' + hex.padStart(6, '0');
+    }) || 'unknown';
   return `smi:local/${kind}/${sanitised}`;
 }
 
@@ -1042,9 +1126,9 @@ function applyMergedOriginValues(origins: Origin[], event: MergedEvent): Origin[
     // OriginUncertainty describes the error ellipse of the SOURCE's epicentre, which
     // has just been replaced: emit only the merged row's own horizontal uncertainty,
     // and drop the element entirely when the merged row has none.
-    if (event.horizontal_uncertainty != null) {
-      // horizontalUncertainty in QuakeML is in metres; DB stores km.
-      merged.uncertainty = { horizontalUncertainty: event.horizontal_uncertainty * 1000 };
+    const ellipse = originUncertaintyFromEvent(event);
+    if (ellipse) {
+      merged.uncertainty = ellipse;
     } else {
       delete merged.uncertainty;
     }
@@ -1053,45 +1137,57 @@ function applyMergedOriginValues(origins: Origin[], event: MergedEvent): Origin[
   });
 }
 
-/**
- * Rewrite the preferred magnitude of a merged row with the authoritative merged
- * magnitude and magnitude type from the scalar columns (see
- * applyMergedOriginValues). The merge strategies pick the magnitude by hierarchy
- * rather than by source event, so the blob's value and SCALE can both differ.
- */
-function applyMergedMagnitudeValues(magnitudes: Magnitude[], event: MergedEvent): Magnitude[] {
-  const preferredIndex = Math.max(
-    0,
-    magnitudes.findIndex(m => m.publicID === event.preferred_magnitude_id)
-  );
+/** Whether a stored measurement agrees with the authoritative scalar selection. */
+function matchesScalarMagnitude(magnitude: Magnitude, event: MergedEvent): boolean {
+  return magnitude.mag?.value === event.magnitude &&
+    (magnitude.type ?? '') === (event.magnitude_type ?? '') &&
+    (event.magnitude_uncertainty == null || magnitude.mag.uncertainty === event.magnitude_uncertainty) &&
+    (event.magnitude_station_count == null || magnitude.stationCount === event.magnitude_station_count) &&
+    (event.magnitude_method_id == null || magnitude.methodID === event.magnitude_method_id) &&
+    (event.magnitude_evaluation_mode == null || magnitude.evaluationMode === event.magnitude_evaluation_mode) &&
+    (event.magnitude_evaluation_status == null || magnitude.evaluationStatus === event.magnitude_evaluation_status);
+}
 
-  return magnitudes.map((magnitude, index) => {
-    if (index !== preferredIndex || event.magnitude == null) return magnitude;
-
-    // Same rule as applyMergedOriginValues: the merged magnitude replaces the source's,
-    // so the scale, uncertainty and station count that describe the SOURCE magnitude go
-    // with it. lib/merge.ts fills MAGNITUDE_META_FIELDS only from a source reporting the
-    // same value on the same scale, precisely so an ML value is never stamped 'Mw' or
-    // given another solution's error estimate — the blob must not put them back.
-    const merged: Magnitude = {
-      ...magnitude,
-      mag: mergedQuantity(event.magnitude, event.magnitude_uncertainty),
-    };
-
-    if (event.magnitude_type) {
-      merged.type = event.magnitude_type;
-    } else {
-      delete merged.type;
-    }
-
-    if (event.magnitude_station_count != null) {
-      merged.stationCount = event.magnitude_station_count;
-    } else {
-      delete merged.stationCount;
-    }
-
-    return merged;
-  });
+/** A <magnitude> element built from the row's scalar magnitude columns. */
+function scalarMagnitudeXml(event: MergedEvent, magnitudeID: string): string {
+  let xml = `    <magnitude publicID="${escapeXml(magnitudeID)}">\n`;
+  xml += `      <mag>\n        <value>${event.magnitude}</value>\n`;
+  if (event.magnitude_uncertainty != null) {
+    xml += `        <uncertainty>${event.magnitude_uncertainty}</uncertainty>\n`;
+  }
+  xml += `      </mag>\n`;
+  if (event.magnitude_type) {
+    xml += `      <type>${escapeXml(event.magnitude_type)}</type>\n`;
+  }
+  if (event.magnitude_station_count != null) {
+    xml += `      <stationCount>${event.magnitude_station_count}</stationCount>\n`;
+  }
+  if (event.preferred_origin_id) {
+    xml += `      <originID>${escapeXml(toResourceID(event.preferred_origin_id, 'origin', event.id))}</originID>\n`;
+  }
+  if (event.magnitude_method_id) {
+    xml += `      <methodID>${escapeXml(toResourceID(event.magnitude_method_id, 'method'))}</methodID>\n`;
+  }
+  // Prefer magnitude-specific evaluation fields; fall back to origin-level fields.
+  const merged = isMultiSourceMerge(event);
+  const magEvalMode = event.magnitude_evaluation_mode || (!merged ? event.evaluation_mode : undefined);
+  const magEvalStatus = event.magnitude_evaluation_status || (!merged ? event.evaluation_status : undefined);
+  if (magEvalMode) {
+    xml += `      <evaluationMode>${escapeXml(magEvalMode)}</evaluationMode>\n`;
+  }
+  if (magEvalStatus) {
+    xml += `      <evaluationStatus>${escapeXml(magEvalStatus)}</evaluationStatus>\n`;
+  }
+  // For a merge these fields identify the origin's agency, which may differ from
+  // the selected magnitude's agency. An unknown donor must remain unattributed.
+  if (!merged && (event.agency_id || event.author)) {
+    xml += `      <creationInfo>\n`;
+    if (event.agency_id) xml += `        <agencyID>${escapeXml(event.agency_id)}</agencyID>\n`;
+    if (event.author) xml += `        <author>${escapeXml(event.author)}</author>\n`;
+    xml += `      </creationInfo>\n`;
+  }
+  xml += `    </magnitude>\n`;
+  return xml;
 }
 
 /**
@@ -1143,8 +1239,12 @@ export function eventToQuakeML(event: MergedEvent): string {
   if (event.focal_mechanisms) {
     try {
       const focalMechanisms: FocalMechanism[] = JSON.parse(event.focal_mechanisms);
-      focalMechanisms.forEach(fm => {
-        xml += formatFocalMechanism(fm) + '\n';
+      focalMechanisms.forEach((fm, index) => {
+        const lifted = liftSimplifiedFocalMechanism(fm);
+        // A mechanism stored without an id (GeoNet enrichment) gets a deterministic one
+        // so two of them cannot both export as ".../unknown".
+        if (!lifted.publicID) lifted.publicID = `${event.id}-focalMechanism-${index + 1}`;
+        xml += formatFocalMechanism(lifted) + '\n';
       });
     } catch (e) {
       // Ignore parse errors
@@ -1172,55 +1272,46 @@ export function eventToQuakeML(event: MergedEvent): string {
       // unparseable JSON; fall through to scalar fallback
     }
   }
+  // The id the <preferredMagnitudeID> element will point at (set below).
+  let preferredMagnitudeExportId: string | undefined = event.preferred_magnitude_id
+    ? toResourceID(event.preferred_magnitude_id, 'magnitude', event.id)
+    : undefined;
   if (parsedMagnitudes && parsedMagnitudes.length > 0) {
-    const magnitudesToEmit = isMultiSourceMerge(event)
-      ? applyMergedMagnitudeValues(parsedMagnitudes, event)
-      : parsedMagnitudes;
-    magnitudesToEmit.forEach(magnitude => {
+    // Entries without an id (e.g. alternatives kept from a flat CSV import) get a
+    // deterministic one so two of them cannot collapse onto "unknown".
+    const withIds = parsedMagnitudes.map((magnitude, index) => ({
+      ...magnitude,
+      publicID: magnitude.publicID || `${event.id}-magnitude-${index + 1}`,
+    }));
+    // Keep source measurements intact. Rewriting an ML entry with a selected Mw
+    // also rewrote its identity while retaining the ML agency's creationInfo.
+    withIds.forEach(magnitude => {
       xml += formatMagnitude(magnitude) + '\n';
     });
-  } else {
-    // Fallback: reconstruct Magnitude from scalar database fields.
-    {
-      const magnitudeID = toResourceID(event.preferred_magnitude_id, 'magnitude', event.id);
-      xml += `    <magnitude publicID="${escapeXml(magnitudeID)}">\n`;
-
-      xml += `      <mag>\n        <value>${event.magnitude}</value>\n`;
-      if (event.magnitude_uncertainty != null) {
-        xml += `        <uncertainty>${event.magnitude_uncertainty}</uncertainty>\n`;
+    if (event.magnitude != null) {
+      const matching = withIds.filter(magnitude => matchesScalarMagnitude(magnitude, event));
+      const selected = matching.find(magnitude => magnitude.publicID === event.preferred_magnitude_id)
+        ?? (matching.length === 1 ? matching[0] : undefined);
+      if (selected) {
+        preferredMagnitudeExportId = toResourceID(selected.publicID, 'magnitude', event.id);
+      } else {
+        // The selected measurement may not be in the stored alternatives. Emit it
+        // separately, without borrowing a different measurement's ID or provenance.
+        const usedIds = new Set(withIds.map(m => toResourceID(m.publicID, 'magnitude', event.id)));
+        let magnitudeID = toResourceID(event.preferred_magnitude_id || `${event.id}-magnitude-preferred`, 'magnitude', event.id);
+        let suffix = 0;
+        while (usedIds.has(magnitudeID)) {
+          magnitudeID = toResourceID(`${event.id}-magnitude-preferred-${++suffix}`, 'magnitude', event.id);
+        }
+        xml += scalarMagnitudeXml(event, magnitudeID);
+        preferredMagnitudeExportId = magnitudeID;
       }
-      xml += `      </mag>\n`;
-
-      if (event.magnitude_type) {
-        xml += `      <type>${escapeXml(event.magnitude_type)}</type>\n`;
-      }
-      if (event.magnitude_station_count != null) {
-        xml += `      <stationCount>${event.magnitude_station_count}</stationCount>\n`;
-      }
-      if (event.preferred_origin_id) {
-        xml += `      <originID>${escapeXml(toResourceID(event.preferred_origin_id, 'origin', event.id))}</originID>\n`;
-      }
-      if (event.magnitude_method_id) {
-        xml += `      <methodID>${escapeXml(toResourceID(event.magnitude_method_id, 'method'))}</methodID>\n`;
-      }
-      // Prefer magnitude-specific evaluation fields; fall back to origin-level fields.
-      const magEvalMode = event.magnitude_evaluation_mode || event.evaluation_mode;
-      const magEvalStatus = event.magnitude_evaluation_status || event.evaluation_status;
-      if (magEvalMode) {
-        xml += `      <evaluationMode>${escapeXml(magEvalMode)}</evaluationMode>\n`;
-      }
-      if (magEvalStatus) {
-        xml += `      <evaluationStatus>${escapeXml(magEvalStatus)}</evaluationStatus>\n`;
-      }
-      // Fallback creationInfo from scalar agency/author fields
-      if (event.agency_id || event.author) {
-        xml += `      <creationInfo>\n`;
-        if (event.agency_id) xml += `        <agencyID>${escapeXml(event.agency_id)}</agencyID>\n`;
-        if (event.author) xml += `        <author>${escapeXml(event.author)}</author>\n`;
-        xml += `      </creationInfo>\n`;
-      }
-      xml += `    </magnitude>\n`;
     }
+  } else if (event.magnitude != null) {
+    // Fallback: reconstruct Magnitude from scalar database fields.
+    const magnitudeID = toResourceID(event.preferred_magnitude_id, 'magnitude', event.id);
+    xml += scalarMagnitudeXml(event, magnitudeID);
+    preferredMagnitudeExportId = magnitudeID;
   }
 
   // Station Magnitudes (schema order: 6th group, before origins)
@@ -1332,11 +1423,9 @@ export function eventToQuakeML(event: MergedEvent): string {
         xml += `      </quality>\n`;
       }
 
-      if (event.horizontal_uncertainty != null) {
-        xml += `      <originUncertainty>\n`;
-        // horizontalUncertainty in QuakeML is in meters; DB stores km
-        xml += `        <horizontalUncertainty>${event.horizontal_uncertainty * 1000}</horizontalUncertainty>\n`;
-        xml += `      </originUncertainty>\n`;
+      const flatUncertainty = originUncertaintyFromEvent(event);
+      if (flatUncertainty) {
+        xml += formatOriginUncertainty(flatUncertainty, '      ') + '\n';
       }
 
       if (event.evaluation_mode) {
@@ -1385,8 +1474,11 @@ export function eventToQuakeML(event: MergedEvent): string {
   if (event.preferred_origin_id) {
     xml += `    <preferredOriginID>${escapeXml(toResourceID(event.preferred_origin_id, 'origin', event.id))}</preferredOriginID>\n`;
   }
-  if (event.preferred_magnitude_id) {
-    xml += `    <preferredMagnitudeID>${escapeXml(toResourceID(event.preferred_magnitude_id, 'magnitude', event.id))}</preferredMagnitudeID>\n`;
+  if (preferredMagnitudeExportId) {
+    xml += `    <preferredMagnitudeID>${escapeXml(preferredMagnitudeExportId)}</preferredMagnitudeID>\n`;
+  }
+  if (event.preferred_focal_mechanism_id) {
+    xml += `    <preferredFocalMechanismID>${escapeXml(toResourceID(event.preferred_focal_mechanism_id, 'focalMechanism', event.id))}</preferredFocalMechanismID>\n`;
   }
 
   // Event type (schema order: after preferredIDs)
@@ -1484,6 +1576,9 @@ export function eventsToQuakeMLDocument(
   if (metadata?.mergeUseCase) addComment(`Merge Use Case: ${metadata.mergeUseCase}`);
   if (metadata?.mergeMethodology) addComment(`Merge Methodology: ${metadata.mergeMethodology}`);
   if (metadata?.mergeQualityAssessment) addComment(`Merge Quality Assessment: ${metadata.mergeQualityAssessment}`);
+  // The strategy and thresholds that produced the merge were carried by CSV/GeoJSON
+  // exports but dropped here (H2).
+  if (metadata?.mergeConfig) addComment(`Merge Config: ${JSON.stringify(metadata.mergeConfig)}`);
   if (metadata?.createdBy) addComment(`Created By: ${metadata.createdBy}`);
   if (metadata?.modifiedAt) addComment(`Modified At: ${metadata.modifiedAt}`);
   if (metadata?.sourceCatalogues) addComment(`Source Catalogues: ${JSON.stringify(metadata.sourceCatalogues)}`);
@@ -1492,7 +1587,8 @@ export function eventsToQuakeMLDocument(
   xml += `    <creationInfo>\n`;
   xml += `      <creationTime>${timestamp}</creationTime>\n`;
   xml += `      <agencyID>CatalogueOfCatalogues</agencyID>\n`;
-  xml += `      <version>${metadata?.version || '1.0'}</version>\n`;
+  // User-entered free text; "1 & 2" unescaped produced a malformed document.
+  xml += `      <version>${escapeXml(String(metadata?.version || '1.0'))}</version>\n`;
   xml += `    </creationInfo>\n`;
 
   // Add all events

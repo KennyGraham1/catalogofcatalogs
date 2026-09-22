@@ -183,7 +183,7 @@ function scoreMinimumDistance(dist?: number | null): { score: number; label: str
   // defaults to 0 ("no data") and therefore caps the min()-aggregated QS at 0.
   // This inconsistency is deliberate-but-debatable and depends on product intent
   // for how to treat missing nearest-station distance; left unchanged pending that
-  // decision (see CODEBASE_LOGIC_AUDIT.md).
+  // decision.
   if (dist === null || dist === undefined) return { score: 3, label: 'Unknown (assume fair)' };
   
   if (dist <= 30) return { score: 6, label: 'Excellent (≤30km)' };

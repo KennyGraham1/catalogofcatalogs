@@ -61,13 +61,30 @@ describe('bounding box construction', () => {
   it('sends a single in-range bbox for an ordinary mainland query', async () => {
     // Wellington, 50 km: latDelta = 50/111 = 0.450450,
     // lonDelta = 50/(111·cos 41.29°) = 50/(111·0.7513763) = 0.5994981.
+    // With an empty service the route climbs its 5 / 20 / 50 km ladder; the last box
+    // is the full-radius one.
     await call('lat=-41.29&lon=174.77&radius=50');
     const boxes = requestedBboxes();
-    expect(boxes).toHaveLength(1);
-    expect(boxes[0].minLon).toBeCloseTo(174.77 - 0.5994981, 6);
-    expect(boxes[0].maxLon).toBeCloseTo(174.77 + 0.5994981, 6);
-    expect(boxes[0].minLat).toBeCloseTo(-41.29 - 0.450450, 6);
-    expect(boxes[0].maxLat).toBeCloseTo(-41.29 + 0.450450, 6);
+    expect(boxes).toHaveLength(3);
+    const full = boxes[boxes.length - 1];
+    expect(full.minLon).toBeCloseTo(174.77 - 0.5994981, 6);
+    expect(full.maxLon).toBeCloseTo(174.77 + 0.5994981, 6);
+    expect(full.minLat).toBeCloseTo(-41.29 - 0.450450, 6);
+    expect(full.maxLat).toBeCloseTo(-41.29 + 0.450450, 6);
+    // The first box is the 5 km one: 5/111 = 0.045045 in latitude.
+    expect(boxes[0].maxLat - boxes[0].minLat).toBeCloseTo(2 * 0.045045, 6);
+  });
+
+  it('stops widening once the requested number of faults lies inside a small box', async () => {
+    // Three faults within 2 km of the point: the 5 km box already settles the ranking.
+    const near = (id: string, dLat: number) => fault(id, [[[174.77, -41.29 + dLat], [174.771, -41.29 + dLat]]], { NAME: id });
+    (global.fetch as jest.Mock).mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({ type: 'FeatureCollection', features: [near('a', 0.005), near('b', 0.01), near('c', 0.015)] }),
+    }));
+    const { body } = await call('lat=-41.29&lon=174.77&radius=50&limit=3');
+    expect(body.faults.map((f: any) => f.id)).toEqual(['a', 'b', 'c']);
+    expect(requestedBboxes()).toHaveLength(1);
   });
 
   it('splits a query that straddles 180 into two in-range boxes', async () => {
@@ -76,7 +93,7 @@ describe('bounding box construction', () => {
     // 179.2837220 .. 180.3162780, i.e. 179.2837220 .. 180 plus
     // -180 .. -179.6837220.
     await call('lat=-29.25&lon=179.8&radius=50');
-    const boxes = requestedBboxes();
+    const boxes = requestedBboxes().slice(-2); // the full-radius pair
     expect(boxes).toHaveLength(2);
     for (const box of boxes) {
       expect(box.minLon).toBeGreaterThanOrEqual(-180);
@@ -94,7 +111,7 @@ describe('bounding box construction', () => {
     // -180.4162780 .. -179.3837220, wrapped to 179.5837220 .. 180 plus
     // -180 .. -179.3837220.
     await call('lat=-29.25&lon=-179.9&radius=50');
-    const boxes = requestedBboxes();
+    const boxes = requestedBboxes().slice(-2); // the full-radius pair
     expect(boxes).toHaveLength(2);
     expect(boxes[0].minLon).toBeCloseTo(179.5837220, 6);
     expect(boxes[0].maxLon).toBe(180);
@@ -107,11 +124,14 @@ describe('bounding box construction', () => {
     // than a half circle: every longitude qualifies. Latitude must stay <= 90.
     await call('lat=89.9&lon=0&radius=50');
     const boxes = requestedBboxes();
-    expect(boxes).toHaveLength(1);
-    expect(boxes[0].minLon).toBe(-180);
-    expect(boxes[0].maxLon).toBe(180);
-    expect(boxes[0].maxLat).toBe(90);
-    expect(Number.isFinite(boxes[0].minLon)).toBe(true);
+    const full = boxes[boxes.length - 1]; // the 50 km rung of the ladder
+    expect(full.minLon).toBe(-180);
+    expect(full.maxLon).toBe(180);
+    expect(full.maxLat).toBe(90);
+    for (const box of boxes) {
+      expect(Number.isFinite(box.minLon)).toBe(true);
+      expect(box.maxLat).toBeLessThanOrEqual(90);
+    }
   });
 
   it('never emits a longitude outside [-180, 180] for any query point', async () => {
@@ -134,6 +154,38 @@ describe('bounding box construction', () => {
     const zero = await call('lat=-41.29&lon=174.77&radius=0');
     expect(zero.status).toBe(400);
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('dense fault search completeness', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it.each([12000, 12001])('does not claim a nearest result from a truncated %i-trace search', async (total) => {
+    const rows = Array.from({ length: total }, (_, i) => {
+      const nearest = i === total - 1;
+      const latitude = nearest ? -41.278 : -41.27;
+      return fault(nearest ? 'nearest-last' : `far-${i}`, [[[174.772, latitude], [174.7721, latitude]]], {});
+    });
+    global.fetch = jest.fn(async (url) => {
+      const query = new URL(String(url)).searchParams;
+      const [west, south, east, north] = query.get('bbox')!.split(',').slice(0, 4).map(Number);
+      const start = Number(query.get('startIndex') || 0);
+      const count = Number(query.get('count'));
+      const matched = rows.filter(row => row.geometry.coordinates.some(line => line.some(([x, y]) => x >= west && x <= east && y >= south && y <= north)));
+      return { ok: true, json: async () => ({ numberMatched: matched.length, features: matched.slice(start, start + count) }) };
+    }) as unknown as typeof fetch;
+    const { status, body } = await call('lat=-41.29&lon=174.77&radius=50&limit=1');
+    if (total === 12000) {
+      expect(status).toBe(200);
+      expect(body.faults[0].id).toBe('nearest-last');
+      expect(body.faults[0].distance).toBe(1.3);
+    } else {
+      expect(status).toBe(502);
+      expect(body.code).toBe('FAULT_DATA_INCOMPLETE');
+      expect(body.faults).toBeUndefined();
+      expect(body.success).not.toBe(true);
+    }
+    expect((global.fetch as jest.Mock).mock.calls.length).toBeLessThanOrEqual(18);
   });
 });
 
@@ -203,7 +255,9 @@ describe('coded-domain attributes', () => {
     mockWfs([straddling]);
 
     const { body } = await call('lat=-29.25&lon=179.8&radius=50');
-    expect((global.fetch as jest.Mock).mock.calls).toHaveLength(2);
+    // Every rung of the ladder that straddles 180 issues two boxes; the fault comes
+    // back from both halves of each and is reported once.
+    expect((global.fetch as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(body.faults).toHaveLength(1);
     expect(body.faults[0].slipType).toBe('reverse');
   });

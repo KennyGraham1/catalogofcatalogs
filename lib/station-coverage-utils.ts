@@ -60,14 +60,16 @@ export function parseStationData(
   eventLon: number,
   originQuality?: OriginQualityCoverage | null
 ): StationCoverage | null {
-  if (!picksJson && !arrivalsJson) return null;
-  
+  const storedGap = finiteInRange(originQuality?.azimuthalGap, 0, 360);
+  const storedCount = finiteInRange(originQuality?.usedStationCount, 0, Number.MAX_SAFE_INTEGER);
+  // Stored OriginQuality alone (no phase data) is still a statement about coverage.
+  if (!picksJson && !arrivalsJson && storedGap === null && storedCount === null) return null;
+
   try {
     const stations: Station[] = [];
-    const azimuths: number[] = [];
-    const distances: number[] = [];
+    const stationKeyByPickId = new Map<string, string>();
     let picksParsed = false;
-    
+
     // Parse picks to get station information
     if (picksJson) {
       const picks = JSON.parse(picksJson);
@@ -81,7 +83,12 @@ export function parseStationData(
               latitude: 0, // Would need station metadata
               longitude: 0,
             };
-            
+            // A pick that names no station cannot be merged with another such pick:
+            // key it on its own id so distinct unnamed stations stay distinct.
+            const named = !!pick.waveformID.stationCode;
+            const key = named ? `${station.network}.${station.code}` : `pick:${pick.publicID ?? `#${stations.length}`}`;
+            if (typeof pick.publicID === 'string') stationKeyByPickId.set(pick.publicID, key);
+
             // Check if we already have this station
             if (!stations.find(s => s.code === station.code && s.network === station.network)) {
               stations.push(station);
@@ -90,46 +97,55 @@ export function parseStationData(
         });
       }
     }
-    
-    // Parse arrivals to get azimuth and distance information
+
+    // Parse arrivals for azimuth and distance, ONE entry per station. The card
+    // describes station geometry, so a station that contributed both a P and an
+    // S arrival must count once: with both phases, twelve evenly spaced stations
+    // were previously reported as "clustered" (every gap doubled up as 0 and 30)
+    // and a second phase at a near station pulled the mean distance towards it.
+    const azimuthByStation = new Map<string, number>();
+    const distanceByStation = new Map<string, number>();
     if (arrivalsJson) {
       const arrivals = JSON.parse(arrivalsJson);
       if (Array.isArray(arrivals)) {
-        arrivals.forEach(arrival => {
-          if (arrival.azimuth !== undefined && arrival.azimuth !== null) {
-            azimuths.push(arrival.azimuth);
+        arrivals.forEach((arrival, index) => {
+          const key =
+            (typeof arrival.pickID === 'string' && stationKeyByPickId.get(arrival.pickID)) ||
+            (typeof arrival.pickID === 'string' ? `pick:${arrival.pickID}` : `arrival:${index}`);
+          if (arrival.azimuth !== undefined && arrival.azimuth !== null && !azimuthByStation.has(key)) {
+            azimuthByStation.set(key, arrival.azimuth);
           }
-          if (arrival.distance !== undefined && arrival.distance !== null) {
+          if (arrival.distance !== undefined && arrival.distance !== null && !distanceByStation.has(key)) {
             // Distance is in degrees, convert to km
-            distances.push(arrival.distance * 111.32);
+            distanceByStation.set(key, arrival.distance * 111.32);
           }
         });
       }
     }
-    
+    const azimuths = Array.from(azimuthByStation.values());
+    const distances = Array.from(distanceByStation.values());
+
     // Azimuthal gap: stored OriginQuality value first, arrivals second.
-    const storedGap = finiteInRange(originQuality?.azimuthalGap, 0, 360);
     const derivedGap = calculateAzimuthalGapDetail(azimuths).gap;
     const azimuthalGap = storedGap ?? derivedGap;
     const azimuthalGapSource: StationCoverage['azimuthalGapSource'] =
       storedGap !== null ? 'origin-quality' : derivedGap !== null ? 'arrivals' : null;
-    
+
     // Station count: stored OriginQuality value first, distinct picks second.
-    const storedCount = finiteInRange(originQuality?.usedStationCount, 0, Number.MAX_SAFE_INTEGER);
     const stationCount = storedCount ?? (picksParsed ? stations.length : null);
     const stationCountSource: StationCoverage['stationCountSource'] =
       storedCount !== null ? 'origin-quality' : picksParsed ? 'picks' : null;
-    
+
     // Calculate distance statistics
     const averageDistance = distances.length > 0
       ? distances.reduce((sum, d) => sum + d, 0) / distances.length
       : 0;
     const minDistance = distances.length > 0 ? Math.min(...distances) : 0;
     const maxDistance = distances.length > 0 ? Math.max(...distances) : 0;
-    
+
     // Determine coverage quality
     const coverageQuality = determineCoverageQuality(azimuthalGap, stationCount);
-    
+
     return {
       stations,
       azimuths,
@@ -343,7 +359,10 @@ export function calculateDistance(
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
     Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  // Rounding can push `a` a few ulp above 1 for antipodal points, which made
+  // sqrt(1 - a) NaN; the true value there is half the circumference.
+  const clamped = Math.min(1, Math.max(0, a));
+  const c = 2 * Math.atan2(Math.sqrt(clamped), Math.sqrt(1 - clamped));
   return R * c;
 }
 

@@ -1022,12 +1022,15 @@ interaction zone is:
 \end{align}
 the two-branch time window $T(M)$ following the larger-magnitude relation for
 $M \geq 6.5$ and the small-magnitude relation otherwise.  Events falling within
-$L(M)$ and $T(M)$ of a larger mainshock are assigned to its cluster.  Note that
-CofC applies $T(M)$ \emph{symmetrically} about the mainshock, so events in the
-window both before and after it are removed; the original \citet{gardner1974}
-procedure applies the window forward in time only, and a symmetric window
-therefore also removes foreshocks and yields a slightly larger declustered
-fraction.  The Reasenberg \citeyearpar{reasenberg1985} algorithm, which
+$L(M)$ and $T(M)$ of a larger mainshock are assigned to its cluster.  CofC
+applies $T(M)$ \emph{forward} in time from the mainshock, as in the original
+\citet{gardner1974} procedure and as the OpenQuake \texttt{hmtk} reference
+implementation does with its foreshock-window proportion
+(\texttt{fs\_time\_prop}) set to zero; foreshocks are therefore not removed.  (A
+symmetric window that also reaches back $T(M)$ before each mainshock is a
+common variant; on the synthetic catalogue of Section~\ref{sec:example} it
+removes a further 2\,635 events and lowers the declustered $\hat{b}$ by
+$0.05$, so the choice is not cosmetic and is stated here.)  The Reasenberg \citeyearpar{reasenberg1985} algorithm, which
 uses an interaction zone based on the Omori--Utsu law
 \citep{omori1894,utsu1961} and adapts to the local seismicity rate, is
 implemented in the analysis library as an alternative, though the browser
@@ -1035,11 +1038,9 @@ worker currently exposes only the Gardner-Knopoff method.
 
 Declustering returns a mainshock/aftershock partition for the events under
 analysis; writing that partition back as a separate, tagged catalogue within the
-platform is specified but not yet implemented.  Because the window is
-symmetric, events preceding a larger mainshock are removed as dependent rather
-than retained; they are not separately labelled as foreshocks, so the
-declustered set should be read as \emph{independent events} rather than as
-mainshocks in the strict sense \citep{vanstiphout2012}.
+platform is specified but not yet implemented.  Events preceding a larger
+mainshock are retained; the declustered set is the mainshock population in the
+usual window-method sense \citep{vanstiphout2012}.
 
 \subsection{Cumulative seismic moment}
 
@@ -1124,10 +1125,11 @@ that period.
 
 Both catalogues are uploaded as QuakeML.  CofC reports per-catalogue
 statistics immediately: event counts, magnitude range, temporal span,
-and completeness grade distribution.  Cross-field validation flags
-$\sim$2\% of Agency~B events for unusually large depth uncertainties
-($\sigma_z > 2 \times z$), consistent with poorly constrained shallow
-focal depths near the Hikurangi subduction interface.
+and completeness grade distribution.  Cross-field validation also flags
+events whose depth uncertainty exceeds twice the depth itself
+($\sigma_z > 2 \times z$), a signature of poorly constrained shallow focal
+depths near the Hikurangi subduction interface; the synthetic catalogue does
+not model depth uncertainty, so no count is quoted for it here.
 
 \subsection{Step 2: Quality assessment}
 
@@ -1166,12 +1168,19 @@ This retention is measured by applying the threshold to the simulated
 per-event scores of the merged provenance mix, not assumed: with the threshold
 set above Agency~B's median score of 58, and below GeoNet's of 72, a cut of
 this size is the arithmetic consequence of the two score distributions.
-Of the 87\,711 removed events, 55\% are Agency-B-only sources and 60\% have
-azimuthal gap $> 180^{\circ}$; conversely the filter removes 99\% of the
-53\,320 merged events with gap $> 180^{\circ}$, the population visible in the
-tail of Figure~\ref{fig:gap}.  The cut is severe, but it is exactly the
-spatially biased subset that would otherwise distort spatial $b$-value maps
-along the Hikurangi margin.
+Those simulated scores are a surrogate, not equation~\eqref{eq:quality}: the
+figure script assigns each synthetic event a score that decreases linearly
+with its azimuthal gap plus noise, then shifts each catalogue to its stated
+median.  The synthetic events carry no station, phase, or uncertainty
+metadata, so the five-dimension index cannot be evaluated on them.
+Consequently the composition of the removed set---55\% Agency-B-only sources,
+60\% with azimuthal gap $> 180^{\circ}$, and 99\% of the 53\,320 merged
+events with gap $> 180^{\circ}$ removed---is a property of that gap-driven
+surrogate and should be read as an illustration of what a network-geometry
+weighted score \emph{would} isolate, not as a measurement of equation~\eqref{eq:quality}.
+The population it isolates, the tail of Figure~\ref{fig:gap}, is nonetheless
+the spatially biased subset that would otherwise distort spatial $b$-value
+maps along the Hikurangi margin.
 
 Gutenberg-Richter $b$-value estimation on the quality-filtered catalogue
 (Section~\ref{sec:analysis}), restricted to the 48\,600 of the 81\,289
@@ -1196,19 +1205,21 @@ the merge strategy applied.
 
 As an additional preprocessing step, applying Gardner-Knopoff declustering
 (Section~\ref{sec:decluster}) to the 48\,600 events above $M_c$ removes
-18\,542 of them (38\%) and lowers $\hat{b}$ to $0.95 \pm 0.005$
-(Figure~\ref{fig:fmd}), illustrating the sensitivity of $b$-value estimates to
-preprocessing choices (Section~\ref{sec:biases}).  The removal fraction is an
-output of the windows, not a design constant, and it exceeds the 23\% that was
-injected as clustered: the windows recover 97\% of the injected aftershocks but
-also remove 7\,697 independent events that merely fall inside the space-time
-window of a larger one.  Those swept-up independent events are preferentially
-small ($b = 1.24$ among themselves, against the $b = 1.00$ of the population
-they come from), so removing them flattens the surviving distribution and the
-declustered $\hat{b} = 0.95$ sits $0.05$ \emph{below} the planted background
-$b = 1.00$ rather than recovering it.  Window methods over-decluster in
-precisely this way \citep{vanstiphout2012}; the controlled example makes the
-size of the resulting $b$ bias explicit.  Figure~\ref{fig:funnel} summarises the
+15\,907 of them (33\%) and brings $\hat{b}$ to $1.00 \pm 0.006$
+(Figure~\ref{fig:fmd}), recovering the planted background value to within
+$0.001$.  The removal fraction is an output of the windows, not a design
+constant, and it exceeds the 23\% that was injected as clustered: the windows
+recover the injected aftershocks but also sweep up 5\,115 independent events
+that fall inside the space-time window of a larger one.  Because the synthetic
+clusters are placed only \emph{after} their parent, a forward window is exactly
+matched to this construction, and the recovery should be read as a check of the
+estimator and the windows rather than as evidence about real seismicity.  The
+same run with a symmetric window removes 18\,542 events (38\%) and gives
+$\hat{b} = 0.95 \pm 0.005$: the extra 2\,635 removals are preferentially small
+independent events, which flattens the surviving distribution.  A defensible
+change of window convention therefore moves $\hat{b}$ by ten times the formal
+error quoted with it, which is the sensitivity to preprocessing choices that
+Section~\ref{sec:biases} addresses.  Figure~\ref{fig:funnel} summarises the
 event-count flow through these steps.
 
 \section{Guidance on Avoiding Statistical Biases}
@@ -1278,9 +1289,11 @@ Aftershock sequences cluster in space, time, and magnitude, violating this
 assumption and shifting the estimated $b$.  In the synthetic example of
 Section~\ref{sec:example}, where the clustered population was assigned a higher
 $b$ by construction, the quality-filtered catalogue gives $\hat{b} = 1.05$
-before declustering versus $0.95$ after; the sign of this shift is a property
-of the injected sequence, not a universal result, and part of the shift is the
-window method's own bias rather than the removal of genuine aftershocks.
+before declustering versus $1.00$ after; the sign of this shift is a property
+of the injected sequence, not a universal result.  The declustered value also
+depends on the window convention: a symmetric window gives $0.95$ on the same
+catalogue (Section~\ref{sec:decluster}), a difference ten times the formal
+$\sigma_b$, so the convention must be reported alongside any declustered $b$.
 
 \textbf{Guidance.}
 \begin{enumerate}[leftmargin=*]
@@ -1522,9 +1535,10 @@ above it, the 23\% of those injected as clustered sequences, and the planted
 $b$-values of the two populations are all \emph{inputs} of the synthetic
 construction.  The quality-filter retention, the fraction that Gardner-Knopoff
 declustering removes, and every $b$-value quoted are \emph{outputs} computed
-from them.  The two median quality scores (72 and 58) are the exception: the
-simulated score distributions are shifted so that their medians take those
-values, so they are stipulated inputs rather than emergent results.  The
+from them.  The per-event quality scores are the exception: they are a gap-driven
+surrogate (Section~\ref{sec:example}, Step~4), not equation~\eqref{eq:quality},
+and their two catalogue medians (72 and 58) are stipulated inputs that the
+simulated distributions are shifted to, rather than emergent results.  The
 \emph{platform's own} estimators and merge engine are exercised separately by two
 tests.  \texttt{\_\_tests\_\_/paper/worked-example.test.ts} runs the CofC
 Gutenberg-Richter, completeness, and Gardner-Knopoff routines on a seeded
@@ -1656,9 +1670,9 @@ conservatively.}
     after) above $M_c = 2.0$ (dotted vertical line); the shallower slope of the
     declustered fit is the $\hat{b}$ shift quoted below.  \textit{(b)}~Non-cumulative
     FMD showing the excess of small events contributed by aftershock sequences.  Declustering removes
-    18\,542 events (38\% of the catalogue, against the 23\% injected as
+    15\,907 events (33\% of the catalogue, against the 23\% injected as
     clustered), shifting $\hat{b}$ from $1.05 \pm 0.005$
-    (before declustering) to $0.95 \pm 0.005$ (declustered).
+    (before declustering) to $1.00 \pm 0.006$ (declustered).
     Data are synthetic and for illustration only (see
     Section~\ref{sec:example}).
   }
@@ -1694,7 +1708,7 @@ conservatively.}
   \draw[->,red!50!black] (c2.west) -- (2.6,-1.875);
   \draw[->,red!50!black] (c3.west) -- (1.4,-3.125);
   \node[anchor=north, font=\footnotesize] (res) at (0,-4.6)
-    {Gutenberg--Richter fit: $\hat{b}=1.05\pm0.005$\quad(after declustering, $\hat{b}=0.95$)};
+    {Gutenberg--Richter fit: $\hat{b}=1.05\pm0.005$\quad(after declustering, $\hat{b}=1.00$)};
   \draw[->,blue!55!black] (b4.south) -- (res.north);
 \end{tikzpicture}%
 }

@@ -65,6 +65,13 @@ export interface GeoNetQueryParams {
 /**
  * GeoNet event in text format (simplified)
  */
+export interface GeoNetFetchDiagnostics {
+  /** Data lines skipped because they were malformed or failed field validation. */
+  skippedRows: number;
+  /** The response ended mid-row: the download was cut short. */
+  truncatedTail: boolean;
+}
+
 export interface GeoNetEventText {
   EventID: string;
   Time: string;
@@ -85,6 +92,11 @@ export interface GeoNetEventText {
 /**
  * GeoNet API client with circuit breaker protection
  */
+/** True for an HTTP 404 on a request that asked GeoNet to signal "no data" with 404. */
+function isExplicitNoData(error: unknown, params: GeoNetQueryParams): boolean {
+  return params.nodata === '404' && typeof error === 'object' && error !== null && (error as { status?: number }).status === 404;
+}
+
 export class GeoNetClient {
   private baseUrl: string;
   private circuitBreaker: CircuitBreaker;
@@ -129,6 +141,13 @@ export class GeoNetClient {
   /**
    * Get circuit breaker statistics
    */
+  /** Rows the last text fetch could not use, so an importer can report an incomplete window. */
+  private lastFetchDiagnostics: GeoNetFetchDiagnostics = { skippedRows: 0, truncatedTail: false };
+
+  getLastFetchDiagnostics(): GeoNetFetchDiagnostics {
+    return { ...this.lastFetchDiagnostics };
+  }
+
   getCircuitBreakerStats() {
     return this.circuitBreaker.getStats();
   }
@@ -168,22 +187,36 @@ export class GeoNetClient {
 
       // retryFetchText reads the body inside the retried attempt, so the 30 s timeout
       // (and the abort behind it) covers the download and not just the headers.
-      const { status, contentType, text } = await retryFetchText(url, {
-        headers: {
-          'User-Agent': 'CatalogOfCatalogs/1.0 (https://github.com/KennyGraham1/catalogofcatalogs)',
-        },
-      }, {
-        maxAttempts: 3,
-        initialDelay: 1000,
-        maxDelay: 10000,
-        timeout: 30000,
-        onRetry: (error, attempt, delay) => {
-          console.log(`[GeoNetClient] Retry attempt ${attempt} for text fetch: ${error.message}. Waiting ${delay}ms...`);
-        },
-      });
+      let fetched: { status: number; contentType: string; text: string };
+      try {
+        fetched = await retryFetchText(url, {
+          headers: {
+            'User-Agent': 'CatalogOfCatalogs/1.0 (https://github.com/KennyGraham1/catalogofcatalogs)',
+          },
+        }, {
+          maxAttempts: 3,
+          initialDelay: 1000,
+          maxDelay: 10000,
+          timeout: 30000,
+          onRetry: (error, attempt, delay) => {
+            console.log(`[GeoNetClient] Retry attempt ${attempt} for text fetch: ${error.message}. Waiting ${delay}ms...`);
+          },
+        });
+      } catch (error) {
+        // FDSN lets the caller choose 404 as the "no data" code; only then is a 404
+        // an empty result rather than a transport failure.
+        if (isExplicitNoData(error, params)) {
+          console.log('[GeoNetClient] No data found (nodata=404)');
+          this.lastFetchDiagnostics = { skippedRows: 0, truncatedTail: false };
+          return [];
+        }
+        throw error;
+      }
+      const { status, contentType, text } = fetched;
 
       if (status === 204 || status === 404) {
         console.log('[GeoNetClient] No data found');
+        this.lastFetchDiagnostics = { skippedRows: 0, truncatedTail: false };
         return [];
       }
 
@@ -210,9 +243,19 @@ export class GeoNetClient {
         console.warn(`[GeoNetClient] Unexpected Content-Type: ${contentType}. Expected text/plain or text/csv.`);
       }
 
-      const lines = text.trim().split('\n');
+      // FDSN event-text permits '#' comment lines; the column header is the first
+      // pipe-delimited line, which may itself start with '#'.
+      const allLines = text.split('\n').map(l => l.replace(/\r$/, ''));
+      // The column header is the pipe-delimited line naming the columns; prefer one
+      // that names EventID/Time over an earlier '#' comment that merely contains a pipe.
+      const namedHeader = allLines.findIndex(l => l.includes('|') && /eventid|\btime\b/i.test(l));
+      const headerIndex = namedHeader >= 0 ? namedHeader : allLines.findIndex(l => l.includes('|'));
+      const lines = headerIndex >= 0
+        ? allLines.slice(headerIndex).filter((l, i) => i === 0 || !l.trim().startsWith('#'))
+        : allLines.filter(l => l.trim() !== '');
 
       if (lines.length === 0) {
+        this.lastFetchDiagnostics = { skippedRows: 0, truncatedTail: false };
         return [];
       }
 
@@ -236,15 +279,28 @@ export class GeoNetClient {
 
       // Parse data lines
       const events: GeoNetEventText[] = [];
+      let skippedRows = 0;
+      let lastDataIndex = lines.length - 1;
+      while (lastDataIndex > 0 && lines[lastDataIndex].trim() === '') lastDataIndex--;
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue; // Skip empty lines
 
         const values = line.split('|').map(v => v.trim());
 
-        // Skip malformed lines that don't have enough values
+        // GeoNet writes every column on every row (empty ones included), so a FINAL
+        // row with fewer columns than the header is a body cut off mid-row: everything
+        // after it is missing and the window must not be reported as a clean success.
+        // Any earlier short row is skipped as malformed.
+        if (i === lastDataIndex && values.length < header.length) {
+          this.lastFetchDiagnostics = { skippedRows: skippedRows + 1, truncatedTail: true };
+          throw new Error(
+            `GeoNet response ended mid-row (${events.length} complete rows before it); the download was truncated`
+          );
+        }
         if (values.length < header.length / 2) {
           console.warn(`[GeoNetClient] Skipping malformed line ${i}: ${line.substring(0, 100)}`);
+          skippedRows++;
           continue;
         }
 
@@ -275,18 +331,21 @@ export class GeoNetClient {
         // Skip events with invalid required numeric fields
         if (!hasValidRequiredFields) {
           console.warn(`[GeoNetClient] Skipping event on line ${i} due to invalid required fields`);
+          skippedRows++;
           continue;
         }
 
         // Validate EventID and Time are present
         if (!event.EventID || !event.Time) {
           console.warn(`[GeoNetClient] Skipping event on line ${i} due to missing EventID or Time`);
+          skippedRows++;
           continue;
         }
 
         events.push(event as GeoNetEventText);
       }
 
+      this.lastFetchDiagnostics = { skippedRows, truncatedTail: false };
       console.log(`[GeoNetClient] Fetched ${events.length} events`);
       return events;
     });
@@ -305,19 +364,29 @@ export class GeoNetClient {
 
       // Body read inside the retried attempt (see fetchEventsText) so the timeout
       // covers the QuakeML download, which is far larger than the text format.
-      const { status, text: xml } = await retryFetchText(url, {
-        headers: {
-          'User-Agent': 'CatalogOfCatalogs/1.0 (https://github.com/KennyGraham1/catalogofcatalogs)',
-        },
-      }, {
-        maxAttempts: 3,
-        initialDelay: 1000,
-        maxDelay: 10000,
-        timeout: 30000,
-        onRetry: (error, attempt, delay) => {
-          console.log(`[GeoNetClient] Retry attempt ${attempt} for QuakeML fetch: ${error.message}. Waiting ${delay}ms...`);
-        },
-      });
+      let fetched: { status: number; text: string };
+      try {
+        fetched = await retryFetchText(url, {
+          headers: {
+            'User-Agent': 'CatalogOfCatalogs/1.0 (https://github.com/KennyGraham1/catalogofcatalogs)',
+          },
+        }, {
+          maxAttempts: 3,
+          initialDelay: 1000,
+          maxDelay: 10000,
+          timeout: 30000,
+          onRetry: (error, attempt, delay) => {
+            console.log(`[GeoNetClient] Retry attempt ${attempt} for QuakeML fetch: ${error.message}. Waiting ${delay}ms...`);
+          },
+        });
+      } catch (error) {
+        if (isExplicitNoData(error, params)) {
+          console.log('[GeoNetClient] No data found (nodata=404)');
+          return null;
+        }
+        throw error;
+      }
+      const { status, text: xml } = fetched;
 
       if (status === 204 || status === 404) {
         console.log('[GeoNetClient] No data found');

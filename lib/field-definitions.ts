@@ -560,6 +560,18 @@ export const FIELD_ALIASES: Record<string, { exactMatches: string[]; aliases: st
     exactMatches: ['horizontal_uncertainty', 'horizontalUncertainty'],
     aliases: ['horizontalerror', 'horiz_unc', 'h_uncertainty', 'herr', 'horizontal_error', 'seh']
   },
+  min_horizontal_uncertainty: {
+    exactMatches: ['min_horizontal_uncertainty', 'minHorizontalUncertainty'],
+    aliases: ['semi_minor_axis', 'semiminoraxis', 'smin']
+  },
+  max_horizontal_uncertainty: {
+    exactMatches: ['max_horizontal_uncertainty', 'maxHorizontalUncertainty'],
+    aliases: ['semi_major_axis', 'semimajoraxis', 'smaj']
+  },
+  azimuth_max_horizontal_uncertainty: {
+    exactMatches: ['azimuth_max_horizontal_uncertainty', 'azimuthMaxHorizontalUncertainty'],
+    aliases: ['ellipse_azimuth', 'sazimuth', 'saz']
+  },
 
   // Origin metadata
   depth_type: {

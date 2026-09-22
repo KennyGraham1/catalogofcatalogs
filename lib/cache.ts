@@ -11,12 +11,27 @@ interface CacheEntry<T> {
 interface CacheOptions {
   maxSize?: number;
   defaultTTL?: number;
+  /**
+   * Upper bound on rows in arrays and paginated { data: [...] } responses. Event pages are
+   * 500-5000 rows each, so an entry-count cap alone let this cache retain
+   * hundreds of megabytes (measured 324 MB at maxSize=100).
+   */
+  maxRows?: number;
+}
+
+function countRows(value: unknown): number {
+  if (Array.isArray(value)) return value.length;
+  if (value !== null && typeof value === 'object' && 'data' in value && Array.isArray(value.data)) {
+    return value.data.length;
+  }
+  return 0;
 }
 
 class Cache {
   private cache: Map<string, CacheEntry<any>>;
   private defaultTTL: number; // Time to live in milliseconds
   private maxSize: number;
+  private maxRows: number;
   private hits: number = 0;
   private misses: number = 0;
 
@@ -25,9 +40,11 @@ class Cache {
     if (typeof options === 'number') {
       this.defaultTTL = options;
       this.maxSize = 100;
+      this.maxRows = Infinity;
     } else {
       this.defaultTTL = options.defaultTTL || 5 * 60 * 1000;
       this.maxSize = options.maxSize || 100;
+      this.maxRows = options.maxRows ?? Infinity;
     }
     this.cache = new Map();
   }
@@ -87,6 +104,19 @@ class Cache {
       timestamp: Date.now(),
       hits: 0,
     });
+
+    // Evict least-recently-used entries until response rows fit the budget. The
+    // entry just written is never evicted, so an oversized page is still served.
+    if (this.maxRows !== Infinity) {
+      let rows = 0;
+      this.cache.forEach((entry) => { rows += countRows(entry.data); });
+      for (const oldest of Array.from(this.cache.keys())) {
+        if (rows <= this.maxRows || oldest === key) break;
+        const entry = this.cache.get(oldest);
+        rows -= countRows(entry?.data);
+        this.cache.delete(oldest);
+      }
+    }
   }
 
   /**
@@ -211,7 +241,7 @@ class Cache {
 // Export singleton instances for different data types
 export const apiCache = new Cache({ defaultTTL: 5 * 60 * 1000, maxSize: 100 });
 export const catalogueCache = new Cache({ defaultTTL: 10 * 60 * 1000, maxSize: 50 });
-export const eventCache = new Cache({ defaultTTL: 5 * 60 * 1000, maxSize: 100 });
+export const eventCache = new Cache({ defaultTTL: 5 * 60 * 1000, maxSize: 100, maxRows: 50_000 });
 export const statisticsCache = new Cache({ defaultTTL: 15 * 60 * 1000, maxSize: 30 });
 
 // Export the class for custom instances

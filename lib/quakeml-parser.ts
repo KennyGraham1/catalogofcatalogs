@@ -29,7 +29,13 @@ import type {
   CreationInfo,
   Comment,
   EventDescription,
-  WaveformStreamID
+  WaveformStreamID,
+  IntegerQuantity,
+  CompositeTime,
+  ConfidenceEllipsoid,
+  StationMagnitudeContribution,
+  SourceTimeFunction,
+  DataUsed,
 } from './types/quakeml';
 
 function escapeRegex(text: string): string {
@@ -126,17 +132,41 @@ const EVENT_CHILD_ELEMENTS = [
  */
 function extractTagValue(xml: string, tagName: string): string | undefined {
   const tag = nsTag(tagName);
-  const regex = new RegExp(`<${tag}\\b[^>]*>([^<]*)<\\/${tag}>`, 's');
+  // Content is character data, CDATA sections, or any mix of the two (a pretty-printer
+  // may surround a CDATA section with whitespace; a large node may be split into
+  // several sections). Anything containing a child element is not a text node.
+  const regex = new RegExp(`<${tag}\\b[^>]*>((?:<!\\[CDATA\\[[\\s\\S]*?\\]\\]>|[^<])*)<\\/${tag}>`, 's');
   const match = xml.match(regex);
-  return match ? decodeXmlEntities(match[1].trim()) : undefined;
+  if (!match) return undefined;
+  return xmlTextContent(match[1]).trim();
+}
+
+/**
+ * The text value of mixed character data and CDATA sections: CDATA is literal and is
+ * NOT entity-decoded; character data is.
+ */
+function xmlTextContent(inner: string): string {
+  if (inner.indexOf('<![CDATA[') === -1) return decodeXmlEntities(inner);
+  let out = '';
+  const re = /<!\[CDATA\[([\s\S]*?)\]\]>/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(inner)) !== null) {
+    out += decodeXmlEntities(inner.slice(last, m.index)) + m[1];
+    last = m.index + m[0].length;
+  }
+  return out + decodeXmlEntities(inner.slice(last));
 }
 
 /**
  * Extract an attribute value from a serialised start tag (already entity-decoded)
  */
 function extractAttribute(tagOrAttrs: string, attrName: string): string | undefined {
-  const match = tagOrAttrs.match(new RegExp(`\\b${escapeRegex(attrName)}="([^"]*)"`));
-  return match ? decodeXmlEntities(match[1]) : undefined;
+  // XML permits either quote style and whitespace around '='; the double-quote-only
+  // form read a valid single-quoted publicID as absent.
+  const match = tagOrAttrs.match(new RegExp(`\\b${escapeRegex(attrName)}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`));
+  if (!match) return undefined;
+  return decodeXmlEntities(match[1] ?? match[2] ?? '');
 }
 
 /**
@@ -163,29 +193,70 @@ function extractRealQuantity(xml: string, parentTag: string): RealQuantity | und
   const valueStr = extractTagValue(content, 'value');
   if (!valueStr) return undefined;
 
-  const value = parseFloat(valueStr);
-  if (isNaN(value)) return undefined;
+  // xs:double lexical form only: "4.5junk" or "12000m" is not a measurement and
+  // parseFloat's prefix tolerance turned it into one without a trace.
+  const value = parseXsDouble(valueStr);
+  if (value === undefined) return undefined;
 
   const result: RealQuantity = { value };
 
-  const uncertaintyStr = extractTagValue(content, 'uncertainty');
-  if (uncertaintyStr) {
-    const uncertainty = parseFloat(uncertaintyStr);
-    if (!isNaN(uncertainty)) result.uncertainty = uncertainty;
+  // The error fields are xs:double too: "0.5abc" is not an uncertainty.
+  for (const key of ['uncertainty', 'lowerUncertainty', 'upperUncertainty', 'confidenceLevel'] as const) {
+    const str = extractTagValue(content, key);
+    if (str) {
+      const num = parseXsDouble(str);
+      if (num !== undefined) result[key] = num;
+    }
   }
 
-  const lowerUncertaintyStr = extractTagValue(content, 'lowerUncertainty');
-  if (lowerUncertaintyStr) {
-    const lowerUncertainty = parseFloat(lowerUncertaintyStr);
-    if (!isNaN(lowerUncertainty)) result.lowerUncertainty = lowerUncertainty;
-  }
+  return result;
+}
 
-  const upperUncertaintyStr = extractTagValue(content, 'upperUncertainty');
-  if (upperUncertaintyStr) {
-    const upperUncertainty = parseFloat(upperUncertaintyStr);
-    if (!isNaN(upperUncertainty)) result.upperUncertainty = upperUncertainty;
-  }
+/** Parse an xs:double lexical value strictly (whole string, INF/NaN excluded). */
+function parseXsDouble(text: string): number | undefined {
+  const trimmed = text.trim();
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(trimmed)) return undefined;
+  const value = Number(trimmed);
+  return Number.isFinite(value) ? value : undefined;
+}
 
+/**
+ * Extract IntegerQuantity (value with optional uncertainties)
+ */
+function extractIntegerQuantity(xml: string, parentTag: string): IntegerQuantity | undefined {
+  const real = extractRealQuantity(xml, parentTag);
+  if (!real) return undefined;
+  const result: IntegerQuantity = { value: Math.trunc(real.value) };
+  if (real.uncertainty !== undefined) result.uncertainty = real.uncertainty;
+  if (real.lowerUncertainty !== undefined) result.lowerUncertainty = real.lowerUncertainty;
+  if (real.upperUncertainty !== undefined) result.upperUncertainty = real.upperUncertainty;
+  if (real.confidenceLevel !== undefined) result.confidenceLevel = real.confidenceLevel;
+  return result;
+}
+
+/**
+ * Extract CompositeTime elements (rupture start for historic events)
+ */
+function extractCompositeTimes(xml: string): CompositeTime[] {
+  const matches = Array.from(xml.matchAll(/<(?:[\w.-]+:)?compositeTime\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?compositeTime>/g));
+  const result: CompositeTime[] = [];
+  for (const match of matches) {
+    const content = match[1];
+    const composite: CompositeTime = {};
+    const year = extractIntegerQuantity(content, 'year');
+    if (year) composite.year = year;
+    const month = extractIntegerQuantity(content, 'month');
+    if (month) composite.month = month;
+    const day = extractIntegerQuantity(content, 'day');
+    if (day) composite.day = day;
+    const hour = extractIntegerQuantity(content, 'hour');
+    if (hour) composite.hour = hour;
+    const minute = extractIntegerQuantity(content, 'minute');
+    if (minute) composite.minute = minute;
+    const second = extractRealQuantity(content, 'second');
+    if (second) composite.second = second;
+    if (Object.keys(composite).length > 0) result.push(composite);
+  }
   return result;
 }
 
@@ -204,10 +275,14 @@ function extractTimeQuantity(xml: string, parentTag: string): TimeQuantity | und
 
   const result: TimeQuantity = { value };
 
-  const uncertaintyStr = extractTagValue(content, 'uncertainty');
-  if (uncertaintyStr) {
-    const uncertainty = parseFloat(uncertaintyStr);
-    if (!isNaN(uncertainty)) result.uncertainty = uncertainty;
+  // Asymmetric errors and confidence level are part of the BED TimeQuantity and
+  // were dropped on import. All four are xs:double.
+  for (const key of ['uncertainty', 'lowerUncertainty', 'upperUncertainty', 'confidenceLevel'] as const) {
+    const str = extractTagValue(content, key);
+    if (str) {
+      const num = parseXsDouble(str);
+      if (num !== undefined) result[key] = num;
+    }
   }
 
   return result;
@@ -239,8 +314,14 @@ function extractCreationInfo(xml: string, excludeNested: boolean = false): Creat
   const agencyID = extractTagValue(content, 'agencyID');
   if (agencyID) info.agencyID = agencyID;
 
+  const agencyURI = extractTagValue(content, 'agencyURI');
+  if (agencyURI) info.agencyURI = agencyURI;
+
   const author = extractTagValue(content, 'author');
   if (author) info.author = author;
+
+  const authorURI = extractTagValue(content, 'authorURI');
+  if (authorURI) info.authorURI = authorURI;
 
   const creationTime = extractTagValue(content, 'creationTime');
   if (creationTime) info.creationTime = creationTime;
@@ -254,6 +335,20 @@ function extractCreationInfo(xml: string, excludeNested: boolean = false): Creat
 /**
  * Extract Comments (preserves id attribute, text, and creationInfo)
  */
+/**
+ * Remove the subtrees of child elements that carry their own <comment> children, so a
+ * comment scan on the result sees only comments that are direct children of the event.
+ */
+function stripOwnedChildren(eventXML: string): string {
+  const owners = ['origin', 'magnitude', 'stationMagnitude', 'pick', 'arrival', 'amplitude', 'focalMechanism'];
+  let out = eventXML;
+  for (const name of owners) {
+    // Non-greedy across newlines; elements of the same name do not nest in BED.
+    out = out.replace(new RegExp(`<(?:[\\w.-]+:)?${name}\\b[^>]*>[\\s\\S]*?<\\/(?:[\\w.-]+:)?${name}>`, 'g'), '');
+  }
+  return out;
+}
+
 function extractComments(xml: string): Comment[] | undefined {
   const comments: Comment[] = [];
   const regex = /<(?:[\w.-]+:)?comment([^>]*)>(.*?)<\/(?:[\w.-]+:)?comment>/gs;
@@ -339,6 +434,15 @@ function extractOriginQuality(xml: string): OriginQuality | undefined {
   const maximumDistance = extractTagValue(content, 'maximumDistance');
   if (maximumDistance) quality.maximumDistance = parseFloat(maximumDistance);
 
+  const secondaryAzimuthalGap = extractTagValue(content, 'secondaryAzimuthalGap');
+  if (secondaryAzimuthalGap) quality.secondaryAzimuthalGap = parseFloat(secondaryAzimuthalGap);
+
+  const groundTruthLevel = extractTagValue(content, 'groundTruthLevel');
+  if (groundTruthLevel) quality.groundTruthLevel = groundTruthLevel;
+
+  const medianDistance = extractTagValue(content, 'medianDistance');
+  if (medianDistance) quality.medianDistance = parseFloat(medianDistance);
+
   return Object.keys(quality).length > 0 ? quality : undefined;
 }
 
@@ -365,6 +469,27 @@ function extractOriginUncertainty(xml: string): OriginUncertainty | undefined {
   const azimuthMaxHorizontalUncertainty = extractTagValue(content, 'azimuthMaxHorizontalUncertainty');
   if (azimuthMaxHorizontalUncertainty) uncertainty.azimuthMaxHorizontalUncertainty = parseFloat(azimuthMaxHorizontalUncertainty);
 
+  const ellipsoidMatch = content.match(/<(?:[\w.-]+:)?confidenceEllipsoid\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?confidenceEllipsoid>/);
+  if (ellipsoidMatch) {
+    const e = ellipsoidMatch[1];
+    const num = (tag: string) => parseFloat(extractTagValue(e, tag) ?? '');
+    const ellipsoid: ConfidenceEllipsoid = {
+      semiMajorAxisLength: num('semiMajorAxisLength'),
+      semiMinorAxisLength: num('semiMinorAxisLength'),
+      semiIntermediateAxisLength: num('semiIntermediateAxisLength'),
+      majorAxisPlunge: num('majorAxisPlunge'),
+      majorAxisAzimuth: num('majorAxisAzimuth'),
+      majorAxisRotation: num('majorAxisRotation'),
+    };
+    if (Object.values(ellipsoid).every(Number.isFinite)) uncertainty.confidenceEllipsoid = ellipsoid;
+  }
+
+  const preferredDescription = extractTagValue(content, 'preferredDescription');
+  if (preferredDescription) uncertainty.preferredDescription = preferredDescription as OriginUncertainty['preferredDescription'];
+
+  const confidenceLevel = extractTagValue(content, 'confidenceLevel');
+  if (confidenceLevel && !isNaN(parseFloat(confidenceLevel))) uncertainty.confidenceLevel = parseFloat(confidenceLevel);
+
   return Object.keys(uncertainty).length > 0 ? uncertainty : undefined;
 }
 
@@ -372,7 +497,7 @@ function extractOriginUncertainty(xml: string): OriginUncertainty | undefined {
  * Extract Origin
  */
 function extractOrigin(xml: string): Origin | undefined {
-  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?origin\b[^>]*publicID="[^"]*"[^>]*>/);
+  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?origin\b[^>]*publicID\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>/);
   if (!publicIDTagMatch) return undefined;
   const publicID = extractAttribute(publicIDTagMatch[0], 'publicID');
   if (publicID === undefined) return undefined;
@@ -382,6 +507,10 @@ function extractOrigin(xml: string): Origin | undefined {
   // earthModelID / methodID / creationInfo in a first-match scan. Pull the
   // arrivals out of the full element, then read the scalars from what remains.
   const arrivals = extractArrivals(xml);
+  const compositeTimes = extractCompositeTimes(stripChildElements(xml, ['arrival', 'comment']));
+  // Comments are stripped from ownXML so they cannot shadow scalar fields, so they must
+  // be read from the full element first - otherwise the origin's own comments vanish.
+  const comments = extractComments(stripChildElements(xml, ['arrival', 'compositeTime']));
   const ownXML = stripChildElements(xml, ['arrival', 'comment', 'compositeTime']);
 
   const time = extractTimeQuantity(ownXML, 'time');
@@ -402,6 +531,18 @@ function extractOrigin(xml: string): Origin | undefined {
 
   const depthType = extractTagValue(ownXML, 'depthType');
   if (depthType) origin.depthType = depthType as any;
+
+  const xsBoolean = (text: string | undefined): boolean | undefined =>
+    text === 'true' || text === '1' ? true : text === 'false' || text === '0' ? false : undefined;
+  const timeFixed = xsBoolean(extractTagValue(ownXML, 'timeFixed'));
+  if (timeFixed !== undefined) origin.timeFixed = timeFixed;
+  const epicenterFixed = xsBoolean(extractTagValue(ownXML, 'epicenterFixed'));
+  if (epicenterFixed !== undefined) origin.epicenterFixed = epicenterFixed;
+  const referenceSystemID = extractTagValue(ownXML, 'referenceSystemID');
+  if (referenceSystemID) origin.referenceSystemID = referenceSystemID;
+  // <type> is an origin child; the quality/uncertainty subtrees do not carry one.
+  const originType = extractTagValue(stripChildElements(ownXML, ['quality', 'originUncertainty', 'creationInfo']), 'type');
+  if (originType) origin.type = originType;
 
   // Extract origin metadata (QuakeML/GeoNet/ISC fields)
   const earthModelID = extractTagValue(ownXML, 'earthModelID');
@@ -432,6 +573,8 @@ function extractOrigin(xml: string): Origin | undefined {
   // one specific origin, and different origins of the same event routinely use
   // different phase sets, weights and residuals.
   if (arrivals.length > 0) origin.arrivals = arrivals;
+  if (comments) origin.comment = comments;
+  if (compositeTimes.length > 0) origin.compositeTime = compositeTimes;
 
   return origin;
 }
@@ -440,9 +583,11 @@ function extractOrigin(xml: string): Origin | undefined {
  * Extract WaveformStreamID from an XML element (e.g. <waveformID …/>)
  */
 function extractWaveformID(xml: string): WaveformStreamID | undefined {
-  // waveformID can be a self-closing tag with attributes
+  // waveformID can be a self-closing tag with attributes; when it has content,
+  // that text is the resourceURI (BED WaveformStreamID).
   const match = xml.match(/<(?:[\w.-]+:)?waveformID([^>]*)\/?>/);
   if (!match) return undefined;
+  const contentMatch = xml.match(/<(?:[\w.-]+:)?waveformID[^>]*[^\/]>([^<]*)<\/(?:[\w.-]+:)?waveformID>/);
 
   const attrs = match[1];
   const networkCode  = extractAttribute(attrs, 'networkCode');
@@ -454,7 +599,7 @@ function extractWaveformID(xml: string): WaveformStreamID | undefined {
   if (locationCode !== undefined) waveformID.locationCode = locationCode;
   const channelCode  = extractAttribute(attrs, 'channelCode');
   if (channelCode !== undefined) waveformID.channelCode = channelCode;
-  const resourceURI  = extractAttribute(attrs, 'resourceURI');
+  const resourceURI  = extractAttribute(attrs, 'resourceURI') ?? (contentMatch && contentMatch[1].trim() ? decodeXmlEntities(contentMatch[1].trim()) : undefined);
   if (resourceURI !== undefined) waveformID.resourceURI = resourceURI;
 
   return waveformID;
@@ -464,7 +609,7 @@ function extractWaveformID(xml: string): WaveformStreamID | undefined {
  * Extract Pick
  */
 function extractPick(xml: string): Pick | undefined {
-  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?pick\b[^>]*publicID="[^"]*"[^>]*>/);
+  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?pick\b[^>]*publicID\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>/);
   if (!publicIDTagMatch) return undefined;
   const publicID = extractAttribute(publicIDTagMatch[0], 'publicID');
   if (publicID === undefined) return undefined;
@@ -486,6 +631,15 @@ function extractPick(xml: string): Pick | undefined {
 
   const methodID = extractTagValue(ownXML, 'methodID');
   if (methodID) pick.methodID = methodID;
+
+  const horizontalSlowness = extractRealQuantity(ownXML, 'horizontalSlowness');
+  if (horizontalSlowness) pick.horizontalSlowness = horizontalSlowness;
+
+  const backazimuth = extractRealQuantity(ownXML, 'backazimuth');
+  if (backazimuth) pick.backazimuth = backazimuth;
+
+  const slownessMethodID = extractTagValue(ownXML, 'slownessMethodID');
+  if (slownessMethodID) pick.slownessMethodID = slownessMethodID;
 
   const onset = extractTagValue(ownXML, 'onset');
   if (onset) pick.onset = onset as any;
@@ -515,7 +669,7 @@ function extractPick(xml: string): Pick | undefined {
  * Extract Magnitude
  */
 function extractMagnitude(xml: string): Magnitude | undefined {
-  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?magnitude\b[^>]*publicID="[^"]*"[^>]*>/);
+  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?magnitude\b[^>]*publicID\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>/);
   if (!publicIDTagMatch) return undefined;
   const publicID = extractAttribute(publicIDTagMatch[0], 'publicID');
   if (publicID === undefined) return undefined;
@@ -559,6 +713,22 @@ function extractMagnitude(xml: string): Magnitude | undefined {
   const creationInfo = extractCreationInfo(ownXML);
   if (creationInfo) magnitude.creationInfo = creationInfo;
 
+  const contributions: StationMagnitudeContribution[] = [];
+  for (const m of Array.from(xml.matchAll(/<(?:[\w.-]+:)?stationMagnitudeContribution\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?stationMagnitudeContribution>/g))) {
+    const stationMagnitudeID = extractTagValue(m[1], 'stationMagnitudeID');
+    if (!stationMagnitudeID) continue;
+    const c: StationMagnitudeContribution = { stationMagnitudeID };
+    const residual = extractTagValue(m[1], 'residual');
+    if (residual && !isNaN(parseFloat(residual))) c.residual = parseFloat(residual);
+    const weight = extractTagValue(m[1], 'weight');
+    if (weight && !isNaN(parseFloat(weight))) c.weight = parseFloat(weight);
+    contributions.push(c);
+  }
+  if (contributions.length > 0) magnitude.stationMagnitudeContributions = contributions;
+
+  const comments = extractComments(xml);
+  if (comments) magnitude.comment = comments;
+
   return magnitude;
 }
 
@@ -574,7 +744,7 @@ function extractArrival(xml: string): Arrival | undefined {
   const phase = extractTagValue(ownXML, 'phase');
   if (!pickID || !phase) return undefined;
 
-  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?arrival\b[^>]*publicID="[^"]*"[^>]*>/);
+  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?arrival\b[^>]*publicID\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>/);
   const arrival: Arrival = { pickID, phase };
   if (publicIDTagMatch) {
     const publicID = extractAttribute(publicIDTagMatch[0], 'publicID');
@@ -629,7 +799,7 @@ function extractArrivals(xml: string): Arrival[] {
  * Extract Amplitude
  */
 function extractAmplitude(xml: string): Amplitude | undefined {
-  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?amplitude\b[^>]*publicID="[^"]*"[^>]*>/);
+  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?amplitude\b[^>]*publicID\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>/);
   if (!publicIDTagMatch) return undefined;
   const publicID = extractAttribute(publicIDTagMatch[0], 'publicID');
   if (publicID === undefined) return undefined;
@@ -666,6 +836,14 @@ function extractAmplitude(xml: string): Amplitude | undefined {
   if (filterID) amplitude.filterID = filterID;
   const scalingTime = extractTimeQuantity(ownXML, 'scalingTime');
   if (scalingTime) amplitude.scalingTime = scalingTime;
+  const timeWindowMatch = ownXML.match(/<(?:[\w.-]+:)?timeWindow\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?timeWindow>/);
+  if (timeWindowMatch) {
+    const w = timeWindowMatch[1];
+    const begin = parseFloat(extractTagValue(w, 'begin') ?? '');
+    const end = parseFloat(extractTagValue(w, 'end') ?? '');
+    const reference = extractTagValue(w, 'reference');
+    if (Number.isFinite(begin) && Number.isFinite(end) && reference) amplitude.timeWindow = { begin, end, reference };
+  }
   const magnitudeHint = extractTagValue(ownXML, 'magnitudeHint');
   if (magnitudeHint) amplitude.magnitudeHint = magnitudeHint;
   const evaluationMode = extractTagValue(ownXML, 'evaluationMode');
@@ -685,7 +863,7 @@ function extractAmplitude(xml: string): Amplitude | undefined {
  * Extract StationMagnitude
  */
 function extractStationMagnitude(xml: string): StationMagnitude | undefined {
-  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?stationMagnitude\b[^>]*publicID="[^"]*"[^>]*>/);
+  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?stationMagnitude\b[^>]*publicID\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>/);
   if (!publicIDTagMatch) return undefined;
   const publicID = extractAttribute(publicIDTagMatch[0], 'publicID');
   if (publicID === undefined) return undefined;
@@ -828,7 +1006,7 @@ function extractTensor(xml: string): Tensor | undefined {
  * Extract FocalMechanism
  */
 function extractFocalMechanism(xml: string): FocalMechanism | undefined {
-  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?focalMechanism\b[^>]*publicID="[^"]*"[^>]*>/);
+  const publicIDTagMatch = xml.match(/<(?:[\w.-]+:)?focalMechanism\b[^>]*publicID\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>/);
   if (!publicIDTagMatch) return undefined;
   const publicID = extractAttribute(publicIDTagMatch[0], 'publicID');
   if (publicID === undefined) return undefined;
@@ -906,11 +1084,38 @@ function extractFocalMechanism(xml: string): FocalMechanism | undefined {
       if (inversionType) momentTensor.inversionType = inversionType;
       const creationInfo = extractCreationInfo(mtOwnXML);
       if (creationInfo) momentTensor.creationInfo = creationInfo;
+      const stfMatch = mtOwnXML.match(/<(?:[\w.-]+:)?sourceTimeFunction\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?sourceTimeFunction>/);
+      if (stfMatch) {
+        const stfType = extractTagValue(stfMatch[1], 'type');
+        const duration = parseFloat(extractTagValue(stfMatch[1], 'duration') ?? '');
+        if (stfType && Number.isFinite(duration)) {
+          const stf: SourceTimeFunction = { type: stfType, duration };
+          const riseTime = parseFloat(extractTagValue(stfMatch[1], 'riseTime') ?? '');
+          if (Number.isFinite(riseTime)) stf.riseTime = riseTime;
+          const decayTime = parseFloat(extractTagValue(stfMatch[1], 'decayTime') ?? '');
+          if (Number.isFinite(decayTime)) stf.decayTime = decayTime;
+          momentTensor.sourceTimeFunction = stf;
+        }
+      }
+      const dataUsed: DataUsed[] = [];
+      for (const du of Array.from(mtXml.matchAll(/<(?:[\w.-]+:)?dataUsed\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?dataUsed>/g))) {
+        const waveType = extractTagValue(du[1], 'waveType');
+        if (!waveType) continue;
+        const entry: DataUsed = { waveType: waveType as DataUsed['waveType'] };
+        for (const key of ['stationCount', 'componentCount', 'shortestPeriod', 'longestPeriod'] as const) {
+          const v = parseFloat(extractTagValue(du[1], key) ?? '');
+          if (Number.isFinite(v)) entry[key] = v;
+        }
+        dataUsed.push(entry);
+      }
+      if (dataUsed.length > 0) momentTensor.dataUsed = dataUsed;
       focalMechanism.momentTensor = momentTensor;
     }
   }
 
-  const waveformIDs = Array.from(xml.matchAll(/<(?:[\w.-]+:)?waveformID\b[^>]*\/?>/g))
+  // Match the whole element (self-closing or with resourceURI text content) so the
+  // text form of the stream identifier survives as it does for picks.
+  const waveformIDs = Array.from(xml.matchAll(/<(?:[\w.-]+:)?waveformID\b[^>]*(?:\/>|>[^<]*<\/(?:[\w.-]+:)?waveformID>)/g))
     .map(match => extractWaveformID(match[0]))
     .filter((item): item is WaveformStreamID => !!item);
   if (waveformIDs.length > 0) focalMechanism.waveformID = waveformIDs;
@@ -929,7 +1134,7 @@ function extractFocalMechanism(xml: string): FocalMechanism | undefined {
 export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
   try {
     // Extract publicID
-    const publicIDTagMatch = eventXML.match(/<(?:[\w.-]+:)?event\b[^>]*publicID="[^"]*"[^>]*>/);
+    const publicIDTagMatch = eventXML.match(/<(?:[\w.-]+:)?event\b[^>]*publicID\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>/);
     if (!publicIDTagMatch) return null;
     const eventPublicID = extractAttribute(publicIDTagMatch[0], 'publicID');
     if (eventPublicID === undefined) return null;
@@ -958,8 +1163,12 @@ export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
     const descriptions = extractEventDescriptions(eventXML);
     if (descriptions) event.description = descriptions;
 
-    // Extract comments
-    const comments = extractComments(eventXML);
+    // Extract comments that belong to the EVENT itself. A scan over the whole subtree
+    // hoisted every origin/magnitude/pick/focalMechanism comment to event level; on
+    // export they were then written both at the event and at their true parent, so the
+    // count doubled on every round trip (0 -> 2 -> 4). Blank out the child elements that
+    // own their own comments before scanning.
+    const comments = extractComments(stripOwnedChildren(eventXML));
     if (comments) event.comment = comments;
 
     // Extract creation info (exclude nested elements to get event-level creationInfo)
@@ -977,7 +1186,7 @@ export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
     if (preferredFocalMechanismID) event.preferredFocalMechanismID = preferredFocalMechanismID;
 
     // Extract origins
-    const originMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?origin\b[^>]*publicID="[^"]*"[^>]*>(.*?)<\/(?:[\w.-]+:)?origin>/gs));
+    const originMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?origin\b[^>]*publicID\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>(.*?)<\/(?:[\w.-]+:)?origin>/gs));
     const origins: Origin[] = [];
     for (let j = 0; j < originMatchesArray.length; j++) {
       const match = originMatchesArray[j];
@@ -988,7 +1197,7 @@ export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
     if (origins.length > 0) event.origins = origins;
 
     // Extract magnitudes
-    const magnitudeMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?magnitude\b[^>]*publicID="[^"]*"[^>]*>(.*?)<\/(?:[\w.-]+:)?magnitude>/gs));
+    const magnitudeMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?magnitude\b[^>]*publicID\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>(.*?)<\/(?:[\w.-]+:)?magnitude>/gs));
     const magnitudes: Magnitude[] = [];
     for (let j = 0; j < magnitudeMatchesArray.length; j++) {
       const match = magnitudeMatchesArray[j];
@@ -999,7 +1208,7 @@ export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
     if (magnitudes.length > 0) event.magnitudes = magnitudes;
 
     // Extract picks
-    const pickMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?pick\b[^>]*publicID="[^"]*"[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?pick>/g));
+    const pickMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?pick\b[^>]*publicID\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?pick>/g));
     const picks: Pick[] = [];
     for (let j = 0; j < pickMatchesArray.length; j++) {
       const pick = extractPick(pickMatchesArray[j][0]);
@@ -1025,7 +1234,7 @@ export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
     }
 
     // Extract station magnitudes
-    const stationMagnitudeMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?stationMagnitude\b[^>]*publicID="[^"]*"[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?stationMagnitude>/g));
+    const stationMagnitudeMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?stationMagnitude\b[^>]*publicID\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?stationMagnitude>/g));
     const stationMagnitudes: StationMagnitude[] = [];
     for (let j = 0; j < stationMagnitudeMatchesArray.length; j++) {
       const stationMagnitude = extractStationMagnitude(stationMagnitudeMatchesArray[j][0]);
@@ -1034,7 +1243,7 @@ export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
     if (stationMagnitudes.length > 0) event.stationMagnitudes = stationMagnitudes;
 
     // Extract amplitudes
-    const amplitudeMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?amplitude\b[^>]*publicID="[^"]*"[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?amplitude>/g));
+    const amplitudeMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?amplitude\b[^>]*publicID\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?amplitude>/g));
     const amplitudes: Amplitude[] = [];
     for (let j = 0; j < amplitudeMatchesArray.length; j++) {
       const amplitude = extractAmplitude(amplitudeMatchesArray[j][0]);
@@ -1043,7 +1252,7 @@ export function parseQuakeMLEvent(eventXML: string): QuakeMLEvent | null {
     if (amplitudes.length > 0) event.amplitudes = amplitudes;
 
     // Extract focal mechanisms
-    const focalMechanismMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?focalMechanism\b[^>]*publicID="[^"]*"[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?focalMechanism>/g));
+    const focalMechanismMatchesArray = Array.from(eventXML.matchAll(/<(?:[\w.-]+:)?focalMechanism\b[^>]*publicID\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?focalMechanism>/g));
     const focalMechanisms: FocalMechanism[] = [];
     for (let j = 0; j < focalMechanismMatchesArray.length; j++) {
       const focalMechanism = extractFocalMechanism(focalMechanismMatchesArray[j][0]);

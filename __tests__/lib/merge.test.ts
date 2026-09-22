@@ -242,7 +242,8 @@ describe('Spatial Indexing', () => {
     });
 
     it('should handle date line crossing', () => {
-      expect(getGridKey(0, 180, 1.0)).toBe('0,180');
+      // +180 and -180 are one meridian and share the storage cell.
+      expect(getGridKey(0, 180, 1.0)).toBe('0,-180');
       expect(getGridKey(0, -180, 1.0)).toBe('0,-180');
       expect(getGridKey(0, 181, 1.0)).toBe('0,-179'); // Wrapped
     });
@@ -416,12 +417,15 @@ describe('Magnitude Selection', () => {
 
 describe('Quality Score Calculation', () => {
   describe('calculateQualityScore', () => {
-    it('should return basic score for events without quality metrics', () => {
-      const event = createMockEvent();
-      const score = calculateQualityScore(event);
-      // Should get basic completeness score (depth + magnitude + time)
-      expect(score).toBeGreaterThan(0);
-      expect(score).toBeLessThanOrEqual(25);
+    it('scores an event with no quality metadata at zero, below any documented event', () => {
+      // A separate 25-point "basic completeness" fallback used to let a record reporting
+      // nothing outrank a documented-but-modest one (Mw, sigma 0.3, 2 stations scored 23),
+      // so stripping metadata raised a source's merge rank. Depth/magnitude/time are the
+      // admission ticket, not evidence of quality.
+      const bare = createMockEvent();
+      const documented = { ...createMockEvent(), magnitude_type: 'Mw', magnitude_uncertainty: 0.3, magnitude_station_count: 2 };
+      expect(calculateQualityScore(bare)).toBe(0);
+      expect(calculateQualityScore(documented)).toBeGreaterThan(calculateQualityScore(bare));
     });
 
     it('should give higher score for better quality metrics', () => {
@@ -501,8 +505,8 @@ describe('Weighted Location Averaging', () => {
           }],
         },
       });
-      // 2000 m = 2 km -> weight 1/2 = 0.5
-      expect(getLocationWeight(event)).toBeCloseTo(0.5, 2);
+      // 2000 m = 2 km -> inverse-variance weight 1/(2^2) = 0.25
+      expect(getLocationWeight(event)).toBeCloseTo(0.25, 2);
     });
 
     it('should clamp extreme uncertainties', () => {
@@ -512,9 +516,9 @@ describe('Weighted Location Averaging', () => {
       const veryHighUncertainty = createMockEvent({
         horizontal_uncertainty: 1000, // 1000 km
       });
-      // Clamped to 0.1-100 range, so weights are 1/0.1=10 and 1/100=0.01
-      expect(getLocationWeight(veryLowUncertainty)).toBe(10);
-      expect(getLocationWeight(veryHighUncertainty)).toBe(0.01);
+      // Clamped to 0.1-100 km, so inverse-variance weights are 1/0.1^2=100 and 1/100^2=0.0001
+      expect(getLocationWeight(veryLowUncertainty)).toBeCloseTo(100, 6);
+      expect(getLocationWeight(veryHighUncertainty)).toBeCloseTo(0.0001, 8);
     });
   });
 

@@ -63,11 +63,9 @@ export interface RetryResult<T> {
 /**
  * Default retry predicate - retries on network errors and 5xx status codes
  */
-function defaultShouldRetry(error: any, attempt: number): boolean {
-  // Don't retry if we've exhausted attempts
-  if (attempt >= 3) {
-    return false;
-  }
+function defaultShouldRetry(error: any, _attempt: number): boolean {
+  // The attempt budget is maxAttempts, enforced by retry() itself. A hard stop at 3
+  // here silently capped callers that configured 5.
 
   // Retry on network errors
   if (error.name === 'TypeError' && error.message.includes('fetch')) {
@@ -183,6 +181,13 @@ export async function retry<T>(
     } catch (error: any) {
       lastError = error;
 
+      // An abort that did not come from this attempt's timeout is the caller
+      // cancelling: stop at once, with no further attempts and no backoff.
+      const externallyAborted = error?.name === 'AbortError' && !controller.signal.aborted;
+      if (externallyAborted) {
+        throw error;
+      }
+
       // Check if we should retry
       if (attempt < maxAttempts && shouldRetry(error, attempt)) {
         const delay = calculateDelay(
@@ -291,10 +296,26 @@ async function fetchOrThrow(
   init: RequestInit | undefined,
   signal?: AbortSignal
 ): Promise<Response> {
-  const response = await fetch(url, {
-    ...init,
-    signal: combineAbortSignals(init?.signal, signal),
-  });
+  // A caller-cancelled request is not retried, whatever the reason the caller
+  // aborted with (AbortSignal.timeout() rejects with a TimeoutError, abort(reason)
+  // with the reason itself): check the caller's signal directly rather than the
+  // error's name, before the attempt and after a failure.
+  const externallyAborted = () => {
+    const e: any = new Error(`Request aborted by caller${init?.signal?.reason instanceof Error ? `: ${init.signal.reason.message}` : ''}`);
+    e.name = 'AbortError';
+    return e;
+  };
+  if (init?.signal?.aborted) throw externallyAborted();
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      signal: combineAbortSignals(init?.signal, signal),
+    });
+  } catch (error) {
+    if (init?.signal?.aborted) throw externallyAborted();
+    throw error;
+  }
 
   // Throw error for non-ok responses so they can be retried
   if (!response.ok) {

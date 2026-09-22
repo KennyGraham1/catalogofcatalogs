@@ -196,8 +196,14 @@ export function validateDepth(depth: number | null): boolean {
  */
 export function normalizeTimestamp(time: string | number, dateFormat?: 'US' | 'International'): string | null {
   if (typeof time === 'number') {
-    // Unix timestamp - detect if it's in seconds or milliseconds
-    const timestamp = time < 10000000000 ? time * 1000 : time;
+    if (!Number.isFinite(time)) return null;
+    // Bare epoch number of unknown unit: seconds when the MAGNITUDE is below 1e11
+    // (year 1000 is -3.06e10 s; 1e11 ms is only 1973-03-03), otherwise milliseconds.
+    // The sign must not decide: a negative epoch (before 1970) was compared as
+    // "< 1e10" and multiplied by 1000, sending 1960 to the year -8032.
+    // Producers whose unit is known (USGS GeoJSON, milliseconds) convert before
+    // reaching here.
+    const timestamp = Math.abs(time) < 100000000000 ? time * 1000 : time;
     const date = new Date(timestamp);
     if (!isNaN(date.getTime())) {
       return date.toISOString();
@@ -234,7 +240,17 @@ export function normalizeTimestamp(time: string | number, dateFormat?: 'US' | 'I
     }
   }
 
-  let date = new Date(trimmed);
+  // Only a string carrying an explicit zone designator may take the generic parse
+  // here. ECMA-262 leaves non-ISO forms implementation-defined, and V8 reads
+  // slash-separated and RFC-2822-style dates as LOCAL wall-clock time, so an
+  // unconditional new Date() at this point shifted every such origin time by the
+  // server's UTC offset and made the explicit-UTC branches below unreachable.
+  // Offset-less forms are assembled into explicit UTC below; the generic parse is
+  // retried as a last resort after them.
+  // A zone must follow a time-of-day: `\d[+-]\d{2}` alone also matches the day of
+  // a bare date like 2024-01-15, which is exactly the shape that must NOT be zoned.
+  const hasZoneDesignator = /\d:\d{2}(?::\d{2}(?:\.\d+)?)?\s*(?:Z|[+-]\d{2}(?::?\d{2})?)$/i.test(trimmed);
+  let date = hasZoneDesignator ? new Date(trimmed) : new Date(NaN);
   if (!isNaN(date.getTime()) && date.getTime() >= minValidDate) {
     return date.toISOString();
   }
@@ -514,6 +530,14 @@ export function normalizeTimestamp(time: string | number, dateFormat?: 'US' | 'I
   // compact Julian day form above has had its (year-restricted) turn.
   if (/^\d{10}$|^\d{13}$/.test(trimmed)) {
     return normalizeTimestamp(Number(trimmed), dateFormat);
+  }
+
+  // Last resort for shapes none of the explicit branches recognise. Anything that
+  // reaches here without a zone designator is parsed in server-local time, which is
+  // the behaviour the ordering above exists to avoid for every documented format.
+  date = new Date(trimmed);
+  if (!isNaN(date.getTime()) && date.getTime() >= minValidDate) {
+    return date.toISOString();
   }
 
   return null;
@@ -802,6 +826,8 @@ export function isEventInBounds<T extends { latitude: number; longitude: number 
   // instead express the same dateline crossing as 170..-170.
   const width = ((span % 360) + 360) % 360;
   const offset = (((event.longitude - bounds.west) % 360) + 360) % 360;
+  // offset lands on 0 for a point exactly on the west edge or exactly 360
+  // degrees east of it (the same meridian, e.g. +180 against a -180 edge).
   return offset <= width;
 }
 

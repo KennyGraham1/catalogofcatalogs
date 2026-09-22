@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { dbQueries } from '@/lib/db';
+import { dbQueries, EVENT_OPTIONAL_RANGES, optionalFieldInRange } from '@/lib/db';
 import { Logger, DatabaseError, formatErrorResponse } from '@/lib/errors';
 import { apiCache, generateCacheKey, catalogueCache, invalidateCacheByPrefix } from '@/lib/cache';
 import { applyRateLimit, readRateLimiter, apiRateLimiter } from '@/lib/rate-limiter';
@@ -91,6 +91,7 @@ const NUMERIC_MAPPING_FIELDS = new Set([
   'latitude', 'longitude', 'depth', 'magnitude',
   'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty',
   'depth_uncertainty', 'horizontal_uncertainty', 'magnitude_uncertainty',
+  'min_horizontal_uncertainty', 'max_horizontal_uncertainty', 'azimuth_max_horizontal_uncertainty',
   'azimuthal_gap', 'used_phase_count', 'used_station_count', 'standard_error',
   'minimum_distance', 'maximum_distance', 'associated_phase_count',
   'associated_station_count', 'depth_phase_count', 'magnitude_station_count',
@@ -232,39 +233,25 @@ class LongitudeArcAccumulator {
   }
 }
 
-function dropInvalidOptionalNumericFields(row: InsertRow): void {
-  const nonNegativeFields = [
-    'magnitude_uncertainty',
-    'time_uncertainty',
-    'latitude_uncertainty',
-    'longitude_uncertainty',
-    'depth_uncertainty',
-    'horizontal_uncertainty',
-    'used_station_count',
-    'used_phase_count',
-    'standard_error',
-    'minimum_distance',
-    'maximum_distance',
-    'associated_phase_count',
-    'associated_station_count',
-    'depth_phase_count',
-    'magnitude_station_count',
-  ];
-
-  for (const field of nonNegativeFields) {
-    const value = safeParseNumber((row as any)[field]);
-    if (value === null || value < 0) {
+/**
+ * Optional numeric fields are advisory metadata: a value the DB validator would
+ * reject (out of range, non-integer count, non-finite) is DROPPED from the row, not
+ * allowed to fail the upload. The ranges are the DB's own (EVENT_OPTIONAL_RANGES), so
+ * nothing this leaves in place can throw inside bulkInsertEvents and take the whole
+ * catalogue down with it.
+ */
+function dropInvalidOptionalNumericFields(row: InsertRow): number {
+  let dropped = 0;
+  for (const [field] of EVENT_OPTIONAL_RANGES) {
+    const raw = (row as any)[field];
+    if (raw === undefined) continue;
+    const value = safeParseNumber(raw);
+    if (value === null || !optionalFieldInRange(field, value)) {
       delete (row as any)[field];
+      if (raw !== null && raw !== '') dropped++;
     } else {
       (row as any)[field] = value;
     }
-  }
-
-  const azimuthalGap = safeParseNumber((row as any).azimuthal_gap);
-  if (azimuthalGap === null || azimuthalGap < 0 || azimuthalGap > 360) {
-    delete (row as any).azimuthal_gap;
-  } else {
-    (row as any).azimuthal_gap = azimuthalGap;
   }
 
   const minDistance = safeParseNumber((row as any).minimum_distance);
@@ -272,7 +259,9 @@ function dropInvalidOptionalNumericFields(row: InsertRow): void {
   if (minDistance !== null && maxDistance !== null && maxDistance < minDistance) {
     delete (row as any).minimum_distance;
     delete (row as any).maximum_distance;
+    dropped++;
   }
+  return dropped;
 }
 
 function dropInvalidOptionalEnumFields(row: InsertRow): void {
@@ -344,6 +333,12 @@ function validateCatalogueEvent(event: any): string[] {
     if (!normalizedTime) {
       errors.push('time is not a valid timestamp');
     } else {
+      // Same window the schema and the DB enforce; a row outside it is skipped here
+      // with a reason instead of throwing inside the bulk insert.
+      const instant = Date.parse(normalizedTime);
+      if (instant < Date.UTC(1000, 0, 1) || instant > Date.now()) {
+        errors.push(`time ${normalizedTime} is outside the accepted range (1000-01-01 to now)`);
+      }
       event.time = normalizedTime;
     }
   }
@@ -876,6 +871,10 @@ export async function POST(request: NextRequest) {
         if (!normalizedTime) {
           errors.push('time is not a valid timestamp');
         } else {
+          const instant = Date.parse(normalizedTime);
+          if (instant < Date.UTC(1000, 0, 1) || instant > Date.now()) {
+            errors.push(`time ${normalizedTime} is outside the accepted range (1000-01-01 to now)`);
+          }
           event.time = normalizedTime;
         }
       }

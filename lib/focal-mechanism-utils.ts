@@ -3,15 +3,24 @@
  * Supports standard double-couple focal mechanisms
  */
 
+/** A nodal plane as reported. An angle the source did not supply is null, never 0. */
 export interface NodalPlane {
-  strike: number;  // 0-360 degrees
-  dip: number;     // 0-90 degrees
-  rake: number;    // -180 to 180 degrees
+  strike: number | null;  // 0-360 degrees
+  dip: number | null;     // 0-90 degrees
+  rake: number | null;    // -180 to 180 degrees
+}
+
+/** A nodal plane with all three angles known; the only kind geometry can be built from. */
+export interface CompleteNodalPlane {
+  strike: number;
+  dip: number;
+  rake: number;
 }
 
 export interface FocalMechanism {
   nodalPlane1?: NodalPlane;
   nodalPlane2?: NodalPlane;
+  /** Only set when the source states a preference; absence is not evidence for plane 1. */
   preferredPlane?: 1 | 2;
 }
 
@@ -19,8 +28,40 @@ function finiteNumber(value: unknown, fallback: number = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
-function normalizePreferredPlane(value: unknown): 1 | 2 {
-  return value === 2 ? 2 : 1;
+function finiteOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function normalizePreferredPlane(value: unknown): 1 | 2 | undefined {
+  if (value === 1 || value === '1') return 1;
+  if (value === 2 || value === '2') return 2;
+  return undefined;
+}
+
+export function isCompletePlane(plane: NodalPlane | null | undefined): plane is CompleteNodalPlane {
+  return !!plane && plane.strike !== null && plane.dip !== null && plane.rake !== null;
+}
+
+/**
+ * The plane geometry and interpretation should be built from: the stated preferred plane
+ * when it is complete, otherwise whichever plane is complete (plane 1 first). The
+ * double-couple beach ball is the same for either plane, so the fallback changes only
+ * which plane's lateral sense is described.
+ */
+export function selectPlane(mechanism: FocalMechanism): CompleteNodalPlane | null {
+  const number = selectPlaneNumber(mechanism);
+  if (number === 1) return mechanism.nodalPlane1 as CompleteNodalPlane;
+  if (number === 2) return mechanism.nodalPlane2 as CompleteNodalPlane;
+  return null;
+}
+
+/** Which plane selectPlane returns (1 or 2), or null when neither is complete. */
+export function selectPlaneNumber(mechanism: FocalMechanism): 1 | 2 | null {
+  const preferred = mechanism.preferredPlane === 2 ? mechanism.nodalPlane2 : mechanism.preferredPlane === 1 ? mechanism.nodalPlane1 : undefined;
+  if (isCompletePlane(preferred)) return mechanism.preferredPlane as 1 | 2;
+  if (isCompletePlane(mechanism.nodalPlane1)) return 1;
+  if (isCompletePlane(mechanism.nodalPlane2)) return 2;
+  return null;
 }
 
 /**
@@ -36,39 +77,27 @@ export function parseFocalMechanism(focalMechanismsJson: string | null | undefin
 
     const fm = mechanisms[0]; // Use first focal mechanism
 
-    // Check if this is the simplified format (direct nodalPlane1/nodalPlane2)
-    if (fm.nodalPlane1 && typeof fm.nodalPlane1.strike === 'number') {
-      return {
-        nodalPlane1: {
-          strike: finiteNumber(fm.nodalPlane1.strike),
-          dip: finiteNumber(fm.nodalPlane1.dip),
-          rake: finiteNumber(fm.nodalPlane1.rake),
-        },
-        nodalPlane2: fm.nodalPlane2 ? {
-          strike: finiteNumber(fm.nodalPlane2.strike),
-          dip: finiteNumber(fm.nodalPlane2.dip),
-          rake: finiteNumber(fm.nodalPlane2.rake),
-        } : undefined,
-        preferredPlane: normalizePreferredPlane(fm.preferredPlane),
-      };
+    // Simplified format (direct nodalPlane1/nodalPlane2 with scalar angles)
+    const simple = (p: any): NodalPlane | undefined =>
+      p && typeof p === 'object' ? { strike: finiteOrNull(p.strike), dip: finiteOrNull(p.dip), rake: finiteOrNull(p.rake) } : undefined;
+    if ((fm.nodalPlane1 || fm.nodalPlane2) && !fm.nodalPlanes) {
+      const nodalPlane1 = simple(fm.nodalPlane1);
+      const nodalPlane2 = simple(fm.nodalPlane2);
+      if (!nodalPlane1 && !nodalPlane2) return null;
+      return { nodalPlane1, nodalPlane2, preferredPlane: normalizePreferredPlane(fm.preferredPlane) };
     }
 
     // Otherwise, try QuakeML format (nested nodalPlanes with value objects)
     if (!fm.nodalPlanes) return null;
 
-    return {
-      nodalPlane1: fm.nodalPlanes.nodalPlane1 ? {
-        strike: finiteNumber(fm.nodalPlanes.nodalPlane1.strike?.value),
-        dip: finiteNumber(fm.nodalPlanes.nodalPlane1.dip?.value),
-        rake: finiteNumber(fm.nodalPlanes.nodalPlane1.rake?.value),
-      } : undefined,
-      nodalPlane2: fm.nodalPlanes.nodalPlane2 ? {
-        strike: finiteNumber(fm.nodalPlanes.nodalPlane2.strike?.value),
-        dip: finiteNumber(fm.nodalPlanes.nodalPlane2.dip?.value),
-        rake: finiteNumber(fm.nodalPlanes.nodalPlane2.rake?.value),
-      } : undefined,
-      preferredPlane: normalizePreferredPlane(fm.nodalPlanes.preferredPlane),
-    };
+    const quakeml = (p: any): NodalPlane | undefined =>
+      p && typeof p === 'object'
+        ? { strike: finiteOrNull(p.strike?.value), dip: finiteOrNull(p.dip?.value), rake: finiteOrNull(p.rake?.value) }
+        : undefined;
+    const nodalPlane1 = quakeml(fm.nodalPlanes.nodalPlane1);
+    const nodalPlane2 = quakeml(fm.nodalPlanes.nodalPlane2);
+    if (!nodalPlane1 && !nodalPlane2) return null;
+    return { nodalPlane1, nodalPlane2, preferredPlane: normalizePreferredPlane(fm.nodalPlanes.preferredPlane) };
   } catch (error) {
     console.error('Error parsing focal mechanism:', error);
     return null;
@@ -225,15 +254,11 @@ function nodalPath(pole: V3, cx: number, cy: number, R: number): string {
 /** Compute the full beach-ball geometry for the preferred nodal plane. */
 export function computeBeachball(mechanism: FocalMechanism, size: number = 100): BeachballGeometry | null {
   // The double-couple beach ball is identical for either nodal plane; honour the
-  // preferred plane when set, and fall back to whichever plane is available.
-  const plane =
-    mechanism.preferredPlane === 2 && mechanism.nodalPlane2
-      ? mechanism.nodalPlane2
-      : mechanism.nodalPlane1 ?? mechanism.nodalPlane2;
+  // preferred plane when set, and fall back to whichever plane is complete. A plane
+  // with a missing angle yields no geometry rather than one drawn with invented zeros.
+  const plane = selectPlane(mechanism);
   if (!plane) return null;
-  const strike = finiteNumber(plane.strike);
-  const dip = finiteNumber(plane.dip);
-  const rake = finiteNumber(plane.rake);
+  const { strike, dip, rake } = plane;
   const s = Math.max(8, finiteNumber(size, 100));
   const center = s / 2;
   const R = center - Math.max(2, s * 0.04);
@@ -276,10 +301,7 @@ export function generateBeachBallSVG(
   size: number = 100,
   style: BeachballStyle = {}
 ): string {
-  const np =
-    mechanism.preferredPlane === 2 && mechanism.nodalPlane2
-      ? mechanism.nodalPlane2
-      : mechanism.nodalPlane1 ?? mechanism.nodalPlane2;
+  const np = selectPlane(mechanism);
   const cacheKey = np
     ? `${np.strike}|${np.dip}|${np.rake}|${size}|${style.fill ?? ''}|${style.background ?? ''}|${style.stroke ?? ''}|${style.showAxes ? 1 : 0}`
     : '';
@@ -358,20 +380,18 @@ export function formatFocalMechanism(mechanism: FocalMechanism): {
   faultType: string;
   preferred: string;
 } {
-  const plane1 = mechanism.nodalPlane1
-    ? `Strike: ${mechanism.nodalPlane1.strike.toFixed(0)}°, Dip: ${mechanism.nodalPlane1.dip.toFixed(0)}°, Rake: ${mechanism.nodalPlane1.rake.toFixed(0)}°`
-    : 'N/A';
-  
-  const plane2 = mechanism.nodalPlane2
-    ? `Strike: ${mechanism.nodalPlane2.strike.toFixed(0)}°, Dip: ${mechanism.nodalPlane2.dip.toFixed(0)}°, Rake: ${mechanism.nodalPlane2.rake.toFixed(0)}°`
-    : 'N/A';
-  
-  const faultType = mechanism.nodalPlane1
-    ? getFaultType(mechanism.nodalPlane1.rake).description
-    : 'Unknown';
-  
-  const preferred = mechanism.preferredPlane === 2 ? 'Plane 2' : 'Plane 1';
-  
+  const angle = (v: number | null) => (v === null ? '—' : `${v.toFixed(0)}°`);
+  const describe = (p: NodalPlane | undefined) =>
+    p ? `Strike: ${angle(p.strike)}, Dip: ${angle(p.dip)}, Rake: ${angle(p.rake)}` : 'N/A';
+
+  const plane1 = describe(mechanism.nodalPlane1);
+  const plane2 = describe(mechanism.nodalPlane2);
+
+  const selected = selectPlane(mechanism);
+  const faultType = selected ? getFaultType(selected.rake).description : 'Unknown';
+
+  const preferred = mechanism.preferredPlane ? `Plane ${mechanism.preferredPlane}` : 'Not stated';
+
   return { plane1, plane2, faultType, preferred };
 }
 

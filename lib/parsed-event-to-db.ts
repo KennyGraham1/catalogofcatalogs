@@ -54,6 +54,19 @@ export function parsedEventToDbFields(event: ParsedEvent): DbEventFields {
 
   // ── Origin metadata (from FIELD_ALIASES-mapped CSV/JSON/GeoJSON) ──────────
   if (event.horizontal_uncertainty != null) fields.horizontal_uncertainty = Number(event.horizontal_uncertainty);
+  // These may arrive as raw CSV cells (no alias entry maps them), so a blank or "n/a"
+  // must stay absent rather than become 0 or NaN.
+  const finiteOrSkip = (v: unknown): number | null => {
+    if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return null;
+    const n = typeof v === 'number' ? v : Number(String(v).trim());
+    return Number.isFinite(n) ? n : null;
+  };
+  const minH = finiteOrSkip(event.min_horizontal_uncertainty);
+  if (minH !== null) fields.min_horizontal_uncertainty = minH;
+  const maxH = finiteOrSkip(event.max_horizontal_uncertainty);
+  if (maxH !== null) fields.max_horizontal_uncertainty = maxH;
+  const azH = finiteOrSkip(event.azimuth_max_horizontal_uncertainty);
+  if (azH !== null) fields.azimuth_max_horizontal_uncertainty = azH;
   if (event.depth_type != null) {
     const raw = String(event.depth_type).trim();
     // Convert 0/1 flag (depthfixed column) to QuakeML depth_type vocabulary
@@ -101,6 +114,7 @@ export function parsedEventToDbFields(event: ParsedEvent): DbEventFields {
   // ── Preferred IDs ────────────────────────────────────────────────────────
   if (event.preferred_origin_id)    fields.preferred_origin_id    = String(event.preferred_origin_id);
   if (event.preferred_magnitude_id) fields.preferred_magnitude_id = String(event.preferred_magnitude_id);
+  if (event.preferred_focal_mechanism_id) fields.preferred_focal_mechanism_id = String(event.preferred_focal_mechanism_id);
 
   // ── Narrative / metadata fields ───────────────────────────────────────────
   // comment (single string) → comments (JSON array, matching MergedEvent schema)

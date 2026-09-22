@@ -19,8 +19,14 @@ export interface DelimiterDetectionResult {
  * Analyzes the first few rows to determine the most likely delimiter
  */
 export function detectDelimiter(content: string, maxSampleRows: number = 10): DelimiterDetectionResult {
-  const lines = content.split('\n').filter(line => line.trim()).slice(0, maxSampleRows);
-  
+  // Sample by RECORD, not by physical line: a quoted field may span several lines
+  // (RFC 4180 2.6), and splitting on newline first made such rows look like
+  // inconsistent column counts, so the wrong delimiter won and the file parsed to
+  // zero events. The sample is bounded to the first physical lines so the
+  // per-delimiter tokenization stays cheap on large files.
+  const sampleText = content.split('\n').slice(0, Math.max(maxSampleRows * 20, 200)).join('\n');
+  const lines = sampleText.split('\n').filter(line => line.trim()).slice(0, maxSampleRows);
+
   if (lines.length === 0) {
     return {
       delimiter: ',',
@@ -38,19 +44,21 @@ export function detectDelimiter(content: string, maxSampleRows: number = 10): De
     const columnCounts: number[] = [];
     let totalColumns = 0;
 
-    for (const line of lines) {
-      // Non-strict: a sample line may end inside a quoted field simply because the
-      // candidate delimiter is the wrong one, or because the quoted field spans
-      // several lines. Scoring must never throw.
-      const columns = tokenizeDelimited(line, delimiter, { strictQuotes: false })[0] ?? [];
+    // Non-strict: the sample may end inside a quoted field simply because the
+    // candidate delimiter is the wrong one. Scoring must never throw.
+    const records = tokenizeDelimited(sampleText, delimiter, { strictQuotes: false })
+      .filter(r => r.length > 1 || (r[0] ?? '').trim() !== '')
+      .slice(0, maxSampleRows);
+    for (const columns of records) {
       const count = columns.length;
       columnCounts.push(count);
       totalColumns += count;
     }
+    const sampled = Math.max(records.length, 1);
 
     // Calculate consistency (how similar are the column counts across rows)
-    const avgColumns = totalColumns / lines.length;
-    const variance = columnCounts.reduce((sum, count) => sum + Math.pow(count - avgColumns, 2), 0) / lines.length;
+    const avgColumns = totalColumns / sampled;
+    const variance = columnCounts.reduce((sum, count) => sum + Math.pow(count - avgColumns, 2), 0) / sampled;
     const stdDev = Math.sqrt(variance);
     const consistency = avgColumns > 1 ? 1 - (stdDev / avgColumns) : 0;
 
@@ -166,6 +174,33 @@ export function tokenizeDelimited(
   if (field.length > 0 || row.length > 0 || fieldWasQuoted) pushRow();
   // drop blank lines (a single empty field), but keep deliberately-empty multi-field rows
   return rows.filter((r) => !(r.length <= 1 && (r[0] ?? '') === ''));
+}
+
+/**
+ * Whether `content` ends inside an open quoted field under the same rules as
+ * tokenizeDelimited (a quote opens a field only at the field's start; "" escapes a
+ * quote inside one). A streaming reader uses this to decide whether the next line
+ * continues the current record.
+ */
+export function endsInsideQuotedField(content: string, delimiter: Delimiter): boolean {
+  let inQuotes = false;
+  let fieldWasQuoted = false;
+  let fieldIsBlank = true;
+  const len = content.length;
+  for (let i = 0; i < len; i++) {
+    const ch = content[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (content[i + 1] === '"') { i++; continue; }
+        inQuotes = false;
+      }
+      continue;
+    }
+    if (ch === '"' && !fieldWasQuoted && fieldIsBlank) { inQuotes = true; fieldWasQuoted = true; continue; }
+    if (ch === delimiter || ch === '\n' || ch === '\r') { fieldWasQuoted = false; fieldIsBlank = true; continue; }
+    if (fieldIsBlank && ch !== ' ' && ch !== '\t') fieldIsBlank = false;
+  }
+  return inQuotes;
 }
 
 /**

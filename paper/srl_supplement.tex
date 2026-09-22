@@ -76,14 +76,18 @@ shown anywhere in this supplement.
 \begin{figure}[ht]
   \centering
   \includegraphics[width=\linewidth]{figures/app_analytics_quality_c.png}
-  \caption{Catalogue-level summary of the per-event quality index
-  (equation~1 of the main paper) for the synthetic GeoNet-like catalogue.  Every
-  event is scored on import and mapped to an A\textsuperscript{+}--F grade; the
-  panel reports the grade distribution and the mean score, together with the
-  field-completeness fractions that feed the individual sub-scores.  The absence
-  of focal mechanisms in this synthetic catalogue is reflected in the
-  completeness bars, and depresses the achievable score, which is why no event
-  reaches grade~A\textsuperscript{+}.}
+  \caption{Catalogue-level quality summary for the synthetic GeoNet-like
+  catalogue.  The grade distribution and mean score are the five-dimension
+  per-event index of equation~1 of the main paper, which scores location,
+  network geometry, solution, magnitude, and evaluation status; every event is
+  scored on import and mapped to an A\textsuperscript{+}--F grade.  The
+  field-completeness bars are a separate catalogue-level metric that reports
+  the fraction of events populating each optional field; they are not inputs to
+  equation~1, and the absence of focal mechanisms in this synthetic catalogue
+  therefore lowers the completeness bars without affecting any event's score.
+  No event reaches grade~A\textsuperscript{+} because the synthetic events
+  carry no station, phase, or uncertainty metadata, and equation~1 treats a
+  missing field as its worst reportable value.}
   \label{fig:s_quality}
 \end{figure}
 

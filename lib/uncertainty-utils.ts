@@ -11,6 +11,8 @@ export interface UncertaintyData {
   depth_uncertainty?: number | null;
   time_uncertainty?: number | null;
   azimuthal_gap?: number | null;
+  /** OriginUncertainty.horizontalUncertainty (circular), km - the DB column most sources fill. */
+  horizontal_uncertainty?: number | null;
   // --- QuakeML 1.2 BED OriginUncertainty horizontal error ellipse -----------
   // These are the real, agency-computed error ellipse: semi-minor axis,
   // semi-major axis and the azimuth (clockwise from north) of the semi-major
@@ -45,7 +47,31 @@ export interface UncertaintyEllipse {
    */
   displayWeight: number;
   /** Provenance of the geometry, so the renderer can label it honestly. */
-  source: 'origin-uncertainty' | 'latlon-marginals';
+  source: 'origin-uncertainty' | 'horizontal-circle' | 'latlon-marginals';
+}
+
+/** Degrees of latitude to km (WGS84 mean); longitude scales by cos(latitude). */
+const KM_PER_DEGREE = 111.32;
+
+/**
+ * The best available horizontal location uncertainty in kilometres and where it came from:
+ * the agency ellipse's semi-major axis, the circular horizontalUncertainty column, or the
+ * larger of the latitude/longitude marginals converted at the event latitude.
+ */
+export function horizontalUncertaintyKm(
+  data: UncertaintyData
+): { km: number; source: 'origin-uncertainty' | 'horizontal-circle' | 'latlon-marginals' } | null {
+  // A reported zero-length axis is a reported (excellent) uncertainty; only the
+  // drawing needs a positive radius.
+  const major = positiveOrNull(data.max_horizontal_uncertainty);
+  if (major !== null) return { km: major, source: 'origin-uncertainty' };
+  const circular = positiveOrNull(data.horizontal_uncertainty);
+  if (circular !== null) return { km: circular, source: 'horizontal-circle' };
+  const latUnc = positiveOrNull(data.latitude_uncertainty);
+  const lonUnc = positiveOrNull(data.longitude_uncertainty);
+  if (latUnc === null && lonUnc === null) return null;
+  const cosLat = Math.cos(((Number.isFinite(data.latitude) ? data.latitude : 0) * Math.PI) / 180);
+  return { km: Math.max((latUnc ?? 0) * KM_PER_DEGREE, (lonUnc ?? 0) * KM_PER_DEGREE * cosLat), source: 'latlon-marginals' };
 }
 
 /** Finite, non-negative number or null. Anything else is treated as "absent". */
@@ -82,7 +108,25 @@ export function calculateUncertaintyEllipse(data: UncertaintyData): UncertaintyE
     };
   }
 
-  // 2. Fallback: independent lat/lon marginals.
+  // 2. Circular OriginUncertainty.horizontalUncertainty (km -> m). A reported 20 km
+  //    radius is location metadata and must draw, not vanish because no ellipse or
+  //    marginals accompany it.
+  //    Precedence is the same as horizontalUncertaintyKm and the quality factor:
+  //    ellipse, then circle, then marginals, so the map and the card describe the
+  //    same measurement.
+  const circularKm = positiveOrNull(data.horizontal_uncertainty);
+  if (circularKm !== null && circularKm > 0) {
+    return {
+      center: [latitude, longitude],
+      semiMajorAxis: circularKm * 1000,
+      semiMinorAxis: circularKm * 1000,
+      rotation: 0,
+      displayWeight,
+      source: 'horizontal-circle',
+    };
+  }
+
+  // 3. Fallback: independent lat/lon marginals.
   if (!latitude_uncertainty && !longitude_uncertainty) {
     return null;
   }
@@ -130,23 +174,41 @@ export function generateEllipsePoints(
 
   // Earth's radius in meters
   const R = 6371000;
+  const lat1 = (centerLat * Math.PI) / 180;
+  const lon1 = (centerLon * Math.PI) / 180;
 
   for (let i = 0; i < numPoints; i++) {
     const angle = (i * 2 * Math.PI) / numPoints;
 
-    // Calculate point on ellipse in local coordinates (x = east, y = north)
+    // Point on the ellipse in local coordinates (x = east, y = north), rotated
+    // counter-clockwise in the (east, north) plane.
     const x = semiMajorAxis * Math.cos(angle);
     const y = semiMinorAxis * Math.sin(angle);
-
-    // Rotate the point counter-clockwise in the (east, north) plane
     const xRotated = x * Math.cos(rotationRad) - y * Math.sin(rotationRad);
     const yRotated = x * Math.sin(rotationRad) + y * Math.cos(rotationRad);
 
-    // Convert meters to degrees (approximate)
-    const latOffset = (yRotated / R) * (180 / Math.PI);
-    const lonOffset = (xRotated / R) * (180 / Math.PI) / Math.cos(centerLat * Math.PI / 180);
+    // Walk that (bearing, distance) along a great circle. The flat-earth
+    // offset (lat + dy/R) left the WGS84 domain for wide ellipses near the poles
+    // (latitude 83 with an 8-degree marginal produced vertices above 90); the
+    // spherical destination formula cannot, and reduces to the same values at
+    // ordinary latitudes and sizes.
+    const distance = Math.hypot(xRotated, yRotated);
+    const bearing = Math.atan2(xRotated, yRotated); // clockwise from north
+    const delta = distance / R;
+    const sinLat2 = Math.sin(lat1) * Math.cos(delta) + Math.cos(lat1) * Math.sin(delta) * Math.cos(bearing);
+    const lat2 = Math.asin(Math.max(-1, Math.min(1, sinLat2)));
+    const lon2 = lon1 + Math.atan2(
+      Math.sin(bearing) * Math.sin(delta) * Math.cos(lat1),
+      Math.cos(delta) - Math.sin(lat1) * sinLat2
+    );
 
-    points.push([centerLat + latOffset, centerLon + lonOffset]);
+    // Keep longitude continuous around the centre (no +-360 jump at the
+    // antimeridian) so Leaflet draws one polygon rather than a wrap-around.
+    let lonDeg = (lon2 * 180) / Math.PI;
+    while (lonDeg - centerLon > 180) lonDeg -= 360;
+    while (lonDeg - centerLon < -180) lonDeg += 360;
+
+    points.push([(lat2 * 180) / Math.PI, lonDeg]);
   }
 
   return points;
@@ -235,11 +297,15 @@ export function calculateLocationQuality(data: UncertaintyData): LocationQuality
   // same ramp as before expressed as a fraction of the factor's weight.
   const ramp = (value: number, worst: number) => 100 * (1 - Math.min(1, Math.max(0, value / worst)));
 
-  // Horizontal uncertainty (degrees): excellent < 0.01° (~1 km), floor at 0.1° (~10 km)
-  const latUnc = positiveOrNull(data.latitude_uncertainty);
-  const lonUnc = positiveOrNull(data.longitude_uncertainty);
-  if (latUnc !== null || lonUnc !== null) {
-    factors.horizontalUncertainty = ramp(Math.max(latUnc ?? 0, lonUnc ?? 0), 0.1);
+  // Horizontal uncertainty: the ellipse semi-major axis or circular
+  // horizontalUncertainty column (km, floor at 0.1 deg = 11.1 km) when reported,
+  // otherwise the larger lat/lon marginal (degrees, floor at 0.1 deg). A stored 20 km
+  // radius used to be ignored entirely because only the marginals were read.
+  // The same resolution the card badge uses (ellipse, circle, then marginals converted
+  // at the event latitude), so badge and bar cannot disagree at high latitude.
+  const horizontal = horizontalUncertaintyKm(data);
+  if (horizontal !== null) {
+    factors.horizontalUncertainty = ramp(horizontal.km, 0.1 * KM_PER_DEGREE);
   }
 
   // Depth uncertainty (km): excellent < 1 km, floor at 10 km
@@ -315,7 +381,10 @@ export function formatUncertainty(value: number | null | undefined, unit: string
 /**
  * Get uncertainty level description
  */
-export function getUncertaintyLevel(uncertainty: number | null | undefined, type: 'horizontal' | 'depth' | 'time'): {
+export function getUncertaintyLevel(
+  uncertainty: number | null | undefined,
+  type: 'horizontal' | 'horizontal-km' | 'depth' | 'time'
+): {
   level: 'excellent' | 'good' | 'fair' | 'poor' | 'unknown';
   description: string;
 } {
@@ -323,10 +392,13 @@ export function getUncertaintyLevel(uncertainty: number | null | undefined, type
     return { level: 'unknown', description: 'No uncertainty data available' };
   }
 
-  if (type === 'horizontal') {
-    if (uncertainty < 0.01) return { level: 'excellent', description: 'Very precise location (< 1 km)' };
-    if (uncertainty < 0.05) return { level: 'good', description: 'Good location precision (1-5 km)' };
-    if (uncertainty < 0.1) return { level: 'fair', description: 'Fair location precision (5-10 km)' };
+  // 'horizontal' takes degrees (marginals); 'horizontal-km' takes kilometres. Both use
+  // the same 1 / 5 / 10 km bands (0.01 deg ~ 1.1 km).
+  if (type === 'horizontal' || type === 'horizontal-km') {
+    const km = type === 'horizontal' ? uncertainty * KM_PER_DEGREE : uncertainty;
+    if (km < 1) return { level: 'excellent', description: 'Very precise location (< 1 km)' };
+    if (km < 5) return { level: 'good', description: 'Good location precision (1-5 km)' };
+    if (km < 10) return { level: 'fair', description: 'Fair location precision (5-10 km)' };
     return { level: 'poor', description: 'Poor location precision (> 10 km)' };
   }
 

@@ -36,7 +36,10 @@ export function metricsFromEvent(event: unknown): QualityMetrics {
     typeof v === 'number' && Number.isFinite(v) ? v : null;
   const latUnc = num(ev.latitude_uncertainty);
   const lonUnc = num(ev.longitude_uncertainty);
-  let horizontalUncertainty = num(ev.horizontal_uncertainty); // km
+  // km, in the same order as the uncertainty card: the error-ellipse semi-major axis,
+  // else the circular column, else the marginals.
+  const majorAxis = num(ev.max_horizontal_uncertainty);
+  let horizontalUncertainty = (majorAxis !== null && majorAxis >= 0 ? majorAxis : null) ?? num(ev.horizontal_uncertainty);
   if (horizontalUncertainty == null && latUnc != null && lonUnc != null) {
     const lat = num(ev.latitude) ?? 0;
     const latKm = latUnc * 111;
@@ -112,6 +115,29 @@ export function scoreToGrade(overall: number): QualityGrade {
 }
 
 /**
+ * The overall score and grade only, for bulk statistics over a whole catalogue: the
+ * per-event details (strengths, weaknesses, recommendations) are string work that
+ * dominated a 200k-event pass on the analytics page.
+ */
+export function scoreQualityMetrics(
+  metrics: QualityMetrics,
+  weights: QualityWeights = {}
+): { overall: number; grade: QualityGrade } {
+  const w = { ...DEFAULT_QUALITY_WEIGHTS, ...weights };
+  const parts = [
+    [calculateLocationScore(metrics).score, w.location],
+    [calculateNetworkScore(metrics).score, w.network],
+    [calculateSolutionScore(metrics).score, w.solution],
+    [calculateMagnitudeScore(metrics).score, w.magnitude],
+    [calculateEvaluationScore(metrics).score, w.evaluation],
+  ];
+  let weighted = 0, total = 0;
+  for (const [score, weight] of parts) { weighted += score * weight; total += weight; }
+  const overall = Math.round(weighted / total);
+  return { overall, grade: scoreToGrade(overall) };
+}
+
+/**
  * Calculate comprehensive quality score for an earthquake event.
  * Dimension weights may be overridden (e.g. by a community with different
  * priorities); omitted weights fall back to DEFAULT_QUALITY_WEIGHTS.
@@ -136,14 +162,17 @@ export function calculateQualityScore(
     0
   ) / totalWeight;
 
-  // Determine grade (Table 2 thresholds)
-  const grade = scoreToGrade(overall);
-  
+  // The reported score is the rounded value, so the grade must be read from the
+  // SAME number: 84.74 used to come back as 85 with grade B+, while every consumer
+  // maps 85 to A.
+  const reported = Math.round(overall);
+  const grade = scoreToGrade(reported);
+
   // Generate details
-  const details = generateQualityDetails(metrics, components, overall);
-  
+  const details = generateQualityDetails(metrics, components, reported);
+
   return {
-    overall: Math.round(overall),
+    overall: reported,
     grade,
     components,
     details,

@@ -14,7 +14,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Activity, Calendar, Ruler, MapPin, Info } from 'lucide-react';
 import { TechnicalTermTooltip } from '@/components/ui/info-tooltip';
-import { getEarthquakeColor } from '@/lib/earthquake-utils';
+import { getEarthquakeColor, getMagnitudeLabel } from '@/lib/earthquake-utils';
 import { useMapColors } from '@/hooks/use-map-theme';
 import 'leaflet/dist/leaflet.css';
 
@@ -66,13 +66,6 @@ function formatOriginTime(time: string): string {
   return UTC_SECOND_FORMAT.format(date);
 }
 
-function getMagnitudeLabel(magnitude: number): string {
-  if (magnitude >= 6.0) return 'Major';
-  if (magnitude >= 5.0) return 'Moderate';
-  if (magnitude >= 4.0) return 'Light';
-  if (magnitude >= 3.0) return 'Minor';
-  return 'Micro';
-}
 
 function EventPopupContent({ event }: { event: CircleMapEvent }) {
   return (

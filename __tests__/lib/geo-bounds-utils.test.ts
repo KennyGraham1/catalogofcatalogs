@@ -1,5 +1,5 @@
 /**
- * Regression tests for antimeridian (180°) handling (audit root cause A).
+ * Regression tests for antimeridian (180°) handling.
  *
  * The RFC 7946 §5.2 convention is used: a box that crosses the antimeridian has
  * minLongitude (west edge) > maxLongitude (east edge).

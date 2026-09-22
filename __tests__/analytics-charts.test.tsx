@@ -18,6 +18,7 @@ jest.mock('echarts-for-react', () => ({
 import {
   RegionDistributionChart, TemporalSeriesChart, MomentReleaseChart, MFDComparisonChart,
 } from '@/components/charts';
+import { calculateMFD } from '@/lib/seismological-analysis';
 
 const build = (el: React.ReactElement) => {
   captured = null;
@@ -45,6 +46,19 @@ const MFD_CATALOGUES = [
 ];
 
 describe('MFD comparison: incremental and cumulative are separate, identifiable series', () => {
+  it.each([false, true])('preserves empty magnitude intervals with logScale=%s', logScale => {
+    const catalogue = calculateMFD([2, 4].map((magnitude, i) => ({
+      id: i, time: '2024-01-01', latitude: 0, longitude: 0, depth: 10, magnitude,
+    })), 'a', 'A', '#000');
+    const option = build(<MFDComparisonChart catalogues={[catalogue]}
+      magnitudeRange={{ min: 2, max: 4 }} logScale={logScale} showHistogram showCumulative={false} />);
+    const series = option.series[0];
+    expect(series.data.find((p: number[]) => p[0] === 3)).toEqual([3, logScale ? null : 0]);
+    expect(series.data[0]).toEqual([2, 1]);
+    expect(series.data[series.data.length - 1]).toEqual([4, 1]);
+    expect(series.connectNulls).toBe(false);
+  });
+
   it('names each curve after its quantity so the legend and tooltip can tell them apart', () => {
     const option = build(
       <MFDComparisonChart
@@ -114,6 +128,20 @@ describe('Temporal series: week bin keys are not dates', () => {
 });
 
 describe('Temporal series: day bin keys are formatted in UTC', () => {
+  it('spaces occupied dates by elapsed time and holds the count through quiet periods', () => {
+    const option = build(<TemporalSeriesChart data={[
+      { date: '2023-01-01', cumulativeCount: 1 },
+      { date: '2023-01-02', cumulativeCount: 2 },
+      { date: '2024-01-01', cumulativeCount: 3 },
+    ]} />);
+    expect(option.xAxis.type).toBe('time');
+    const points = option.series[0].data;
+    expect((points[2][0] - points[1][0]) / (points[1][0] - points[0][0])).toBe(364);
+    expect(points.map((p: number[]) => p[1])).toEqual([1, 2, 3]);
+    expect(option.series[0].step).toBe('end');
+    expect(option.xAxis.axisLabel.formatter(Date.UTC(2024, 0, 1))).toBe('1/24');
+  });
+
   const ORIGINAL_TZ = process.env.TZ;
   // A westward local zone is where a UTC-midnight key rolls back a day (and,
   // on the 1st of a month, a month) if the formatter uses local getters.

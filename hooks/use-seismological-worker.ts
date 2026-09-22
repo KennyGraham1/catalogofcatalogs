@@ -1,13 +1,14 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { createSeismologicalWorker } from '@/lib/seismological-worker-client';
 
 interface EarthquakeEvent {
   id: number | string;
   time: string;
   latitude: number;
   longitude: number;
-  depth: number;
+  depth: number | null;
   magnitude: number;
   magnitude_type?: string | null;
 }
@@ -31,93 +32,55 @@ export function useSeismologicalWorker<T>(
   enabled: boolean = true,
   options?: { minMagnitude?: number; binWidth?: number }
 ): WorkerResult<T> {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [cached, setCached] = useState(false);
-  
-  const workerRef = useRef<Worker | null>(null);
-  const mountedRef = useRef(true);
+  const minMagnitude = options?.minMagnitude;
+  const binWidth = options?.binWidth;
+  const request = useMemo(() => ({ type, events, enabled, minMagnitude, binWidth }),
+    [type, events, enabled, minMagnitude, binWidth]);
+  const pending: WorkerResult<T> = { data: null, loading: enabled && events.length > 0, error: null, cached: false };
+  const [state, setState] = useState<WorkerResult<T> & { request: typeof request }>({ ...pending, request });
 
   useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    // Don't run if not enabled or no events
+    const finish = (result: Partial<WorkerResult<T>>) => setState({
+      request, data: null, loading: false, error: null, cached: false, ...result,
+    });
     if (!enabled || events.length === 0) {
-      setData(null);
-      setLoading(false);
+      finish({});
       return;
     }
-
-    // Minimum event requirements
     const minEvents = type === 'completeness' ? 50 : type === 'gutenberg-richter' ? 10 : 1;
     if (events.length < minEvents) {
-      setError(`Insufficient data (need at least ${minEvents} events)`);
-      setLoading(false);
+      finish({ error: `Insufficient data (need at least ${minEvents} events)` });
       return;
     }
-
-    setLoading(true);
-    setError(null);
-
-    // Create worker
+    finish({ loading: true });
+    let active = true;
+    let worker: Worker | undefined;
     try {
-      // Use dynamic import for worker
-      const worker = new Worker(
-        new URL('../workers/seismological-worker.ts', import.meta.url)
-      );
-      workerRef.current = worker;
-
-      worker.onmessage = (e) => {
-        if (!mountedRef.current) return;
-        
-        const { result, cached: wasCached } = e.data;
-        
-        if (result.error) {
-          setError(result.error);
-          setData(null);
-        } else {
-          setData(result);
-          setError(null);
-        }
-        setCached(wasCached);
-        setLoading(false);
+      worker = createSeismologicalWorker();
+      worker.onmessage = event => {
+        if (!active) return;
+        const { result, cached } = event.data;
+        finish(result?.error ? { error: result.error } : { data: result, cached: Boolean(cached) });
       };
-
-      worker.onerror = (e) => {
-        if (!mountedRef.current) return;
-        setError(e.message || 'Worker error');
-        setLoading(false);
+      worker.onerror = event => {
+        if (active) finish({ error: event.message || 'Analysis worker failed' });
       };
-
-      // Send data to worker
-      worker.postMessage({
-        type,
-        events,
-        ...options
-      });
-
-    } catch (err) {
-      // Fallback if workers aren't supported
-      setError('Web Workers not supported');
-      setLoading(false);
+      // Send only the inputs the science algorithms use. Nested event details
+      // otherwise incur an unnecessary structured clone for every tab change.
+      worker.postMessage({ type, minMagnitude, binWidth, events: events.map(event => ({
+        id: event.id, time: event.time, latitude: event.latitude, longitude: event.longitude,
+        depth: event.depth, magnitude: event.magnitude, magnitude_type: event.magnitude_type,
+      })) });
+    } catch (error) {
+      active = false;
+      worker?.terminate();
+      finish({ error: error instanceof Error ? error.message : 'Unable to start analysis worker' });
     }
+    return () => { active = false; worker?.terminate(); };
+  }, [request, type, events, enabled, minMagnitude, binWidth]);
 
-    // Cleanup
-    return () => {
-      if (workerRef.current) {
-        workerRef.current.terminate();
-        workerRef.current = null;
-      }
-    };
-  }, [type, events, enabled, options?.minMagnitude, options?.binWidth]);
-
-  return { data, loading, error, cached };
+  // A queued message or an old result must never describe newly selected inputs.
+  return state.request === request ? state : pending;
 }
 
 /**
@@ -125,8 +88,8 @@ export function useSeismologicalWorker<T>(
  */
 export function useSeismologicalAnalyses(events: EarthquakeEvent[], activeTab: string) {
   // Only compute analysis for active tab
-  const grEnabled = activeTab === 'gutenberg-richter' && events.length >= 10;
-  const completenessEnabled = activeTab === 'completeness' && events.length >= 50;
+  const grEnabled = activeTab === 'gutenberg-richter';
+  const completenessEnabled = activeTab === 'completeness';
   const temporalEnabled = activeTab === 'temporal' && events.length > 0;
   const momentEnabled = activeTab === 'moment' && events.length > 0;
 
