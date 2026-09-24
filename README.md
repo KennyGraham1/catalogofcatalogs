@@ -17,7 +17,7 @@ A web application for managing, analyzing, and visualizing earthquake catalogue 
 ## 🚀 Getting Started
 
 ### Prerequisites
-*   Node.js 18.x or higher
+*   Node.js 22.12+ (22 LTS) or 24 LTS
 *   MongoDB 6.x or higher (Local or Atlas)
 
 ### Installation
@@ -39,6 +39,15 @@ A web application for managing, analyzing, and visualizing earthquake catalogue 
     ```bash
     npx tsx scripts/init-database.ts
     ```
+    Rerun this command on existing deployments before enabling imports. It now requires
+    unique event IDs and a partial unique `(catalogue_id, source_id)` index. If legacy
+    duplicates or conflicting indexes prevent creation, setup fails: back up and repair
+    those records/index definitions before retrying. Setup does not delete duplicate data.
+
+    Credential login uses shared MongoDB counters (10 attempts per account and 50 per
+    client in each 15-minute window). The application creates a TTL index on
+    `auth_rate_limits`; its database role must permit index creation. Configure
+    `TRUSTED_PROXY_HOPS` for your ingress and prevent clients bypassing that proxy.
 
 4.  **Run Development Server**
     ```bash
@@ -48,7 +57,7 @@ A web application for managing, analyzing, and visualizing earthquake catalogue 
 
 ## 🛠 Technology Stack
 
-*   **Frontend**: Next.js 13 (App Router), TypeScript, Tailwind CSS, shadcn/ui, Leaflet, Recharts.
+*   **Frontend**: Next.js 15 (App Router), TypeScript, Tailwind CSS, shadcn/ui, Leaflet, Apache ECharts 6.
 *   **Backend**: Next.js API Routes, MongoDB, xml2js.
 *   **Testing**: Jest, React Testing Library.
 
@@ -135,3 +144,15 @@ Key capabilities include:
 ## 📄 License
 
 This project is licensed under the MIT License.
+
+### Integrity and production browser checks
+
+`npm run test:runtime` exercises the real authentication middleware. To check database
+concurrency and required indexes, set `MONGODB_TEST_URI` to a disposable MongoDB server
+and run `npm run test:database`; the script creates and deletes its own test database.
+
+After `npm run build`, start the app with a test database and auth secret, install
+Chromium with `npx playwright install chromium`, and run
+`PRODUCTION_TEST_URL=http://127.0.0.1:3000 npm run test:browser`. This verifies matching
+CSP nonces and interactive hydration on login and catalogue pages. CI runs these
+checks and blocks on dependency advisories rated moderate or higher.

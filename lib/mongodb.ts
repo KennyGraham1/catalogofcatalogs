@@ -279,6 +279,7 @@ export const COLLECTIONS = {
   IMPORT_HISTORY: 'import_history',
   SAVED_FILTERS: 'saved_filters',
   USERS: 'users',
+  AUTH_RATE_LIMITS: 'auth_rate_limits',
   SESSIONS: 'sessions',
   ROLE_REQUESTS: 'role_requests',
   NOTIFICATIONS: 'notifications',

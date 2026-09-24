@@ -1,3 +1,4 @@
+import { ensureEventIntegrityIndexes } from '../lib/event-indexes';
 import { getDb, COLLECTIONS } from '../lib/mongodb';
 
 /**
@@ -13,33 +14,7 @@ export async function ensureIndexes() {
 
   const eventsCollection = db.collection(COLLECTIONS.EVENTS);
 
-  // Partial UNIQUE index on (catalogue_id, source_id) — makes re-imports idempotent
-  // and prevents duplicate events. Partial so events without a source_id are exempt.
-  // Creation fails if legacy duplicates already exist; in that case de-duplicate first
-  // (see notes below) — we fall back to a non-unique index rather than abort the run.
-  try {
-    await eventsCollection.createIndex(
-      { catalogue_id: 1, source_id: 1 },
-      {
-        name: 'catalogue_source_id_unique_idx',
-        unique: true,
-        partialFilterExpression: { source_id: { $exists: true, $type: 'string' } },
-        background: true,
-      }
-    );
-    console.log('✓ Created UNIQUE index: catalogue_source_id_unique_idx');
-  } catch (err) {
-    console.warn(
-      '⚠ Could not create UNIQUE (catalogue_id, source_id) index (likely pre-existing duplicates). ' +
-      'De-duplicate events, then re-run. Falling back to a non-unique index.',
-      (err as Error)?.message
-    );
-    await eventsCollection.createIndex(
-      { catalogue_id: 1, source_id: 1 },
-      { name: 'catalogue_source_id_idx', background: true }
-    );
-    console.log('✓ Created index: catalogue_source_id_idx (non-unique fallback)');
-  }
+  await ensureEventIntegrityIndexes(eventsCollection);
 
   await eventsCollection.createIndex({ catalogue_id: 1, time: -1 }, { name: 'catalogue_time_idx', background: true });
   console.log('✓ Created index: catalogue_time_idx');

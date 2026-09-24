@@ -15,9 +15,10 @@ import { useRouter } from 'next/navigation';
 
 interface LayoutProps {
   children: ReactNode;
+  nonce?: string;
 }
 
-export function Layout({ children }: LayoutProps) {
+export function Layout({ children, nonce }: LayoutProps) {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
@@ -78,7 +79,7 @@ export function Layout({ children }: LayoutProps) {
   });
 
   return (
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+    <ThemeProvider nonce={nonce} attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
       <CatalogueProvider>
         <div className="min-h-screen flex flex-col">
           <Header

@@ -19,20 +19,16 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // Read the nonce injected by middleware. Next.js uses it when rendering its
-  // own inline bootstrap scripts, which is what eliminates 'unsafe-inline'.
+  // Reading request headers keeps this layout dynamic. Next.js reads the request
+  // CSP for its own scripts; next-themes needs the nonce passed explicitly.
   const nonce = (await headers()).get('x-nonce') ?? undefined;
 
   return (
     <html lang="en" suppressHydrationWarning>
-      <head>
-        {/* Expose the nonce so Next.js can apply it to its inline scripts */}
-        {nonce && <meta name="csp-nonce" content={nonce} />}
-      </head>
       <body className={inter.className}>
         <SessionProvider>
           <ErrorBoundary>
-            <Layout>
+            <Layout nonce={nonce}>
               {children}
             </Layout>
             <Analytics />

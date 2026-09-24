@@ -1,3 +1,4 @@
+import { ensureEventIntegrityIndexes } from '../lib/event-indexes';
 /**
  * Initialize MongoDB Database
  * Creates all collections and indexes
@@ -30,7 +31,6 @@ const COLLECTIONS = {
 
 async function initializeDatabase() {
   console.log('🔧 Initializing MongoDB database...\n');
-  console.log(`   URI: ${MONGODB_URI}`);
   console.log(`   Database: ${DATABASE_NAME}\n`);
 
   const client = new MongoClient(MONGODB_URI);
@@ -63,6 +63,7 @@ async function initializeDatabase() {
 
     // Events collection indexes
     const eventsCollection = db.collection(COLLECTIONS.EVENTS);
+    await ensureEventIntegrityIndexes(eventsCollection);
     const eventIndexes: Array<{ key: Record<string, 1 | -1>; name: string; unique?: boolean }> = [
       { key: { id: 1 }, name: 'idx_id', unique: true },
       { key: { catalogue_id: 1 }, name: 'idx_catalogue_id' },

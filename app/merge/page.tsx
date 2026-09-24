@@ -865,7 +865,7 @@ export default function MergePage() {
     return parsed;
   }, []);
 
-  const getSourceNamesForSearch = (catalogue: CatalogueItem): string[] => {
+  const getSourceNamesForSearch = useCallback((catalogue: CatalogueItem): string[] => {
     const sources: string[] = [];
     if (catalogue.source) sources.push(catalogue.source);
 
@@ -878,9 +878,9 @@ export default function MergePage() {
     }
 
     return sources;
-  };
+  }, [parseSourceCatalogues]);
 
-  const getSourceType = (catalogue: CatalogueItem): 'merged' | 'imported' | 'uploaded' => {
+  const getSourceType = useCallback((catalogue: CatalogueItem): 'merged' | 'imported' | 'uploaded' => {
     try {
       const sources = parseSourceCatalogues(catalogue.source_catalogues);
 
@@ -919,12 +919,12 @@ export default function MergePage() {
     } catch {
       return 'uploaded';
     }
-  };
+  }, [parseSourceCatalogues]);
 
   const getSourceNamesForSort = useCallback((catalogue: CatalogueItem): string => {
     const sourceNames = getSourceNamesForSearch(catalogue);
     return sourceNames.length > 0 ? sourceNames.join(', ') : 'Unknown';
-  }, []);
+  }, [getSourceNamesForSearch]);
 
   const getSourceTypeBadge = (catalogue: CatalogueItem) => {
     const sourceType = getSourceType(catalogue);
@@ -1106,7 +1106,7 @@ export default function MergePage() {
 
       return sortDirection === 'asc' ? comparison : -comparison;
     });
-  }, [getSourceNamesForSort, searchedCatalogues, sortField, sortDirection]);
+  }, [getSourceNamesForSort, getSourceType, searchedCatalogues, sortField, sortDirection]);
 
   const {
     currentPage,

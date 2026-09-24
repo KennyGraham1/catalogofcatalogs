@@ -21,6 +21,7 @@ jest.mock('@/lib/db', () => ({
   dbQueries: {
     insertCatalogue: jest.fn(),
     bulkInsertEvents: jest.fn(),
+    countEventsByCatalogue: jest.fn(),
     updateCatalogueStatus: jest.fn(),
     updateCatalogueEventCount: jest.fn(),
     updateCatalogueGeoBounds: jest.fn(),
@@ -86,6 +87,10 @@ function storedBounds() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockDb.countEventsByCatalogue.mockImplementation(async () => {
+    const counts = await Promise.all(mockDb.bulkInsertEvents.mock.results.map(result => result.value));
+    return counts.reduce((sum, count) => sum + count, 0);
+  });
   mockDb.insertCatalogue.mockResolvedValue(undefined);
   mockDb.updateCatalogueStatus.mockResolvedValue(undefined);
   mockDb.updateCatalogueEventCount.mockResolvedValue(undefined);

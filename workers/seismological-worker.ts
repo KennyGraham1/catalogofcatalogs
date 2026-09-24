@@ -174,18 +174,6 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
     }
   }
 
-  const n = cumulativeCounts.length;
-  // Hard floor: a fit needs at least three POPULATED magnitude bins.
-  // `cumulativeCounts.length` counts every bin from minMag up to the largest
-  // populated one, so two populated bins far apart used to slip through.
-  const populatedBins = sortedBins.reduce(
-    (count, [, binCount]) => (binCount > 0 ? count + 1 : count),
-    0
-  );
-  if (populatedBins < 3) {
-    return { error: 'Insufficient magnitude bins for regression (need at least 3 populated bins)' };
-  }
-
   // Completeness magnitude Mc (MAXC; Wiemer & Wyss 2000, with the +0.2 correction
   // of Woessner & Wiemer 2005) when no explicit cut-off is supplied. The Aki-Utsu
   // MLE is only valid above Mc and the mean MUST be taken over events with M >= Mc;
@@ -214,15 +202,22 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
     };
   }
 
+  // Apply the bin safeguard to the same complete sample used by the MLE.
+  const populatedBins = new Set(magsAboveMc.map(m => binKey(binLowerEdge(m, binWidth)))).size;
+  if (populatedBins < 3) {
+    return { error: 'Insufficient magnitude bins above Mc (need at least 3 populated bins)' };
+  }
+
   // Maximum-likelihood b-value (Aki, 1965) with the Utsu binning correction.
   const meanMag = magsAboveMc.reduce((sum, m) => sum + m, 0) / magsAboveMc.length;
   const bValue = Math.LOG10E / (meanMag - (mc - binWidth / 2));
   const bUncertainty = bValue / Math.sqrt(magsAboveMc.length);
   const aValue = Math.log10(magsAboveMc.length) + bValue * mc;
 
-  const meanY = cumulativeCounts.reduce((sum, p) => sum + p.logCount, 0) / n;
-  const ssTotal = cumulativeCounts.reduce((sum, p) => sum + Math.pow(p.logCount - meanY, 2), 0);
-  const ssResidual = cumulativeCounts.reduce((sum, p) => {
+  const fittedCounts = cumulativeCounts.filter(p => p.magnitude >= mc);
+  const meanY = fittedCounts.reduce((sum, p) => sum + p.logCount, 0) / fittedCounts.length;
+  const ssTotal = fittedCounts.reduce((sum, p) => sum + Math.pow(p.logCount - meanY, 2), 0);
+  const ssResidual = fittedCounts.reduce((sum, p) => {
     const predicted = aValue - bValue * p.magnitude;
     return sum + Math.pow(p.logCount - predicted, 2);
   }, 0);
@@ -231,7 +226,7 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
   // Completeness magnitude actually used for the b-value.
   const completeness = mc;
 
-  const fittedLine = cumulativeCounts.map(p => ({
+  const fittedLine = fittedCounts.map(p => ({
     magnitude: p.magnitude,
     logCount: aValue - bValue * p.magnitude
   }));

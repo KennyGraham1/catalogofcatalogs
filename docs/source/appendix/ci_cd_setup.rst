@@ -22,7 +22,7 @@ GitHub Actions Workflows
        end
 
        subgraph CI["CI Pipeline (test.yml)"]
-           Test[/"Run Tests (Node 18 &amp; 20)"/]
+           Test[/"Run Tests (Node 22 &amp; 24)"/]
            Security[/"Security Audit (npm audit)"/]
            Build[/"Build App"/]
        end
@@ -77,7 +77,7 @@ GitHub Actions Workflows
 Test Job
 ~~~~~~~~
 
-- **Matrix Strategy**: Tests on Node.js 18.x and 20.x
+- **Matrix Strategy**: Tests on Node.js 22.x and 24.x
 - **Steps**:
   1. Checkout code
   2. Setup Node.js with caching

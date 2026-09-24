@@ -7,6 +7,7 @@ import { NextRequest } from 'next/server';
 jest.mock('@/lib/auth/middleware', () => ({ requireEditor: jest.fn(async () => ({ user: { id: 'editor' } })) }));
 const calls: any = { insertMany: [], deleteOne: [] };
 const stub: any = {
+  countDocuments: jest.fn(async () => calls.insertMany.flat().length),
   insertOne: jest.fn(async () => ({})),
   insertMany: jest.fn(async (docs: any[]) => { calls.insertMany.push(docs); return { insertedCount: docs.length }; }),
   updateOne: jest.fn(async () => ({ matchedCount: 1 })),

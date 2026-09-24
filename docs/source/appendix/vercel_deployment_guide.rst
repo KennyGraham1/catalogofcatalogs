@@ -28,7 +28,7 @@ Before deploying, ensure you have:
 - [ ] A ``Vercel account <https://vercel.com/signup>``_ (free tier works)
 - [ ] MongoDB Atlas cluster configured (you already have this!)
 - [ ] Your code pushed to a Git repository (GitHub, GitLab, or Bitbucket)
-- [ ] Node.js 18+ installed locally (for running initialization scripts)
+- [ ] Node.js 22.12+ (22 LTS) or 24 LTS installed locally (for running initialization scripts)
 
 
 

@@ -7,7 +7,7 @@ This guide covers the local development workflow for contributors.
 Prerequisites
 -------------
 
-- Node.js 18+
+- Node.js 22.12+ (22 LTS) or 24 LTS
 - npm 9+
 - MongoDB (local or Atlas)
 - Git

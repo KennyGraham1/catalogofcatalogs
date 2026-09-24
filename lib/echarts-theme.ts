@@ -9,6 +9,7 @@
  */
 
 import type { EChartsOption } from 'echarts';
+import { escapeHtml } from './html';
 import { SEISMIC_COLORS, CATEGORICAL_COLORS } from './chart-config';
 
 /** Resolved per-theme colours used across all charts. */
@@ -36,23 +37,24 @@ export function chartColors(isDark: boolean) {
 
 export type ChartColors = ReturnType<typeof chartColors>;
 
-/** Labels can contain catalogue/region names supplied by an uploader. */
-function escapeHtml(value: string): string {
-  return String(value).replace(/[&<>"']/g, character => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[character]!));
-}
-
 const FONT_FAMILY =
   'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 
 /** Cartesian axis styling (category or value). */
-export function axis(
+type AxisType = 'value' | 'category' | 'log' | 'time';
+type AxisOptions<T extends AxisType> = { name?: string; type?: T; nameGap?: number };
+export function axis(c: ChartColors, opts?: Omit<AxisOptions<'value'>, 'type'>): ReturnType<typeof createAxis<'value'>>;
+export function axis<T extends AxisType>(c: ChartColors, opts: AxisOptions<T> & { type: T }): ReturnType<typeof createAxis<T>>;
+export function axis(c: ChartColors, opts: AxisOptions<AxisType> = {}) {
+  return createAxis(c, opts);
+}
+
+function createAxis<T extends AxisType = 'value'>(
   c: ChartColors,
-  opts: { name?: string; type?: 'value' | 'category' | 'log' | 'time'; nameGap?: number } = {}
+  opts: { name?: string; type?: T; nameGap?: number } = {}
 ) {
   return {
-    type: opts.type ?? 'value',
+    type: (opts.type ?? 'value') as T,
     name: opts.name,
     nameLocation: 'middle' as const,
     nameGap: opts.nameGap ?? 34,

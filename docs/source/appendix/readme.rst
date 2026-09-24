@@ -61,7 +61,7 @@ Prerequisites
 ^^^^^^^^^^^^^
 
 
-- **Node.js**: Version 18.x or higher
+- **Node.js**: Version 22.12+ (22 LTS) or 24 LTS
 - **npm**: Version 9.x or higher
 - **MongoDB**: Version 6.x or higher (local installation or MongoDB Atlas)
 

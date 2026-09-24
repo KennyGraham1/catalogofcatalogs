@@ -14,6 +14,7 @@
 import { memo, useMemo, useRef } from 'react';
 import { useTheme } from 'next-themes';
 import ReactECharts from 'echarts-for-react';
+import 'echarts/theme/v5';
 import type { EChartsOption } from 'echarts';
 import { chartColors, baseOption } from '@/lib/echarts-theme';
 import { cn } from '@/lib/utils';
@@ -71,6 +72,7 @@ export const EChart = memo(function EChart({
     <div className={cn('relative w-full', className)} style={{ height, width: '100%', ...style }}>
       <div ref={containerRef} role="img" aria-label={ariaLabel} className="h-full w-full">
         <ReactECharts
+          theme="v5"
           option={merged}
           notMerge={notMerge}
           lazyUpdate

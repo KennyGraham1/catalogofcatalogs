@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'crypto';
 import { getCollection, COLLECTIONS } from '@/lib/mongodb';
-import { getUserById, hashPassword, bumpJwtVersion } from '@/lib/auth/utils';
+import { getUserById, hashPassword } from '@/lib/auth/utils';
 import { Logger } from '@/lib/errors';
 import { applyRateLimit, authRateLimiter } from '@/lib/rate-limiter';
 import type { PasswordResetToken } from '@/lib/auth/types';
@@ -60,14 +60,27 @@ export async function POST(request: NextRequest) {
     }
 
     const newPasswordHash = await hashPassword(newPassword);
+    // Claim after hashing, but before changing credentials. Only one request can
+    // consume this token, including across application instances. If a later write
+    // fails the token stays consumed; the user must request another reset link.
+    const now = new Date();
+    const claim = await collection.updateOne(
+      { id: tokenDoc.id, token_hash: tokenHash, used_at: null, expires_at: { $gt: now } },
+      { $set: { used_at: now } },
+    );
+    if (claim.matchedCount !== 1) {
+      return NextResponse.json({ error: 'Invalid or expired reset token' }, { status: 400 });
+    }
+
     const usersCollection = await getCollection(COLLECTIONS.USERS);
     const updateResult = await usersCollection.updateOne(
-      { id: user.id },
+      { id: user.id, password_hash: user.password_hash },
       {
         $set: {
           password_hash: newPasswordHash,
-          updated_at: new Date().toISOString(),
+          updated_at: now.toISOString(),
         },
+        $inc: { jwt_version: 1 },
       }
     );
 
@@ -78,18 +91,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const now = new Date();
-    await collection.updateOne(
-      { id: tokenDoc.id },
-      { $set: { used_at: now } }
-    );
     await collection.updateMany(
       { user_id: user.id, used_at: null },
       { $set: { used_at: now } }
     );
-
-    // Invalidate all existing JWTs for this user.
-    await bumpJwtVersion(user.id);
 
     return NextResponse.json({ message: 'Password reset successfully' });
   } catch (error) {

@@ -197,7 +197,7 @@ GitHub Actions Workflows
 
 
 **Features**:
-- **Matrix Testing**: Node.js 18.x and 20.x
+- **Matrix Testing**: Node.js 22.x and 24.x
 - **Parallel Jobs**: Test, Build, Security
 - **Quality Gates**: Linting, type checking, tests, build
 - **Coverage Reporting**: Codecov integration, GitHub summary
@@ -374,7 +374,7 @@ CI/CD Quality
 
 
 - ✅ Automated testing on every push/PR
-- ✅ Matrix testing (Node 18.x, 20.x)
+- ✅ Matrix testing (Node 22.x, 24.x)
 - ✅ Security audits
 - ✅ Build verification
 - ✅ Coverage tracking

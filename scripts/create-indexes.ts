@@ -1,4 +1,5 @@
 #!/usr/bin/env npx tsx
+import { ensureEventIntegrityIndexes } from '../lib/event-indexes';
 /**
  * Database Index Creation Script
  *
@@ -41,12 +42,6 @@ const indexes: IndexDefinition[] = [
     name: 'idx_events_catalogue_time',
     keys: { catalogue_id: 1, time: -1 },
     options: { background: true },
-  },
-  {
-    collection: 'merged_events',
-    name: 'idx_events_catalogue_source',
-    keys: { catalogue_id: 1, source_id: 1 },
-    options: { background: true, sparse: true },
   },
   {
     collection: 'merged_events',
@@ -209,6 +204,7 @@ async function createIndexes(): Promise<void> {
   try {
     await client.connect();
     const db = client.db(DATABASE_NAME);
+    await ensureEventIntegrityIndexes(db.collection('merged_events'));
 
     console.log('✅ Connected successfully\n');
     console.log('📊 Creating indexes...\n');

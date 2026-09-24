@@ -517,7 +517,7 @@ Production Environment
 * **Database:** MongoDB Atlas (cloud) or self-hosted
 * **CDN:** Vercel Edge Network
 * **SSL/TLS:** Automatic HTTPS with Vercel
-* **Environment:** Node.js 18+ runtime
+* **Environment:** Node.js 22.12+ (22 LTS) or 24 LTS runtime
 
 See :doc:`../deployment/index` for deployment guides.
 

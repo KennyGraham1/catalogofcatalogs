@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth/config';
-import { getUserById, hashPassword, verifyPassword, bumpJwtVersion } from '@/lib/auth/utils';
+import { getUserById, hashPassword, verifyPassword } from '@/lib/auth/utils';
 import { getCollection, COLLECTIONS } from '@/lib/mongodb';
 import { AppError } from '@/lib/errors';
 import { applyRateLimit, authRateLimiter } from '@/lib/rate-limiter';
@@ -72,21 +72,19 @@ export async function POST(request: NextRequest) {
     // Update password in database
     const usersCollection = await getCollection(COLLECTIONS.USERS);
     const result = await usersCollection.updateOne(
-      { id: user.id },
+      { id: user.id, password_hash: user.password_hash },
       {
         $set: {
           password_hash: newPasswordHash,
           updated_at: new Date().toISOString(),
         },
+        $inc: { jwt_version: 1 },
       }
     );
 
     if (result.modifiedCount === 0) {
       throw new AppError('Failed to update password', 500);
     }
-
-    // Invalidate all existing JWTs for this user.
-    await bumpJwtVersion(user.id);
 
     return NextResponse.json({
       message: 'Password changed successfully',

@@ -137,8 +137,7 @@ export async function appendPendingUploadEvents(
  * Retrieve all events for a pending upload in their original order.
  *
  * Returns `null` when the `uploadId` is not found (e.g. already consumed or
- * expired).  Callers should fall back to the scalar events supplied in the
- * request body in that case.
+ * expired). Callers must reject missing tokens to preserve event alignment.
  */
 export async function getPendingUploadEvents(
   uploadId: string,
@@ -159,21 +158,22 @@ export async function* iteratePendingUploadEventBatches(
 
   const collection = await getCollection(COLLECTIONS.PENDING_UPLOADS);
   const cursor = collection
-    .find({ upload_id: uploadId })
+    .find({ upload_id: uploadId, expires_at: { $gt: new Date() } })
     .sort({ seq: 1 })
     .batchSize(batchSize);
 
   let batch: ParsedEvent[] = [];
-  for await (const doc of cursor) {
-    batch.push(doc.event as ParsedEvent);
-    if (batch.length >= batchSize) {
-      yield batch;
-      batch = [];
+  try {
+    for await (const doc of cursor) {
+      batch.push(doc.event as ParsedEvent);
+      if (batch.length >= batchSize) {
+        yield batch;
+        batch = [];
+      }
     }
-  }
-
-  if (batch.length > 0) {
-    yield batch;
+    if (batch.length > 0) yield batch;
+  } finally {
+    await cursor.close();
   }
 }
 

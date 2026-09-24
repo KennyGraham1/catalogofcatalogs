@@ -4,7 +4,7 @@
   "private": true,
   "license": "MIT",
   "engines": {
-    "node": ">=18.0.0",
+    "node": "^22.12.0 || ^24.0.0",
     "npm": ">=9.0.0"
   },
   "scripts": {
@@ -15,11 +15,14 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "migrate:auth": "tsx scripts/migrate-auth-schema.ts"
+    "migrate:auth": "tsx scripts/migrate-auth-schema.ts",
+    "test:runtime": "node --import tsx scripts/check-auth-runtime.ts",
+    "test:database": "node --import tsx scripts/check-database-integrity.ts",
+    "test:browser": "node scripts/check-production-browser.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
-    "@next/swc-wasm-nodejs": "^15.5.15",
+    "@next/swc-wasm-nodejs": "^15.5.24",
     "@radix-ui/react-accordion": "^1.2.0",
     "@radix-ui/react-alert-dialog": "^1.1.1",
     "@radix-ui/react-aspect-ratio": "^1.1.0",
@@ -67,20 +70,19 @@
     "cmdk": "^1.0.0",
     "date-fns": "^3.6.0",
     "dotenv": "^17.2.3",
-    "echarts": "^5.6.0",
+    "echarts": "^6.1.0",
     "echarts-for-react": "^3.0.6",
     "embla-carousel-react": "^8.3.0",
     "eslint": "^8.57.1",
-    "eslint-config-next": "^15.5.15",
+    "eslint-config-next": "^15.5.24",
     "input-otp": "^1.2.4",
     "leaflet": "^1.9.4",
     "leaflet-draw": "^1.0.4",
     "lru-cache": "^11.2.2",
     "lucide-react": "^0.446.0",
     "mongodb": "^7.0.0",
-    "nanoid": "^5.0.4",
-    "next": "^15.5.15",
-    "next-auth": "^4.24.13",
+    "next": "^15.5.24",
+    "next-auth": "^4.24.15",
     "next-themes": "^0.3.0",
     "p-limit": "^7.2.0",
     "postcss": "^8.5.13",
@@ -111,11 +113,11 @@
     "@types/xml2js": "^0.4.14",
     "jest": "^30.2.0",
     "jest-environment-jsdom": "^30.2.0",
+    "playwright": "^1.63.0",
     "tsx": "^4.21.0",
     "undici": "^7.19.2"
   },
   "overrides": {
-    "postcss": "^8.5.13",
-    "uuid": "^14.0.0"
+    "postcss": "^8.5.13"
   }
 }

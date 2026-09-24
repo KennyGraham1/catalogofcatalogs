@@ -8,6 +8,7 @@ import CredentialsProvider from 'next-auth/providers/credentials';
 import { getUserByEmail, verifyPassword, updateLastLogin, toSafeUser, getSessionUserState } from './utils';
 import { UserRole } from './types';
 import { writeAuditLog } from '../audit';
+import { allowCredentialAttempt } from './login-rate-limit';
 
 // Validate NEXTAUTH_SECRET at module load time so the application fails fast if
 // the secret is not configured at runtime. The check is skipped during
@@ -45,13 +46,18 @@ export const authOptions: NextAuthOptions = {
         email: { label: 'Email', type: 'email', placeholder: 'user@example.com' },
         password: { label: 'Password', type: 'password' },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         if (!credentials?.email || !credentials?.password) {
           throw new Error('Email and password are required');
         }
 
-        // Get user from database
-        const user = await getUserByEmail(credentials.email);
+        const email = credentials.email.trim().toLowerCase();
+        if (!await allowCredentialAttempt(email, request.headers)) {
+          throw new Error('Too many login attempts. Please try again later.');
+        }
+
+        // Check the shared quota before user lookup or expensive bcrypt work.
+        const user = await getUserByEmail(email);
 
         if (!user) {
           await writeAuditLog({ action: 'user.login_failed', metadata: { reason: 'user_not_found' } });

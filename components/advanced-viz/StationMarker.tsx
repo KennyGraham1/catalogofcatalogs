@@ -1,5 +1,7 @@
 'use client';
 
+import { escapeHtml } from '@/lib/html';
+
 import { useEffect } from 'react';
 import { useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -60,8 +62,8 @@ export function StationMarker({
     // Create popup content
     const popupContent = `
       <div style="padding: 8px; min-width: 200px;">
-        <h4 style="font-weight: 600; margin-bottom: 4px;">${stationNetwork}.${stationCode}</h4>
-        ${stationName ? `<p style="font-size: 0.875rem; color: #6b7280; margin-bottom: 4px;">${stationName}</p>` : ''}
+        <h4 style="font-weight: 600; margin-bottom: 4px;">${escapeHtml(stationNetwork)}.${escapeHtml(stationCode)}</h4>
+        ${stationName ? `<p style="font-size: 0.875rem; color: #6b7280; margin-bottom: 4px;">${escapeHtml(stationName)}</p>` : ''}
         <p style="font-size: 0.75rem; margin-top: 4px;">
           Location: ${position[0].toFixed(4)}°, ${position[1].toFixed(4)}°
         </p>

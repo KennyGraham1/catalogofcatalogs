@@ -50,7 +50,8 @@ describe('Gutenberg-Richter Analysis', () => {
     expect(result.rSquared).toBeGreaterThan(0);
     expect(result.rSquared).toBeLessThanOrEqual(1);
     expect(result.dataPoints.length).toBeGreaterThan(0);
-    expect(result.fittedLine.length).toBe(result.dataPoints.length);
+    expect(result.fittedLine.length).toBe(result.dataPoints.filter(p => p.magnitude >= result.completeness).length);
+    expect(result.fittedLine.every(p => p.magnitude >= result.completeness)).toBe(true);
   });
 
   test('throws error with insufficient data', () => {

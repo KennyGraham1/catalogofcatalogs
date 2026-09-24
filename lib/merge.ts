@@ -6,6 +6,23 @@ import type { SourceCatalogue, MergeConfig } from './validation';
 import type { QuakeMLEvent } from './types/quakeml';
 import { extractBoundsFromEvents } from './geo-bounds-utils';
 
+/** Merge inputs must be complete even when API responses have an unpaginated cap. */
+async function loadCompleteCatalogueEvents(catalogueId: string): Promise<MergedEvent[]> {
+  if (!dbQueries) throw new Error('Database not initialized');
+  const events: MergedEvent[] = [];
+  while (true) {
+    const result = await dbQueries.getEventsByCatalogueId(catalogueId, {
+      offset: events.length,
+      pageSize: 10000,
+    });
+    // The database interface also permits complete arrays (e.g. alternate adapters).
+    if (Array.isArray(result)) return result;
+    for (const event of result.data) events.push(event);
+    if (events.length >= result.pagination.totalItems) return events;
+    if (result.data.length === 0) throw new Error('Catalogue changed while loading merge inputs; please retry');
+  }
+}
+
 interface EventData {
   id?: string;
   time: string;
@@ -444,8 +461,7 @@ async function executeMergeOperation(
       }
 
       const catalogueIdStr = String(catalogue.id);
-      const events = await dbQueries.getEventsByCatalogueId(catalogueIdStr);
-      const eventsArray = Array.isArray(events) ? events : events.data || [];
+      const eventsArray = await loadCompleteCatalogueEvents(catalogueIdStr);
 
       // A loop, not push(...spread): spreading a whole source catalogue as function
       // arguments throws RangeError past the V8 argument limit (~131k), so a
@@ -3320,8 +3336,7 @@ export async function previewMerge(
   for (let i = 0; i < sourceCatalogues.length; i++) {
     const catalogue = sourceCatalogues[i];
     const catalogueIdStr = String(catalogue.id);
-    const events = await dbQueries.getEventsByCatalogueId(catalogueIdStr);
-    const eventsArray = Array.isArray(events) ? events : events.data || [];
+    const eventsArray = await loadCompleteCatalogueEvents(catalogueIdStr);
 
     // Assign color to catalogue
     catalogueColors[catalogueIdStr] = colors[i % colors.length];

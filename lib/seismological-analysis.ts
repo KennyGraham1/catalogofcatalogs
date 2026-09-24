@@ -347,20 +347,6 @@ export function calculateGutenbergRichter(
     }
   }
 
-  const n = cumulativeCounts.length;
-  // Hard floor: a Gutenberg-Richter fit needs at least three POPULATED magnitude
-  // bins (paper, sec:mc). `cumulativeCounts.length` cannot express that — it holds
-  // every bin from minMag up to the largest populated one, so a catalogue with
-  // events at only M1.0 and M4.0 still produced 31 entries and was fitted
-  // (b = 0.15, R^2 = -13.5) instead of being withheld.
-  const populatedBins = sortedBins.reduce(
-    (count, [, binCount]) => (binCount > 0 ? count + 1 : count),
-    0
-  );
-  if (populatedBins < 3) {
-    throw new Error('Insufficient magnitude bins for regression (need at least 3 populated bins)');
-  }
-
   // Completeness magnitude Mc. The Aki-Utsu MLE below is only valid for a sample
   // that is complete above Mc, so when the caller does not supply an explicit
   // cut-off we ESTIMATE Mc by maximum curvature (MAXC; Wiemer & Wyss, 2000) — the
@@ -391,6 +377,12 @@ export function calculateGutenbergRichter(
     );
   }
 
+  // Apply the bin safeguard to the same complete sample used by the MLE.
+  const populatedBins = new Set(magsAboveMc.map(m => binKey(binLowerEdge(m, binWidth)))).size;
+  if (populatedBins < 3) {
+    throw new Error('Insufficient magnitude bins above Mc (need at least 3 populated bins)');
+  }
+
   // Maximum-likelihood b-value (Aki, 1965) with the Utsu binning correction:
   //   b = log10(e) / (meanMag - (Mc - binWidth/2))
   // (ordinary least-squares on the cumulative FMD is biased and is not used).
@@ -402,16 +394,17 @@ export function calculateGutenbergRichter(
   const aValue = Math.log10(magsAboveMc.length) + bValue * mc;
 
   // R-squared of the MLE line against the observed cumulative FMD (diagnostic).
-  const meanY = cumulativeCounts.reduce((sum, p) => sum + p.logCount, 0) / n;
-  const ssTotal = cumulativeCounts.reduce((sum, p) => sum + Math.pow(p.logCount - meanY, 2), 0);
-  const ssResidual = cumulativeCounts.reduce((sum, p) => {
+  const fittedCounts = cumulativeCounts.filter(p => p.magnitude >= mc);
+  const meanY = fittedCounts.reduce((sum, p) => sum + p.logCount, 0) / fittedCounts.length;
+  const ssTotal = fittedCounts.reduce((sum, p) => sum + Math.pow(p.logCount - meanY, 2), 0);
+  const ssResidual = fittedCounts.reduce((sum, p) => {
     const predicted = aValue - bValue * p.magnitude;
     return sum + Math.pow(p.logCount - predicted, 2);
   }, 0);
   const rSquared = ssTotal > 0 ? 1 - (ssResidual / ssTotal) : 0;
 
   // Generate fitted line
-  const fittedLine = cumulativeCounts.map(p => ({
+  const fittedLine = fittedCounts.map(p => ({
     magnitude: p.magnitude,
     logCount: aValue - bValue * p.magnitude
   }));

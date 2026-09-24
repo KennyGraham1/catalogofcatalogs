@@ -32,7 +32,7 @@ Prerequisites
 ^^^^^^^^^^^^^
 
 
-- Node.js >= 18.0.0
+- Node.js 22.12+ (22 LTS) or 24 LTS
 - npm >= 9.0.0
 - MongoDB (local or Atlas)
 - Git

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries, EVENT_OPTIONAL_RANGES, optionalFieldInRange } from '@/lib/db';
-import { Logger, DatabaseError, formatErrorResponse } from '@/lib/errors';
+import { AppError, Logger, DatabaseError, formatErrorResponse } from '@/lib/errors';
 import { apiCache, generateCacheKey, catalogueCache, invalidateCacheByPrefix } from '@/lib/cache';
 import { applyRateLimit, readRateLimiter, apiRateLimiter } from '@/lib/rate-limiter';
 import { requireEditor } from '@/lib/auth/middleware';
@@ -485,10 +485,14 @@ async function bulkInsertEventRows(
     // with the (catalogue_id, source_id) unique index. Counting submitted rows made
     // every deduplicated row a phantom event in the catalogue's event_count.
     // `submitted` stays a row offset so the retry log still points at the input.
-    const results = await Promise.all(window.map((batch, offset) =>
+    // A rejected batch must not start cleanup while a sibling can still commit.
+    const results = await Promise.allSettled(window.map((batch, offset) =>
       insertBatchWithRetry(db, catalogueId, batch, submittedSoFar + submitted + offset * EVENT_INSERT_BATCH_SIZE)
     ));
-    inserted += results.reduce((sum, count) => sum + count, 0);
+    for (const result of results) {
+      if (result.status === 'rejected') throw result.reason;
+      inserted += result.value;
+    }
     submitted += window.reduce((sum, batch) => sum + batch.length, 0);
   }
 
@@ -580,7 +584,7 @@ async function createCatalogueFromPendingUploads(params: {
       }
 
       if (!foundAny) {
-        logger.warn('Pending upload not found or expired', { pendingUploadId: id });
+        throw new AppError('Pending upload not found or expired. Please upload the files again.', 404, 'PENDING_UPLOAD_NOT_FOUND');
       }
     }
 
@@ -606,12 +610,15 @@ async function createCatalogueFromPendingUploads(params: {
       );
     }
 
-    await db.updateCatalogueStatus('complete', catalogueId);
+    // A retry may have committed rows before throwing. Its final return count
+    // cannot account for those earlier writes; the stored count is authoritative.
+    insertedCount = await db.countEventsByCatalogue(catalogueId);
     await db.updateCatalogueEventCount(catalogueId, insertedCount);
     const lonExtent = longitudeArc.extent();
     if (minLat !== undefined && maxLat !== undefined && lonExtent) {
       await db.updateCatalogueGeoBounds(catalogueId, minLat, maxLat, lonExtent.west, lonExtent.east);
     }
+    await db.updateCatalogueStatus('complete', catalogueId);
   } catch (error) {
     logger.error('Catalogue import failed; cleaning up partially inserted data', {
       catalogueId,
@@ -795,14 +802,24 @@ export async function POST(request: NextRequest) {
     // token's events, and concatenate them so pendingEvents[i] aligns with
     // events[i] in the request body (both are in file-then-event order).
     let pendingEvents: ParsedEvent[] | null = null;
+    if (
+      (pendingUploadIdList !== undefined && (!Array.isArray(pendingUploadIdList) ||
+        pendingUploadIdList.some((id: unknown) => typeof id !== 'string' || !id.trim()))) ||
+      (pendingUploadId !== undefined && (typeof pendingUploadId !== 'string' || !pendingUploadId.trim()))
+    ) {
+      throw new AppError('Pending upload IDs must be nonempty strings', 400, 'INVALID_PENDING_UPLOAD_IDS');
+    }
     const ids: string[] = Array.isArray(pendingUploadIdList)
-      ? pendingUploadIdList.filter((id: unknown) => typeof id === 'string')
+      ? pendingUploadIdList
       : pendingUploadId && typeof pendingUploadId === 'string'
         ? [pendingUploadId]
         : [];
+    if (new Set(ids).size !== ids.length) {
+      throw new AppError('Pending upload IDs must be distinct', 400, 'INVALID_PENDING_UPLOAD_IDS');
+    }
 
     if ((!bodyEvents || !Array.isArray(bodyEvents) || bodyEvents.length === 0) && ids.length > 0) {
-      return createCatalogueFromPendingUploads({
+      return await createCatalogueFromPendingUploads({
         ids,
         trimmedName,
         metadata,
@@ -811,20 +828,13 @@ export async function POST(request: NextRequest) {
     }
 
     if (ids.length > 0) {
-      try {
-        const batches = await Promise.all(ids.map(id => getPendingUploadEvents(id)));
-        const combined: ParsedEvent[] = [];
-        for (let i = 0; i < batches.length; i++) {
-          const b = batches[i];
-          if (b) {
-            combined.push(...b);
-          } else {
-            logger.warn('Pending upload not found or expired', { pendingUploadId: ids[i] });
-          }
-        }
-        if (combined.length > 0) pendingEvents = combined;
-      } catch (err) {
-        logger.warn('Failed to retrieve pending uploads, falling back to scalar events', { ids, err });
+      const batches = await Promise.all(ids.map(id => getPendingUploadEvents(id)));
+      if (batches.some(batch => !batch || batch.length === 0)) {
+        throw new AppError('Pending upload not found or expired. Please upload the files again.', 404, 'PENDING_UPLOAD_NOT_FOUND');
+      }
+      pendingEvents = batches.flatMap(batch => batch!);
+      if (pendingEvents.length !== bodyEvents.length) {
+        throw new AppError('Pending upload events do not match the submitted rows. Please upload the files again.', 409, 'PENDING_UPLOAD_MISMATCH');
       }
     }
 
@@ -1023,8 +1033,7 @@ export async function POST(request: NextRequest) {
     let insertedCount = 0;
     try {
       insertedCount = await bulkInsertEventRows(db, catalogueId, eventsToInsert as InsertRow[]);
-
-      await db.updateCatalogueStatus('complete', catalogueId);
+      insertedCount = await db.countEventsByCatalogue(catalogueId);
       await db.updateCatalogueEventCount(catalogueId, insertedCount);
       if (
         minLat !== undefined &&
@@ -1034,6 +1043,7 @@ export async function POST(request: NextRequest) {
       ) {
         await db.updateCatalogueGeoBounds(catalogueId, minLat, maxLat, minLon, maxLon);
       }
+      await db.updateCatalogueStatus('complete', catalogueId);
     } catch (error) {
       logger.error('Catalogue import failed; cleaning up partially inserted data', {
         catalogueId,

@@ -70,3 +70,6 @@ jest.mock('mongodb', () => ({
   },
   ObjectId: jest.fn().mockImplementation((id) => ({ toString: () => id || 'mock-object-id' })),
 }));
+
+// Chart component tests inspect options; theme registration loads ECharts' ESM engine.
+jest.mock('echarts/theme/v5', () => ({}));

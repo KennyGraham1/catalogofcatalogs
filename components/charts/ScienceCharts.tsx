@@ -179,7 +179,7 @@ export const TemporalSeriesChart = memo(function TemporalSeriesChart({
   const timeAxis = data.every(d => Number.isFinite(Date.parse(d.date)));
   const fmtDate = (v: string | number) => {
     const t = typeof v === 'number' ? v : Date.parse(v);
-    if (!Number.isFinite(t)) return v;
+    if (!Number.isFinite(t)) return String(v);
     const d = new Date(t);
     return `${d.getUTCMonth() + 1}/${d.getUTCFullYear().toString().slice(-2)}`;
   };
@@ -205,10 +205,13 @@ export const TemporalSeriesChart = memo(function TemporalSeriesChart({
           return html;
         },
       }),
-      xAxis: {
-        ...axis(c, { type: timeAxis ? 'time' : 'category' }),
+      xAxis: timeAxis ? {
+        ...axis(c, { type: 'time' }),
+        axisLabel: { ...axis(c).axisLabel, formatter: fmtDate },
+      } : {
+        ...axis(c, { type: 'category' }),
         boundaryGap: false,
-        ...(timeAxis ? {} : { data: data.map(d => d.date) }),
+        data: data.map(d => d.date),
         axisLabel: { ...axis(c).axisLabel, formatter: fmtDate },
       },
       yAxis: axis(c, { name: 'Cumulative events', nameGap: 46 }),

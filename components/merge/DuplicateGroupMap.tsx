@@ -1,5 +1,7 @@
 'use client';
 
+import { escapeHtml } from '@/lib/html';
+
 import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -135,7 +137,8 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
     const markers: L.Marker[] = [];
     group.events.forEach((event, idx) => {
       const isSelected = idx === group.selectedEventIndex;
-      const color = catalogueColors[event.catalogueId] || '#6b7280';
+      const candidateColor = catalogueColors[event.catalogueId] || '';
+      const color = /^#[0-9a-f]{6}$/i.test(candidateColor) ? candidateColor : '#6b7280';
 
       // Create custom icon
       const iconHtml = `
@@ -168,7 +171,7 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
         .bindPopup(`
           <div style="min-width: 200px;">
             <div style="font-weight: bold; margin-bottom: 4px; color: ${color};">
-              ${event.catalogueName}
+              ${escapeHtml(event.catalogueName)}
             </div>
             <div style="font-size: 12px;">
               <div><strong>Time:</strong> ${new Date(event.time).toLocaleString('en-GB', {
