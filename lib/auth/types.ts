@@ -144,6 +144,16 @@ export interface RoleChangeRequest {
 }
 
 /**
+ * Role change request as listed for review. `current_role` is the role the user had
+ * when filing; `live_role` / `live_is_active` describe the account now (null when it
+ * no longer exists).
+ */
+export interface RoleChangeRequestForReview extends RoleChangeRequest {
+  live_role: UserRole | null;
+  live_is_active: boolean | null;
+}
+
+/**
  * User notification document
  */
 export interface UserNotification {

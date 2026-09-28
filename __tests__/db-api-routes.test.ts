@@ -96,7 +96,12 @@ describe('db-api :: GET /api/catalogues/[id]/statistics', () => {
       averageAzimuthalGap: 120,
       averageStationCount: 8,
       eventsWithUncertainty: 5,
+      eventsWithHorizontalUncertainty: 4,
+      eventsWithDepthUncertainty: 3,
       eventsWithFocalMechanism: 1,
+      qualityScoreCount: 200000,
+      averageQualityScore: 64.2,
+      qualityGrades: [{ grade: 'A', count: 50000 }, { grade: 'C', count: 150000 }],
     });
 
     const response = await getStatistics(request(), context);
@@ -117,8 +122,15 @@ describe('db-api :: GET /api/catalogues/[id]/statistics', () => {
       averageAzimuthalGap: 120,
       averageStationCount: 8,
       eventsWithUncertainty: 5,
+      eventsWithHorizontalUncertainty: 4,
+      eventsWithDepthUncertainty: 3,
       eventsWithFocalMechanism: 1,
+      eventsWithQualityScore: 200000,
+      averageQualityScore: 64.2,
+      gradeDistribution: [{ grade: 'A', count: 50000 }, { grade: 'C', count: 150000 }],
     });
+    // Catalogues stored before versioning report 1.0.0 (contract C3).
+    expect(body.version).toBe('1.0.0');
   });
 
   it('keeps the historical empty-catalogue envelope', async () => {
@@ -139,13 +151,19 @@ describe('db-api :: GET /api/catalogues/[id]/statistics', () => {
       averageAzimuthalGap: null,
       averageStationCount: null,
       eventsWithUncertainty: 0,
+      eventsWithHorizontalUncertainty: 0,
+      eventsWithDepthUncertainty: 0,
       eventsWithFocalMechanism: 0,
+      qualityScoreCount: 0,
+      averageQualityScore: null,
+      qualityGrades: [],
     });
 
     const body = await (await getStatistics(request(), context)).json();
 
     expect(body).toEqual({
       catalogueId: 'cat',
+      version: '1.0.0',
       eventCount: 0,
       dateRange: null,
       magnitudeRange: null,
@@ -155,7 +173,7 @@ describe('db-api :: GET /api/catalogues/[id]/statistics', () => {
     });
   });
 
-  it('falls back to the zeroed depth range when no event carries a depth', async () => {
+  it('reports no depth range when no event carries a depth', async () => {
     (db.getCatalogueEventStatistics as jest.Mock).mockResolvedValue({
       eventCount: 3,
       earliestTime: '2020-01-01T00:00:00.000Z',
@@ -173,12 +191,19 @@ describe('db-api :: GET /api/catalogues/[id]/statistics', () => {
       averageAzimuthalGap: null,
       averageStationCount: null,
       eventsWithUncertainty: 0,
+      eventsWithHorizontalUncertainty: 0,
+      eventsWithDepthUncertainty: 0,
       eventsWithFocalMechanism: 0,
+      qualityScoreCount: 0,
+      averageQualityScore: null,
+      qualityGrades: [],
     });
 
     const body = await (await getStatistics(request(), context)).json();
 
-    expect(body.depthRange).toEqual({ min: 0, max: 0, average: 0 });
+    // Null, as for magnitudes: 0 km is a real depth, so a zeroed range claimed every
+    // event sat at the datum (gap finding gt#6).
+    expect(body.depthRange).toBeNull();
     // Half a day still counts as one day of span.
     expect(body.dateRange.spanDays).toBe(1);
     expect(body.qualityMetrics.averageAzimuthalGap).toBeUndefined();

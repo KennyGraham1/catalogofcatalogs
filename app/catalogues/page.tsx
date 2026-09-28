@@ -70,6 +70,7 @@ import { useAuth, usePermission } from '@/lib/auth/hooks';
 import { Permission, UserRole } from '@/lib/auth/types';
 import { ToastAction } from '@/components/ui/toast';
 import { getApiError } from '@/lib/api';
+import { invalidateCatalogueData } from '@/lib/client-cache';
 
 interface Catalogue {
   id: string;
@@ -83,6 +84,8 @@ interface Catalogue {
   max_latitude?: number | null;
   min_longitude?: number | null;
   max_longitude?: number | null;
+  // C3: "MAJOR.MINOR.PATCH"; legacy catalogues written before versioning read as "1.0.0".
+  version?: string | null;
 }
 
 type CatalogueStatus = 'all' | 'complete' | 'processing' | 'error';
@@ -988,8 +991,8 @@ export default function CataloguesPage() {
       setDeleteDialogOpen(false);
       setSelectedCatalogue(null);
 
-      // Refresh the catalogue list
-      fetchCatalogues();
+      // Refresh the catalogue list everywhere it's cached (C5)
+      invalidateCatalogueData();
     } catch (error) {
       toast({
         title: "Delete failed",
@@ -1084,6 +1087,9 @@ export default function CataloguesPage() {
                   <div className="flex items-center gap-2">
                     <FileText className="h-4 w-4 text-muted-foreground" />
                     <span>{catalogue.name}</span>
+                    <span className="text-xs text-muted-foreground font-normal" title="Catalogue version">
+                      v{catalogue.version || '1.0.0'}
+                    </span>
                   </div>
                 </TableCell>
                 <TableCell>

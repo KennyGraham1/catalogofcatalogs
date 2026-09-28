@@ -16,6 +16,33 @@ import { ALLOWED_EVENT_TYPE } from './db';
 
 type DbEventFields = Partial<Omit<MergedEvent, 'id' | 'catalogue_id' | 'time' | 'latitude' | 'longitude' | 'magnitude' | 'source_events' | 'created_at'>>;
 
+/** The eight QuakeML 1.2 BED OriginDepthType values, in their schema spelling. */
+export const QUAKEML_DEPTH_TYPES = [
+  'from location',
+  'from moment tensor inversion',
+  'from modeling of broad-band P waveforms',
+  'constrained by depth phases',
+  'constrained by direct phases',
+  'constrained by depth and direct phases',
+  'operator assigned',
+  'other',
+] as const;
+
+const DEPTH_TYPE_BY_LOWER_CASE = new Map<string, string>(
+  QUAKEML_DEPTH_TYPES.map((value) => [value.toLowerCase(), value])
+);
+
+/**
+ * A depth type in its QuakeML 1.2 spelling, matched case-insensitively ('FROM LOCATION',
+ * 'from modeling of broad-band p waveforms'), or null when it is not one of the eight
+ * OriginDepthType values. Lower-casing every value instead made 'broad-band P waveforms'
+ * unmatchable and exported a spelling the schema rejects.
+ */
+export function canonicalQuakeMLDepthType(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  return DEPTH_TYPE_BY_LOWER_CASE.get(value.trim().replace(/\s+/g, ' ').toLowerCase()) ?? null;
+}
+
 export function quakemlEventToDbFields(quakeml: QuakeMLEvent): DbEventFields {
   const fields: DbEventFields = {};
 
@@ -56,9 +83,19 @@ export function quakemlEventToDbFields(quakeml: QuakeMLEvent): DbEventFields {
     if (ou?.minHorizontalUncertainty != null) fields.min_horizontal_uncertainty = ou.minHorizontalUncertainty / 1000;
     if (ou?.maxHorizontalUncertainty != null) fields.max_horizontal_uncertainty = ou.maxHorizontalUncertainty / 1000;
     if (ou?.azimuthMaxHorizontalUncertainty != null) fields.azimuth_max_horizontal_uncertainty = ou.azimuthMaxHorizontalUncertainty;
+    // The confidence (percent) the uncertainty describes: a 68% and a 95% ellipse of the
+    // same size are different solutions (contract C16).
+    if (typeof ou?.confidenceLevel === 'number' && Number.isFinite(ou.confidenceLevel)) {
+      fields.confidence_level = ou.confidenceLevel;
+    }
 
-    // Origin metadata
-    if (preferredOrigin.depthType)    fields.depth_type    = preferredOrigin.depthType.toLowerCase().trim();
+    // Origin metadata. The depth type keeps the schema's spelling; a value outside the
+    // OriginDepthType enumeration is passed on lower-cased, as before, for the insert
+    // validator to reject or drop.
+    if (preferredOrigin.depthType) {
+      fields.depth_type = canonicalQuakeMLDepthType(preferredOrigin.depthType)
+        ?? preferredOrigin.depthType.toLowerCase().trim();
+    }
     if (preferredOrigin.earthModelID) fields.earth_model_id = preferredOrigin.earthModelID;
     if (preferredOrigin.methodID)     fields.method_id     = preferredOrigin.methodID;
     if (preferredOrigin.region)       fields.region        = preferredOrigin.region;

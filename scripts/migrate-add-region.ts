@@ -5,24 +5,37 @@
  * This script ensures the proper index exists for region queries.
  */
 
-import { MongoClient } from 'mongodb';
+import { COLLECTIONS } from '../lib/mongodb';
+import { resolveDbTarget } from './lib/db-target';
+import { confirmWrite } from './lib/confirm';
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
-const DATABASE_NAME = process.env.MONGODB_DATABASE || 'earthquake_catalogue';
+const ASSUME_YES = process.argv.includes('--yes');
 
 async function runMigration() {
   console.log('Starting migration: Add region index\n');
-  console.log(`   URI: ${MONGODB_URI}`);
-  console.log(`   Database: ${DATABASE_NAME}\n`);
 
-  const client = new MongoClient(MONGODB_URI);
+  // Resolved the same way the app does (lib/mongodb.ts getDb), not re-derived here
+  // — a script with its own copy of the MONGODB_DATABASE/URI precedence rule can
+  // silently create indexes in a different database than the one the app queries
+  // (finding gs#3). Printing only the host, never the full connection string,
+  // avoids leaking credentials into logs (gs#4).
+  const target = await resolveDbTarget();
+
+  const decision = await confirmWrite(
+    target,
+    `About to create indexes on merged_events in database "${target.db.databaseName}".`,
+    'yes',
+    ASSUME_YES,
+  );
+  if (!decision.ok) {
+    console.error(`❌ ${decision.reason}`);
+    await target.close();
+    process.exitCode = 1;
+    return;
+  }
 
   try {
-    await client.connect();
-    console.log('✓ Connected to MongoDB\n');
-
-    const db = client.db(DATABASE_NAME);
-    const eventsCollection = db.collection('merged_events');
+    const eventsCollection = target.db.collection(COLLECTIONS.EVENTS);
 
     // Create index for region field
     console.log('Creating index for region field...');
@@ -54,17 +67,21 @@ async function runMigration() {
 
   } catch (error) {
     console.error('\n❌ Migration failed:', error);
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
-    await client.close();
+    await target.close();
     console.log('\n✓ Disconnected from MongoDB');
   }
 }
 
 // Run migration
-runMigration()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error('Migration failed:', error);
-    process.exit(1);
-  });
+if (require.main === module) {
+  runMigration()
+    .then(() => process.exit(0))
+    .catch((error) => {
+      console.error('Migration failed:', error);
+      process.exit(1);
+    });
+}
+
+export { runMigration };

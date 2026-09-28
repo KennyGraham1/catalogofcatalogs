@@ -7,10 +7,15 @@ services:
       dockerfile: Dockerfile
     container_name: earthquake-catalogue-platform
     ports:
+      # Published directly: without a reverse proxy in front, clients can forge the
+      # X-Forwarded-For address the rate limits key on. For internet-facing use see
+      # docker-compose.prod.yml and nginx/nginx.conf.
       - "3000:3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
+      # Number of trusted reverse proxies that set X-Forwarded-For (see .env.example)
+      - TRUSTED_PROXY_HOPS=${TRUSTED_PROXY_HOPS:-1}
       # Required — set in a .env file or via docker-compose --env-file
       - MONGODB_URI=${MONGODB_URI:-mongodb://localhost:27017/earthquake_catalogue}
       - MONGODB_DATABASE=${MONGODB_DATABASE:-earthquake_catalogue}
@@ -39,8 +44,8 @@ services:
   #     - "80:80"
   #     - "443:443"
   #   volumes:
-  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
-  #     - ./ssl:/etc/nginx/ssl:ro
+  #     - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./nginx/ssl:/etc/nginx/ssl:ro
   #   depends_on:
   #     - app
   #   restart: unless-stopped

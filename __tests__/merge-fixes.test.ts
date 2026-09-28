@@ -133,12 +133,13 @@ describe('mergeByAverage — magnitude/location/depth metadata provenance (regre
 
   it('leaves location uncertainties unset for an epicentre no source reported', () => {
     const merged: any = mergeEventGroup([geonet, usgs], { ...config, mergeStrategy: 'average' });
-    // Inverse-variance blend: GeoNet lat -41.0 at 1.2 km -> w = 1/1.2^2 = 0.6944;
-    // USGS lat -41.2 with no reported uncertainty -> neutral w = 1.0.
-    // (-41.0*0.6944 + -41.2*1.0) / 1.6944 = -41.118033. (The former -41.109091 was
-    // the 1/sigma blend, w = 1/1.2 = 0.8333.)
-    expect(merged.latitude).toBeCloseTo(-41.118033, 6);
-    expect(merged.longitude).toBeCloseTo(174.177049, 6); // same weights: (174.0*0.6944 + 174.3) / 1.6944
+    // GeoNet states sigma = 1.2 km; USGS states none. An inverse-variance mean needs a sigma
+    // for EVERY solution, so the pair is averaged with equal weights: (-41.0 + -41.2) / 2 and
+    // (174.0 + 174.3) / 2. This test used to pin the missing sigma as a "neutral" weight 1.0,
+    // i.e. sigma = 1 km, which ranked the undocumented USGS location above the documented
+    // 1.2 km GeoNet one (-41.118033 / 174.177049).
+    expect(merged.latitude).toBeCloseTo(-41.1, 6);
+    expect(merged.longitude).toBeCloseTo(174.15, 6);
     expect(merged.latitude_uncertainty).toBeNull();
     expect(merged.longitude_uncertainty).toBeNull();
     expect(merged.horizontal_uncertainty).toBeNull();

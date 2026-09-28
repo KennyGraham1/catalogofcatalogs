@@ -22,6 +22,7 @@ jest.mock('@/lib/geonet-client', () => ({
   geonetClient: {
     fetchEventsText: jest.fn(),
     fetchEventById: jest.fn(),
+    fetchEventQuakeMLText: jest.fn(),
   },
 }));
 
@@ -34,6 +35,7 @@ jest.mock('@/lib/db', () => {
       getCatalogueById: jest.fn(),
       insertCatalogue: jest.fn(),
       getEventsBySourceIds: jest.fn(),
+      getEventBySourceId: jest.fn(),
       getEventCoordinatesByIds: jest.fn(),
       bulkInsertEvents: jest.fn(),
       insertEvent: jest.fn(),
@@ -92,8 +94,11 @@ beforeAll(() => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // An existing catalogue created by the GeoNet importer (the only kind it adds to).
   db.getCatalogueById.mockResolvedValue({
     id: 'cat-1',
+    name: 'GeoNet - Automated Import',
+    merge_config: JSON.stringify({ source: 'GeoNet' }),
     min_latitude: null,
     max_latitude: null,
     min_longitude: null,
@@ -112,6 +117,7 @@ beforeEach(() => {
   db.updateCatalogueGeoBounds.mockResolvedValue(undefined);
   db.insertImportHistory.mockResolvedValue(undefined);
   client.fetchEventById.mockResolvedValue(null);
+  client.fetchEventQuakeMLText.mockResolvedValue(null);
 });
 
 /** All documents handed to bulkInsertEvents across every batch, in order. */
@@ -265,31 +271,39 @@ describe('GeoNet import catalogue status', () => {
 describe('GeoNet origin quality', () => {
   it('lifts origin quality out of the QuakeML already fetched for M5.0+ events', async () => {
     client.fetchEventsText.mockResolvedValue([geonetRow({ Magnitude: 6.2 })]);
-    client.fetchEventById.mockResolvedValue({
-      quakeml: {
-        eventParameters: {
-          event: {
-            publicID: 'smi:nz.org.geonet/2016p858055',
-            preferredOriginID: 'smi:nz.org.geonet/origin/2',
-            origin: [
-              { publicID: 'smi:nz.org.geonet/origin/1', quality: { azimuthalGap: '300' } },
-              {
-                publicID: 'smi:nz.org.geonet/origin/2',
-                depth: { value: '15000', uncertainty: '2400' },
-                quality: {
-                  azimuthalGap: '62.5',
-                  usedPhaseCount: '54',
-                  usedStationCount: '31',
-                  standardError: '0.21',
-                  minimumDistance: '0.18',
-                },
-                originUncertainty: { horizontalUncertainty: '1500' },
-              },
-            ],
-          },
-        },
-      },
-    });
+    // GeoNet's QuakeML for the event (format=xml), as served.
+    client.fetchEventQuakeMLText.mockResolvedValue(`<?xml version="1.0" encoding="UTF-8"?>
+<q:quakeml xmlns="http://quakeml.org/xmlns/bed/1.2" xmlns:q="http://quakeml.org/xmlns/quakeml/1.2">
+  <eventParameters publicID="smi:nz.org.geonet/EventParameters">
+    <event publicID="smi:nz.org.geonet/2016p858055">
+      <origin publicID="smi:nz.org.geonet/origin/1">
+        <time><value>2016-11-13T11:32:07.000Z</value></time>
+        <latitude><value>-42.2</value></latitude>
+        <longitude><value>173.6</value></longitude>
+        <quality><azimuthalGap>300</azimuthalGap></quality>
+      </origin>
+      <origin publicID="smi:nz.org.geonet/origin/2">
+        <time><value>2016-11-13T11:32:07.000Z</value></time>
+        <latitude><value>-42.246</value></latitude>
+        <longitude><value>173.673</value></longitude>
+        <depth><value>15000</value><uncertainty>2400</uncertainty></depth>
+        <quality>
+          <usedPhaseCount>54</usedPhaseCount>
+          <usedStationCount>31</usedStationCount>
+          <standardError>0.21</standardError>
+          <azimuthalGap>62.5</azimuthalGap>
+          <minimumDistance>0.18</minimumDistance>
+        </quality>
+        <originUncertainty>
+          <horizontalUncertainty>1500</horizontalUncertainty>
+          <confidenceLevel>68</confidenceLevel>
+        </originUncertainty>
+      </origin>
+      <preferredOriginID>smi:nz.org.geonet/origin/2</preferredOriginID>
+      <type>earthquake</type>
+    </event>
+  </eventParameters>
+</q:quakeml>`);
 
     await new GeoNetImportService().importEvents({ hours: 1, catalogueId: 'cat-1' });
 
@@ -305,11 +319,15 @@ describe('GeoNet origin quality', () => {
     // 2400 m -> 2.4 km.
     expect(doc.horizontal_uncertainty).toBe(1.5);
     expect(doc.depth_uncertainty).toBe(2.4);
+    // OriginUncertainty.confidenceLevel, percent (contract C16).
+    expect(doc.confidence_level).toBe(68);
   });
 
   it('stores nothing rather than guessing when the QuakeML carries no quality', async () => {
     client.fetchEventsText.mockResolvedValue([geonetRow({ Magnitude: 5.4 })]);
-    client.fetchEventById.mockResolvedValue({ quakeml: { eventParameters: {} } });
+    client.fetchEventQuakeMLText.mockResolvedValue(
+      '<q:quakeml xmlns="http://quakeml.org/xmlns/bed/1.2" xmlns:q="http://quakeml.org/xmlns/quakeml/1.2"><eventParameters publicID="smi:nz.org.geonet/EventParameters"></eventParameters></q:quakeml>'
+    );
 
     await new GeoNetImportService().importEvents({ hours: 1, catalogueId: 'cat-1' });
 

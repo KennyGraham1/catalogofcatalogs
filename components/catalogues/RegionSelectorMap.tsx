@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MapPin, Trash2, Info } from 'lucide-react';
+import { NZ_NATIONAL_BOUNDS, unwrappedLongitudeRange } from '@/lib/geo-bounds-utils';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
 
@@ -25,6 +26,22 @@ interface RegionSelectorMapProps {
   initialBounds?: GeographicBounds | null;
   height?: string;
 }
+
+/** Preset regions, keyed by Select value (RFC 7946: minLongitude > maxLongitude crosses 180). */
+const REGION_PRESETS: Record<string, GeographicBounds> = {
+  // New Zealand (entire country, including the Chatham and Kermadec Islands across 180)
+  nz: NZ_NATIONAL_BOUNDS,
+  // North Island
+  'nz-north': { minLatitude: -41.8, maxLatitude: -34.0, minLongitude: 172.5, maxLongitude: 178.6 },
+  // South Island
+  'nz-south': { minLatitude: -47.5, maxLatitude: -40.5, minLongitude: 166.0, maxLongitude: 174.5 },
+  // Canterbury region
+  'nz-canterbury': { minLatitude: -44.5, maxLatitude: -42.5, minLongitude: 170.5, maxLongitude: 173.5 },
+  // Wellington region
+  'nz-wellington': { minLatitude: -41.6, maxLatitude: -40.7, minLongitude: 174.7, maxLongitude: 175.5 },
+  // Auckland region
+  'nz-auckland': { minLatitude: -37.3, maxLatitude: -36.5, minLongitude: 174.4, maxLongitude: 175.2 },
+};
 
 const clampValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -169,102 +186,17 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
       featureGroupRef.current.removeLayer(drawnPolygonRef.current);
     }
 
-    let bounds: L.LatLngBounds;
-    let geoBounds: GeographicBounds;
-
-    switch (region) {
-      case 'nz':
-        // New Zealand (entire country)
-        geoBounds = {
-          minLatitude: -47.5,
-          maxLatitude: -34.0,
-          minLongitude: 166.0,
-          maxLongitude: 179.0,
-        };
-        bounds = L.latLngBounds(
-          L.latLng(-47.5, 166.0),
-          L.latLng(-34.0, 179.0)
-        );
-        break;
-      case 'nz-north':
-        // North Island
-        geoBounds = {
-          minLatitude: -41.8,
-          maxLatitude: -34.0,
-          minLongitude: 172.5,
-          maxLongitude: 178.6,
-        };
-        bounds = L.latLngBounds(
-          L.latLng(-41.8, 172.5),
-          L.latLng(-34.0, 178.6)
-        );
-        break;
-      case 'nz-south':
-        // South Island
-        geoBounds = {
-          minLatitude: -47.5,
-          maxLatitude: -40.5,
-          minLongitude: 166.0,
-          maxLongitude: 174.5,
-        };
-        bounds = L.latLngBounds(
-          L.latLng(-47.5, 166.0),
-          L.latLng(-40.5, 174.5)
-        );
-        break;
-      case 'nz-canterbury':
-        // Canterbury region
-        geoBounds = {
-          minLatitude: -44.5,
-          maxLatitude: -42.5,
-          minLongitude: 170.5,
-          maxLongitude: 173.5,
-        };
-        bounds = L.latLngBounds(
-          L.latLng(-44.5, 170.5),
-          L.latLng(-42.5, 173.5)
-        );
-        break;
-      case 'nz-wellington':
-        // Wellington region
-        geoBounds = {
-          minLatitude: -41.6,
-          maxLatitude: -40.7,
-          minLongitude: 174.7,
-          maxLongitude: 175.5,
-        };
-        bounds = L.latLngBounds(
-          L.latLng(-41.6, 174.7),
-          L.latLng(-40.7, 175.5)
-        );
-        break;
-      case 'nz-auckland':
-        // Auckland region
-        geoBounds = {
-          minLatitude: -37.3,
-          maxLatitude: -36.5,
-          minLongitude: 174.4,
-          maxLongitude: 175.2,
-        };
-        bounds = L.latLngBounds(
-          L.latLng(-37.3, 174.4),
-          L.latLng(-36.5, 175.2)
-        );
-        break;
-      default:
-        // Default to New Zealand (All)
-        geoBounds = {
-          minLatitude: -47.5,
-          maxLatitude: -34.0,
-          minLongitude: 166.0,
-          maxLongitude: 179.0,
-        };
-        bounds = L.latLngBounds(
-          L.latLng(-47.5, 166.0),
-          L.latLng(-34.0, 179.0)
-        );
-        break;
-    }
+    // Default to New Zealand (All)
+    const preset = Object.prototype.hasOwnProperty.call(REGION_PRESETS, region)
+      ? REGION_PRESETS[region] : REGION_PRESETS.nz;
+    const geoBounds: GeographicBounds = { ...preset };
+    // Draw in the map's continuous longitude frame so a box that crosses 180 (the
+    // national preset) spans New Zealand instead of the rest of the globe.
+    const { west, east } = unwrappedLongitudeRange(geoBounds);
+    const bounds = L.latLngBounds(
+      L.latLng(geoBounds.minLatitude, west),
+      L.latLng(geoBounds.maxLatitude, east)
+    );
 
     // Create rectangle for preset (keep as rectangle for presets)
     const rectangle = L.rectangle(bounds, {

@@ -21,7 +21,7 @@ essential for:
 Key platform features include:
 
 * **🆕 Quality-Based Strategy (Recommended):** A new merge strategy that scores every duplicate event on a 0–100 point index (station count, azimuthal gap, location error, magnitude uncertainty, magnitude type, review status) and keeps the highest-scoring event. This is a user-selectable option — see :ref:`merge-strategies` below.
-* **Automated Duplicate Detection:** Matches events across catalogues using time, location, and magnitude criteria.
+* **Automated Duplicate Detection:** Matches events across catalogues using time and epicentral distance, in windows that automatically widen for larger and deeper events. Magnitude is not itself a matching criterion; it only breaks ties between equally-close candidates.
 * **Complete Provenance:** Tracks the source of every event in the merged result.
 * **Configurable Thresholds:** Adjust matching parameters for different data types.
 
@@ -29,7 +29,7 @@ The platform also applies underlying algorithm improvements. Some run for **ever
 
 * **Date Line Normalisation** *(all strategies)*: Spatial matching near ±180° uses unit-vector averaging to avoid arithmetic errors in the Pacific region.
 * **Validation Gates** *(all strategies)*: Rejects physically inconsistent duplicate groups before any strategy is applied (e.g., an M4.0 matched against an M7.0, or a group spanning > 200 km).
-* **Magnitude Hierarchy** *(Average strategy)*: Uses the ISC standard (Mw > Ms > mb > ML) when computing averages, preventing saturation errors from mixing incompatible scales. Other strategies keep the winning event's existing magnitude unchanged.
+* **Magnitude Type Preference** *(Average strategy)*: Selects (never averages) a magnitude by a size-dependent type preference — Mw always leads; below M5.5 the order is ML > mb/mB/mbLg > Ms > Md, and from M5.5 up it is Ms > mB > ML > mb > Md — which avoids saturation errors from mixing incompatible scales. Other strategies keep the winning event's existing magnitude unchanged.
 * **Depth Uncertainty Selection** *(Average strategy)*: Selects the depth with the lowest reported uncertainty rather than a simple mean. Other strategies inherit depth directly from the winning event.
 
 Merge Process Overview
@@ -47,7 +47,7 @@ Merge Process Overview
        end
 
        Combine[/"Combine all events"/]
-       Detect{"Duplicate?<br/>time + location + magnitude"}
+       Detect{"Duplicate?<br/>time + location (adaptive)"}
        Resolve[/"Resolve conflicts<br/>(apply selected merge strategy)"/]
        Result[("Merged catalogue<br/>unique events with provenance")]
 
@@ -83,11 +83,11 @@ Understanding Duplicates
 What Makes Events Duplicates?
 =============================
 
-Two events are considered duplicates if they likely represent the same
-earthquake recorded in different catalogues. The platform uses three criteria,
-with default thresholds and association logic based on international standards 
-for global and regional earthquake association (Storchak et al., 2013; 
-Benz et al., 2019):
+Two events are considered candidate duplicates if they likely represent the
+same earthquake recorded in different catalogues. The platform tests two
+criteria, with default thresholds and association logic based on
+international standards for global and regional earthquake association
+(Storchak et al., 2013; Benz et al., 2019):
 
 .. list-table::
    :header-rows: 1
@@ -100,13 +100,25 @@ Benz et al., 2019):
      - ± 60 seconds
      - Origin times may differ due to analysis methods
    * - Distance
-     - ≤ 50 km
+     - ≤ 10 km
      - Locations vary based on velocity models and data
-   * - Magnitude
-     - ≤ 0.5
-     - Different scales and stations affect magnitude
 
-**All three criteria must be met** for events to be considered duplicates.
+**Both criteria must be met**, and both thresholds automatically widen for
+larger and deeper events (see :ref:`Step 3 <configure-matching-rules>`
+below). Magnitude is **not** a matching criterion — a candidate pair is
+accepted or rejected on time and distance alone. Magnitude is used in two
+other ways only:
+
+* **Tie-breaking:** when a report could pair with more than one equally
+  close candidate, the pairing with the closer magnitude (converted to a
+  common Mw scale where possible) is preferred.
+* **Group consistency, after matching:** once a group of matched reports is
+  formed, its magnitudes must agree within a tolerance that scales with the
+  group's mean magnitude (0.5 below M4.0, 0.8 below M5.5, 1.2 below M7.0,
+  otherwise 1.5). A group that fails this check is split and re-associated
+  rather than merged as-is.
+
+There is no separate, user-configurable "magnitude difference" threshold.
 
 Why Duplicates Occur
 ====================
@@ -127,9 +139,9 @@ Example Duplicate Detection
    Catalogue A: 2024-01-15 10:30:45, M4.5, -41.50, 174.20
    Catalogue B: 2024-01-15 10:30:47, M4.6, -41.51, 174.21
 
-   Time difference:    2 seconds   (< 60s threshold) ✓
-   Distance:           1.4 km      (< 50km threshold) ✓
-   Magnitude diff:     0.1         (< 0.5 threshold) ✓
+   Time difference:    2 seconds   (within 60s adaptive window) ✓
+   Distance:           1.4 km      (within 10km adaptive window) ✓
+   Magnitude diff:     0.1         (informational only - not a matching test)
 
    Result: These are duplicates (same earthquake)
 
@@ -156,7 +168,7 @@ Strategy Decision Guide
 
        Quality("Use Quality-Based<br/>(Recommended)")
        Priority("Use Priority-Based")
-       Newest("Use Newest Data")
+       Newest("Use Most Recent Solution")
        Complete("Use Most Complete")
        Average("Use Average Values")
 
@@ -191,20 +203,36 @@ Priority-Based Strategy
 
 **How it works:**
 
-* You designate one catalogue as "primary"
-* When duplicates are found, keep the primary catalogue's event
-* Discard the duplicate from other catalogues
+Choose which report wins when the same event appears in more than one
+catalogue:
 
-This approach follows the principle of network authority, where local 
-networks are prioritized for regional events as recommended by Bondár & 
+* **GeoNet > Others** / **GNS > Others** — keeps the GeoNet report when the
+  group has one. GeoNet is recognised by its agency code (e.g. ``WEL``) or
+  the catalogue's own provider/import metadata, never by matching words in
+  a catalogue's name.
+* **Most Recent Solution** — keeps the solution whose origin the reporting
+  agency computed last (see the Most Recent Solution strategy below).
+* **Quality-Based** — keeps the best-constrained solution, comparing only
+  the metrics every catalogue in the group reports (see the Quality Score
+  strategy below).
+* **Custom Order** — you rank the selected catalogues yourself; the record
+  from the highest-ranked catalogue in a group wins.
+
+Whenever the preferred agency/solution is not present in a group (or, for
+Custom Order, when catalogues tie), the built-in network-authority ranking
+decides instead (GeoNet, GCMT, ISC, USGS, then other agencies), and quality
+score breaks any remaining tie.
+
+This approach follows the principle of network authority, where local
+networks are prioritized for regional events as recommended by Bondár &
 Storchak (2011).
 
-**Example:**
+**Example (GeoNet > Others):**
 
 .. code-block:: text
 
-   Primary (GeoNet):   M4.5, depth 25 km, 42 phases
-   Secondary (USGS):   M4.6, depth 28 km, 15 phases
+   GeoNet:   M4.5, depth 25 km, 42 phases
+   USGS:     M4.6, depth 28 km, 15 phases
 
    Result: Keep GeoNet event (M4.5, depth 25 km, 42 phases)
 
@@ -218,7 +246,7 @@ Storchak (2011).
 
 * Simple and predictable
 * May discard valid information from secondary sources
-* Assumes primary source is always correct
+* Assumes the chosen agency, ordering, or ranking method is reliable for every event in the group
 
 .. mermaid::
    :align: center
@@ -233,8 +261,8 @@ Storchak (2011).
 
        subgraph Logic ["Priority Logic"]
            P1[/"1. GeoNet (Primary)"/]
-           P2[/"2. USGS"/]
-           P3[/"3. ISC"/]
+           P2[/"2. ISC"/]
+           P3[/"3. USGS"/]
        end
 
        Result("GeoNet event selected")
@@ -267,11 +295,23 @@ Average Values Strategy
 
 **How it works:**
 
-* Compute a weighted-average location (lower uncertainty = higher weight)
-* Select the best magnitude using the ISC hierarchy (Mw > Ms > mb > ML)
-* Pick the depth with the lowest reported uncertainty
-* Use the earliest origin time across duplicates
-* Preserve metadata from the highest-quality source event
+* **Location:** average every report's epicentre, weighted by inverse
+  variance (1/σ²) when *every* report in the group states a horizontal
+  uncertainty (a report twice as precise counts four times as much);
+  otherwise every report is weighted equally rather than guessing an
+  uncertainty for the ones that stated none
+* **Magnitude:** selected, not averaged, by a size-dependent type
+  preference — Mw first; below M5.5, ML ranks ahead of mb/mB/mbLg, then
+  Ms, then Md; from M5.5 up, Ms leads, then mB, then ML, then mb, then Md;
+  a magnitude an agency marked "rejected" is skipped
+* **Depth:** taken from the best-constrained report that actually solved
+  for depth (a fixed/operator-assigned depth is used only when no report
+  in the group solved freely for depth)
+* **Time:** the earliest reported origin time across the group
+* Origin metadata that belongs to one agency's solution alone (agency,
+  method, azimuthal gap, station/phase counts, RMS, time uncertainty,
+  evaluation status) is **not** carried onto the averaged row — an
+  averaged epicentre is not any single agency's solution
 
 Statistical averaging and uncertainty propagation follow Bayesian 
 principles for combining independent seismic observations (Schorlemmer 
@@ -281,11 +321,11 @@ et al., 2024).
 
 .. code-block:: text
 
-   Catalogue A: M4.5, depth 25 km
-   Catalogue B: M4.6, depth 28 km
-   Catalogue C: M4.4, depth 24 km
+   Catalogue A: ML 4.5, depth 25 km (uncertainty 2 km)
+   Catalogue B: mb 4.6, depth 28 km (uncertainty 8 km)
+   Catalogue C: Mw 4.4, depth 24 km (uncertainty 1 km)
 
-   Result: M4.5 (magnitude hierarchy), depth 25 km (lowest uncertainty)
+   Result: Mw 4.4 (Mw is preferred over mb/ML), depth 24 km (lowest reported uncertainty)
 
 **Best for:**
 
@@ -301,9 +341,9 @@ et al., 2024).
 
 .. note::
    The Average strategy is actually a **hybrid** approach:
-   * **Location**: Weighted average using inverse-variance (lower uncertainty = higher weight).
-   * **Magnitude**: Uses the **Magnitude Hierarchy** (Mw > Ms > mb > ML) rather than a simple mean to avoid saturation errors.
-   * **Depth**: Selects the depth with the **lowest reported uncertainty**.
+   * **Location**: Weighted average using inverse-variance (lower uncertainty = higher weight), or equal weights when any report states no uncertainty.
+   * **Magnitude**: Selected by a size-dependent **type preference** (Mw first, then whichever remaining scale is best calibrated and unsaturated at that earthquake's size) rather than averaged, to avoid saturation errors.
+   * **Depth**: Selects the depth from the **best-constrained report that solved for it**, not a simple mean.
 
 .. mermaid::
    :align: center
@@ -316,7 +356,7 @@ et al., 2024).
        end
 
        subgraph Processing ["Hybrid Averaging"]
-           Loc[/"Location: weighted mean<br/>(Source A weighted 5x)"/]
+           Loc[/"Location: weighted mean<br/>(Source A weighted 25x: inverse-variance 1/sigma^2)"/]
            Mag[/"Magnitude: hierarchy<br/>(prefers Mw over ML)"/]
            Dep[/"Depth: best uncertainty"/]
        end
@@ -345,23 +385,30 @@ et al., 2024).
        classDef warning fill:#FBE0DA,stroke:#C24A2B,stroke-width:1.5px,color:#5E1C0C
        classDef terminal fill:#1F2D3D,stroke:#0B1622,stroke-width:1.5px,color:#FFFFFF
 
-Newest Data Strategy
-====================
+Most Recent Solution Strategy
+=============================
 
 **How it works:**
 
-* Compare origin times across duplicate events
-* Keep the event with the latest origin time
-* Useful when later earthquakes in a sequence have better solutions
+* Keep the solution whose origin the reporting agency computed *last*
+  (QuakeML ``creationInfo``/``creationTime``, or else the record's creation
+  and modification time) — not simply the latest origin (event) time, which
+  says nothing about which analysis is newer
+* When not every report in the group states a determination time,
+  evaluation status decides instead (final/reviewed beats preliminary),
+  then quality score
+* A report its own agency marked "rejected" never wins while another
+  report is available
+* The platform's own upload time is never used
 
 **Example:**
 
 .. code-block:: text
 
-   Event A: Last updated 2024-01-15 (automatic solution)
-   Event B: Last updated 2024-01-20 (reviewed solution)
+   Event A: origin computed 2024-01-15 (automatic solution)
+   Event B: origin computed 2024-01-20 (reviewed solution)
 
-   Result: Keep Event B (more recent, likely reviewed)
+   Result: Keep Event B (its origin was computed later)
 
 **Best for:**
 
@@ -371,8 +418,8 @@ Newest Data Strategy
 
 **Considerations:**
 
-* Assumes newer is better
-* May not work well if timestamps aren't reliable
+* Assumes the most recently computed solution is the best one
+* Relies on agencies reporting a determination/creation time
 * Good for refreshing operational catalogues
 
 Most Complete Strategy
@@ -420,8 +467,12 @@ international standards for network performance and location accuracy
 * **Location Precision (15 pts)**: Based on Standard Error / RMS residuals 
   (ISC standard: < 0.3s is excellent).
 * **Magnitude Uncertainty (15 pts)**: Lower uncertainty yields higher scores.
-* **Magnitude Type (15 pts)**: Preferred order Mw > Ms > mb > ML > Md 
-  (Storchak et al., 2013).
+* **Magnitude Type (15 pts)**: Rewards whichever type is best calibrated and
+  unsaturated at the group's earthquake size — the same size-dependent
+  preference the Average strategy uses to select a magnitude (Mw always
+  leads; below M5.5, ML > mb/mB/mbLg > Ms > Md; from M5.5 up,
+  Ms > mB > ML > mb > Md) — following the ISC-GEM approach to magnitude
+  selection (Storchak et al., 2013).
 * **Review Status (10 pts)**: "Reviewed" or "Final" status adds points over 
   "Preliminary" solutions.
 
@@ -480,10 +531,13 @@ as possible.
    secondary source.
 2. **Rich Data Preservation**: Complex data types like **Picks**, **Arrivals**, 
    and **Station Magnitudes** are preserved through a ranked inheritance system.
-3. **Focal Mechanism Selection**: The platform automatically selects the 
-   best focal mechanism across all duplicate sources based on a hierarchy 
-   (GCMT > GeoNet > USGS > ISC) and quality metrics including station 
-   polarity count and misfit values.
+3. **Focal Mechanism Selection**: The platform unites every focal mechanism
+   reported by every source (by publicID) and selects the best one based on
+   an authority hierarchy — GCMT > USGS/NEIC > GEOFON/GFZ > GeoNet > INGV,
+   then any other moment-tensor solution, then a first-motion solution from
+   at least 20 station polarities, then an automatic solution — with ties
+   within a tier broken by variance reduction, then station polarity count,
+   then misfit.
 
 ---------------------------
 Advanced Quality Control
@@ -498,9 +552,11 @@ process to prevent "over-matching" or physical inconsistencies:
   calculates the spatial spread. If it exceeds the magnitude-scaled threshold
   (100 km for M < 5, 150 km for M 5–6, 200 km for M ≥ 6), the group is
   rejected and each event is kept as a separate unique event.
-* **Network Mismatch**: If the same network reports two different events in 
-  the same group, the platform identifies these as likely distinct events 
-  (e.g., foreshock/aftershock) and prevents them from being merged.
+* **Same-Catalogue Mismatch**: If the same source *catalogue* would
+  contribute two different reports to the same group, the platform treats
+  them as likely distinct events (e.g., a foreshock/aftershock pair) and
+  keeps them separate rather than merging them — one catalogue never
+  contributes more than one report to a merged event.
 
 ----------------------------
 Scientific Accuracy Features
@@ -515,9 +571,14 @@ rigour:
 * **Date Line Normalization**: Merging events near the International Date 
   Line (±180°) uses Cartesian unit-vector averaging to avoid mathematical 
   errors that occur with simple arithmetic means.
-* **Uncertainty-Weighted Locations**: When averaging locations, the platform 
-  weights the result by the inverse of the reported horizontal uncertainty 
-  (geometric mean of latitude/longitude errors).
+* **Uncertainty-Weighted Locations**: When every report in a group states a
+  horizontal location uncertainty, the platform weights the averaged
+  location by **inverse variance** (1/σ², so a report twice as precise
+  counts four times as much) — σ is taken from the report's error ellipse
+  or circle where available, otherwise from its latitude/longitude
+  uncertainties converted to kilometres (the larger of the two, using
+  cos(latitude) for the longitude term). If any report in the group states
+  no uncertainty, every report is weighted equally instead.
 * **Regional Authority Hierarchy**: The platform recognizes regional 
   boundaries. For example, it automatically prioritizes GeoNet for events 
   within New Zealand and JMA for events in Japan. This preference is 
@@ -552,13 +613,22 @@ Select two or more catalogues to merge:
    Start with 2-3 catalogues. For complex merges, consider an iterative
    approach (merge two first, then add more).
 
+.. _configure-matching-rules:
+
 Step 3: Configure Matching Rules
 ================================
 
-Set thresholds for duplicate detection. These thresholds are adaptively 
-scaled based on event magnitude and depth (Tanaka et al., 2022), as larger 
-earthquakes typically have larger location and timing uncertainties in 
-global reports (Benz et al., 2019):
+Set the two thresholds used for duplicate detection: a time window and a
+distance threshold. There is no separate magnitude threshold — magnitude is
+never a pairwise matching criterion (see *Understanding Duplicates* above).
+Both thresholds are the values you enter *before* adaptive scaling: the
+platform automatically widens them for larger and deeper events (Tanaka et
+al., 2022), as larger earthquakes typically have larger location and timing
+uncertainties in global reports (Benz et al., 2019). Specifically, your
+configured values apply as-is below M4.0 and scale up by magnitude to 1.5×
+(M4.0–5.5), 2× time / 2.5× distance (M5.5–7.0), and 3× time / 4× distance at
+M7.0 and above; on top of that, distance gets a further 1.2× between 100 and
+300 km depth, or 1.5× beyond 300 km.
 
 **Time Window**
 
@@ -573,81 +643,79 @@ global reports (Benz et al., 2019):
 
 .. code-block:: text
 
-   Default: 50 km
+   Default: 10 km
 
-   Stricter: 25 km (regional, well-located events)
-   Looser:   100 km (global, poorly-located events)
-
-**Magnitude Difference**
-
-.. code-block:: text
-
-   Default: 0.5
-
-   Stricter: 0.3 (same magnitude scale)
-   Looser:   1.0 (different magnitude scales)
+   Stricter: 5 km (regional, well-located events)
+   Looser:   25 km (global, poorly-located events)
 
 **Threshold Guidelines:**
 
 .. list-table::
    :header-rows: 1
-   :widths: 25 25 25 25
+   :widths: 30 35 35
 
    * - Scenario
      - Time
      - Distance
-     - Magnitude
    * - High-quality regional
      - ± 30s
-     - 25 km
-     - 0.3
-   * - Standard national
+     - 5 km
+   * - Standard national (default)
      - ± 60s
-     - 50 km
-     - 0.5
+     - 10 km
    * - Global catalogues
      - ± 120s
-     - 100 km
-     - 0.5
+     - 25 km
    * - Historical data
      - ± 180s
-     - 150 km
-     - 1.0
+     - 50 km
 
 Step 4: Choose Merge Strategy
 =============================
 
 Select your conflict resolution strategy:
 
-* **Quality-Based (Recommended)** - Scores each duplicate event 0–100 and keeps the highest-scoring one (station count, azimuthal gap, RMS, magnitude uncertainty, magnitude type, review status).
-* **Priority-Based** - Select a primary catalogue; its events always win.
-* **Average Values** - Computes a weighted-average location, applies magnitude hierarchy, and picks the lowest-uncertainty depth.
-* **Newest Data** - Keeps the event with the latest origin time.
+* **Quality-Based (Recommended)** - Scores each duplicate event 0–100 and keeps the highest-scoring one (station count, azimuthal gap, RMS, magnitude uncertainty, magnitude type, review status); falls back to network authority when a report in the group states none of these metrics.
+* **Priority-Based** - Choose GeoNet/GNS, Most Recent Solution, Quality-Based, or your own Custom Order to decide which report wins (see :ref:`merge-strategies` above).
+* **Average Values** - Computes a weighted-average location, selects (does not average) the magnitude by type preference, and picks the depth from the best-constrained solution.
+* **Most Recent Solution** - Keeps the solution whose origin was computed last.
 * **Most Complete** - Keeps the event with the most populated fields.
 
 .. note::
-   Regardless of the strategy chosen, the platform always applies date line normalisation and validation gates. Magnitude hierarchy and depth uncertainty selection are specific to the Average strategy. The strategy controls *which event's core parameters win* when duplicates are resolved.
+   Regardless of the strategy chosen, the platform always applies date line normalisation and validation gates. The magnitude type preference and depth-uncertainty selection described for the Average strategy are specific to it — every other strategy keeps the winning event's own magnitude and depth unchanged. The strategy controls *which event's core parameters win* when duplicates are resolved.
 
 .. tip::
    Use **Quality-Based** for scientific work — it selects the most reliable origin automatically. Use **Priority-Based** when you have a single authoritative source (e.g., always prefer GeoNet for New Zealand events).
 
 .. note::
-   During the merge process, different magnitude scales (ML, mb, Ms) are 
-   automatically converted to a common Moment Magnitude (Mw) scale using 
-   the empirical relationships of Scordilis (2006) to ensure 
-   comparability across catalogues.
+   Magnitude scales are never rewritten in the published merged event — the
+   magnitude shown is always one agency's own reported value, in its own
+   reported type. Conversions to a common Mw scale, using the empirical
+   relationships of Scordilis (2006) for mb and Ms, are used only
+   internally: to check that a duplicate group's magnitudes are mutually
+   consistent before merging, and to judge which magnitude type is best
+   calibrated at that earthquake's size when the Average strategy selects a
+   magnitude. ML has no calibrated conversion to Mw and is instead treated
+   as approximately equal to Mw for these purposes.
 
 Step 5: Configure Priority (if applicable)
 ==========================================
 
-If using Priority-Based strategy, rank your catalogues:
+If Priority-Based is set to **Custom Order**, rank the selected catalogues
+with the up/down buttons (the list starts in your catalogue-selection
+order):
 
 .. code-block:: text
 
-   Priority Order:
-   1. GeoNet - New Zealand 2024     (highest priority)
+   Catalogue ranking (highest priority first):
+   1. GeoNet - New Zealand 2024
    2. Local Network Data
-   3. USGS - Southwest Pacific      (lowest priority)
+   3. USGS - Southwest Pacific
+
+The record from the highest-ranked catalogue in a duplicate group wins; a
+catalogue you have not ranked (or did not select) ranks after every ranked
+one, and quality score breaks any remaining tie. The other Priority-Based
+options (GeoNet/GNS, Most Recent Solution, Quality-Based) need no ranking.
 
 Step 6: Name the Merged Catalogue
 =================================
@@ -674,9 +742,9 @@ Click **Merge Catalogues** to begin processing.
 
 1. Load events from all source catalogues
 2. Build spatial grid index for efficient geographic lookups
-3. Find candidate duplicates within time and distance windows
-4. Apply distance and magnitude criteria
-5. Resolve conflicts using selected strategy
+3. Find candidate duplicate pairs within the adaptive time and distance windows
+4. Associate pairs one-to-one, closest match first (magnitude only breaks ties), and validate each group — a group that fails validation is split and its members re-offered
+5. Resolve remaining conflicts using the selected strategy
 6. Record provenance for all events
 7. Calculate quality scores for merged events
 8. Generate summary statistics
@@ -740,11 +808,11 @@ Provenance Metadata
 
 Every event in the merged catalogue includes:
 
-* **source_catalogue_id:** Original catalogue identifier
-* **source_event_id:** Original event ID
-* **merge_strategy:** How conflicts were resolved
-* **duplicate_sources:** Other catalogues with matching events
-* **merge_timestamp:** When the merge was performed
+* **merge_strategy:** How conflicts were resolved (``quality``, ``priority``, ``newest``, ``complete`` or ``average``)
+* **merge_parameters:** The effective configuration used — thresholds, priority option, priority order (for Custom Order), and confirmation that adaptive windows were applied
+* **source_catalogue_ids:** Every catalogue that contributed a report to this event
+* **source_events:** One entry per contributing report, with its original data; the entry whose solution was published is flagged ``selected`` (no entry is flagged for an Average-strategy merge, since no single report's solution is published)
+* **quality_score** / **quality_grade:** Computed from the published row at merge time
 
 Viewing Provenance
 ==================
@@ -795,7 +863,7 @@ Threshold Selection
 
 **Start conservative, then loosen:**
 
-1. Begin with strict thresholds (30s, 25km, 0.3)
+1. Begin with strict thresholds (30s, 5 km)
 2. Run merge and review matched pairs
 3. If too many missed duplicates, loosen thresholds
 4. If too many false matches, tighten thresholds
@@ -862,7 +930,7 @@ For complex multi-source merges:
             → "NZ_Comprehensive"
 
    Stage 3: NZ_Comprehensive + Historical
-            (Strategy: Newest Data)
+            (Strategy: Most Recent Solution)
             → "NZ_Complete_1900-2024"
 
 **Benefits:**
@@ -892,9 +960,8 @@ Too Many Duplicates Found
 **Solutions:**
 
 1. Tighten time window (try ± 30s)
-2. Reduce distance threshold (try 25 km)
-3. Reduce magnitude threshold (try 0.3)
-4. Review matched pairs for false positives
+2. Reduce distance threshold (try 5 km)
+3. Review matched pairs for false positives
 
 Too Few Duplicates Found
 ========================
@@ -904,9 +971,8 @@ Too Few Duplicates Found
 **Solutions:**
 
 1. Loosen time window (try ± 120s)
-2. Increase distance threshold (try 100 km)
-3. Increase magnitude threshold (try 1.0)
-4. Check for systematic time or location offsets
+2. Increase distance threshold (try 25 km)
+3. Check for systematic time or location offsets
 
 Merge Takes Too Long
 ====================

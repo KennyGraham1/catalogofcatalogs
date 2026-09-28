@@ -5,6 +5,7 @@
 // Import canonical EarthquakeEvent type from central types module
 import { EarthquakeEvent } from '@/types/earthquake';
 import { dedupeById } from '@/lib/utils';
+import type { DateFormat } from './date-format-detector';
 
 // Re-export for backwards compatibility with existing imports
 export type { EarthquakeEvent } from '@/types/earthquake';
@@ -109,14 +110,23 @@ export function getMagnitudePixelRadius(magnitude: number): number {
 }
 
 /**
- * Get human-readable label for magnitude
+ * Get human-readable label for magnitude.
+ *
+ * Richter-style descriptor classes: Great >= 8, Major 7-7.9, Strong 6-6.9,
+ * Moderate 5-5.9, Light 4-4.9, Minor 2-3.9, Micro < 2. These are the bands
+ * lib/chart-config.ts magnitudeClass uses for chart tooltips, so a map popup and a
+ * chart describe the same event the same way (an Mw 8.1 is 'Great' in both).
  */
 export function getMagnitudeLabel(magnitude: number): string {
+  // A missing magnitude fell through every comparison and was labelled 'Minor'.
+  if (typeof magnitude !== 'number' || !Number.isFinite(magnitude)) return 'Unknown';
+  if (magnitude >= 8.0) return 'Great';
   if (magnitude >= 7.0) return 'Major';
   if (magnitude >= 6.0) return 'Strong';
   if (magnitude >= 5.0) return 'Moderate';
   if (magnitude >= 4.0) return 'Light';
-  return 'Minor';
+  if (magnitude >= 2.0) return 'Minor';
+  return 'Micro';
 }
 
 /**
@@ -187,12 +197,31 @@ export function validateDepth(depth: number | null): boolean {
 }
 
 /**
- * Normalize timestamp to ISO 8601 format
- * Supports multiple input formats:
- * - ISO 8601: 2024-01-15T10:30:00.000Z, 2024-01-15T10:30:00Z, 2024-01-15 10:30:00
- * - Unix timestamp (seconds): 1705318200
- * - Unix timestamp (milliseconds): 1705318200000
- * - Common date formats: DD/MM/YYYY, MM/DD/YYYY, DD.MM.YYYY, YYYY/MM/DD
+ * Normalize timestamp to ISO 8601 format (UTC, millisecond precision).
+ *
+ * Origin times are UTC by definition (QuakeML 1.2, FDSN, ISO 8601), so a string
+ * without a zone designator is READ AS UTC and a string with one (Z, UTC, GMT, +13:00,
+ * -0500, UTC+13) is converted from that offset. Every supported shape is parsed into
+ * calendar parts here and assembled with Date.UTC: nothing is handed to new Date() as
+ * a string, because V8 reads offset-less and non-ISO strings as SERVER-LOCAL time,
+ * which made stored origin times depend on the host's TZ. Unrecognised shapes and
+ * impossible calendar values (31 February, day-of-year 366 in 2023) return null
+ * rather than rolling over into a different, valid-looking date.
+ *
+ * Supported shapes (T or whitespace between date and time; seconds and any number of
+ * fractional-second digits optional, truncated to milliseconds):
+ * - ISO 8601 / year-first: 2024-01-15T10:30:00.123456789Z, 2024-01-15 10:30,
+ *   2024/01/15, 2024.01.15 10:30:00
+ * - Day/month-first: DD/MM/YYYY or MM/DD/YYYY (slash or dash), DD.MM.YYYY; the order
+ *   is decided by a day > 12, otherwise by `dateFormat` (DD/MM when absent). Slash
+ *   and dot forms also take a two-digit year: the latest year with those digits that
+ *   is not after the current year ('24' -> 2024, '95' -> 1995), as an origin time
+ *   cannot be in the future.
+ * - Month names: 15 Jan 2024 10:30:00, 15-JAN-24, Jan 15 2024, January 15, 2024 10:30,
+ *   with an optional weekday (RFC 2822 'Mon, 15 Jan 2024 10:30:00 +1300')
+ * - Compact: YYYYMMDD, YYYYMMDD HHMMSS, YYYYMMDDHHMMSS, 20240115T103000Z
+ * - Day of year: YYYY DDD HH:MM:SS, YYYY-DDD HH:MM:SS, YYYYDDDHHMMSS
+ * - Unix epoch: numbers, or 10-digit (seconds) / 13-digit (milliseconds) strings
  */
 export function normalizeTimestamp(time: string | number, dateFormat?: 'US' | 'International'): string | null {
   if (typeof time === 'number') {
@@ -216,331 +245,247 @@ export function normalizeTimestamp(time: string | number, dateFormat?: 'US' | 'I
   }
 
   const trimmed = time.trim();
+  if (trimmed === '') return null;
 
-  // Try parsing as-is first (handles ISO 8601 and other standard formats)
-  // Allow historical dates (earthquakes can be from centuries ago)
-  // Minimum valid date: year 1000 CE (reasonable lower bound for historical seismology)
-  const minValidDate = new Date('1000-01-01T00:00:00.000Z').getTime();
-
-  // Offset-less ISO 8601 (date, or date+time with space or T, NO timezone) MUST be
-  // treated as UTC: `new Date('2024-01-01 12:00:00')` parses as LOCAL time, silently
-  // shifting UTC earthquake times by the server timezone (and non-deterministically
-  // across deploy environments). Force UTC before the generic parse. Strings that
-  // carry an explicit Z/offset are not matched here and fall through to new Date().
-  const isoNoTz = trimmed.match(
-    /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,6}))?)?)?$/
-  );
-  if (isoNoTz) {
-    const [, y, mo, d, h = '00', mi = '00', s = '00', ms = ''] = isoNoTz;
-    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
-    const isoUtc = `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}T${h.padStart(2, '0')}:${mi.padStart(2, '0')}:${s.padStart(2, '0')}.${millis}Z`;
-    const utc = new Date(isoUtc);
-    if (!isNaN(utc.getTime()) && utc.getTime() >= minValidDate) {
-      return utc.toISOString();
-    }
-  }
-
-  // Only a string carrying an explicit zone designator may take the generic parse
-  // here. ECMA-262 leaves non-ISO forms implementation-defined, and V8 reads
-  // slash-separated and RFC-2822-style dates as LOCAL wall-clock time, so an
-  // unconditional new Date() at this point shifted every such origin time by the
-  // server's UTC offset and made the explicit-UTC branches below unreachable.
-  // Offset-less forms are assembled into explicit UTC below; the generic parse is
-  // retried as a last resort after them.
-  // A zone must follow a time-of-day: `\d[+-]\d{2}` alone also matches the day of
-  // a bare date like 2024-01-15, which is exactly the shape that must NOT be zoned.
-  const hasZoneDesignator = /\d:\d{2}(?::\d{2}(?:\.\d+)?)?\s*(?:Z|[+-]\d{2}(?::?\d{2})?)$/i.test(trimmed);
-  let date = hasZoneDesignator ? new Date(trimmed) : new Date(NaN);
-  if (!isNaN(date.getTime()) && date.getTime() >= minValidDate) {
-    return date.toISOString();
-  }
-
-  let match: RegExpMatchArray | null;
-
-  // YYYY-MM-DD HH:MM:SS format (space-separated ISO without T)
-  const yyyymmddSpace = /^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
-  match = trimmed.match(yyyymmddSpace);
-  if (match) {
-    const [, year, month, day, hour, minute, second, ms] = match;
-    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
-    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${millis}Z`;
-    date = new Date(isoString);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString();
-    }
-  }
-
-  // DD/MM/YYYY or MM/DD/YYYY HH:MM:SS format (ambiguous - use dateFormat hint)
-  const ambiguousSlash = /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
-  match = trimmed.match(ambiguousSlash);
-  if (match) {
-    const [, first, second, year, hour, minute, second_time, ms] = match;
-    const firstNum = parseInt(first);
-    const secondNum = parseInt(second);
-
-    let day: string;
-    let month: string;
-
-    // Determine format based on values and hint
-    if (firstNum > 12 && secondNum <= 12) {
-      // Unambiguous: first must be day (DD/MM/YYYY)
-      day = first;
-      month = second;
-    } else if (firstNum <= 12 && secondNum > 12) {
-      // Unambiguous: second must be day (MM/DD/YYYY)
-      month = first;
-      day = second;
-    } else if (firstNum <= 12 && secondNum <= 12) {
-      // Ambiguous: use dateFormat hint
-      if (dateFormat === 'US') {
-        month = first;
-        day = second;
-      } else {
-        // Default to International (DD/MM/YYYY)
-        day = first;
-        month = second;
-      }
-    } else {
-      // Both > 12, invalid date
-      return null;
-    }
-
-    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
-    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second_time.padStart(2, '0')}.${millis}Z`;
-    date = new Date(isoString);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString();
-    }
-  }
-
-  // DD-MM-YYYY or MM-DD-YYYY HH:MM:SS format (ambiguous - use dateFormat hint)
-  const ambiguousDash = /^(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
-  match = trimmed.match(ambiguousDash);
-  if (match) {
-    const [, first, second, year, hour, minute, second_time, ms] = match;
-    const firstNum = parseInt(first);
-    const secondNum = parseInt(second);
-
-    let day: string;
-    let month: string;
-
-    // Determine format based on values and hint
-    if (firstNum > 12 && secondNum <= 12) {
-      // Unambiguous: first must be day (DD-MM-YYYY)
-      day = first;
-      month = second;
-    } else if (firstNum <= 12 && secondNum > 12) {
-      // Unambiguous: second must be day (MM-DD-YYYY)
-      month = first;
-      day = second;
-    } else if (firstNum <= 12 && secondNum <= 12) {
-      // Ambiguous: use dateFormat hint
-      if (dateFormat === 'US') {
-        month = first;
-        day = second;
-      } else {
-        // Default to International (DD-MM-YYYY)
-        day = first;
-        month = second;
-      }
-    } else {
-      // Both > 12, invalid date
-      return null;
-    }
-
-    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
-    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second_time.padStart(2, '0')}.${millis}Z`;
-    date = new Date(isoString);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString();
-    }
-  }
-
-  // DD.MM.YYYY HH:MM:SS format (European with dots)
-  const ddmmyyyyDot = /^(\d{1,2})\.(\d{1,2})\.(\d{4})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
-  match = trimmed.match(ddmmyyyyDot);
-  if (match) {
-    const [, day, month, year, hour, minute, second, ms] = match;
-    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
-    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${millis}Z`;
-    date = new Date(isoString);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString();
-    }
-  }
-
-  // DD.MM.YYYY format (European with dots, date only)
-  const ddmmyyyyDotDateOnly = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/;
-  match = trimmed.match(ddmmyyyyDotDateOnly);
-  if (match) {
-    const [, day, month, year] = match;
-    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T00:00:00.000Z`;
-    date = new Date(isoString);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString();
-    }
-  }
-
-  // YYYY/MM/DD HH:MM:SS format
-  const yyyymmddSlash = /^(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
-  match = trimmed.match(yyyymmddSlash);
-  if (match) {
-    const [, year, month, day, hour, minute, second, ms] = match;
-    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
-    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${millis}Z`;
-    date = new Date(isoString);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString();
-    }
-  }
-
-  // DD/MM/YYYY or MM/DD/YYYY format (date only - ambiguous)
-  const ambiguousDateOnly = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
-  match = trimmed.match(ambiguousDateOnly);
-  if (match) {
-    const [, first, second, year] = match;
-    const firstNum = parseInt(first);
-    const secondNum = parseInt(second);
-
-    let day: string;
-    let month: string;
-
-    // Determine format based on values and hint
-    if (firstNum > 12 && secondNum <= 12) {
-      // Unambiguous: first must be day (DD/MM/YYYY)
-      day = first;
-      month = second;
-    } else if (firstNum <= 12 && secondNum > 12) {
-      // Unambiguous: second must be day (MM/DD/YYYY)
-      month = first;
-      day = second;
-    } else if (firstNum <= 12 && secondNum <= 12) {
-      // Ambiguous: use dateFormat hint
-      if (dateFormat === 'US') {
-        month = first;
-        day = second;
-      } else {
-        // Default to International (DD/MM/YYYY)
-        day = first;
-        month = second;
-      }
-    } else {
-      // Both > 12, invalid date
-      return null;
-    }
-
-    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T00:00:00.000Z`;
-    date = new Date(isoString);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString();
-    }
-  }
-
-  // YYYYMMDD HHMMSS format (compact seismological format)
-  const compactFormat = /^(\d{4})(\d{2})(\d{2})\s+(\d{2})(\d{2})(\d{2})(?:\.(\d{1,6}))?$/;
-  match = trimmed.match(compactFormat);
-  if (match) {
-    const [, year, month, day, hour, minute, second, ms] = match;
-    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
-    const isoString = `${year}-${month}-${day}T${hour}:${minute}:${second}.${millis}Z`;
-    date = new Date(isoString);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString();
-    }
-  }
-
-  // YYYYMMDDHHMMSS format (no separator compact format)
-  const compactNoSpace = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\.(\d{1,6}))?$/;
-  match = trimmed.match(compactNoSpace);
-  if (match) {
-    const [, year, month, day, hour, minute, second, ms] = match;
-    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
-    const isoString = `${year}-${month}-${day}T${hour}:${minute}:${second}.${millis}Z`;
-    date = new Date(isoString);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString();
-    }
-  }
-
-  // YYYY DDD HH:MM:SS format (Julian day / day of year - used in seismology)
-  const julianDayFormat = /^(\d{4})\s+(\d{1,3})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
-  match = trimmed.match(julianDayFormat);
-  if (match) {
-    const [, year, dayOfYear, hour, minute, second, ms] = match;
-    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
-    // Convert day of year to month and day
-    const baseDate = new Date(parseInt(year), 0, 1); // January 1st of the year
-    baseDate.setDate(parseInt(dayOfYear));
-    const month = String(baseDate.getMonth() + 1).padStart(2, '0');
-    const day = String(baseDate.getDate()).padStart(2, '0');
-    const isoString = `${year}-${month}-${day}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${millis}Z`;
-    date = new Date(isoString);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString();
-    }
-  }
-
-  // YYYY-DDD HH:MM:SS format (Julian day with dash)
-  const julianDayDashFormat = /^(\d{4})-(\d{1,3})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,6}))?$/;
-  match = trimmed.match(julianDayDashFormat);
-  if (match) {
-    const [, year, dayOfYear, hour, minute, second, ms] = match;
-    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
-    const baseDate = new Date(parseInt(year), 0, 1);
-    baseDate.setDate(parseInt(dayOfYear));
-    const month = String(baseDate.getMonth() + 1).padStart(2, '0');
-    const day = String(baseDate.getDate()).padStart(2, '0');
-    const isoString = `${year}-${month}-${day}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${millis}Z`;
-    date = new Date(isoString);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString();
-    }
-  }
-
-  // YYYYDDDHHMMSS format (compact Julian day format)
-  // Shape-identical to a 13-digit Unix millisecond epoch, which CSV imports always
-  // deliver as a string (lib/parsers.ts assigns the raw cell text). The two are
-  // separated by the leading year: epoch-ms values only reach a 19xx leading group
-  // in 2030-03 (1.9e12 ms) and a 20xx group in 2033-05 (2.0e12 ms), so a Julian year
-  // >= 1900 is unambiguous, while 1000-1899 (1.0e12-1.8e12 ms = 2001-2027) is an
-  // epoch and is handled by the branch below. Day-of-year is range-checked here so
-  // that an out-of-range value falls through rather than silently rolling over.
-  const compactJulian = /^(\d{4})(\d{3})(\d{2})(\d{2})(\d{2})(?:\.(\d{1,6}))?$/;
-  match = trimmed.match(compactJulian);
-  if (match && parseInt(match[1]) >= 1900 &&
-      parseInt(match[2]) >= 1 && parseInt(match[2]) <= 366) {
-    const [, year, dayOfYear, hour, minute, second, ms] = match;
-    const millis = ms ? ms.padEnd(3, '0').slice(0, 3) : '000';
-    const baseDate = new Date(parseInt(year), 0, 1);
-    baseDate.setDate(parseInt(dayOfYear));
-    const month = String(baseDate.getMonth() + 1).padStart(2, '0');
-    const day = String(baseDate.getDate()).padStart(2, '0');
-    const isoString = `${year}-${month}-${day}T${hour}:${minute}:${second}.${millis}Z`;
-    date = new Date(isoString);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString();
-    }
-  }
+  const zone = splitZoneDesignator(trimmed);
+  const parsed = parseCalendarParts(zone.body, dateFormat);
+  if (parsed === 'invalid') return null;
+  if (parsed !== null) return assembleUtcTimestamp(parsed, zone.offsetMinutes);
 
   // Unix epoch supplied as a string. The numeric branch at the top of this function
   // is unreachable for file imports, because parsers hand over the raw cell text, so
   // the epoch support promised above has to be honoured for digit strings as well:
   // 10 digits are seconds and 13 are milliseconds, the same split the numeric branch
   // applies. No other supported format is a bare 10- or 13-digit string once the
-  // compact Julian day form above has had its (year-restricted) turn.
-  if (/^\d{10}$|^\d{13}$/.test(trimmed)) {
+  // compact day-of-year form has had its (year-restricted) turn.
+  if (zone.offsetMinutes === 0 && zone.body === trimmed && /^\d{10}$|^\d{13}$/.test(trimmed)) {
     return normalizeTimestamp(Number(trimmed), dateFormat);
   }
 
-  // Last resort for shapes none of the explicit branches recognise. Anything that
-  // reaches here without a zone designator is parsed in server-local time, which is
-  // the behaviour the ordering above exists to avoid for every documented format.
-  date = new Date(trimmed);
-  if (!isNaN(date.getTime()) && date.getTime() >= minValidDate) {
-    return date.toISOString();
+  // No last-resort new Date(string): a shape none of the parsers above recognises is
+  // rejected, so an origin time can never be read in the server's local time.
+  return null;
+}
+
+/** Earliest origin time accepted: year 1000 CE, a reasonable lower bound for historical seismology. */
+const MIN_VALID_TIME_MS = Date.UTC(1000, 0, 1);
+
+/** Calendar parts of a timestamp, before any zone offset is applied. */
+interface CalendarParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  millisecond: number;
+}
+
+const MONTH_NUMBERS: Record<string, number> = {
+  jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4, may: 5,
+  jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8, sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12,
+};
+
+const WEEKDAY_NAMES = new Set([
+  'mon', 'monday', 'tue', 'tues', 'tuesday', 'wed', 'wednesday', 'thu', 'thur', 'thurs',
+  'thursday', 'fri', 'friday', 'sat', 'saturday', 'sun', 'sunday',
+]);
+
+// HH:MM[:SS[.fraction]] and the separator between a date and its time of day.
+const TIME_OF_DAY = '(\\d{1,2}):(\\d{1,2})(?::(\\d{1,2})(?:[.,](\\d+))?)?';
+const DATE_TIME_SEPARATOR = '(?:[Tt]|\\s+)';
+
+// 2024-01-15, 2024/01/15, 2024.01.15 (ISO 8601 and its year-first variants)
+const YEAR_FIRST = new RegExp(`^(\\d{4})([-/.])(\\d{1,2})\\2(\\d{1,2})(?:${DATE_TIME_SEPARATOR}${TIME_OF_DAY})?$`);
+// DD/MM/YYYY or MM/DD/YYYY (and YY), DD-MM-YYYY or MM-DD-YYYY
+const DAY_MONTH_SLASH = new RegExp(`^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4}|\\d{2})(?:${DATE_TIME_SEPARATOR}${TIME_OF_DAY})?$`);
+const DAY_MONTH_DASH = new RegExp(`^(\\d{1,2})-(\\d{1,2})-(\\d{4})(?:${DATE_TIME_SEPARATOR}${TIME_OF_DAY})?$`);
+// DD.MM.YYYY (and YY): the dotted form is day-first wherever it is used
+const DAY_MONTH_DOT = new RegExp(`^(\\d{1,2})\\.(\\d{1,2})\\.(\\d{4}|\\d{2})(?:${DATE_TIME_SEPARATOR}${TIME_OF_DAY})?$`);
+// YYYYMMDD, YYYYMMDD HHMMSS, YYYYMMDDHHMMSS, YYYYMMDDTHHMMSS (ISO 8601 basic format)
+const COMPACT = /^(\d{4})(\d{2})(\d{2})(?:(?:[Tt]|\s+)?(\d{2})(\d{2})(\d{2})(?:[.,](\d+))?)?$/;
+const COMPACT_DATE_WITH_TIME = new RegExp(`^(\\d{4})(\\d{2})(\\d{2})${DATE_TIME_SEPARATOR}${TIME_OF_DAY}$`);
+// YYYY DDD HH:MM:SS and YYYY-DDD HH:MM:SS (day of year, common in seismology)
+const DAY_OF_YEAR = /^(\d{4})(?:\s+|-)(\d{1,3})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:[.,](\d+))?$/;
+// YYYYDDDHHMMSS: shape-identical to a 13-digit Unix millisecond epoch (see below)
+const COMPACT_DAY_OF_YEAR = /^(\d{4})(\d{3})(\d{2})(\d{2})(\d{2})(?:[.,](\d+))?$/;
+// [Weekday,] 15 Jan 2024 [time], 15-JAN-24
+const DAY_MONTHNAME_YEAR = new RegExp(
+  `^(?:([A-Za-z]{3,9})\\.?,?\\s+)?(\\d{1,2})(?:\\s+|-)([A-Za-z]{3,9})\\.?(?:\\s+|-)(\\d{4}|\\d{2})(?:${DATE_TIME_SEPARATOR}${TIME_OF_DAY})?$`
+);
+// [Weekday,] Jan 15 2024 [time], January 15, 2024 [time]
+const MONTHNAME_DAY_YEAR = new RegExp(
+  `^(?:([A-Za-z]{3,9})\\.?,?\\s+)?([A-Za-z]{3,9})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})(?:(?:,?\\s+|[Tt])${TIME_OF_DAY})?$`
+);
+
+/**
+ * Split a trailing zone designator from a timestamp: Z, UT/UTC/GMT (optionally with
+ * an offset, as in 'GMT+1300 (New Zealand Daylight Time)'), or a numeric offset
+ * (+13:00, +1300, +13, -05:00). A numeric offset must follow a time of day: the '-15'
+ * that ends the bare date 2024-01-15 is its day, not a zone. Named local zones (EST,
+ * NZDT, CST...) are not accepted: several are ambiguous, and an origin time the
+ * parser cannot place exactly is rejected rather than guessed.
+ */
+function splitZoneDesignator(value: string): { body: string; offsetMinutes: number } {
+  const match = value.match(
+    /^(.*\d)\s*(?:(Z)|(UTC|GMT|UT)(?:\s*([+-])(\d{1,2})(?::?(\d{2}))?)?|([+-])(\d{2})(?::?(\d{2}))?)\s*(?:\([^()]*\))?$/i
+  );
+  if (!match) return { body: value, offsetMinutes: 0 };
+  const [, body, zulu, named, namedSign, namedHours, namedMinutes = '0', sign, hours, minutes = '0'] = match;
+  if (zulu !== undefined || (named !== undefined && namedSign === undefined)) {
+    return { body: body.trim(), offsetMinutes: 0 };
+  }
+  const endsWithTimeOfDay = /(?:\d:\d{1,2}(?::\d{1,2}(?:[.,]\d+)?)?|[Tt\s]\d{4}(?:\d{2}(?:[.,]\d+)?)?)$/.test(body);
+  if (named === undefined && !endsWithTimeOfDay) return { body: value, offsetMinutes: 0 };
+  const offsetSign = (namedSign ?? sign) === '-' ? -1 : 1;
+  const offsetHours = parseInt(namedHours ?? hours, 10);
+  const offsetMinutesPart = parseInt(named !== undefined ? namedMinutes : minutes, 10);
+  if (offsetHours > 23 || offsetMinutesPart > 59) return { body: value, offsetMinutes: NaN };
+  return { body: body.trim(), offsetMinutes: offsetSign * (offsetHours * 60 + offsetMinutesPart) };
+}
+
+/**
+ * Read the calendar parts of a zone-less timestamp. Returns null when no supported
+ * shape matches, and 'invalid' when a shape matches but its values cannot be a date.
+ */
+function parseCalendarParts(body: string, dateFormat?: 'US' | 'International'): CalendarParts | 'invalid' | null {
+  let m: RegExpMatchArray | null;
+
+  if ((m = body.match(YEAR_FIRST))) {
+    return withTimeOfDay(Number(m[1]), Number(m[3]), Number(m[4]), m, 5);
+  }
+
+  if ((m = body.match(DAY_MONTH_SLASH)) || (m = body.match(DAY_MONTH_DASH))) {
+    const order = resolveDayMonthOrder(Number(m[1]), Number(m[2]), dateFormat);
+    if (!order) return 'invalid';
+    return withTimeOfDay(expandYear(m[3]), order.month, order.day, m, 4);
+  }
+
+  if ((m = body.match(DAY_MONTH_DOT))) {
+    return withTimeOfDay(expandYear(m[3]), Number(m[2]), Number(m[1]), m, 4);
+  }
+
+  if ((m = body.match(COMPACT))) {
+    const [, y, mo, d, h = '0', mi = '0', s = '0', fraction = ''] = m;
+    return checkedParts(Number(y), Number(mo), Number(d), Number(h), Number(mi), Number(s), fraction);
+  }
+
+  if ((m = body.match(COMPACT_DATE_WITH_TIME))) {
+    return withTimeOfDay(Number(m[1]), Number(m[2]), Number(m[3]), m, 4);
+  }
+
+  if ((m = body.match(DAY_OF_YEAR))) {
+    const [, y, doy, h, mi, s, fraction = ''] = m;
+    return dayOfYearParts(Number(y), Number(doy), Number(h), Number(mi), Number(s), fraction);
+  }
+
+  // YYYYDDDHHMMSS is shape-identical to a 13-digit Unix millisecond epoch, which CSV
+  // imports always deliver as a string. The two are separated by the leading year:
+  // epoch-ms values only reach a 19xx leading group in 2030-03 (1.9e12 ms) and a 20xx
+  // group in 2033-05 (2.0e12 ms), so a day-of-year year >= 1900 is unambiguous, while
+  // 1000-1899 (1.0e12-1.8e12 ms = 2001-2027) is an epoch and is left to the caller.
+  if ((m = body.match(COMPACT_DAY_OF_YEAR)) && Number(m[1]) >= 1900) {
+    const [, y, doy, h, mi, s, fraction = ''] = m;
+    return dayOfYearParts(Number(y), Number(doy), Number(h), Number(mi), Number(s), fraction);
+  }
+
+  if ((m = body.match(DAY_MONTHNAME_YEAR))) {
+    const month = monthFromName(m[3]);
+    if (month === null || !isWeekdayOrAbsent(m[1])) return null;
+    return withTimeOfDay(expandYear(m[4]), month, Number(m[2]), m, 5);
+  }
+
+  if ((m = body.match(MONTHNAME_DAY_YEAR))) {
+    const month = monthFromName(m[2]);
+    if (month === null || !isWeekdayOrAbsent(m[1])) return null;
+    return withTimeOfDay(Number(m[4]), month, Number(m[3]), m, 5);
   }
 
   return null;
+}
+
+/** Calendar parts from a date plus the optional TIME_OF_DAY groups starting at `index`. */
+function withTimeOfDay(year: number, month: number, day: number, m: RegExpMatchArray, index: number): CalendarParts | 'invalid' {
+  const hour = m[index] === undefined ? 0 : Number(m[index]);
+  const minute = m[index + 1] === undefined ? 0 : Number(m[index + 1]);
+  const second = m[index + 2] === undefined ? 0 : Number(m[index + 2]);
+  return checkedParts(year, month, day, hour, minute, second, m[index + 3] ?? '');
+}
+
+/**
+ * Validate calendar parts. Day 31 of a 30-day month, February 29 outside a leap year
+ * and month 13 are rejected: Date.UTC would silently roll them into the next month.
+ * Second 60 (a leap second) is accepted and carried into the next minute, as JS time
+ * has no leap seconds; 24:00:00 is the end of the day (ISO 8601).
+ */
+function checkedParts(
+  year: number, month: number, day: number,
+  hour: number, minute: number, second: number, fraction: string
+): CalendarParts | 'invalid' {
+  // Date.UTC maps years 0-99 to 1900-1999, and nothing before year 1000 is accepted.
+  if (!Number.isInteger(year) || year < 1000) return 'invalid';
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) return 'invalid';
+  if (hour > 24 || minute > 59 || second > 60) return 'invalid';
+  const millisecond = fraction === '' ? 0 : Number(fraction.slice(0, 3).padEnd(3, '0'));
+  if (hour === 24 && (minute !== 0 || second !== 0 || millisecond !== 0)) return 'invalid';
+  return { year, month, day, hour, minute, second, millisecond };
+}
+
+/** Calendar parts from a year and day-of-year, which must exist in that year. */
+function dayOfYearParts(
+  year: number, dayOfYear: number, hour: number, minute: number, second: number, fraction: string
+): CalendarParts | 'invalid' {
+  if (!Number.isInteger(year) || year < 1000) return 'invalid';
+  if (dayOfYear < 1 || dayOfYear > (isLeapYear(year) ? 366 : 365)) return 'invalid';
+  const date = new Date(Date.UTC(year, 0, dayOfYear));
+  return checkedParts(year, date.getUTCMonth() + 1, date.getUTCDate(), hour, minute, second, fraction);
+}
+
+/** The instant the parts name at the given zone offset, as an ISO 8601 UTC string. */
+function assembleUtcTimestamp(parts: CalendarParts, offsetMinutes: number): string | null {
+  if (!Number.isFinite(offsetMinutes)) return null;
+  const local = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second, parts.millisecond);
+  const instant = local - offsetMinutes * 60000;
+  if (!Number.isFinite(instant) || instant < MIN_VALID_TIME_MS) return null;
+  const iso = new Date(instant).toISOString();
+  // Years after 9999 render in expanded form (+010000-...); keep the plain form only.
+  return iso.startsWith('+') || iso.startsWith('-') ? null : iso;
+}
+
+/** Decide day and month from the values, falling back to the file's format (DD/MM by default). */
+function resolveDayMonthOrder(first: number, second: number, dateFormat?: 'US' | 'International'): { day: number; month: number } | null {
+  if (first > 12 && second <= 12) return { day: first, month: second };   // unambiguous DD/MM
+  if (first <= 12 && second > 12) return { day: second, month: first };   // unambiguous MM/DD
+  if (first > 12 && second > 12) return null;                             // neither is a month
+  return dateFormat === 'US' ? { day: second, month: first } : { day: first, month: second };
+}
+
+/**
+ * A four-digit year as written; a two-digit year is the latest year with those digits
+ * that is not after the current one (an origin time is never in the future).
+ */
+function expandYear(text: string): number {
+  const year = Number(text);
+  if (text.length !== 2) return year;
+  const current = new Date().getUTCFullYear();
+  return current - ((((current - year) % 100) + 100) % 100);
+}
+
+function monthFromName(name: string): number | null {
+  return MONTH_NUMBERS[name.toLowerCase()] ?? null;
+}
+
+function isWeekdayOrAbsent(name: string | undefined): boolean {
+  return name === undefined || WEEKDAY_NAMES.has(name.toLowerCase());
+}
+
+function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+function daysInMonth(year: number, month: number): number {
+  return [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
 }
 
 /**
@@ -548,6 +493,214 @@ export function normalizeTimestamp(time: string | number, dateFormat?: 'US' | 'I
  */
 export function validateTimestamp(time: string | number): boolean {
   return normalizeTimestamp(time) !== null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cell normalisation shared by the file parsers and the upload mapping step
+// (contract C14). The parsers resolve each canonical field once, with file-level
+// decisions; a column the user remaps afterwards must go through the same rules,
+// or the mapping step silently undoes them. This module has no Node-only imports,
+// so the browser can use it too.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * File-level decisions a parser applied to every row of one file. Absent members
+ * did not apply to the file (a QuakeML file has no day/month order to decide).
+ */
+export interface ParseFileDecisions {
+  /**
+   * Day/month order used for ambiguous numeric dates (03/04/2024): the caller's
+   * declared format, or the one detected from the file's WHOLE time column(s).
+   */
+  dateFormat?: DateFormat;
+  dateFormatSource?: 'declared' | 'detected';
+  /**
+   * Unit the file reports depth in. For 'm' the depth and its length uncertainties
+   * (depth, horizontal, min/max horizontal) were divided by 1000 to kilometres.
+   */
+  depthUnit?: 'km' | 'm';
+  depthUnitReason?: string;
+  /**
+   * Longitudes on the 0-360 convention (180 < lon <= 360) are always wrapped to
+   * -180..180; this counts the events that were.
+   */
+  wrappedLongitudes?: number;
+  /** Depths outside -5..1000 km that were set to unknown (the event is kept). */
+  outOfRangeDepths?: number;
+  /** Negative sentinel values (-1, -999 ...) in non-negative columns read as missing. */
+  sentinelValues?: number;
+  /**
+   * Units of flat moment-tensor columns: 'N-m' as given, or 'dyne-cm' for GeoNet CMT
+   * files (components in 1e20 dyne.cm, Mo in dyne.cm) converted to N.m.
+   */
+  momentTensorUnits?: 'N-m' | 'dyne-cm';
+}
+
+/** Canonical event fields that hold numbers (read with parseStrictNumber). */
+export const NUMERIC_EVENT_FIELDS: ReadonlySet<string> = new Set([
+  'latitude', 'longitude', 'depth', 'magnitude',
+  'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty',
+  'depth_uncertainty', 'horizontal_uncertainty', 'magnitude_uncertainty',
+  'min_horizontal_uncertainty', 'max_horizontal_uncertainty', 'azimuth_max_horizontal_uncertainty',
+  'confidence_level',
+  'azimuthal_gap', 'used_phase_count', 'used_station_count', 'standard_error',
+  'minimum_distance', 'maximum_distance', 'associated_phase_count',
+  'associated_station_count', 'depth_phase_count', 'magnitude_station_count',
+]);
+
+/**
+ * Lengths stored in kilometres. A file that reports depth in metres reports these in
+ * metres too, so they take the depth's unit decision.
+ */
+export const KILOMETRE_LENGTH_FIELDS: ReadonlySet<string> = new Set([
+  'depth', 'depth_uncertainty', 'horizontal_uncertainty',
+  'min_horizontal_uncertainty', 'max_horizontal_uncertainty',
+]);
+
+/**
+ * Optional quantities that cannot be negative (the ranges lib/db.ts EVENT_OPTIONAL_RANGES
+ * enforces start at 0). Bulletins write -1, -9 or -999 in them for "not determined", so a
+ * negative value is read as missing instead of as a measurement. The ellipse azimuth is
+ * not here: some producers write it on -180..180.
+ */
+export const NON_NEGATIVE_EVENT_FIELDS: ReadonlySet<string> = new Set([
+  'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty', 'depth_uncertainty',
+  'horizontal_uncertainty', 'min_horizontal_uncertainty', 'max_horizontal_uncertainty',
+  'magnitude_uncertainty', 'confidence_level', 'azimuthal_gap', 'standard_error',
+  'minimum_distance', 'maximum_distance', 'used_phase_count', 'used_station_count',
+  'associated_phase_count', 'associated_station_count', 'depth_phase_count', 'magnitude_station_count',
+]);
+
+const STRICT_NUMERIC_LITERAL = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
+
+/**
+ * A cell as a number, or null. A numeric field holds a numeric literal: parseFloat's
+ * prefix tolerance turned "4.1garbage" into 4.1 without a trace. Thousands separators
+ * and a trailing '%' or unit are not accepted; a column's unit is decided per file.
+ */
+export function parseStrictNumber(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const str = String(value).trim();
+  if (str === '' || !STRICT_NUMERIC_LITERAL.test(str)) return null;
+  const num = Number(str);
+  return Number.isFinite(num) ? num : null;
+}
+
+/**
+ * Longitude on the 0-360 convention (180 < lon <= 360) as -180..180, so valid
+ * Pacific/NZ events east of the antimeridian (Kermadec 182.7) are not rejected.
+ */
+export function wrapLongitude(longitude: number): number {
+  return longitude > 180 && longitude <= 360 ? longitude - 360 : longitude;
+}
+
+/** The length unit a column name states ('Depth/km', 'depth_m'), or null when it states none. */
+export function lengthUnitFromColumnName(column: string | null | undefined): 'km' | 'm' | null {
+  const name = (column ?? '').toLowerCase().replace(/[\s)\]]+$/, '');
+  if (!name) return null;
+  if (/(?:^|[^a-z])(?:km|kilomet(?:re|er)s?)$/.test(name)) return 'km';
+  if (/(?:^|[^a-z])(?:m|met(?:re|er)s?)$/.test(name)) return 'm';
+  return null;
+}
+
+/** Canonical spellings of magnitude scale codes, by their case- and separator-free form. */
+const MAGNITUDE_SCALE_CODES: Record<string, string> = {
+  ml: 'ML', mlv: 'MLv', mlr: 'MLr', mw: 'Mw', mww: 'Mww', mwc: 'Mwc', mwb: 'Mwb', mwr: 'Mwr',
+  mwp: 'Mwp', mi: 'Mi', mb: 'mb', mblg: 'mb_Lg', ms: 'Ms', msbb: 'Ms_BB', md: 'Md', mc: 'Mc',
+  me: 'Me', mh: 'Mh', mj: 'Mj', mjma: 'Mj', mn: 'MN', mt: 'Mt',
+};
+
+/**
+ * The magnitude scale a column name states ('ML', 'mb', 'mag_Ms', 'Mw_magnitude'), or
+ * null for a generic magnitude column. A name whose case already distinguishes the
+ * scale ('mB', broadband body-wave, as JSON keys keep it) is kept as written.
+ */
+export function inferMagnitudeTypeFromColumn(column: string | null | undefined): string | null {
+  if (!column) return null;
+  const core = column.trim()
+    .replace(/^mag(?:nitude)?[\s_.(-]*/i, '')
+    .replace(/[\s_.(-]*(?:mag(?:nitude)?)?\)?$/i, '');
+  if (!core) return null;
+  if (core === 'mB') return 'mB';
+  return MAGNITUDE_SCALE_CODES[core.toLowerCase().replace(/[\s_-]/g, '')] ?? null;
+}
+
+/** A value the parser stores for one field, plus fields it derives from the same cell. */
+export interface NormalizedMappedField {
+  /** The stored value: an ISO 8601 UTC time, a number, or the cell; null when blank or invalid. */
+  value: unknown;
+  /** Companion fields, e.g. magnitude_type 'mb' from a magnitude read out of an 'mb' column. */
+  derived: Record<string, unknown>;
+}
+
+/**
+ * Turn one raw cell into what the parser stores for `target`, with the file's decisions:
+ * - time: UTC ISO 8601 with the file's day/month order (see normalizeTimestamp)
+ * - numeric fields: strict number; longitude wrapped from 0-360; depth and its length
+ *   uncertainties converted to km when the column name or the file says metres; a depth
+ *   outside -5..1000 km is unknown; a negative sentinel in a non-negative field is missing
+ * - magnitude: also derives magnitude_type from a scale-named column (ML, Mw, mb, Ms, Md ...)
+ * - magnitude_type: the cell, or the scale the source column's name states
+ * - anything else: the cell as given (blank is null)
+ */
+export function normalizeMappedField(
+  target: string,
+  raw: unknown,
+  decisions?: ParseFileDecisions | null,
+  sourceColumn?: string
+): NormalizedMappedField {
+  const derived: Record<string, unknown> = {};
+  const blank = raw === undefined || raw === null || (typeof raw === 'string' && raw.trim() === '');
+
+  if (target === 'time') {
+    if (blank || (typeof raw !== 'string' && typeof raw !== 'number')) return { value: null, derived };
+    const hint = decisions?.dateFormat === 'US' || decisions?.dateFormat === 'International'
+      ? decisions.dateFormat
+      : undefined;
+    return { value: normalizeTimestamp(raw, hint), derived };
+  }
+
+  if (NUMERIC_EVENT_FIELDS.has(target)) {
+    let value = parseStrictNumber(raw);
+    if (value !== null) {
+      if (target === 'longitude') value = wrapLongitude(value);
+      if (KILOMETRE_LENGTH_FIELDS.has(target)) value = value / lengthDivisor(decisions, sourceColumn);
+      if (NON_NEGATIVE_EVENT_FIELDS.has(target) && value < 0) value = null;
+      if (target === 'depth' && value !== null && !validateDepth(value)) value = null;
+    }
+    if (target === 'magnitude') {
+      const scale = inferMagnitudeTypeFromColumn(sourceColumn);
+      if (scale) derived.magnitude_type = scale;
+    }
+    return { value, derived };
+  }
+
+  if (target === 'magnitude_type') {
+    const text = blank ? '' : String(raw).trim();
+    // A number is never a scale code: the column holds magnitudes, so its name is the scale.
+    if (text !== '' && parseStrictNumber(text) === null) return { value: text, derived };
+    return { value: inferMagnitudeTypeFromColumn(sourceColumn), derived };
+  }
+
+  return { value: blank ? null : raw, derived };
+}
+
+/** normalizeMappedField's stored value alone (contract C14). */
+export function normalizeMappedValue(
+  target: string,
+  raw: unknown,
+  decisions?: ParseFileDecisions | null,
+  sourceColumn?: string
+): unknown {
+  return normalizeMappedField(target, raw, decisions, sourceColumn).value;
+}
+
+/** Divisor to kilometres: the unit the column name states wins, then the file's decision. */
+function lengthDivisor(decisions: ParseFileDecisions | null | undefined, sourceColumn?: string): number {
+  const named = lengthUnitFromColumnName(sourceColumn);
+  if (named) return named === 'm' ? 1000 : 1;
+  return decisions?.depthUnit === 'm' ? 1000 : 1;
 }
 
 /**

@@ -5,6 +5,7 @@
 
 import { summarizeValidationFailures, validateEventWithDetails, type ValidationEventContext, type ValidationFailureDetail } from './validation';
 import { validateEventCrossFields } from './cross-field-validation';
+import { NON_NEGATIVE_EVENT_FIELDS, parseStrictNumber, validateDepth, wrapLongitude, type ParseFileDecisions } from './earthquake-utils';
 import type { ParsedEvent, ParseResult } from './parsers';
 
 interface ValidationAccumulator {
@@ -90,6 +91,7 @@ export function parseGeoJSON(content: string): ParseResult {
   const events: ParsedEvent[] = [];
   const detectedFields = new Set<string>(['time', 'latitude', 'longitude', 'depth', 'magnitude']);
   const validationAccumulator = createValidationAccumulator();
+  const adjustments = createFeatureAdjustments();
 
   try {
     const data = JSON.parse(content);
@@ -108,7 +110,9 @@ export function parseGeoJSON(content: string): ParseResult {
           totalEvents: 0,
           validEvents: 0,
           invalidEvents: 0,
-        })
+        }),
+        resolvedFieldSources: {},
+        fileDecisions: {},
       };
     }
 
@@ -128,7 +132,9 @@ export function parseGeoJSON(content: string): ParseResult {
             totalEvents: 0,
             validEvents: 0,
             invalidEvents: 0,
-          })
+          }),
+          resolvedFieldSources: {},
+          fileDecisions: {},
         };
       }
       features = data.features;
@@ -147,7 +153,9 @@ export function parseGeoJSON(content: string): ParseResult {
           totalEvents: 0,
           validEvents: 0,
           invalidEvents: 0,
-        })
+        }),
+        resolvedFieldSources: {},
+        fileDecisions: {},
       };
     }
 
@@ -161,7 +169,8 @@ export function parseGeoJSON(content: string): ParseResult {
           errors,
           warnings,
           detectedFields,
-          validationAccumulator
+          validationAccumulator,
+          adjustments
         );
         if (event) {
           events.push(event);
@@ -190,10 +199,31 @@ export function parseGeoJSON(content: string): ParseResult {
         totalEvents: 0,
         validEvents: 0,
         invalidEvents: 0,
-      })
+      }),
+      resolvedFieldSources: {},
+      fileDecisions: {},
     };
   }
 
+  if (adjustments.outOfRangeDepths > 0) {
+    warnings.push({
+      line: 0,
+      message: `${adjustments.outOfRangeDepths} depth value(s) outside -5 to 1000 km were set to unknown; the events were kept.`,
+    });
+  }
+  if (adjustments.sentinelValues > 0) {
+    warnings.push({
+      line: 0,
+      message: `${adjustments.sentinelValues} negative value(s) in properties that cannot be negative ` +
+        '(uncertainties, counts, gap, distances) were read as "not determined" sentinels and left empty.',
+    });
+  }
+
+  const fileDecisions: ParseFileDecisions = {
+    wrappedLongitudes: adjustments.wrappedLongitudes,
+    outOfRangeDepths: adjustments.outOfRangeDepths,
+    sentinelValues: adjustments.sentinelValues,
+  };
   return {
     success: errors.length === 0,
     events,
@@ -204,8 +234,50 @@ export function parseGeoJSON(content: string): ParseResult {
       totalEvents: validationAccumulator.totalEvents,
       validEvents: validationAccumulator.validEvents,
       invalidEvents: validationAccumulator.invalidEvents,
-    })
+    }),
+    resolvedFieldSources: resolveFeatureSources(adjustments.sources),
+    fileDecisions,
   };
+}
+
+/** Per-file counts, and the property each field was read from, across the features. */
+interface FeatureAdjustments {
+  wrappedLongitudes: number;
+  outOfRangeDepths: number;
+  sentinelValues: number;
+  sources: Map<string, Map<string, number>>;
+}
+
+const createFeatureAdjustments = (): FeatureAdjustments => ({
+  wrappedLongitudes: 0,
+  outOfRangeDepths: 0,
+  sentinelValues: 0,
+  sources: new Map(),
+});
+
+function recordFeatureSource(adjustments: FeatureAdjustments, targetField: string, source: string): void {
+  let bySource = adjustments.sources.get(targetField);
+  if (!bySource) adjustments.sources.set(targetField, (bySource = new Map()));
+  bySource.set(source, (bySource.get(source) ?? 0) + 1);
+}
+
+/** The most-used source per field (contract C14 resolvedFieldSources). */
+function resolveFeatureSources(sources: Map<string, Map<string, number>>): Record<string, string> {
+  const out: Record<string, string> = {};
+  sources.forEach((bySource, targetField) => {
+    let best: string | null = null;
+    let bestCount = 0;
+    bySource.forEach((count, source) => {
+      if (count > bestCount) { best = source; bestCount = count; }
+    });
+    if (best !== null) out[targetField] = best;
+  });
+  return out;
+}
+
+/** The first of the given property names that holds a value. */
+function firstPresentKey(props: Record<string, any>, keys: string[]): string | undefined {
+  return keys.find((key) => props[key] !== undefined && props[key] !== null && props[key] !== '');
 }
 
 /**
@@ -217,7 +289,8 @@ function parseGeoJSONFeature(
   errors: Array<{ line: number; message: string }>,
   warnings: Array<{ line: number; message: string }>,
   detectedFields: Set<string>,
-  validationAccumulator: ValidationAccumulator
+  validationAccumulator: ValidationAccumulator,
+  adjustments: FeatureAdjustments = createFeatureAdjustments()
 ): ParsedEvent | null {
   // Validate feature structure
   if (!feature.geometry || feature.geometry.type !== 'Point') {
@@ -244,8 +317,15 @@ function parseGeoJSONFeature(
     return null;
   }
 
-  const [longitude, latitude, thirdCoord] = feature.geometry.coordinates;
+  const [rawLongitude, latitude, thirdCoord] = feature.geometry.coordinates;
   const props = feature.properties || {};
+  recordFeatureSource(adjustments, 'longitude', 'geometry.coordinates[0]');
+  recordFeatureSource(adjustments, 'latitude', 'geometry.coordinates[1]');
+
+  // The 0-360 longitude convention (Kermadec 182.7) is read as -180..180, as the CSV,
+  // JSON and QuakeML parsers read it; RFC 7946 sets no numeric range for a position.
+  const longitude = typeof rawLongitude === 'number' ? wrapLongitude(rawLongitude) : rawLongitude;
+  if (longitude !== rawLongitude) adjustments.wrappedLongitudes += 1;
 
   // Features that identify as USGS/ComCat or GeoNet output follow those producers'
   // conventions (time in milliseconds, third coordinate in km).
@@ -259,12 +339,24 @@ function parseGeoJSONFeature(
   //     the rare event located above the datum.
   // An explicit properties.depth/dep (km) always wins when present.
   let depth: number | null = null;
-  const propDepth = props.depth ?? props.dep;
-  if (propDepth !== undefined && propDepth !== null && propDepth !== '') {
-    depth = Number(propDepth);
+  let depthRaw: unknown;
+  const propDepthKey = firstPresentKey(props, ['depth', 'dep']);
+  if (propDepthKey !== undefined) {
+    depthRaw = props[propDepthKey];
+    recordFeatureSource(adjustments, 'depth', `properties.${propDepthKey}`);
+    // Strictly numeric, as on the other paths: Number('12km') was NaN and Number('') 0.
+    depth = parseStrictNumber(depthRaw);
+    if (depth === null) {
+      validationAccumulator.failures.push(buildFailureDetail(
+        { line: lineNumber, eventIndex: lineNumber - 1 },
+        { field: 'depth', value: depthRaw, expected: 'Number between -5 and 1000 (km)', message: 'Depth must be a number', category: 'invalid_type', severity: 'warning' }
+      ));
+    }
   } else if (thirdCoord !== undefined && thirdCoord !== null) {
     const z = Number(thirdCoord);
     if (Number.isFinite(z)) {
+      depthRaw = thirdCoord;
+      recordFeatureSource(adjustments, 'depth', 'geometry.coordinates[2]');
       // Disambiguate against the depth domain this platform accepts: lib/validation.ts admits
       // -5 km <= depth <= 1000 km. So
       // z < -5     -> outside the km-depth domain; the only consistent reading is RFC 7946
@@ -284,8 +376,16 @@ function parseGeoJSONFeature(
       }
     }
   }
+  // A depth outside -5..1000 km is set to unknown and the event kept, as on the CSV,
+  // JSON and QuakeML paths (it used to reject the event here and keep it there).
+  const depthOutOfRangeKm = depth !== null && !validateDepth(depth) ? depth : null;
+  if (depthOutOfRangeKm !== null) depth = null;
 
   // Build event from GeoJSON properties
+  const timeKey = firstPresentKey(props, ['time', 'datetime', 'date', 'origin_time', 'origintime']);
+  const magnitudeKey = firstPresentKey(props, ['magnitude', 'mag', 'm']);
+  if (timeKey !== undefined) recordFeatureSource(adjustments, 'time', timeKey);
+  if (magnitudeKey !== undefined) recordFeatureSource(adjustments, 'magnitude', magnitudeKey);
   const event: ParsedEvent = {
     longitude,
     latitude,
@@ -294,10 +394,10 @@ function parseGeoJSONFeature(
     // real instant), so a self-identified USGS/GeoNet feature converts as milliseconds;
     // any other producer's bare number is classified by magnitude (seconds below
     // 1e11), which is what Python/GeoPandas exports carry.
-    time: epochToIso(firstPresent(props.time, props.datetime, props.date, props.origin_time, props.origintime), knownProducer),
+    time: epochToIso(timeKey === undefined ? undefined : props[timeKey], knownProducer),
     // `||` treats a magnitude of 0.0 as absent; M0.0 is a real value in microseismic
     // catalogues, so pick the first field that is genuinely present.
-    magnitude: firstPresent(props.magnitude, props.mag, props.m),
+    magnitude: magnitudeKey === undefined ? undefined : props[magnitudeKey],
   };
 
   // Add optional fields
@@ -311,15 +411,25 @@ function parseGeoJSONFeature(
     detectedFields.add('region');
   }
 
-  // RFC 7946 3.3 allows a number as the Feature id, and 0 is a valid one.
-  const featureId = firstPresent(props.eventId, props.id, feature.id);
+  // Identity: the event's public ID (GeoNet WFS 'publicid', GeoNet quake API 'publicID',
+  // this platform's export 'publicId') ahead of generic ids, and the Feature id last.
+  // A GeoServer Feature id ('quake_search_v1.fid-...') names a database row, not the
+  // earthquake. RFC 7946 3.3 allows a number as the Feature id, and 0 is a valid one.
+  const idKey = firstPresentKey(props, ['publicID', 'publicid', 'publicId', 'eventId', 'eventid', 'id']);
+  const featureId = idKey !== undefined ? props[idKey] : firstPresent(feature.id);
   if (featureId !== undefined) {
     event.eventId = String(featureId);
     detectedFields.add('eventId');
+    recordFeatureSource(adjustments, 'eventId', idKey !== undefined ? idKey : 'id');
   }
 
-  // Agency — prefer explicit agency_id, then USGS `net`, then generic aliases
-  const agencyId = props.agency_id || props.net || props.agency || props.source || props.network;
+  // Agency — prefer explicit agency_id (agencyId in this platform's own export), then
+  // USGS `net`, then generic aliases. In this platform's own export `source` is the
+  // event's lineage (the source whose solution was kept, 'merged', 'unknown'), written
+  // beside sourceCatalogueIds / selectedSource, and is not an agency.
+  const sourceIsLineage = 'sourceCatalogueIds' in props || 'selectedSource' in props;
+  const agencyId = props.agency_id || props.agencyId || props.net || props.agency ||
+    (sourceIsLineage ? undefined : props.source) || props.network;
   if (agencyId) {
     event.agency_id = String(agencyId);
     detectedFields.add('agency_id');
@@ -327,11 +437,23 @@ function parseGeoJSONFeature(
 
   // ── USGS standard GeoJSON property names → normalised field names ─────────
   // FIELD_ALIASES knows these aliases but the GeoJSON parser doesn't call
-  // mapCommonFields(), so we map the most common USGS names explicitly here.
-  if (props.gap        != null) { event.azimuthal_gap           = Number(props.gap);        detectedFields.add('azimuthal_gap'); }
-  if (props.dmin       != null) { event.minimum_distance        = Number(props.dmin);       detectedFields.add('minimum_distance'); }
-  if (props.nst        != null) { event.used_station_count      = Number(props.nst);        detectedFields.add('used_station_count'); }
-  if (props.rms        != null) { event.standard_error          = Number(props.rms);        detectedFields.add('standard_error'); }
+  // mapCommonFields(), so we map the most common USGS names explicitly here, with the
+  // same strict numeric reading. -1 / -999 in these non-negative quantities means
+  // "not determined" and is left empty.
+  const usgsNumeric: Array<[string, string]> = [
+    ['gap', 'azimuthal_gap'], ['dmin', 'minimum_distance'], ['nst', 'used_station_count'], ['rms', 'standard_error'],
+  ];
+  for (const [property, field] of usgsNumeric) {
+    if (props[property] == null) continue;
+    const value = parseStrictNumber(props[property]);
+    if (value === null) continue;
+    if (value < 0 && NON_NEGATIVE_EVENT_FIELDS.has(field)) {
+      adjustments.sentinelValues += 1;
+      continue;
+    }
+    event[field] = value;
+    detectedFields.add(field);
+  }
   if (props.status)             { event.evaluation_status       = String(props.status);     detectedFields.add('evaluation_status'); }
   if (props.type)               { event.event_type              = String(props.type);       detectedFields.add('event_type'); }
 
@@ -343,6 +465,10 @@ function parseGeoJSONFeature(
     const value = props[property];
     if (value === undefined || value === null || value === '') continue;
     if (event[field] !== undefined) continue;
+    if (NON_NEGATIVE_EVENT_FIELDS.has(field) && typeof value === 'number' && value < 0) {
+      adjustments.sentinelValues += 1;
+      continue;
+    }
     event[field] = typeof value === 'object' ? JSON.stringify(value) : value;
     detectedFields.add(field);
   }
@@ -391,6 +517,17 @@ function parseGeoJSONFeature(
 
   validationAccumulator.validEvents += 1;
   validationAccumulator.failures.push(...validation.failures);
+  if (depthOutOfRangeKm !== null) {
+    adjustments.outOfRangeDepths += 1;
+    validationAccumulator.failures.push(buildFailureDetail(context, {
+      field: 'depth',
+      value: depthRaw,
+      expected: 'Number between -5 and 1000 (km)',
+      message: `Depth ${Number(depthOutOfRangeKm.toPrecision(6))} km is outside -5 to 1000 km; the depth was set to unknown and the event kept`,
+      category: 'out_of_range',
+      severity: 'warning',
+    }));
+  }
   appendCrossFieldFailures(validationAccumulator, event, context);
   return event;
 }
@@ -407,6 +544,8 @@ const OWN_EXPORT_PROPERTY_FIELDS: Record<string, string> = {
   locationName: 'location_name',
   eventType: 'event_type',
   eventTypeCertainty: 'event_type_certainty',
+  // The agency's raw event type, beside the normalised one (contract C8).
+  sourceEventType: 'source_event_type',
   magnitudeUncertainty: 'magnitude_uncertainty',
   magnitudeStationCount: 'magnitude_station_count',
   magnitudeMethodId: 'magnitude_method_id',
@@ -449,6 +588,8 @@ const OWN_EXPORT_PROPERTY_FIELDS: Record<string, string> = {
   comments: 'comments',
   creationInfo: 'creation_info',
   originQuality: 'origin_quality',
+  // OriginUncertainty.confidenceLevel of the error ellipse, in percent (contract C16).
+  confidenceLevel: 'confidence_level',
 };
 
 const THIRD_COORDINATE_NOTE =

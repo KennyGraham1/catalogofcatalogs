@@ -2,8 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { Logger, formatErrorResponse } from '@/lib/errors';
 import { requireViewer } from '@/lib/auth/middleware';
+import { UserRole } from '@/lib/auth/types';
+import { validateSavedFilterInput } from '../validation';
 
 const logger = new Logger('SavedFilterAPI');
+
+/**
+ * Saved filters are personal. Every operation addresses only the caller's own filters,
+ * so another user's filter is indistinguishable from a missing one (404). An
+ * administrator may address any filter, including those saved before ownership was
+ * recorded. Any signed-in account used to be able to read, overwrite or delete every
+ * user's filters.
+ */
+function ownerScope(user: { id: string; role?: string }): string | undefined {
+  return user.role === UserRole.ADMIN ? undefined : user.id;
+}
+
+const notFound = () => NextResponse.json({ error: 'Saved filter not found' }, { status: 404 });
 
 /**
  * GET /api/saved-filters/[id]
@@ -16,17 +31,19 @@ export async function GET(
   const { id } = await context.params;
 
   try {
+    const authResult = await requireViewer(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     if (!dbQueries) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
-    const filter = await dbQueries.getSavedFilterById(id);
+    const filter = await dbQueries.getSavedFilterById(id, ownerScope(authResult.user));
 
     if (!filter) {
-      return NextResponse.json(
-        { error: 'Saved filter not found' },
-        { status: 404 }
-      );
+      return notFound();
     }
 
     // Parse the filter config JSON
@@ -39,7 +56,7 @@ export async function GET(
   } catch (error) {
     logger.error('Failed to fetch saved filter', error);
     const errorResponse = formatErrorResponse(error);
-    
+
     return NextResponse.json(
       { error: errorResponse.error, code: errorResponse.code },
       { status: errorResponse.statusCode }
@@ -67,19 +84,17 @@ export async function PUT(
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
-    const body = await request.json();
-    const { name, description, filterConfig } = body;
-
-    if (!name || !filterConfig) {
-      return NextResponse.json(
-        { error: 'Missing required fields: name and filterConfig' },
-        { status: 400 }
-      );
+    const body = await request.json().catch(() => null);
+    const input = validateSavedFilterInput(body);
+    if (!input.ok) {
+      return NextResponse.json({ error: input.error }, { status: 400 });
     }
+    const { name, description, filterConfig, filterConfigString } = input.value;
 
-    const filterConfigString = JSON.stringify(filterConfig);
-
-    await dbQueries.updateSavedFilter(id, name, description || null, filterConfigString);
+    const updated = await dbQueries.updateSavedFilter(id, name, description, filterConfigString, ownerScope(authResult.user));
+    if (!updated) {
+      return notFound();
+    }
 
     logger.info('Saved filter updated', { id: id, name });
 
@@ -87,7 +102,7 @@ export async function PUT(
   } catch (error) {
     logger.error('Failed to update saved filter', error);
     const errorResponse = formatErrorResponse(error);
-    
+
     return NextResponse.json(
       { error: errorResponse.error, code: errorResponse.code },
       { status: errorResponse.statusCode }
@@ -115,7 +130,10 @@ export async function DELETE(
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
-    await dbQueries.deleteSavedFilter(id);
+    const deleted = await dbQueries.deleteSavedFilter(id, ownerScope(authResult.user));
+    if (!deleted) {
+      return notFound();
+    }
 
     logger.info('Saved filter deleted', { id: id });
 
@@ -123,7 +141,7 @@ export async function DELETE(
   } catch (error) {
     logger.error('Failed to delete saved filter', error);
     const errorResponse = formatErrorResponse(error);
-    
+
     return NextResponse.json(
       { error: errorResponse.error, code: errorResponse.code },
       { status: errorResponse.statusCode }

@@ -8,13 +8,14 @@ import { TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import {
   FocalMechanism,
   NodalPlane,
-  getFaultType,
+  getMechanismFaultType,
+  normalizeRake,
   computeBeachball,
   selectPlane,
   selectPlaneNumber,
   isCompletePlane,
 } from '@/lib/focal-mechanism-utils';
-import { Beachball } from './Beachball';
+import { Beachball, BeachballLegend } from './Beachball';
 
 interface FocalMechanismCardProps {
   mechanism: FocalMechanism;
@@ -32,16 +33,18 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
     );
   }
 
-  // Interpretation follows the stated preferred plane; without a complete plane there is
-  // no geometry and no fault-type claim, only the angles the source actually reported.
+  // The faulting style comes from the P/T/B axes, which both nodal planes share; only a
+  // strike-slip mechanism's lateral sense follows the selected plane. Without a complete
+  // plane there is no geometry and no fault-type claim, only the angles actually reported.
   const selected = selectPlane(mechanism);
   const selectedNumber = selectPlaneNumber(mechanism);
-  const faultType = selected ? getFaultType(selected.rake) : null;
+  const faultType = getMechanismFaultType(mechanism);
   const beachball = selected ? computeBeachball(mechanism, 200) : null;
   // Open on the plane the description is built from.
   const defaultTab = selectedNumber === 2 || (!mechanism.nodalPlane1 && mechanism.nodalPlane2) ? 'plane2' : 'plane1';
   // The description follows the stated preference only when that plane is complete;
-  // say so when it had to fall back, since lateral sense differs between the planes.
+  // say so when it had to fall back, since the lateral sense of slip differs between the
+  // planes (the faulting style does not).
   const preferenceHonoured = mechanism.preferredPlane !== undefined && selectedNumber === mechanism.preferredPlane;
 
   return (
@@ -120,19 +123,11 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
           </div>
         </div>
 
-        {/* Legend */}
+        {/* Legend: in the ball's own colours. The unshaded quadrants hold the P axis,
+            so they are dilatational, not "tensional". */}
         <div className="pt-2 border-t">
           <h4 className="font-semibold text-sm mb-2">Beach Ball Legend</h4>
-          <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-black rounded"></div>
-              <span>Compressional quadrants</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-white border border-black rounded"></div>
-              <span>Tensional quadrants</span>
-            </div>
-          </div>
+          <BeachballLegend className="grid grid-cols-2 gap-2 text-xs text-muted-foreground" />
         </div>
       </CardContent>
     </Card>
@@ -186,7 +181,9 @@ function PlanePanel({ plane }: { plane: NodalPlane }) {
 }
 
 function getPlaneInterpretation(plane: { strike: number; dip: number; rake: number }): string {
-  const { strike, dip, rake } = plane;
+  const { strike, dip } = plane;
+  // Sources also report rake on 0-360; 270 is normal slip, not strike-slip.
+  const rake = normalizeRake(plane.rake);
   
   let interpretation = `Fault plane striking ${getCompassDirection(strike)} (${strike.toFixed(0)}°) `;
   
@@ -230,6 +227,8 @@ function getFaultTypeExplanation(type: string): string {
       return 'Oblique-normal faulting combines normal faulting with a strike-slip component, indicating both extension and lateral motion.';
     case 'oblique-reverse':
       return 'Oblique-reverse faulting combines reverse faulting with a strike-slip component, indicating both compression and lateral motion.';
+    case 'oblique':
+      return 'Oblique slip combines dip-slip and strike-slip motion: none of the pressure (P), tension (T) or null (B) axes is steep enough to assign a single faulting style.';
     default:
       return 'The fault mechanism indicates the type of motion that occurred during the earthquake.';
   }

@@ -31,13 +31,16 @@ Option 1: Automated Import During Database Setup
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
-Run the GeoNet baseline population script after setting up the database:
+Run the GeoNet baseline population script after resetting the database:
 
 .. code-block:: bash
 
-   # 1. Clean and initialize database with synthetic data
-   node scripts/clean-database.js
-   
+   # 1. Reset and re-initialize the database (empty). This drops all
+   #    existing data, gated by a typed confirmation that names the
+   #    database; pass --yes to skip the prompt for non-interactive/CI use.
+   #    It no longer populates synthetic data itself.
+   node scripts/clean-database.js --yes
+
    # 2. Import real GeoNet data (last 30 days, M3.0+)
    npx tsx scripts/populate-geonet-baseline.ts
 
@@ -219,18 +222,14 @@ Each event includes full QuakeML 1.2 metadata:
 --------------------
 
 
-Test the GeoNet import functionality:
+To exercise the GeoNet import functionality directly, run the baseline
+population script (Option 1 above) or use the manual import form at
+``/import`` (Option 2 above) with a short time range and a high minimum
+magnitude, then:
 
-.. code-block:: bash
-
-   node scripts/test-geonet-import.js
-
-
-This will:
-1. Import events from the last 24 hours (M4.0+)
-2. Verify the catalogue was created
-3. Check event data structure
-4. Display import statistics
+1. Verify the catalogue was created: visit ``/catalogues``
+2. Check the event data structure: open the catalogue and inspect an event's detail card
+3. Review import statistics: check the import history tab
 
 
 
@@ -354,7 +353,12 @@ Import Fails with Error
 
 
 **Check**:
-1. Database is initialized: ``node scripts/clean-database.js``
+
+1. Database is initialized: run ``npx tsx scripts/init-database.ts`` (safe
+   to re-run — it only creates missing collections/indexes). Only reset with
+   ``node scripts/clean-database.js`` or ``bash scripts/clean-and-setup-database.sh``
+   if you actually want to wipe existing data first; both now require a
+   typed confirmation naming the database (or ``--yes``) before doing so.
 2. Dependencies installed: ``npm install``
 3. Network connectivity to GeoNet API
 
@@ -376,8 +380,7 @@ Events Not Appearing in UI
 - **GeoNet Website**: https://www.geonet.org.nz/
 - **FDSN Web Services**: https://www.fdsn.org/webservices/
 - **QuakeML Standard**: https://quake.ethz.ch/quakeml/
-- **Import Documentation**: See ``GEONET_IMPORT_DOCUMENTATION.md``
-- **Implementation Details**: See ``GEONET_IMPORT_IMPLEMENTATION_SUMMARY.md``
+- **Implementation Details**: See :doc:`/appendix/geonet_import_implementation_summary`
 
 
 

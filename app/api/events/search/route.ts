@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { dbQueries } from '@/lib/db';
+import { dbQueries, MAX_SEARCH_RESULTS } from '@/lib/db';
+import { formatErrorResponse } from '@/lib/errors';
 import { applyRateLimit, apiRateLimiter } from '@/lib/rate-limiter';
 import { requireViewer } from '@/lib/auth/middleware';
 
@@ -32,8 +33,20 @@ export async function GET(request: NextRequest) {
 
     const searchParams = request.nextUrl.searchParams;
     const query = searchParams.get('q');
-    const limit = parseInt(searchParams.get('limit') || '20');
     const catalogueId = searchParams.get('catalogueId') || undefined;
+
+    // The result count is bounded. The driver reads limit(0) as "no limit", and a huge
+    // or unparsed value did the same: one request could load every matching event.
+    // A whole number of at least 1 is required; anything above the cap is capped.
+    const rawLimit = (searchParams.get('limit') ?? '').trim();
+    const requestedLimit = rawLimit === '' ? 20 : Number(rawLimit);
+    if ((rawLimit !== '' && !/^\d+$/.test(rawLimit)) || !Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
+      return NextResponse.json(
+        { error: 'Invalid limit: must be a whole number of at least 1' },
+        { status: 400 }
+      );
+    }
+    const limit = Math.min(requestedLimit, MAX_SEARCH_RESULTS);
 
     if (!query || query.trim().length < 2) {
       return NextResponse.json({ results: [] });
@@ -66,7 +79,8 @@ export async function GET(request: NextRequest) {
       locationName: row.location_name || row.region || null,
       // Create a display label for the search result
       label: (() => {
-        const magnitudeLabel = row.magnitude ? `M${row.magnitude}` : 'Unknown magnitude';
+        // M0.0 is a magnitude; only a missing one is unknown.
+        const magnitudeLabel = row.magnitude != null ? `M${row.magnitude}` : 'Unknown magnitude';
         const locationLabel = row.location_name || row.region;
         const dateLabel = new Date(row.time).toLocaleDateString('en-GB', {
           day: '2-digit',
@@ -87,6 +101,12 @@ export async function GET(request: NextRequest) {
       query: query.trim(),
     });
   } catch (error) {
+    // An unparseable filter token (e.g. mag:abc, date:2024-13-01) is the caller's
+    // error: answer 400 with the reason rather than ignoring the token.
+    const errorResponse = formatErrorResponse(error);
+    if (errorResponse.statusCode === 400) {
+      return NextResponse.json({ error: errorResponse.error }, { status: 400 });
+    }
     console.error('Error searching events:', error);
     return NextResponse.json(
       { error: 'Failed to search events', message: error instanceof Error ? error.message : 'Unknown error' },

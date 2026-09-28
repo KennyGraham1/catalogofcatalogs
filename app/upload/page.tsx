@@ -21,6 +21,8 @@ import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import { toast } from '@/hooks/use-toast';
 import { performQualityCheck, QualityCheckResult, getQualityGrade } from '@/lib/data-quality-checker';
 import { validateEventsCrossFields } from '@/lib/cross-field-validation';
+import { computeFileMappingChanges, resolveParserFieldSources } from '@/lib/field-definitions';
+import { invalidateCatalogueData } from '@/lib/client-cache';
 import { useAuth } from '@/lib/auth/hooks';
 import { UserRole } from '@/lib/auth/types';
 import { getApiError } from '@/lib/api';
@@ -34,8 +36,78 @@ const MAX_FILES = 20;
 // Files above this threshold are uploaded in 3 MB chunks and may take up to
 // 60 seconds to process on the server — warn the user so they are not surprised.
 const LARGE_FILE_WARN_BYTES = 200 * 1024 * 1024; // 200 MB
+// Parse failures kept per file in the catalogue's stored validation report
+const MAX_STORED_FAILURES_PER_FILE = 200;
 
 type UploadStatus = 'idle' | 'uploading' | 'validating' | 'mapping' | 'metadata' | 'processing' | 'complete' | 'error';
+
+/**
+ * One file of the current upload run as the upload API described it: counts, the
+ * parser's column resolution and file-level decisions, and a bounded preview sample.
+ * The parsed events themselves stay in the server's pending store under the token.
+ */
+interface UploadedFile extends FileValidationResult {
+  pendingUploadId?: string;
+  resolvedFieldSources: Record<string, string>;
+  fileDecisions: Record<string, unknown>;
+  previewEvents: ParsedEvent[];
+  previewIndices: number[];
+  previewTruncated: boolean;
+}
+
+/** The server's account of what it stored (POST /api/catalogues). */
+interface ImportReport {
+  totalSubmitted: number;
+  successfullyImported: number;
+  failedValidation: number;
+  duplicatesSkipped: number;
+  successRate: number;
+  invalidEvents?: Array<{ index: number; reason: string; file?: string }>;
+  hasMoreInvalidEvents?: boolean;
+}
+
+/** Where a preview event came from, so a check can name the file and row. */
+interface PreviewOrigin {
+  fileName: string;
+  row: number;
+}
+
+const QUAKEML_FORMATS = new Set(['XML', 'QML', 'QUAKEML']);
+
+/**
+ * The catalogue-creation manifest: one entry per uploaded file, in upload order, with
+ * the number of events its upload reported and the explicit mapping changes for that
+ * file (contract C15). QuakeML files keep their standard structure and take no mapping.
+ */
+function buildPendingUploadManifest(uploadedFiles: UploadedFile[], explicitMappings: Record<string, string>) {
+  return uploadedFiles
+    .filter(file => file.pendingUploadId && file.eventCount > 0)
+    .map(file => {
+      const isQuakeML = QUAKEML_FORMATS.has(String(file.format).toUpperCase());
+      const mapping = isQuakeML
+        ? { set: {}, unset: [] }
+        : computeFileMappingChanges(
+            file.fields,
+            resolveParserFieldSources(file.fields, file.resolvedFieldSources),
+            explicitMappings,
+          );
+      const decisions = file.fileDecisions as { dateFormat?: unknown; depthUnit?: unknown };
+      const fileDecisions = {
+        ...(decisions.dateFormat === 'US' || decisions.dateFormat === 'International' || decisions.dateFormat === 'ISO'
+          ? { dateFormat: decisions.dateFormat }
+          : {}),
+        ...(decisions.depthUnit === 'km' || decisions.depthUnit === 'm' ? { depthUnit: decisions.depthUnit } : {}),
+      };
+      return {
+        id: file.pendingUploadId!,
+        expectedCount: file.eventCount,
+        fileName: file.fileName,
+        format: String(file.format),
+        ...(Object.keys(mapping.set).length > 0 || mapping.unset.length > 0 ? { mapping } : {}),
+        ...(Object.keys(fileDecisions).length > 0 ? { fileDecisions } : {}),
+      };
+    });
+}
 
 export default function UploadPage() {
   const router = useRouter();
@@ -50,13 +122,15 @@ export default function UploadPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [delimiter, setDelimiter] = useState<DelimiterOption>('auto');
   const [dateFormat, setDateFormat] = useState<DateFormatOption>('auto');
-  const [validationResults, setValidationResults] = useState<FileValidationResult[] | null>(null);
+  // Files of the current upload run, in upload order. Replaced by every run, so a
+  // pending token can never outlive the run that created it or attach to another file.
+  const [validationResults, setValidationResults] = useState<UploadedFile[] | null>(null);
   const [qualityCheckResult, setQualityCheckResult] = useState<QualityCheckResult | null>(null);
   const [crossFieldValidation, setCrossFieldValidation] = useState<CrossFieldValidationBatchResult | null>(null);
+  // Preview samples of every file (the full sets stay in the server's pending store)
   const [parsedEvents, setParsedEvents] = useState<ParsedEvent[]>([]);
-  // Pending upload IDs keyed by file name — used to retrieve full QuakeML data
-  // on the server when creating the catalogue (see lib/pending-uploads.ts).
-  const [pendingUploadIds, setPendingUploadIds] = useState<Record<string, string>>({});
+  const [previewOrigins, setPreviewOrigins] = useState<PreviewOrigin[]>([]);
+  // Explicit changes to the parser's column resolution: column -> target, '' = do not map
   const [fieldMappings, setFieldMappings] = useState<Record<string, string>>({});
   const [isSchemaReady, setIsSchemaReady] = useState(false);
   const [catalogueName, setCatalogueName] = useState('');
@@ -69,8 +143,12 @@ export default function UploadPage() {
     filesProcessed: Array<{ name: string; size: number; format: string }>;
     totalEvents: number;
     qualityScore: number | null;
+    qualitySampleSize: number;
     validationResults: FileValidationResult[] | null;
     validationSummary: { totalEvents: number; validEvents: number; invalidEvents: number } | null;
+    importReport: ImportReport | null;
+    importMessage: string | null;
+    partialImport: boolean;
     metadata: CatalogueMetadata;
   } | null>(null);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressInfo>({
@@ -122,7 +200,27 @@ export default function UploadPage() {
     );
   }
 
+  /**
+   * Forget the results of a previous upload run. Called whenever the file list changes
+   * and at the start of every run, so a catalogue is only ever created from tokens of
+   * the files currently listed, uploaded in the order they are listed.
+   */
+  const resetUploadRun = () => {
+    setValidationResults(null);
+    setQualityCheckResult(null);
+    setCrossFieldValidation(null);
+    setParsedEvents([]);
+    setPreviewOrigins([]);
+    setFieldMappings({});
+    setIsSchemaReady(false);
+    setProcessingReport(null);
+  };
+
   const handleFilesAdded = (newFiles: File[]) => {
+    if (validationResults) {
+      resetUploadRun();
+      setUploadStatus('idle');
+    }
     const totalFiles = files.length + newFiles.length;
     if (totalFiles > MAX_FILES) {
       toast({
@@ -150,23 +248,21 @@ export default function UploadPage() {
     }
   };
 
-  const handleFileRemoved = (fileName: string) => {
-    setFiles(files.filter(file => file.name !== fileName));
+  // FileUploader reports the row's position: two listed files can share a name.
+  const handleFileRemoved = (index: number) => {
+    if (validationResults) {
+      resetUploadRun();
+      setUploadStatus('idle');
+    }
+    if (index >= 0 && index < files.length) setFiles(files.filter((_, i) => i !== index));
   };
 
   const handleCancel = () => {
     // Reset all upload state
     setFiles([]);
-    setValidationResults(null);
-    setQualityCheckResult(null);
-    setCrossFieldValidation(null);
-    setParsedEvents([]);
-    setPendingUploadIds({});
-    setFieldMappings({});
-    setIsSchemaReady(false);
+    resetUploadRun();
     setCatalogueName('');
     setMetadata({});
-    setProcessingReport(null);
     setUploadStatus('idle');
     setUploadProgress({
       stage: 'idle',
@@ -183,69 +279,12 @@ export default function UploadPage() {
     setActiveTab('upload');
   };
 
-  /**
-   * Apply UI field mappings to events before saving
-   * This ensures user's manual mapping changes are respected
-   */
-  const applyUIMappings = (events: any[]): any[] => {
-    if (Object.keys(fieldMappings).length === 0) {
-      return events; // No custom mappings, return as-is
-    }
-
-    // Fields that must be numeric
-    const numericFields = new Set([
-      'latitude', 'longitude', 'depth', 'magnitude',
-      'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty',
-      'depth_uncertainty', 'horizontal_uncertainty', 'magnitude_uncertainty',
-      'azimuthal_gap', 'used_phase_count', 'used_station_count', 'standard_error',
-      'minimum_distance', 'maximum_distance', 'associated_phase_count',
-      'associated_station_count', 'depth_phase_count', 'magnitude_station_count'
-    ]);
-
-    // Helper to safely parse numeric values
-    const safeParseNumber = (value: any): number | null => {
-      if (value === undefined || value === null || value === '') return null;
-      const num = typeof value === 'number' ? value : parseFloat(String(value));
-      return isNaN(num) ? null : num;
-    };
-
-    return events.map(event => {
-      const mappedEvent: any = { ...event };
-
-      // Apply each UI mapping
-      for (const [sourceField, targetField] of Object.entries(fieldMappings)) {
-        // Skip if no target or source field doesn't exist
-        if (!targetField || targetField === '' || event[sourceField] === undefined) {
-          continue;
-        }
-
-        // For numeric fields, ensure proper type conversion
-        if (numericFields.has(targetField)) {
-          const parsed = safeParseNumber(event[sourceField]);
-          if (parsed !== null) {
-            mappedEvent[targetField] = parsed;
-          }
-        } else if (targetField === 'time') {
-          const value = event[sourceField];
-          if (typeof value === 'string' || typeof value === 'number') {
-            mappedEvent[targetField] = value;
-          }
-        } else {
-          mappedEvent[targetField] = event[sourceField];
-        }
-      }
-
-      return mappedEvent;
-    });
-  };
-
   const buildValidationReportStorage = () => {
     if (!validationResults || validationResults.length === 0) {
       return null;
     }
 
-    const maxFailuresPerFile = 500;
-    const files = validationResults.map((result: any) => {
+    const files = validationResults.map((result) => {
       const report = result.validationReport;
       const failures = report?.failures || [];
 
@@ -263,8 +302,9 @@ export default function UploadPage() {
           byCategory: {},
           byField: {},
         },
-        failures: failures.slice(0, maxFailuresPerFile),
-        truncated: failures.length > maxFailuresPerFile,
+        failures: failures.slice(0, MAX_STORED_FAILURES_PER_FILE),
+        truncated: failures.length > MAX_STORED_FAILURES_PER_FILE ||
+          Boolean((report as { failuresTruncated?: boolean } | undefined)?.failuresTruncated),
       };
     });
 
@@ -291,7 +331,7 @@ export default function UploadPage() {
       files: [] as Array<any>,
     };
 
-    validationResults.forEach((result: any) => {
+    validationResults.forEach((result) => {
       const reportSummary = result.validationReport?.summary;
       if (!reportSummary) {
         return;
@@ -338,6 +378,9 @@ export default function UploadPage() {
       return;
     }
 
+    // Every run starts clean: its tokens, previews and mappings replace the last run's.
+    resetUploadRun();
+
     const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
     const startTime = Date.now();
 
@@ -363,7 +406,8 @@ export default function UploadPage() {
       //   1. POST /api/upload/init   → sessionId
       //   2. POST /api/upload/chunk  × N  (one per 3 MB chunk)
       //   3. POST /api/upload/finalize   → same response shape as /api/upload
-      // Smaller files use the existing single-request upload.
+      // Smaller files use the existing single-request upload. Both responses carry
+      // counts and a bounded preview, never every event.
       const LARGE_FILE_THRESHOLD = 3.5 * 1024 * 1024; // 3.5 MB
       const CHUNK_SIZE = 3 * 1024 * 1024;              // 3 MB per chunk
 
@@ -436,7 +480,7 @@ export default function UploadPage() {
             }));
           }
 
-          // Step 3: finalize — server reassembles, parses, returns events
+          // Step 3: finalize — server reassembles, parses, stores the events
           setUploadProgress(prev => ({
             ...prev,
             message: `Processing ${file.name}...`,
@@ -465,10 +509,6 @@ export default function UploadPage() {
         }
 
         uploadResults.push(result);
-        // Record server-side pending upload token for QuakeML files
-        if (result.pendingUploadId) {
-          setPendingUploadIds(prev => ({ ...prev, [file.name]: result.pendingUploadId }));
-        }
         bytesCompleted += file.size;
 
         setUploadProgress(prev => ({
@@ -500,8 +540,9 @@ export default function UploadPage() {
 
       // Process validation results
       // Issue #6 fix: isValid should consider validation report's invalidEvents count, not just parser errors
-      const results = uploadResults.map(result => {
-        const hasParserErrors = result.errors && result.errors.length > 0;
+      const results: UploadedFile[] = uploadResults.map(result => {
+        const errorCount = Number(result.errorCount ?? result.errors?.length ?? 0);
+        const hasParserErrors = errorCount > 0;
         const hasValidationErrors = (result.validationReport?.summary?.invalidEvents || 0) > 0;
         const explicitlyInvalid = result.isValid === false;
 
@@ -511,24 +552,36 @@ export default function UploadPage() {
           errors: result.errors || [],
           warnings: result.warnings || [],
           format: result.format || 'UNKNOWN',
-          eventCount: result.events?.length || 0,
-          fields: result.detectedFields || ['time', 'latitude', 'longitude', 'depth', 'magnitude'],
-          validationReport: result.validationReport
+          eventCount: Number(result.eventCount ?? 0),
+          fields: result.detectedFields || [],
+          validationReport: result.validationReport,
+          pendingUploadId: result.pendingUploadId,
+          resolvedFieldSources: result.resolvedFieldSources || {},
+          fileDecisions: result.fileDecisions || {},
+          previewEvents: Array.isArray(result.previewEvents) ? result.previewEvents : [],
+          previewIndices: Array.isArray(result.previewIndices) ? result.previewIndices : [],
+          previewTruncated: Boolean(result.previewTruncated),
         };
       });
 
-      // Combine all events from all files
-      const allEvents = uploadResults.flatMap(result => result.events || []);
+      // Preview samples of all files. The quality and cross-field checks below run on
+      // these; every event of every file is validated again on the server when the
+      // catalogue is created.
+      const allEvents = results.flatMap(result => result.previewEvents);
+      const origins: PreviewOrigin[] = results.flatMap(result =>
+        result.previewEvents.map((_, i) => ({ fileName: result.fileName, row: (result.previewIndices[i] ?? i) + 1 })));
+      const totalEventCount = results.reduce((sum, result) => sum + result.eventCount, 0);
       setParsedEvents(allEvents);
-      const totalErrors = results.reduce((sum, result) => sum + result.errors.length, 0);
-      const hasValidEvents = allEvents.length > 0;
+      setPreviewOrigins(origins);
+      const totalErrors = uploadResults.reduce((sum, result) => sum + Number(result.errorCount ?? result.errors?.length ?? 0), 0);
+      const hasValidEvents = totalEventCount > 0;
       const hasErrors = totalErrors > 0;
 
       // Update progress
       setUploadProgress(prev => ({
         ...prev,
         progress: 85,
-        message: `Validating ${allEvents.length} events...`
+        message: `Validating ${totalEventCount.toLocaleString()} events...`
       }));
 
       // Perform quality check
@@ -544,7 +597,7 @@ export default function UploadPage() {
         ...prev,
         stage: 'complete',
         progress: 100,
-        message: `Successfully processed ${allEvents.length} events`
+        message: `Successfully processed ${totalEventCount.toLocaleString()} events`
       }));
 
       setValidationResults(results);
@@ -574,21 +627,22 @@ export default function UploadPage() {
       if (hasErrors && hasValidEvents) {
         toast({
           title: 'Partial import ready',
-          description: `Skipped ${totalErrors} invalid event${totalErrors === 1 ? '' : 's'}. ${allEvents.length} valid event${allEvents.length === 1 ? '' : 's'} ready to map.`,
+          description: `Skipped ${totalErrors} invalid event${totalErrors === 1 ? '' : 's'}. ${totalEventCount.toLocaleString()} valid event${totalEventCount === 1 ? '' : 's'} ready to map.`,
         });
       }
 
       // Cross-field checks are advisory quality checks. They should be visible,
       // but they do not block mapping or catalogue creation.
+      const sampled = results.some(result => result.previewTruncated);
       if (crossFieldResult.summary.failedEvents > 0) {
         toast({
           title: 'Cross-field review recommended',
-          description: `${crossFieldResult.summary.failedEvents} event(s) have high-severity consistency checks. You can continue, but review the validation results when possible.`,
+          description: `${crossFieldResult.summary.failedEvents} event(s)${sampled ? ' in the preview sample' : ''} have high-severity consistency checks. You can continue, but review the validation results when possible.`,
         });
       } else if (crossFieldResult.summary.warnings > 0) {
         toast({
           title: 'Cross-field review recommended',
-          description: `${crossFieldResult.summary.warnings} cross-field warning(s) detected. You can continue.`,
+          description: `${crossFieldResult.summary.warnings} cross-field warning(s) detected${sampled ? ' in the preview sample' : ''}. You can continue.`,
         });
       }
 
@@ -645,6 +699,8 @@ export default function UploadPage() {
       return;
     }
 
+    const uploadedFiles = validationResults ?? [];
+    const totalEventCount = uploadedFiles.reduce((sum, file) => sum + file.eventCount, 0);
     setUploadStatus('processing');
 
     // Initialize processing progress
@@ -652,39 +708,32 @@ export default function UploadPage() {
       stage: 'mapping',
       progress: 0,
       message: 'Applying field mappings...',
-      eventCount: parsedEvents.length,
+      eventCount: totalEventCount,
       eventsProcessed: 0,
     });
 
     try {
-      // Step 1: Apply UI field mappings before saving
+      // Step 1: the explicit mapping changes, per file
       setProcessingProgress(prev => ({
         ...prev,
         stage: 'mapping',
         progress: 10,
-        message: 'Applying field mappings to events...',
+        message: 'Preparing field mappings for each file...',
       }));
 
-      // Large uploads omit the events array from the catalogue request because
-      // it can exceed Vercel's 4.5 MB hard limit. Small uploads keep sending
-      // events inline, even when they also have a pendingUploadId, so they stay
-      // on the older catalogue creation path.
-      //
-      // If any file is missing a pending record (e.g. it was a tiny in-memory
-      // upload that never went through the pending store) we fall back to
-      // sending the events inline as before.
-      const pendingIds = Object.values(pendingUploadIds);
-      const allFilesHavePendingId = files.length > 0 && files.every(f => pendingUploadIds[f.name]);
-      const totalSourceBytes = files.reduce((sum, f) => sum + f.size, 0);
-      const usePendingOnlyPayload = allFilesHavePendingId && totalSourceBytes > 3.5 * 1024 * 1024;
-
-      const finalEvents = usePendingOnlyPayload ? [] : applyUIMappings(parsedEvents);
+      // The catalogue is always created from the pending uploads of this run: one
+      // manifest entry per file, in upload order, with the count its upload reported.
+      // The server checks every file against it and applies each file's explicit
+      // mapping with that file's own decisions. No events travel in this request.
+      const pendingUploads = buildPendingUploadManifest(uploadedFiles, fieldMappings);
+      if (pendingUploads.length === 0) {
+        throw new Error('No uploaded events are available. Please upload the files again.');
+      }
 
       setProcessingProgress(prev => ({
         ...prev,
         progress: 25,
         message: 'Building validation reports...',
-        eventsProcessed: parsedEvents.length,
       }));
 
       const validationSummary = buildValidationSummary();
@@ -702,7 +751,7 @@ export default function UploadPage() {
         ...prev,
         stage: 'saving',
         progress: 35,
-        message: `Saving catalogue with ${parsedEvents.length.toLocaleString()} events...`,
+        message: `Saving catalogue with ${totalEventCount.toLocaleString()} events...`,
       }));
 
       const response = await fetch('/api/catalogues', {
@@ -712,18 +761,8 @@ export default function UploadPage() {
         },
         body: JSON.stringify({
           name: catalogueName.trim(),
-          // Omit events only when the source payload is large enough that the
-          // catalogue request risks Vercel's 4.5 MB body limit. Small uploads
-          // keep using the mature inline-events path even when a pending token
-          // exists.
-          ...(usePendingOnlyPayload ? {} : { events: finalEvents }),
           metadata: metadataPayload,
-          pendingUploadIds: pendingIds,
-          // Send field mappings config so the server can apply them to
-          // pendingEvents when events are not included in the body.
-          ...(usePendingOnlyPayload && Object.keys(fieldMappings).length > 0
-            ? { fieldMappings }
-            : {}),
+          pendingUploads,
         }),
       });
 
@@ -745,6 +784,14 @@ export default function UploadPage() {
       }
 
       const createdCatalogue = await response.json();
+      const importReport: ImportReport | null = createdCatalogue.validationReport ?? null;
+      const importMessage: string | null = typeof createdCatalogue.importMessage === 'string'
+        ? createdCatalogue.importMessage
+        : null;
+      const partialImport = Boolean(createdCatalogue.partialImport);
+
+      // Every catalogue list and cached catalogue page must show the new catalogue.
+      invalidateCatalogueData();
 
       // Step 3: Generate processing report
       setProcessingProgress(prev => ({
@@ -763,12 +810,17 @@ export default function UploadPage() {
           size: f.size,
           format: f.name.split('.').pop()?.toUpperCase() || 'UNKNOWN'
         })),
-        totalEvents: parsedEvents.length,
+        // What the server stored, not what the browser parsed
+        totalEvents: importReport?.successfullyImported ?? Number(createdCatalogue.event_count ?? 0),
         // Issue #9 fix: Use null instead of 0 when no quality check was performed
         // This distinguishes "no check performed" from "score is 0"
         qualityScore: qualityCheckResult?.score ?? null,
+        qualitySampleSize: parsedEvents.length,
         validationResults,
         validationSummary,
+        importReport,
+        importMessage,
+        partialImport,
         metadata
       };
       setProcessingReport(report);
@@ -787,8 +839,8 @@ export default function UploadPage() {
       setActiveTab('results');
 
       toast({
-        title: "Processing complete",
-        description: `Successfully created catalogue "${catalogueName}" with ${parsedEvents.length} events!`,
+        title: partialImport ? 'Catalogue created with skipped events' : 'Processing complete',
+        description: `Catalogue "${catalogueName}": ${importMessage ?? `${report.totalEvents.toLocaleString()} events imported.`}`,
         variant: "default"
       });
     } catch (error) {
@@ -808,6 +860,7 @@ export default function UploadPage() {
   };
 
   const handleViewCatalogues = () => {
+    invalidateCatalogueData();
     router.push('/catalogues');
   };
 
@@ -830,11 +883,16 @@ export default function UploadPage() {
     const generatedAt = new Date();
     const processedAt = new Date(processingReport.processedAt);
 
+    // Parse stage (rows read from the files) and import stage (rows the server stored)
     const summary = (processingReport.validationSummary || {}) as any;
-    const totalEvents = Number(summary.totalEvents ?? processingReport.totalEvents ?? 0);
-    const validEvents = Number(summary.validEvents ?? totalEvents);
-    const invalidEvents = Number(summary.invalidEvents ?? Math.max(totalEvents - validEvents, 0));
-    const validationPassRate = totalEvents > 0 ? (validEvents / totalEvents) * 100 : 100;
+    const importReport = processingReport.importReport;
+    const eventsImported = importReport?.successfullyImported ?? processingReport.totalEvents;
+    const parseTotal = Number(summary.totalEvents ?? importReport?.totalSubmitted ?? eventsImported);
+    const parseInvalid = Number(summary.invalidEvents ?? 0);
+    const totalEvents = Math.max(parseTotal, importReport?.totalSubmitted ?? 0);
+    const invalidEvents = parseInvalid + (importReport?.failedValidation ?? 0);
+    const duplicatesSkipped = importReport?.duplicatesSkipped ?? 0;
+    const validationPassRate = totalEvents > 0 ? (eventsImported / totalEvents) * 100 : 100;
     const filesProcessedCount = processingReport.filesProcessed.length;
 
     const qualityScore = processingReport.qualityScore;
@@ -842,6 +900,7 @@ export default function UploadPage() {
     const qualityInterpretation = qualityGrade
       ? `${qualityGrade.label} (${qualityGrade.grade})`
       : 'Quality assessment was not available for this run';
+    const qualitySampled = processingReport.qualitySampleSize < totalEvents;
 
     const totalFileSizeBytes = processingReport.filesProcessed.reduce((sum, file) => sum + (file.size || 0), 0);
     const fileFormats = Array.from(new Set(processingReport.filesProcessed.map(file => file.format)));
@@ -875,7 +934,7 @@ export default function UploadPage() {
     const reportContent = {
       reportMetadata: {
         reportType: 'Catalogue Processing Report',
-        reportVersion: '2.0',
+        reportVersion: '2.1',
         generatedAt: {
           iso: generatedAt.toISOString(),
           local: generatedAt.toLocaleString(),
@@ -884,17 +943,20 @@ export default function UploadPage() {
         description: 'Comprehensive processing report for catalogue ingestion, validation, and quality assessment.',
       },
       executiveSummary: {
-        description: 'High-level metrics for stakeholders.',
+        description: 'High-level metrics for stakeholders. Event counts are what the server stored.',
         keyMetrics: {
           totalEventsProcessed: totalEvents,
+          eventsImported,
+          importMessage: processingReport.importMessage,
           filesProcessed: filesProcessedCount,
           overallQualityScore: qualityScore,
           qualityInterpretation,
           validationPassRate: {
             percent: Number(validationPassRate.toFixed(2)),
             display: formatPercent(validationPassRate),
-            validEvents,
+            validEvents: eventsImported,
             invalidEvents,
+            duplicatesSkipped,
             totalEvents,
           },
         },
@@ -908,6 +970,12 @@ export default function UploadPage() {
             iso: processingReport.processedAt,
             local: processedAt.toLocaleString(),
           },
+        },
+        importResults: {
+          description: 'What the server stored: rows it rejected and duplicate source IDs it skipped.',
+          partialImport: processingReport.partialImport,
+          message: processingReport.importMessage,
+          report: importReport,
         },
         fileProcessingDetails: {
           description: 'Uploaded files and processing footprint.',
@@ -925,7 +993,13 @@ export default function UploadPage() {
           })),
         },
         qualityAssessment: {
-          description: 'Overall catalogue quality score and supporting metrics.',
+          description: qualitySampled
+            ? `Overall catalogue quality score and supporting metrics, computed on a preview sample of ${processingReport.qualitySampleSize.toLocaleString()} events.`
+            : 'Overall catalogue quality score and supporting metrics.',
+          basis: {
+            sampleSize: processingReport.qualitySampleSize,
+            sampled: qualitySampled,
+          },
           overall: {
             score: qualityScore,
             grade: qualityGrade?.grade || null,
@@ -956,8 +1030,9 @@ export default function UploadPage() {
           description: 'Validation outcomes by file, category, and severity.',
           summary: {
             totalEvents,
-            validEvents,
+            validEvents: eventsImported,
             invalidEvents,
+            duplicatesSkipped,
             passRatePercent: Number(validationPassRate.toFixed(2)),
             passRateDisplay: formatPercent(validationPassRate),
             errorCount: Number(summary.errorCount ?? aggregateSeverity.error),
@@ -976,12 +1051,17 @@ export default function UploadPage() {
         },
       },
       technicalAppendix: {
-        rawValidationResults: processingReport.validationResults,
+        rawValidationResults: (processingReport.validationResults || []).map((result: any) => {
+          // The preview samples are not part of the report
+          const { previewEvents: _preview, previewIndices: _indices, ...rest } = result;
+          return rest;
+        }),
         rawValidationSummary: processingReport.validationSummary,
         notes: [
           'Timestamps include ISO and locale-formatted variants.',
           'Percentages are rounded to 2 decimal places.',
           'Quality interpretation is derived from getQualityGrade(score).',
+          'Event counts come from the server import report; parse-stage counts are in rawValidationSummary.',
         ],
       },
     };
@@ -1046,6 +1126,9 @@ export default function UploadPage() {
         return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300';
     }
   };
+
+  const totalUploadedEvents = (validationResults ?? []).reduce((sum, result) => sum + result.eventCount, 0);
+  const previewIsSample = parsedEvents.length < totalUploadedEvents;
 
   const reportPreview = buildProcessingReportContent();
 
@@ -1118,6 +1201,14 @@ export default function UploadPage() {
                   <div className="mt-6 space-y-6">
                     <ValidationResults results={validationResults} catalogueName={catalogueName} />
 
+                    {previewIsSample && (
+                      <p className="text-xs text-muted-foreground">
+                        The quality, completeness and cross-field checks below are computed on a preview sample of{' '}
+                        {parsedEvents.length.toLocaleString()} of the {totalUploadedEvents.toLocaleString()} parsed events.
+                        Every event is validated again on the server when the catalogue is created.
+                      </p>
+                    )}
+
                     {qualityCheckResult && (
                       <DataQualityReport result={qualityCheckResult} />
                     )}
@@ -1151,7 +1242,11 @@ export default function UploadPage() {
                               .slice(0, 5)
                               .map((result: any, idx: number) => (
                                 <div key={idx} className="text-xs p-2 bg-muted/50 rounded space-y-1">
-                                  <span className="font-medium">Event {result.eventIndex + 1}:</span>
+                                  <span className="font-medium">
+                                    {previewOrigins[result.eventIndex]
+                                      ? `${previewOrigins[result.eventIndex].fileName}, event ${previewOrigins[result.eventIndex].row}:`
+                                      : `Event ${result.eventIndex + 1}:`}
+                                  </span>
                                   {result.checks
                                     .filter((c: any) => c.severity === 'error' || c.severity === 'warning')
                                     .map((check: any, cIdx: number) => (
@@ -1187,6 +1282,7 @@ export default function UploadPage() {
                   validationResults={validationResults}
                   onSchemaReady={setIsSchemaReady}
                   onMappingsChange={setFieldMappings}
+                  initialMappings={fieldMappings}
                   readOnly={isReadOnly}
                 />
               </TabsContent>
@@ -1242,9 +1338,14 @@ export default function UploadPage() {
                     </svg>
                   </div>
                   <h3 className="text-2xl font-semibold mb-2">Processing Complete</h3>
-                  <p className="text-muted-foreground mb-6 max-w-md">
-                    Your catalogue files have been successfully processed and are now available in your collections.
+                  <p className="text-muted-foreground mb-2 max-w-md">
+                    Your catalogue has been created and is now available in your collections.
                   </p>
+                  {processingReport?.importMessage && (
+                    <p className={`text-sm mb-6 max-w-md ${processingReport.partialImport ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                      {processingReport.importMessage}
+                    </p>
+                  )}
                   <div className="flex gap-4">
                     <Button variant="default" onClick={handleViewCatalogues}>View Catalogues</Button>
                     <Button variant="outline" onClick={handleDownloadReport}>Download Report</Button>
@@ -1264,9 +1365,10 @@ export default function UploadPage() {
                         <section className="space-y-2">
                           <h4 className="font-medium">Executive Summary</h4>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                            <div>Total Events: <span className="font-medium">{reportPreview.executiveSummary.keyMetrics.totalEventsProcessed.toLocaleString()}</span></div>
+                            <div>Events Imported: <span className="font-medium">{reportPreview.executiveSummary.keyMetrics.eventsImported.toLocaleString()} of {reportPreview.executiveSummary.keyMetrics.totalEventsProcessed.toLocaleString()}</span></div>
                             <div>Files Processed: <span className="font-medium">{reportPreview.executiveSummary.keyMetrics.filesProcessed}</span></div>
-                            <div>Validation Pass Rate: <span className="font-medium">{reportPreview.executiveSummary.keyMetrics.validationPassRate.display}</span></div>
+                            <div>Import Rate: <span className="font-medium">{reportPreview.executiveSummary.keyMetrics.validationPassRate.display}</span></div>
+                            <div>Duplicates Skipped: <span className="font-medium">{reportPreview.executiveSummary.keyMetrics.validationPassRate.duplicatesSkipped.toLocaleString()}</span></div>
                             <div>Quality: <span className="font-medium">{reportPreview.executiveSummary.keyMetrics.qualityInterpretation}</span></div>
                           </div>
                         </section>

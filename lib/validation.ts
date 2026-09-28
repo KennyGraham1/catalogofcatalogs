@@ -104,7 +104,13 @@ export const mergeConfigSchema = z.object({
   timeThreshold: z.number().min(0).max(3600), // Max 1 hour
   distanceThreshold: z.number().min(0).max(1000), // Max 1000 km
   mergeStrategy: z.enum(['priority', 'average', 'newest', 'complete', 'quality']),
-  priority: z.string(),
+  // An option name ('newest', 'geonet', 'custom', ...) or an agency name. Bounded because the
+  // effective config is stored on every merged event (merge_parameters, contract C2).
+  priority: z.string().max(100),
+  // Custom Order (contract C10): source catalogue IDs, highest priority first. The designated
+  // order decides which record is kept; remaining ties are broken by quality. Only meaningful
+  // with priority 'custom'; mergeRequestSchema checks the IDs against the sources.
+  priorityOrder: z.array(z.string().min(1).max(255)).max(50).optional(),
 });
 
 export type MergeConfig = z.infer<typeof mergeConfigSchema>;
@@ -153,6 +159,29 @@ export const mergeRequestSchema = z.object({
   config: mergeConfigSchema,
   metadata: mergeMetadataSchema.optional(),
   exportOnly: z.boolean().optional(),
+}).superRefine((request, ctx) => {
+  // A Custom Order ranking must rank the catalogues being merged, each once: an unknown or
+  // repeated ID would silently fall back to the quality tie-break for every group.
+  const order = request.config.priorityOrder;
+  if (!order) return;
+  const sourceIds = new Set(request.sourceCatalogues.map((catalogue) => String(catalogue.id)));
+  const seen = new Set<string>();
+  order.forEach((id, index) => {
+    if (!sourceIds.has(id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['config', 'priorityOrder', index],
+        message: `priorityOrder names catalogue "${id}", which is not one of the source catalogues`,
+      });
+    } else if (seen.has(id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['config', 'priorityOrder', index],
+        message: `priorityOrder lists catalogue "${id}" more than once`,
+      });
+    }
+    seen.add(id);
+  });
 });
 
 export type MergeRequest = z.infer<typeof mergeRequestSchema>;
@@ -783,14 +812,20 @@ export interface DataQualityReport {
 export function horizontalUncertaintyKm(event: any): number | null {
   const num = (v: unknown): number | null =>
     typeof v === 'number' && Number.isFinite(v) ? v : null;
+  // An uncertainty cannot be negative: a -999 / -1 missing-value sentinel is absent (as in
+  // lib/uncertainty-utils), not a reported and apparently precise location.
+  const uncertainty = (v: unknown): number | null => {
+    const n = num(v);
+    return n !== null && n >= 0 ? n : null;
+  };
   // One precedence everywhere (lib/uncertainty-utils horizontalUncertaintyKm): the
   // error-ellipse semi-major axis, then the circular radius, then the marginals.
-  const majorAxisKm = num(event?.max_horizontal_uncertainty);
-  if (majorAxisKm !== null && majorAxisKm >= 0) return majorAxisKm;
-  const km = num(event?.horizontal_uncertainty);
+  const majorAxisKm = uncertainty(event?.max_horizontal_uncertainty);
+  if (majorAxisKm !== null) return majorAxisKm;
+  const km = uncertainty(event?.horizontal_uncertainty);
   if (km !== null) return km;
-  const latUnc = num(event?.latitude_uncertainty);
-  const lonUnc = num(event?.longitude_uncertainty);
+  const latUnc = uncertainty(event?.latitude_uncertainty);
+  const lonUnc = uncertainty(event?.longitude_uncertainty);
   if (latUnc === null && lonUnc === null) return null;
   const lat = num(event?.latitude) ?? 0;
   return Math.max(
@@ -979,7 +1014,11 @@ export function assessDataQuality(events: any[]): DataQualityReport {
   // Consistency checks
   let consistencyScore = 100;
 
-  // Check for duplicate times
+  // Check for duplicate times. The message counts the EVENTS that share a timestamp, not
+  // the distinct repeated timestamps (100 events at one instant used to read "Found 1
+  // events"). The penalty is the percentage of records that are extra copies: a flat -10
+  // could not tell one coincident pair in a large catalogue from a file where every row
+  // repeats.
   const timeCounts = new Map<string, number>();
   events.forEach(e => {
     if (e.time) {
@@ -987,15 +1026,17 @@ export function assessDataQuality(events: any[]): DataQualityReport {
       timeCounts.set(e.time, count + 1);
     }
   });
-  const duplicateTimes = Array.from(timeCounts.values()).filter(count => count > 1).length;
-  if (duplicateTimes > 0) {
-    consistencyScore -= 10;
+  const duplicateGroups = Array.from(timeCounts.values()).filter(count => count > 1);
+  if (duplicateGroups.length > 0) {
+    const eventsInGroups = duplicateGroups.reduce((sum, count) => sum + count, 0);
+    const extraCopies = eventsInGroups - duplicateGroups.length;
+    consistencyScore -= (100 * extraCopies) / events.length;
     checks.push({
       passed: false,
       severity: 'warning',
-      message: `Found ${duplicateTimes} events with duplicate timestamps`,
+      message: `Found ${eventsInGroups} events sharing ${duplicateGroups.length} duplicated timestamp${duplicateGroups.length === 1 ? '' : 's'}`,
       field: 'time',
-      suggestion: 'Review events with identical times - they may be duplicates'
+      suggestion: `Review events with identical times - up to ${extraCopies} of them may be duplicate records`
     });
   }
 
@@ -1018,6 +1059,8 @@ export function assessDataQuality(events: any[]): DataQualityReport {
       suggestion: 'These events are rare and should be reviewed for accuracy'
     });
   }
+  // The duplicate penalty alone can reach 100, so keep the score a percentage.
+  consistencyScore = Math.max(0, consistencyScore);
 
   // Accuracy checks based on uncertainty values.
   // A missing uncertainty is NOT evidence of a precise location, so it must not be coerced to

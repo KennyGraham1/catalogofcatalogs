@@ -1,6 +1,6 @@
-====================
+=====================
 Importing from GeoNet
-====================
+=====================
 
 Learn how to automatically import earthquake data from GeoNet's FDSN Event Web
 Service. This guide covers the import process, configuration options, duplicate
@@ -172,6 +172,15 @@ The following fields are extracted from GeoNet's QuakeML response:
 * Event type (earthquake, etc.)
 * Geographic region (Flinn-Engdahl region)
 
+GeoNet's own event-type text is kept verbatim in ``source_event_type``. The
+normalised ``event_type`` field follows SeisComP's QuakeML event-type
+mapping: GeoNet's ``outside of network interest`` and ``induced earthquake``
+types map to QuakeML's ``other event`` and ``induced or triggered event``
+respectively, and GeoNet's ordinary types (``earthquake``, and so on) pass
+through unchanged. GeoNet's ``duplicate``, ``not existing`` and
+``not locatable`` types are excluded from the import entirely — see
+*Configure Duplicate Handling* below.
+
 --------------
 Import Process
 --------------
@@ -304,12 +313,29 @@ Limit imports to a specific region using a bounding box:
 
 .. code-block:: text
 
-   Minimum Latitude:  -47.5  (South)
-   Maximum Latitude:  -34.0  (North)
-   Minimum Longitude: 165.0  (West)
-   Maximum Longitude: 179.0  (East)
+   Minimum Latitude:  -53   (South)
+   Maximum Latitude:  -28   (North)
+   Minimum Longitude: 165   (West)
+   Maximum Longitude: -175  (East)
 
-**Predefined Regions:**
+.. note::
+   The "All New Zealand" bounds cross the antimeridian (180°): the box runs
+   east from 165°E, through 180°, to 175°W, so the minimum longitude (165)
+   is numerically *greater* than the maximum longitude (-175). This is the
+   platform's ``NZ_NATIONAL_BOUNDS`` and is what the **Use New Zealand
+   region** preset button fills in. It covers the main islands, the
+   Kermadec Islands, the Chatham Islands, the Bounty/Antipodes Islands and
+   the Auckland/Campbell Islands — an older, smaller box (-47.5 to -34.0
+   latitude, 165.0 to 179.0 longitude) used to exclude all of those
+   offshore territories and has been replaced.
+
+**Regions:**
+
+Only **All New Zealand** is a one-click preset (the **Use New Zealand
+region** button, which fills in ``NZ_NATIONAL_BOUNDS``). The other rows
+below are example boxes for sub-regions you can type into the four
+coordinate fields by hand; the platform does not currently offer a button
+for them.
 
 .. list-table::
    :header-rows: 1
@@ -317,19 +343,19 @@ Limit imports to a specific region using a bounding box:
 
    * - Region
      - Coordinates
-   * - All New Zealand
-     - Lat: -47.5 to -34.0, Lon: 165.0 to 179.0
-   * - North Island
+   * - All New Zealand (preset button)
+     - Lat: -53 to -28, Lon: 165 to -175 (crosses the antimeridian)
+   * - North Island (manual entry)
      - Lat: -42.0 to -34.0, Lon: 172.0 to 179.0
-   * - South Island
+   * - South Island (manual entry)
      - Lat: -47.5 to -40.0, Lon: 165.0 to 175.0
-   * - Canterbury
+   * - Canterbury (manual entry)
      - Lat: -44.5 to -42.0, Lon: 170.5 to 174.0
-   * - Wellington
+   * - Wellington (manual entry)
      - Lat: -42.0 to -40.5, Lon: 174.0 to 176.5
-   * - Auckland
+   * - Auckland (manual entry)
      - Lat: -37.5 to -36.0, Lon: 174.0 to 175.5
-   * - Taupo Volcanic Zone
+   * - Taupo Volcanic Zone (manual entry)
      - Lat: -39.5 to -37.5, Lon: 175.5 to 177.0
 
 .. note::
@@ -351,7 +377,8 @@ Events already in the catalogue are skipped. Use this when:
 
 **Update Existing Events**
 
-Replace existing events with fresh data from GeoNet. Use this when:
+Rewrite the stored fields that GeoNet has actually revised since the last
+import (fields that have not changed are left alone). Use this when:
 
 * Refreshing automatic solutions with reviewed parameters
 * Updating preliminary data with final solutions
@@ -359,16 +386,22 @@ Replace existing events with fresh data from GeoNet. Use this when:
 
 **How Duplicates Are Detected:**
 
-The platform matches events using:
+The platform matches an incoming GeoNet event to a stored one **only** by
+its GeoNet EventID (``source_id``) — there is no time, distance or
+magnitude proximity matching. This means:
 
-.. code-block:: text
+* Re-importing the same time range from GeoNet always dedupes correctly,
+  because the EventID is always the same.
+* Importing the *same* earthquake a second time from a source that carries
+  no GeoNet EventID (e.g. a plain CSV upload, or a different catalogue) is
+  **not** detected as a duplicate and will insert a second copy of it.
 
-   Matching Criteria:
-   - Time difference:     ± 60 seconds
-   - Spatial distance:    ≤ 50 km
-   - Magnitude difference: ≤ 0.5
+**Excluded Event Types**
 
-Events meeting ALL criteria are considered duplicates.
+Separately from the skip/update choice above, GeoNet records typed
+``duplicate``, ``not existing`` or ``not locatable`` are never imported at
+all — they are counted as "Excluded" in the import results (see
+*Import Results* below) rather than stored under any event type.
 
 Step 7: Select or Create Catalogue
 ==================================
@@ -386,7 +419,13 @@ Provide a descriptive name:
 
 **Add to Existing Catalogue:**
 
-Select an existing catalogue from the dropdown to append events.
+Select an existing catalogue from the dropdown. Only catalogues this
+importer created are offered as targets, since duplicate detection matches
+on the GeoNet EventID that only a GeoNet import stamps on its own events;
+adding GeoNet events to an unrelated catalogue would sit them beside
+that catalogue's own copies of the same earthquakes with no way to
+reconcile them. Events already stored are compared with GeoNet's current
+solution, and only the fields GeoNet has actually revised are rewritten.
 
 Step 8: Start Import
 ====================
@@ -428,11 +467,15 @@ After import completes, review the summary:
 
    Results:
    --------
-   Total Fetched:     1,234 events
-   New Events:        1,150 events
-   Updated Events:    45 events
-   Skipped (Dupes):   39 events
-   Errors:            0 events
+   Total Fetched:       1,234 events
+   New Events:          1,120 events
+   Updated Events:      45 events
+   Skipped (unchanged): 39 events
+   Collided:            2 events   (EventID written by a concurrent import)
+   Invalid:             15 events  (unusable or failed validation)
+   Excluded:            10 events  (GeoNet type: 6 duplicate, 4 not locatable)
+   Failed:              3 events   (database write failed)
+   Errors:              0
 
    Quality Distribution:
    A+/A: 342 (28%)
@@ -441,6 +484,9 @@ After import completes, review the summary:
    D/F:  85 (7%)
 
    Processing Time:   12.5 seconds
+
+Every fetched row lands in exactly one of New/Updated/Skipped/Collided/
+Invalid/Excluded/Failed, so those counts sum to Total Fetched.
 
 --------------
 Import History
@@ -459,7 +505,7 @@ Track all imports for data provenance:
 * Import date and time
 * Time range imported
 * Filter parameters (magnitude, depth, bounds)
-* Event counts (new, updated, skipped, errors)
+* Event counts (new, updated, skipped, collided, invalid, excluded, failed)
 * User who performed import
 * Processing duration
 
@@ -475,24 +521,31 @@ Understanding Duplicates
 ========================
 
 When importing from GeoNet, some events may already exist in your catalogue
-from previous imports or uploads. The platform detects these duplicates
-intelligently.
+from a previous GeoNet import. The platform detects these duplicates by
+identity, not by proximity.
 
 **Matching Algorithm:**
 
 .. code-block:: text
 
-   Event A matches Event B if ALL conditions are true:
+   Event A (incoming) matches Event B (stored) if and only if:
 
-   1. |Time_A - Time_B| ≤ 60 seconds
-   2. Distance(A, B) ≤ 50 km
-   3. |Mag_A - Mag_B| ≤ 0.5
+   A.EventID == B.source_id
 
-**Why These Thresholds?**
+There is no time, distance or magnitude proximity test. This is reliable
+for GeoNet-to-GeoNet re-imports, because GeoNet always assigns the same
+EventID to the same earthquake. It also means an earthquake already in your
+catalogue from a *different* source (one with no GeoNet EventID, such as a
+plain CSV upload) is **not** recognised as a duplicate, and importing it
+from GeoNet will add a second copy rather than merge with it — use the
+:doc:`merging-catalogues` workflow afterwards to reconcile such cases.
 
-* **Time (60s):** Event parameters may be refined, shifting origin time
-* **Distance (50km):** Location revisions can shift epicenters significantly
-* **Magnitude (0.5):** Magnitude estimates often change with review
+**Why Match on EventID Alone?**
+
+A GeoNet EventID identifies one specific earthquake for the life of that
+event, even as its location, magnitude and evaluation status are revised —
+so it is the one field guaranteed to still match after GeoNet updates an
+event's parameters, which time/distance/magnitude proximity is not.
 
 Handling Strategies
 ===================
@@ -501,19 +554,19 @@ Handling Strategies
 
 .. code-block:: text
 
-   Existing: 2024-01-15 10:30:45, M4.5, -41.5, 174.2
-   Imported: 2024-01-15 10:30:47, M4.6, -41.51, 174.21
+   Existing (EventID 2024p123456): M4.5, -41.5, 174.2 (automatic)
+   GeoNet now reports (same EventID): M4.6, -41.51, 174.21 (reviewed)
 
-   Result: Keep existing, skip imported
+   Result: Keep the stored event unchanged; GeoNet's revision is not fetched in
 
 **Update (Use GeoNet):**
 
 .. code-block:: text
 
-   Existing: 2024-01-15 10:30:45, M4.5, -41.5, 174.2 (automatic)
-   Imported: 2024-01-15 10:30:47, M4.6, -41.51, 174.21 (reviewed)
+   Existing (EventID 2024p123456): M4.5, -41.5, 174.2 (automatic)
+   GeoNet now reports (same EventID): M4.6, -41.51, 174.21 (reviewed)
 
-   Result: Replace with imported (better quality)
+   Result: Overwrite the stored fields that changed (magnitude, location, evaluation status)
 
 -----------------
 Best Practices
@@ -586,7 +639,7 @@ For precise analysis, apply quality filters:
 .. code-block:: text
 
    Minimum Magnitude: 3.0 (better located)
-   After import, filter by: Quality Grade ≥ B
+   After import, filter by: Minimum Quality Score (Q) >= 65 (approximately grade B)
 
 **Import All, Filter Later:**
 
@@ -640,12 +693,33 @@ For programmatic imports, use the REST API:
    curl -X POST "http://localhost:3000/api/import/geonet" \
      -H "Content-Type: application/json" \
      -d '{
-       "catalogueId": "existing-catalogue-id",
+       "catalogueId": "existing-geonet-import-catalogue-id",
        "startDate": "2024-01-01T00:00:00Z",
        "endDate": "2024-01-31T23:59:59Z",
        "minMagnitude": 3.0,
        "updateExisting": true
      }'
+
+``startDate``/``endDate`` accept ISO 8601; a date-time with no UTC offset
+(e.g. ``2024-01-01T00:00:00``) is read as UTC. Supply both or neither —
+supplying only one is rejected.
+
+**Error responses:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 85
+
+   * - Status
+     - Meaning
+   * - 400
+     - Invalid parameters (bad dates, only one of start/end supplied,
+       out-of-range filters), or ``catalogueId`` names a catalogue that was
+       not created by the GeoNet importer
+   * - 404
+     - ``catalogueId`` does not match any existing catalogue
+   * - 409
+     - Another import into the same ``catalogueId`` is already running
 
 See :doc:`../api-reference/import` for complete API documentation.
 

@@ -6,6 +6,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronDown, ChevronUp, AlertTriangle, CheckCircle2, MapPin, Clock, Layers } from 'lucide-react';
 import { calculateDistance, calculateTimeDifference } from '@/lib/earthquake-utils';
+// Origin times are UTC by definition, so they are shown in UTC with the zone: the same
+// string as the other map popups and the merge result table (host-zone formatting put NZ
+// reviewers on the wrong calendar day).
+import { formatOriginTime } from '@/components/map/OptimizedEventPopup';
 
 interface EventData {
   id?: string;
@@ -74,6 +78,13 @@ export function DuplicateGroupCard({ group, groupIndex, catalogueColors, onViewO
                 <Badge variant="outline" className="border-orange-500 text-orange-700">
                   <AlertTriangle className="h-3 w-3 mr-1" />
                   Suspicious
+                </Badge>
+              )}
+              {/* The Average Values strategy publishes an epicentre no single report located,
+                  so no report is selected (selectedEventIndex -1). */}
+              {group.selectedEventIndex < 0 && groupSize > 1 && (
+                <Badge variant="outline" title="No single report is kept: the epicentre is averaged across the reports">
+                  Averaged
                 </Badge>
               )}
             </div>
@@ -171,14 +182,7 @@ export function DuplicateGroupCard({ group, groupIndex, catalogueColors, onViewO
                         </div>
                       </td>
                       <td className="py-2 px-2">
-                        <div>{new Date(event.time).toLocaleString('en-GB', {
-                          day: '2-digit',
-                          month: '2-digit',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          second: '2-digit',
-                        })}</div>
+                        <div>{formatOriginTime(event.time)}</div>
                         {idx > 0 && <div className="text-muted-foreground">+{timeDiff.toFixed(1)}s</div>}
                       </td>
                       <td className="py-2 px-2 text-right">{event.latitude.toFixed(4)}</td>

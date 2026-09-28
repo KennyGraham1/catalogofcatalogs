@@ -4,6 +4,8 @@ import { getCollection, COLLECTIONS } from '@/lib/mongodb';
 import { getUserById, hashPassword } from '@/lib/auth/utils';
 import { Logger } from '@/lib/errors';
 import { applyRateLimit, authRateLimiter } from '@/lib/rate-limiter';
+import { rememberCredentialClient } from '@/lib/auth/login-rate-limit';
+import { writeAuditLog } from '@/lib/audit';
 import type { PasswordResetToken } from '@/lib/auth/types';
 
 const logger = new Logger('ResetPasswordAPI');
@@ -95,6 +97,23 @@ export async function POST(request: NextRequest) {
       { user_id: user.id, used_at: null },
       { $set: { used_at: now } }
     );
+
+    // Whoever held the emailed token acted; the account is the target.
+    await writeAuditLog({
+      action: 'user.password_reset',
+      target_id: user.id,
+      target_type: 'user',
+      metadata: { tokenId: tokenDoc.id },
+    }, request);
+
+    // The reset proved control of the account: let this client sign in even if the
+    // account is being guessed at from elsewhere (see lib/auth/login-rate-limit.ts).
+    // Best effort - the password has already been changed.
+    await rememberCredentialClient(user.email, request.headers).catch(error => {
+      logger.warn('Could not mark the resetting client as known', {
+        error: error instanceof Error ? error.message : error,
+      });
+    });
 
     return NextResponse.json({ message: 'Password reset successfully' });
   } catch (error) {

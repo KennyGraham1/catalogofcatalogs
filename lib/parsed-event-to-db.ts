@@ -14,6 +14,7 @@
 import type { ParsedEvent } from '@/types/upload';
 import type { MergedEvent } from './db';
 import { ALLOWED_EVENT_TYPE } from './db';
+import { canonicalQuakeMLDepthType } from './quakeml-to-db';
 
 type DbEventFields = Partial<Omit<MergedEvent, 'id' | 'catalogue_id' | 'time' | 'latitude' | 'longitude' | 'magnitude' | 'source_events' | 'created_at'>>;
 
@@ -41,6 +42,11 @@ export function parsedEventToDbFields(event: ParsedEvent): DbEventFields {
     // Unrecognised value — drop silently rather than failing the entire upload
   }
   if (event.event_type_certainty) fields.event_type_certainty = String(event.event_type_certainty).toLowerCase().trim();
+  // The agency's raw event type as reported (contract C8), e.g. from a re-imported export.
+  const sourceEventType = (event as any).source_event_type;
+  if (typeof sourceEventType === 'string' && sourceEventType.trim() !== '' && sourceEventType.length <= 200) {
+    fields.source_event_type = sourceEventType.trim();
+  }
 
   // ── Location metadata ─────────────────────────────────────────────────────
   if (event.region)               fields.region        = String(event.region);
@@ -67,12 +73,17 @@ export function parsedEventToDbFields(event: ParsedEvent): DbEventFields {
   if (maxH !== null) fields.max_horizontal_uncertainty = maxH;
   const azH = finiteOrSkip(event.azimuth_max_horizontal_uncertainty);
   if (azH !== null) fields.azimuth_max_horizontal_uncertainty = azH;
+  // OriginUncertainty.confidenceLevel in percent (contract C16); a negative value is a
+  // "not determined" sentinel, not a level.
+  const confidenceLevel = finiteOrSkip((event as any).confidence_level ?? (event as any).confidenceLevel);
+  if (confidenceLevel !== null && confidenceLevel >= 0) fields.confidence_level = confidenceLevel;
   if (event.depth_type != null) {
     const raw = String(event.depth_type).trim();
-    // Convert 0/1 flag (depthfixed column) to QuakeML depth_type vocabulary
+    // Convert 0/1 flag (depthfixed column) to QuakeML depth_type vocabulary; a QuakeML
+    // value keeps its schema spelling ('from modeling of broad-band P waveforms').
     fields.depth_type = raw === '1' ? 'operator assigned'
                       : raw === '0' ? 'from location'
-                      : raw.toLowerCase();
+                      : canonicalQuakeMLDepthType(raw) ?? raw.toLowerCase();
   }
   if (event.earth_model_id)                 fields.earth_model_id         = String(event.earth_model_id);
   if (event.method_id)                      fields.method_id              = String(event.method_id);

@@ -75,11 +75,13 @@ export interface RateLimitResult {
  * ```
  */
 export function rateLimit(config: RateLimitConfig) {
-  // Create LRU cache to store request counts per token (IP address)
-  // Entries automatically expire after the configured interval
+  const interval = config.interval || 60000;
+  // Create LRU cache to store [request count, window start] per token (IP address).
+  // Entries automatically expire after the configured interval, which starts at the
+  // token's first request: that is when its window ends.
   const tokenCache = new LRUCache<string, number[]>({
     max: config.uniqueTokenPerInterval || 500,
-    ttl: config.interval || 60000, // Time to live in milliseconds
+    ttl: interval, // Time to live in milliseconds
   });
 
   return {
@@ -91,11 +93,12 @@ export function rateLimit(config: RateLimitConfig) {
      * @returns Rate limit check result
      */
     check: (limit: number, token: string): RateLimitResult => {
-      // Get current request count for this token, or initialize to [0]
-      const tokenCount = tokenCache.get(token) || [0];
+      // Get [count, window start] for this token, or open a new window now
+      let tokenCount = tokenCache.get(token);
 
       // If this is a new token, add it to the cache
-      if (tokenCount[0] === 0) {
+      if (!tokenCount) {
+        tokenCount = [0, Date.now()];
         tokenCache.set(token, tokenCount);
       }
 
@@ -109,7 +112,8 @@ export function rateLimit(config: RateLimitConfig) {
         success: !isRateLimited,
         limit,
         remaining: Math.max(0, limit - currentUsage),
-        reset: Date.now() + config.interval,
+        // When this window closes, not a full interval from now.
+        reset: tokenCount[1] + interval,
       };
     },
 
@@ -169,34 +173,108 @@ export const authRateLimiter = rateLimit({
   uniqueTokenPerInterval: 500,
 });
 
+const DEFAULT_TRUSTED_PROXY_HOPS = 1;
+
 /**
- * Extract the real client IP from request headers.
+ * Parse TRUSTED_PROXY_HOPS: a non-negative integer, 1 when unset.
+ *
+ * Anything else (e.g. "two", "-1", "1.5") is reported as invalid and replaced by the
+ * default. The old `Math.max(1, parseInt(...))` turned a typo into NaN, which made
+ * every request resolve to one shared key, and silently turned 0 into 1.
+ */
+export function parseTrustedProxyHops(raw: string | undefined): { hops: number; valid: boolean } {
+  const value = raw?.trim() ?? '';
+  if (value === '') return { hops: DEFAULT_TRUSTED_PROXY_HOPS, valid: true };
+  if (!/^\d+$/.test(value)) return { hops: DEFAULT_TRUSTED_PROXY_HOPS, valid: false };
+  return { hops: Number(value), valid: true };
+}
+
+// Each distinct problem is logged once per process, not once per request.
+const reportedHopsProblems = new Set<string>();
+function reportHopsProblemOnce(key: string, log: () => void) {
+  if (reportedHopsProblems.has(key)) return;
+  reportedHopsProblems.add(key);
+  log();
+}
+
+function trustedProxyHops(): number {
+  const raw = process.env.TRUSTED_PROXY_HOPS;
+  const { hops, valid } = parseTrustedProxyHops(raw);
+  if (!valid) {
+    reportHopsProblemOnce(`invalid:${raw}`, () => console.error(
+      `[RateLimiter] TRUSTED_PROXY_HOPS="${raw}" is not a non-negative integer; using ` +
+      `${DEFAULT_TRUSTED_PROXY_HOPS}. Set it to the number of trusted reverse proxies in ` +
+      'front of the app (see .env.example).'
+    ));
+  } else if (hops === 0) {
+    reportHopsProblemOnce('zero', () => console.warn(
+      '[RateLimiter] TRUSTED_PROXY_HOPS=0: no trusted proxy. Route handlers cannot see the ' +
+      'TCP peer, so client keys come from the X-Forwarded-For value Next.js fills in when a ' +
+      'request has none - and a client that sends its own header can forge its key. Put the ' +
+      'app behind the reverse proxy in nginx/nginx.conf for per-client limits that hold.'
+    ));
+  }
+  return hops;
+}
+
+/**
+ * The client address as reported by our trusted proxies, or null when the request
+ * carries none.
  *
  * x-forwarded-for is a comma-separated list of IPs appended left-to-right by
  * each proxy. A client can prepend arbitrary values to the leftmost position,
  * so taking [0] is spoofable. The rightmost IP is appended by the nearest
- * trusted proxy and cannot be forged by the client.
+ * trusted proxy and cannot be forged by the client - provided the client cannot
+ * bypass that proxy (Next.js only fills the header in when it is absent).
  *
- * Set TRUSTED_PROXY_HOPS=N (default 1) to control how many proxy hops to
- * strip from the right. For Vercel / a single nginx in front of the app,
- * the default of 1 is correct.
+ * Set TRUSTED_PROXY_HOPS=N (default 1) to the number of trusted proxies that
+ * append to the header. For Vercel / the nginx config in nginx/ (which overwrites
+ * the header with the peer address), the default of 1 is correct. 0 declares that
+ * there is no proxy; the rightmost entry is then all a route handler can see.
  */
-export function getClientIp(request: Request): string {
-  const trustedHops = Math.max(1, parseInt(process.env.TRUSTED_PROXY_HOPS || '1', 10));
+export function resolveClientIp(request: Pick<Request, 'headers'>): string | null {
+  const trustedHops = Math.max(1, trustedProxyHops());
 
   const forwardedFor = request.headers.get('x-forwarded-for');
   if (forwardedFor) {
     const ips = forwardedFor.split(',').map(ip => ip.trim()).filter(Boolean);
+    if (ips.length > 0 && ips.length < trustedHops) {
+      // Fewer entries than trusted proxies: either the setting is too large for the
+      // proxy chain or the request skipped a proxy. Index 0 is then the address the
+      // first proxy saw (a client that skips a proxy can forge any position anyway).
+      reportHopsProblemOnce('short-chain', () => console.warn(
+        `[RateLimiter] X-Forwarded-For has fewer entries than TRUSTED_PROXY_HOPS=${trustedHops}; ` +
+        'check that the setting matches the proxy chain and that the app is not reachable directly.'
+      ));
+    }
     // The client-supplied IP is at index 0; the first proxy adds at index 1, etc.
     // We trust the entry added by our own proxy: ips[ips.length - trustedHops].
     const idx = Math.max(0, ips.length - trustedHops);
     if (ips[idx]) return ips[idx];
   }
 
-  const realIp = request.headers.get('x-real-ip');
-  if (realIp) return realIp.trim();
+  const realIp = request.headers.get('x-real-ip')?.trim();
+  if (realIp) return realIp;
 
-  return 'unknown';
+  return null;
+}
+
+/**
+ * Extract the real client IP from request headers (see resolveClientIp), or
+ * 'unknown' when the request carries no client address.
+ */
+export function getClientIp(request: Request): string {
+  return resolveClientIp(request) ?? 'unknown';
+}
+
+/** Node-style header records (as NextAuth hands to `authorize`) as a Headers object. */
+export function toHeaders(raw: Headers | Record<string, string | string[] | undefined> = {}): Headers {
+  if (raw instanceof Headers) return raw;
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(raw)) {
+    if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(',') : value);
+  }
+  return headers;
 }
 
 /**

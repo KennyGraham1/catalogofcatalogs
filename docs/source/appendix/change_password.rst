@@ -137,10 +137,13 @@ Step 6: Success!
 ^^^^^^^^^^^^^^^^
 
 
-- You'll see a success message: "Password changed successfully!"
-- You'll be automatically redirected to your profile page
-- Your new password is now active
-- You can use it immediately for future logins
+- You'll see a message that your password was changed and that all
+  sessions were signed out (changing your password revokes every active
+  session, including this one)
+- After about 2 seconds, you'll be signed out automatically and redirected
+  to the login page
+- Sign in again with your new password to land back on your profile page
+- Your new password is active immediately
 
 
 
@@ -285,7 +288,9 @@ The password change functionality uses the following API endpoint:
 **Error Responses:**
 
 - **401 Unauthorized** - Not logged in
-- **401 Unauthorized** - Current password is incorrect
+- **400 Bad Request** - Current password is incorrect (you are signed in;
+  only the password field was wrong, so this is not reported as a session
+  problem)
 - **400 Bad Request** - Missing required fields
 - **400 Bad Request** - New password too short
 - **404 Not Found** - User not found

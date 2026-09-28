@@ -17,7 +17,7 @@ Executive Summary
 ✅ **Validation:** Comprehensive validation in place  
 ✅ **Error Handling:** Robust error handling implemented  
 ✅ **Data Quality:** Multi-layer quality checks active  
-✅ **Security:** CSRF protection enabled on all POST endpoints
+✅ **Security:** Cross-origin state-changing requests blocked by Origin-check middleware (no CSRF token)
 
 
 
@@ -33,8 +33,8 @@ Endpoints Audited
 
 **Findings:**
 - ✅ File size limit: 500MB properly enforced
-- ✅ File type validation: Supports CSV, TXT, JSON, GeoJSON, XML, QML
-- ✅ CSRF protection: Enabled via ``withCSRF`` middleware
+- ✅ File type validation: Supports CSV, TXT, DAT, JSON, GeoJSON, XML, QML, QuakeML
+- ✅ Cross-origin write protection: blocked by Origin-check middleware (``middleware.ts``); no CSRF token is used
 - ✅ Error handling: Comprehensive try-catch with detailed error messages
 - ✅ Delimiter support: NEW - Supports multiple delimiters with auto-detection
 - ✅ GeoJSON support: NEW - Full GeoJSON FeatureCollection and Feature support
@@ -55,14 +55,14 @@ Endpoints Audited
 **Status:** ✅ PASS
 
 **Findings:**
-- ✅ CSRF protection: Enabled via ``withCSRF`` middleware
+- ✅ Cross-origin write protection: blocked by Origin-check middleware (``middleware.ts``); no CSRF token is used
 - ✅ Input validation: Comprehensive validation of all parameters
   - Date range validation
   - Magnitude range validation
   - Depth range validation
   - Geographic bounds validation
 - ✅ Error handling: Proper try-catch with detailed error messages
-- ✅ Audit logging: All imports logged via ``auditApiAction()``
+- ✅ Audit logging: Each import recorded via ``writeAuditLog()`` (``lib/audit.ts``, action ``import.geonet``)
 - ✅ Cache invalidation: Properly invalidates catalogue cache after import
 - ⚠️ No file size limit (not applicable - API import, not file upload)
 
@@ -85,7 +85,7 @@ Endpoints Audited
 - ✅ Input validation: catalogueId required, limit parameter validated
 - ✅ Error handling: Proper try-catch with error messages
 - ✅ Parameter validation: Limit must be positive number
-- ⚠️ No CSRF protection (not required for GET requests)
+- ⚠️ No origin/cross-site-write check applies (the middleware only checks state-changing methods; not relevant to GET requests)
 
 
 
@@ -171,7 +171,7 @@ Client-Side Validation
    export const fileUploadSchema = z.object({
      fileName: z.string().min(1),
      fileSize: z.number().max(500 * 1024 * 1024), // Max 500MB
-     fileType: z.enum(['csv', 'txt', 'json', 'geojson', 'xml', 'qml']),
+     fileType: z.enum(['csv', 'txt', 'dat', 'json', 'geojson', 'xml', 'qml']),
    });
 
 
@@ -219,12 +219,20 @@ Security Assessment
 -------------------
 
 
-CSRF Protection
-^^^^^^^^^^^^^^^
+Cross-Origin Write Protection
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-✅ All POST endpoints protected:
+✅ No CSRF token is used. ``middleware.ts`` refuses any state-changing
+(POST/PUT/PATCH/DELETE) request to ``/api/*`` whose ``Origin`` header
+names a different host than the app itself, returning ``403``
+(``/api/auth/*`` routes are excluded and check their own CSRF-equivalent).
+This applies uniformly to all state-changing API routes, including:
 - ``/api/upload`` - ✅ Protected
 - ``/api/import/geonet`` - ✅ Protected
+
+It is layered with the NextAuth session cookie's ``SameSite=Lax``
+attribute (keeps the cookie off cross-site POSTs) and route-level
+role/permission checks.
 
 Input Sanitization
 ^^^^^^^^^^^^^^^^^^

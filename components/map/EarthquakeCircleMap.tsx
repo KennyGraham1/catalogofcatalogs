@@ -1,20 +1,28 @@
 'use client';
 
-import { useEffect, useCallback, memo } from 'react';
+import { useEffect, useCallback, useMemo, useState, memo } from 'react';
 import { useMapEventSelection } from '@/hooks/use-map-event-selection';
 import { MapViewportObserver } from './MapViewportObserver';
 import { MapDetailControl } from './MapDetailControl';
 import type { MapDetail } from '@/lib/map-event-selection';
 import { EarthquakeMarkerLayer } from './EarthquakeMarkerLayer';
+import {
+  DepthLegendItems, MagnitudeLegendItems, QualityLegendItems, AzimuthalGapLegendItems,
+  SourceCatalogueLegendItems, resolveSourceCatalogue, buildCatalogueColorScale,
+} from './MapLegend';
 import { useEventMapPopup } from '@/hooks/use-event-map-popup';
 import L from 'leaflet';
 import { MapContainer, Popup } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Activity, Calendar, Ruler, MapPin, Info } from 'lucide-react';
-import { TechnicalTermTooltip } from '@/components/ui/info-tooltip';
+import { Label } from '@/components/ui/label';
+import { Activity, Calendar, Ruler, MapPin, Info, Layers } from 'lucide-react';
+import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import { getEarthquakeColor, getMagnitudeLabel } from '@/lib/earthquake-utils';
+import { getAzimuthalGapColor } from '@/lib/uncertainty-utils';
+import { getQualityColor } from '@/lib/quality-scoring';
+import { resolveEventQuality } from '@/components/events/event-quality';
 import { useMapColors } from '@/hooks/use-map-theme';
 import 'leaflet/dist/leaflet.css';
 
@@ -28,6 +36,21 @@ export interface CircleMapEvent {
   magnitude_type?: string | null;
   event_type?: string | null;
   region?: string | null;
+
+  // C1: stored quality score/grade (resolveEventQuality prefers these; see event-quality.ts).
+  quality_score?: number | null;
+  quality_grade?: string | null;
+
+  // Station-coverage / azimuthal-gap colour mode.
+  azimuthal_gap?: number | null;
+
+  // Source-catalogue colour mode (contract C2; see MapLegend.resolveSourceCatalogue).
+  /** Stamped by catalogue-event-loader with the catalogue this row was fetched from. */
+  catalogue?: string | null;
+  /** Distinct catalogue ids that contributed to a merged row. */
+  source_catalogue_ids?: string[] | null;
+  /** Full per-source provenance JSON; only present when the caller fetched full events. */
+  source_events?: string | null;
 }
 
 interface EarthquakeCircleMapProps {
@@ -38,7 +61,17 @@ interface EarthquakeCircleMapProps {
   zoom?: number;
   height?: string;
   mapKey?: string;
+  /**
+   * Optional catalogue id -> display name lookup for the source-catalogue colour mode.
+   * Without it, a merged row's contributing catalogues are labelled by their raw id.
+   */
+  catalogueNames?: Record<string, string>;
 }
+
+/** Colour modes this map's selector offers (paper sec:viz: depth, quality grade,
+ *  azimuthal gap, source catalogue). Magnitude is size-only here, matching the existing
+ *  legend ("Magnitude (Size)"), so it is not also a colour choice. */
+type CircleMapColorMode = 'depth' | 'quality' | 'azimuthal-gap' | 'source-catalogue';
 
 /**
  * Origin times are UTC by definition (QuakeML 1.2 / ISO 8601 "Z"), so they are rendered
@@ -116,8 +149,10 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
   zoom = 5,
   height = '600px',
   mapKey = 'earthquake-circle-map',
+  catalogueNames,
 }: EarthquakeCircleMapProps) {
   const mapColors = useMapColors();
+  const [colorMode, setColorMode] = useState<CircleMapColorMode>('depth');
 
   const { sampled: sampledEvents, total, displayCount, visibleCount, isSampled, onViewportChange } = useMapEventSelection(events, sampleSize);
 
@@ -131,11 +166,87 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
   }, []);
 
   const { activePopup, onEventClick } = useEventMapPopup(events, mapKey);
-  const getEventColor = useCallback((event: CircleMapEvent) =>
-    getEarthquakeColor(event.depth, mapColors.isDark), [mapColors.isDark]);
+
+  // Quality scores (C1: prefer the stored quality_score/quality_grade; see event-quality.ts).
+  const qualityScoreMap = useMemo(() => {
+    if (colorMode !== 'quality') return new Map<CircleMapEvent['id'], ReturnType<typeof resolveEventQuality>>();
+    return new Map(sampledEvents.map(event => [event.id, resolveEventQuality(event)]));
+  }, [sampledEvents, colorMode]);
+
+  // Source-catalogue category per event (contract C2) and the categorical scale/legend it implies.
+  const sourceCatalogueInfoMap = useMemo(() => {
+    if (colorMode !== 'source-catalogue') return new Map<CircleMapEvent['id'], ReturnType<typeof resolveSourceCatalogue>>();
+    return new Map(sampledEvents.map(event => [event.id, resolveSourceCatalogue(event, catalogueNames)]));
+  }, [sampledEvents, colorMode, catalogueNames]);
+
+  const sourceCatalogueScale = useMemo(
+    () => buildCatalogueColorScale(Array.from(sourceCatalogueInfoMap.values())),
+    [sourceCatalogueInfoMap]
+  );
+
+  const getEventColor = useCallback((event: CircleMapEvent) => {
+    if (colorMode === 'quality') {
+      const quality = qualityScoreMap.get(event.id);
+      return quality ? getQualityColor(quality.score) : getEarthquakeColor(event.depth, mapColors.isDark);
+    }
+    if (colorMode === 'azimuthal-gap') {
+      return getAzimuthalGapColor(event.azimuthal_gap);
+    }
+    if (colorMode === 'source-catalogue') {
+      const info = sourceCatalogueInfoMap.get(event.id);
+      return sourceCatalogueScale.colorFor(info?.key ?? '__unknown__');
+    }
+    return getEarthquakeColor(event.depth, mapColors.isDark);
+  }, [colorMode, qualityScoreMap, mapColors.isDark, sourceCatalogueInfoMap, sourceCatalogueScale]);
 
   return (
     <div className="relative" style={{ height }}>
+      {/* Map Options: colour-mode selector (paper sec:viz: depth, quality grade,
+          azimuthal gap, source catalogue), self-contained so callers need no change. */}
+      <Card className="absolute top-4 right-4 z-[2000] p-3 bg-background/95 backdrop-blur-sm shadow-lg max-w-[220px]">
+        <div className="flex items-center gap-1.5 mb-2">
+          <Layers className="h-3.5 w-3.5" />
+          <Label className="text-xs font-medium">Color By</Label>
+          <InfoTooltip content="Choose which attribute determines marker color." />
+        </div>
+        <div className="space-y-1">
+          {([
+            { mode: 'depth', label: 'Depth', term: 'depth' },
+            { mode: 'quality', label: 'Quality', term: 'qualityScore' },
+            { mode: 'azimuthal-gap', label: 'Azimuthal Gap', term: 'azimuthalGap' },
+          ] as const).map(({ mode, label, term }) => (
+            <div key={mode} className="flex items-center gap-2">
+              <input
+                type="radio"
+                id={`circle-color-${mode}`}
+                name={`circle-colorMode-${mapKey}`}
+                checked={colorMode === mode}
+                onChange={() => setColorMode(mode)}
+                className="cursor-pointer"
+              />
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor={`circle-color-${mode}`} className="text-xs cursor-pointer">{label}</Label>
+                <TechnicalTermTooltip term={term} />
+              </div>
+            </div>
+          ))}
+          <div className="flex items-center gap-2">
+            <input
+              type="radio"
+              id="circle-color-source-catalogue"
+              name={`circle-colorMode-${mapKey}`}
+              checked={colorMode === 'source-catalogue'}
+              onChange={() => setColorMode('source-catalogue')}
+              className="cursor-pointer"
+            />
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="circle-color-source-catalogue" className="text-xs cursor-pointer">Source Catalogue</Label>
+              <InfoTooltip content="For a merged event, the catalogue whose solution (time and location) this row publishes; otherwise the catalogue the event came from." />
+            </div>
+          </div>
+        </div>
+      </Card>
+
       {/* Sampling badge */}
       {isSampled && (
         <Card className="absolute top-20 left-4 z-[2000] p-3 bg-background/95 backdrop-blur-sm shadow-lg">
@@ -171,46 +282,41 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
         )}
       </MapContainer>
 
-      {/* Legend */}
+      {/* Legend: swatches come from the same functions that colour the markers above */}
       <Card className="absolute bottom-4 right-4 z-[2000] max-w-[240px] border-border/60 bg-background/90 px-3 py-2.5 text-[11px] leading-tight backdrop-blur-sm shadow-lg">
         <div className="flex items-center justify-between gap-2">
-          <h4 className="text-[11px] font-semibold">Depth (Color)</h4>
-          <TechnicalTermTooltip term="depth" />
+          <h4 className="text-[11px] font-semibold">
+            {colorMode === 'quality' ? 'Quality Score'
+              : colorMode === 'azimuthal-gap' ? 'Azimuthal Gap'
+              : colorMode === 'source-catalogue' ? 'Source Catalogue'
+              : 'Depth (Color)'}
+          </h4>
+          {colorMode === 'quality' ? (
+            <TechnicalTermTooltip term="qualityScore" />
+          ) : colorMode === 'azimuthal-gap' ? (
+            <TechnicalTermTooltip term="azimuthalGap" />
+          ) : colorMode === 'source-catalogue' ? (
+            <InfoTooltip content="Which catalogue each plotted event's solution (or source) came from." />
+          ) : (
+            <TechnicalTermTooltip term="depth" />
+          )}
         </div>
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-          {[
-            { color: getEarthquakeColor(0, mapColors.isDark), label: '<15 km (Shallow)' },
-            { color: getEarthquakeColor(15, mapColors.isDark), label: '15–40 km' },
-            { color: getEarthquakeColor(40, mapColors.isDark), label: '40–100 km' },
-            { color: getEarthquakeColor(100, mapColors.isDark), label: '100–200 km' },
-            { color: getEarthquakeColor(200, mapColors.isDark), label: '≥200 km (Deep)' },
-            { color: getEarthquakeColor(null, mapColors.isDark), label: 'Unknown depth' },
-          ].map(({ color, label }) => (
-            <div key={label} className="flex items-center gap-1.5">
-              <div className="h-2.5 w-2.5 flex-shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: color }} />
-              <span>{label}</span>
-            </div>
-          ))}
-        </div>
+        {colorMode === 'quality' ? (
+          <QualityLegendItems />
+        ) : colorMode === 'azimuthal-gap' ? (
+          <AzimuthalGapLegendItems />
+        ) : colorMode === 'source-catalogue' ? (
+          <SourceCatalogueLegendItems legend={sourceCatalogueScale.legend} />
+        ) : (
+          <DepthLegendItems isDark={mapColors.isDark} />
+        )}
 
         <div className="mt-2 border-t border-border/60 pt-2">
           <div className="flex items-center justify-between gap-2">
             <h4 className="text-[11px] font-semibold">Magnitude (Size)</h4>
             <TechnicalTermTooltip term="magnitude" />
           </div>
-          <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-            {[
-              { size: 'h-2 w-2', label: 'M2' },
-              { size: 'h-3 w-3', label: 'M4' },
-              { size: 'h-4 w-4', label: 'M6' },
-              { size: 'h-5 w-5', label: 'M7+' },
-            ].map(({ size, label }) => (
-              <div key={label} className="flex items-center gap-1.5">
-                <div className={`${size} flex-shrink-0 rounded-full`} style={{ backgroundColor: '#0D9488' }} />
-                <span>{label}</span>
-              </div>
-            ))}
-          </div>
+          <MagnitudeLegendItems />
         </div>
 
         <div className="mt-2 border-t border-border/60 pt-2">

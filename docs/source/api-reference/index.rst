@@ -14,6 +14,7 @@ including request/response payloads, parameters, and error conditions.
    upload
    merge
    export
+   saved-filters
    health
    errors
    authentication

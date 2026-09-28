@@ -1,4 +1,6 @@
 /**
+ * @jest-environment node
+ *
  * Integration tests for Catalogue API endpoints
  *
  * These tests verify the complete CRUD operations for catalogues:
@@ -9,16 +11,17 @@
  * - Delete catalogue (DELETE /api/catalogues/[id])
  * - Export catalogue (GET /api/catalogues/[id]/export)
  *
- * NOTE: These tests require Node.js 18+ for native Web API support (Request/Response).
- * They will be skipped on older Node versions.
+ * The route handlers and lib/db.ts run for real; MongoDB collections and the session
+ * lookup are mocked. This suite must run in the node environment: under the repo's
+ * default jsdom environment `Request` is undefined, and an earlier version of this file
+ * skipped itself on that condition, so it silently never ran anywhere (gap finding
+ * gt#3).
  */
 
-// Ensure this file is treated as a module (prevents global scope pollution)
-export {};
-
-// Check for Web API support BEFORE any imports that might depend on them
-const hasWebAPIs = typeof globalThis.Request !== 'undefined';
-const describeIfWebAPIs = hasWebAPIs ? describe : describe.skip;
+import { NextRequest } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { getCollection } from '@/lib/mongodb';
+import { catalogueCache } from '@/lib/cache';
 
 // Mock definitions - these are hoisted by Jest and run before any imports
 jest.mock('next-auth', () => ({
@@ -29,40 +32,36 @@ jest.mock('@/lib/mongodb', () => ({
   getDb: jest.fn(),
   getCollection: jest.fn(),
   withTransaction: jest.fn((callback) => callback({})),
-  COLLECTIONS: {
-    CATALOGUES: 'merged_catalogues',
-    EVENTS: 'merged_events',
+  COLLECTIONS: jest.requireActual('@/lib/mongodb').COLLECTIONS,
+}));
+
+// The real cache module, with the list cache replaced so a test can serve a hit.
+jest.mock('@/lib/cache', () => ({
+  ...jest.requireActual('@/lib/cache'),
+  catalogueCache: {
+    get: jest.fn(),
+    set: jest.fn(),
+    clearAll: jest.fn(),
+    invalidateByPrefix: jest.fn(() => 0),
+    invalidateBySubstring: jest.fn(() => 0),
   },
 }));
 
-jest.mock('@/lib/cache', () => ({
-  apiCache: { get: jest.fn(), set: jest.fn(), delete: jest.fn(), clear: jest.fn() },
-  catalogueCache: { get: jest.fn(), set: jest.fn(), delete: jest.fn() },
-  generateCacheKey: jest.fn((prefix, params) => `${prefix}:${JSON.stringify(params)}`),
-  invalidateCacheByPrefix: jest.fn(),
-}));
-
 jest.mock('@/lib/rate-limiter', () => ({
+  ...jest.requireActual('@/lib/rate-limiter'),
   applyRateLimit: jest.fn(() => ({ success: true, headers: {} })),
   readRateLimiter: {},
   apiRateLimiter: {},
 }));
 
-// Conditionally import modules to avoid loading next/server on Node < 18
-// Using require() inside conditional ensures the import doesn't happen at module parse time
-let NextRequest: typeof import('next/server').NextRequest;
-let getServerSession: typeof import('next-auth').getServerSession;
-let getCollection: typeof import('@/lib/mongodb').getCollection;
-let catalogueCache: typeof import('@/lib/cache').catalogueCache;
-
-if (hasWebAPIs) {
-  NextRequest = require('next/server').NextRequest;
-  getServerSession = require('next-auth').getServerSession;
-  getCollection = require('@/lib/mongodb').getCollection;
-  catalogueCache = require('@/lib/cache').catalogueCache;
+/** Split a CSV export into its header columns and data rows (RFC 4180, no prologue). */
+function csvTable(text: string): { header: string[]; rows: string[][] } {
+  const lines = text.split(/\r?\n/).filter((line) => line.length > 0 && !line.startsWith('#'));
+  const [header = '', ...rows] = lines;
+  return { header: header.split(','), rows: rows.map((line) => line.split(',')) };
 }
 
-describeIfWebAPIs('Catalogue API Integration Tests', () => {
+describe('Catalogue API Integration Tests', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -77,6 +76,10 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
       mockFind.mockReturnValue({ sort: mockSort });
       (getCollection as jest.Mock).mockResolvedValue({
         find: mockFind,
+        // The list cache is keyed by the shared cache generation (lib/cache.ts), which
+        // lib/db reads from the cache_generations collection; without it the route
+        // (correctly) neither reads nor writes the cache.
+        findOne: jest.fn(async () => ({ generation: 0 })),
       });
     });
 
@@ -141,6 +144,12 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
         insertOne: mockInsertOne,
         insertMany: mockInsertMany,
         findOne: mockFindOne,
+        // The upload recounts the rows it stored and then completes the catalogue.
+        countDocuments: jest.fn().mockResolvedValue(2),
+        updateOne: jest.fn().mockResolvedValue({ matchedCount: 1, modifiedCount: 1 }),
+        deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }),
+        deleteOne: jest.fn().mockResolvedValue({ deletedCount: 0 }),
+        bulkWrite: jest.fn().mockResolvedValue({ ok: 1 }),
       });
     });
 
@@ -156,6 +165,8 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
         id: 'new-cat-id',
         name: 'New Catalogue',
         event_count: 2,
+        status: 'processing',
+        version_state: 'initial',
       });
 
       const requestBody = {
@@ -337,6 +348,8 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
       (getCollection as jest.Mock).mockResolvedValue({
         findOne: mockFindOne,
         updateOne: mockUpdateOne,
+        insertOne: jest.fn().mockResolvedValue({ acknowledged: true }), // audit log
+        bulkWrite: jest.fn().mockResolvedValue({ ok: 1 }),
       });
     });
 
@@ -349,12 +362,15 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
       mockFindOne.mockResolvedValue({
         id: 'cat-123',
         name: 'Old Name',
+        status: 'complete',
+        version: '1.0.0',
       });
-      mockUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+      mockUpdateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
 
+      // Metadata fields sit at the top level of the body, beside the name.
       const requestBody = {
         name: 'Updated Name',
-        metadata: { description: 'Updated description' },
+        description: 'Updated description',
       };
 
       // Act
@@ -367,7 +383,32 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
 
       // Assert
       expect(response.status).toBe(200);
-      expect(mockUpdateOne).toHaveBeenCalled();
+      expect(await response.json()).toEqual({ success: true, version: '1.0.1' });
+      const [filter, update] = mockUpdateOne.mock.calls[0];
+      expect(filter).toMatchObject({ id: 'cat-123' });
+      expect(update.$set).toMatchObject({
+        name: 'Updated Name',
+        description: 'Updated description',
+        modified_by: 'editor-123',
+        version: '1.0.1',
+      });
+    });
+
+    it('should return 404 when updating a non-existent catalogue', async () => {
+      (getServerSession as jest.Mock).mockResolvedValue({
+        user: { id: 'editor-123', email: 'editor@example.com', role: 'editor' },
+      });
+      mockFindOne.mockResolvedValue(null);
+
+      const { PATCH } = await import('@/app/api/catalogues/[id]/route');
+      const request = new NextRequest('http://localhost:3000/api/catalogues/missing', {
+        method: 'PATCH',
+        body: JSON.stringify({ description: 'x' }),
+      });
+      const response = await PATCH(request, { params: Promise.resolve({ id: 'missing' }) });
+
+      expect(response.status).toBe(404);
+      expect(mockUpdateOne).not.toHaveBeenCalled();
     });
 
     it('should reject update without authentication', async () => {
@@ -388,15 +429,17 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
   });
 
   describe('DELETE /api/catalogues/[id]', () => {
-    const mockFindOne = jest.fn();
+    const mockUpdateOne = jest.fn();
     const mockDeleteOne = jest.fn();
     const mockDeleteMany = jest.fn();
 
     beforeEach(() => {
       (getCollection as jest.Mock).mockResolvedValue({
-        findOne: mockFindOne,
+        updateOne: mockUpdateOne,
         deleteOne: mockDeleteOne,
         deleteMany: mockDeleteMany,
+        insertOne: jest.fn().mockResolvedValue({ acknowledged: true }), // audit log
+        bulkWrite: jest.fn().mockResolvedValue({ ok: 1 }),
       });
     });
 
@@ -406,7 +449,7 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
         user: { id: 'editor-123', email: 'editor@example.com', role: 'editor' },
       });
 
-      mockFindOne.mockResolvedValue({ id: 'cat-123', name: 'To Delete' });
+      mockUpdateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 }); // marked 'deleting'
       mockDeleteOne.mockResolvedValue({ deletedCount: 1 });
       mockDeleteMany.mockResolvedValue({ deletedCount: 100 });
 
@@ -417,8 +460,11 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
       });
       const response = await DELETE(request, { params: Promise.resolve({ id: 'cat-123' }) });
 
-      // Assert
+      // Assert: marked first, then its events and import history, then the row itself.
       expect(response.status).toBe(200);
+      expect(mockUpdateOne.mock.calls[0][1]).toMatchObject({ $set: { status: 'deleting' } });
+      expect(mockDeleteMany).toHaveBeenCalledWith({ catalogue_id: 'cat-123' });
+      expect(mockDeleteOne).toHaveBeenCalledWith({ id: 'cat-123', status: 'deleting' });
     });
 
     it('should return 404 for non-existent catalogue', async () => {
@@ -427,7 +473,7 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
         user: { id: 'editor-123', email: 'editor@example.com', role: 'editor' },
       });
 
-      mockFindOne.mockResolvedValue(null);
+      mockUpdateOne.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
 
       // Act
       const { DELETE } = await import('@/app/api/catalogues/[id]/route');
@@ -438,11 +484,12 @@ describeIfWebAPIs('Catalogue API Integration Tests', () => {
 
       // Assert
       expect(response.status).toBe(404);
+      expect(mockDeleteMany).not.toHaveBeenCalled();
     });
   });
 });
 
-describeIfWebAPIs('Catalogue Events API', () => {
+describe('Catalogue Events API', () => {
   const mockFind = jest.fn();
   const mockToArray = jest.fn();
   const mockSort = jest.fn();
@@ -486,14 +533,15 @@ describeIfWebAPIs('Catalogue Events API', () => {
       const response = await GET(request, { params: Promise.resolve({ id: 'cat-123' }) });
       const body = await response.json();
 
-      // Assert
+      // Assert: a paginated response carries the rows in `data`.
       expect(response.status).toBe(200);
-      expect(body.events).toHaveLength(2);
+      expect(body.data).toHaveLength(2);
+      expect(body.pagination.totalItems).toBe(100);
     });
   });
 });
 
-describeIfWebAPIs('Catalogue Export API', () => {
+describe('Catalogue Export API', () => {
   const mockFindOne = jest.fn();
   const mockFind = jest.fn();
   const mockToArray = jest.fn();
@@ -537,7 +585,7 @@ describeIfWebAPIs('Catalogue Export API', () => {
       );
       const response = await GET(request, { params: Promise.resolve({ id: 'cat-123' }) });
       const text = await response.text();
-      const headerLine = text.split('\n').find(l => l.startsWith('Time,'));
+      const headerLine = csvTable(text).header.join(',');
 
       // Assert
       expect(response.status).toBe(200);
@@ -739,7 +787,9 @@ describeIfWebAPIs('Catalogue Export API', () => {
       expect(response.status).toBe(200);
       const text = await response.text();
       // Should contain the header row but no data rows
-      expect(text).toContain('Time,Latitude,Longitude');
+      const { header, rows } = csvTable(text);
+      expect(header).toEqual(expect.arrayContaining(['Time', 'Latitude', 'Longitude']));
+      expect(rows).toEqual([]);
     });
 
     it('should quote CSV fields containing commas', async () => {
@@ -796,10 +846,9 @@ describeIfWebAPIs('Catalogue Export API', () => {
 
       expect(response.status).toBe(200);
       const text = await response.text();
-      const dataLine = text.split('\n').find(l => l.startsWith('2024-01-15'));
-      expect(dataLine).toBeDefined();
-      const fields = dataLine!.split(',');
-      expect(fields[6]).toBe('0'); // depth column
+      const { header, rows } = csvTable(text);
+      expect(rows).toHaveLength(1);
+      expect(rows[0][header.indexOf('Depth')]).toBe('0');
     });
 
     it('should set Content-Disposition header with filename', async () => {

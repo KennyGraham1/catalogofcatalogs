@@ -10,7 +10,7 @@ import { getCollection, COLLECTIONS } from '@/lib/mongodb';
 import { Logger } from '@/lib/errors';
 import { validateRoleRequestSubmission, formatZodErrors } from '@/lib/validation';
 import { getUserById } from '@/lib/auth/utils';
-import { RoleChangeRequest, UserRole } from '@/lib/auth/types';
+import { RoleChangeRequest, RoleChangeRequestForReview, UserRole } from '@/lib/auth/types';
 
 const logger = new Logger('RoleRequestsAPI');
 
@@ -148,9 +148,25 @@ export async function GET(request: NextRequest) {
     const collection = await getCollection<RoleChangeRequest>(COLLECTIONS.ROLE_REQUESTS);
     const requests = await collection.find(filter).sort({ created_at: -1 }).toArray();
 
-    const sanitized = requests.map((item) => {
+    // A request records the role the user had when filing it. Reviewers need the role
+    // the account has now: it may have been changed, or the account deactivated, since.
+    const userIds = Array.from(new Set(requests.map((item) => item.user_id)));
+    const usersCollection = await getCollection(COLLECTIONS.USERS);
+    const accounts = userIds.length === 0
+      ? []
+      : await usersCollection
+        .find({ id: { $in: userIds } }, { projection: { id: 1, role: 1, is_active: 1 } })
+        .toArray();
+    const liveById = new Map(accounts.map((account) => [account.id as string, account]));
+
+    const sanitized: RoleChangeRequestForReview[] = requests.map((item) => {
       const { _id, ...rest } = item as RoleChangeRequest & { _id?: unknown };
-      return rest;
+      const live = liveById.get(rest.user_id);
+      return {
+        ...rest,
+        live_role: live ? (live.role as UserRole) : null,
+        live_is_active: live ? live.is_active !== false : null,
+      };
     });
 
     return NextResponse.json({ requests: sanitized });

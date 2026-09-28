@@ -25,16 +25,28 @@ beforeEach(() => {
   buckets.clear();
   (getCollection as jest.Mock).mockResolvedValue(limits);
 });
-it('allows only ten concurrent guesses for one normalized account before lookup and bcrypt', async () => {
+it('allows only ten concurrent guesses for one normalized account from one client before lookup and bcrypt', async () => {
   (auth.getUserByEmail as jest.Mock).mockResolvedValue({ id: 'u', is_active: true, password_hash: 'hash' });
   (auth.verifyPassword as jest.Mock).mockResolvedValue(false);
   const results = await Promise.allSettled(Array.from({ length: 20 }, (_, i) =>
-    (authOptions.providers[0] as any).authorize({ email: i % 2 ? ' AUDIT@example.test ' : 'audit@example.test', password: 'wrong-password' }, { headers: { 'x-forwarded-for': `198.51.100.${i}` } })
+    (authOptions.providers[0] as any).authorize({ email: i % 2 ? ' AUDIT@example.test ' : 'audit@example.test', password: 'wrong-password' }, { headers: { 'x-forwarded-for': `198.51.100.${i}, 203.0.113.7` } })
   ));
   expect(auth.getUserByEmail).toHaveBeenCalledTimes(10);
   expect(auth.verifyPassword).toHaveBeenCalledTimes(10);
-  expect(results.filter(r => r.status === 'rejected' && /Too many/.test(r.reason.message))).toHaveLength(10);
+  expect(results.filter(r => r.status === 'rejected' && r.reason.message === 'TooManyAttempts')).toHaveLength(10);
   expect(Array.from(buckets.keys()).some(key => key.includes('audit@'))).toBe(false);
+});
+// Finding #126: the old version of the test above sent the 20 guesses from 20 addresses
+// and required 10 to be refused, i.e. it asserted that other clients' failures lock the
+// account. Failures elsewhere must not stop the owner's client.
+it("does not let other clients' failures lock an account", async () => {
+  (auth.getUserByEmail as jest.Mock).mockResolvedValue({ id: 'u', is_active: true, password_hash: 'hash' });
+  (auth.verifyPassword as jest.Mock).mockResolvedValue(false);
+  const results = await Promise.allSettled(Array.from({ length: 20 }, (_, i) =>
+    (authOptions.providers[0] as any).authorize({ email: 'audit@example.test', password: 'wrong-password' }, { headers: { 'x-forwarded-for': `198.51.100.${i}` } })
+  ));
+  expect(results.filter(r => r.status === 'rejected' && r.reason.message === 'TooManyAttempts')).toHaveLength(0);
+  expect(auth.verifyPassword).toHaveBeenCalledTimes(20);
 });
 it('caps password spraying by the trusted client even when spoofed prefixes vary', async () => {
   const results = await Promise.all(Array.from({ length: 60 }, (_, i) =>
@@ -51,10 +63,18 @@ it('opens a fresh quota in the next window independently of TTL deletion', async
     expect(await allowCredentialAttempt('a@example.test')).toBe(true);
   } finally { now.mockRestore(); }
 });
-it('fails closed before user lookup if the shared limiter is unavailable', async () => {
+// Finding #126: this used to assert fail-closed, which turned any limiter-store fault into
+// a site-wide login outage. The limits are now enforced from process memory instead.
+it('keeps enforcing the limits in process memory if the shared limiter is unavailable', async () => {
   (getCollection as jest.Mock).mockRejectedValue(new Error('database unavailable'));
-  await expect((authOptions.providers[0] as any).authorize({ email: 'audit@example.test', password: 'guess' }, { headers: {} })).rejects.toThrow('database unavailable');
-  expect(auth.getUserByEmail).not.toHaveBeenCalled();
+  const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const results = await Promise.all(Array.from({ length: 11 }, () =>
+      allowCredentialAttempt('outage@example.test', { 'x-forwarded-for': '198.51.100.99' })
+    ));
+    expect(results.filter(Boolean)).toHaveLength(10);
+    expect(error).toHaveBeenCalled();
+  } finally { error.mockRestore(); }
 });
 it('allows only one concurrent reset and changes password/session version in one write', async () => {
   const token = { id: 'reset-1', user_id: 'u', used_at: null as Date | null };

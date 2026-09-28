@@ -58,51 +58,58 @@ export interface WaveformStreamID {
 // Event Types
 // ============================================================================
 
-export type EventType =
-  | 'not existing'
-  | 'not reported'
-  | 'earthquake'
-  | 'anthropogenic event'
-  | 'collapse'
-  | 'cavity collapse'
-  | 'mine collapse'
-  | 'building collapse'
-  | 'explosion'
-  | 'accidental explosion'
-  | 'chemical explosion'
-  | 'controlled explosion'
-  | 'experimental explosion'
-  | 'industrial explosion'
-  | 'mining explosion'
-  | 'quarry blast'
-  | 'road cut'
-  | 'blasting levee'
-  | 'nuclear explosion'
-  | 'induced or triggered event'
-  | 'rock burst'
-  | 'reservoir loading'
-  | 'fluid injection'
-  | 'fluid extraction'
-  | 'crash'
-  | 'plane crash'
-  | 'train crash'
-  | 'boat crash'
-  | 'other event'
-  | 'atmospheric event'
-  | 'sonic boom'
-  | 'sonic blast'
-  | 'acoustic noise'
-  | 'thunder'
-  | 'avalanche'
-  | 'snow avalanche'
-  | 'debris avalanche'
-  | 'hydroacoustic event'
-  | 'ice quake'
-  | 'slide'
-  | 'landslide'
-  | 'rockslide'
-  | 'meteorite'
-  | 'volcanic eruption';
+/**
+ * QuakeML 1.2 BED EventType enumeration (QuakeML-BED-1.2.xsd), as a runtime list so exporters
+ * can check a stored label against it.
+ */
+export const QUAKEML_EVENT_TYPES = [
+  'not existing',
+  'not reported',
+  'earthquake',
+  'anthropogenic event',
+  'collapse',
+  'cavity collapse',
+  'mine collapse',
+  'building collapse',
+  'explosion',
+  'accidental explosion',
+  'chemical explosion',
+  'controlled explosion',
+  'experimental explosion',
+  'industrial explosion',
+  'mining explosion',
+  'quarry blast',
+  'road cut',
+  'blasting levee',
+  'nuclear explosion',
+  'induced or triggered event',
+  'rock burst',
+  'reservoir loading',
+  'fluid injection',
+  'fluid extraction',
+  'crash',
+  'plane crash',
+  'train crash',
+  'boat crash',
+  'other event',
+  'atmospheric event',
+  'sonic boom',
+  'sonic blast',
+  'acoustic noise',
+  'thunder',
+  'avalanche',
+  'snow avalanche',
+  'debris avalanche',
+  'hydroacoustic event',
+  'ice quake',
+  'slide',
+  'landslide',
+  'rockslide',
+  'meteorite',
+  'volcanic eruption',
+] as const;
+
+export type EventType = typeof QUAKEML_EVENT_TYPES[number];
 
 export type EventTypeCertainty = 'known' | 'suspected';
 
@@ -119,15 +126,19 @@ export type EvaluationMode = 'manual' | 'automatic';
 
 export type EvaluationStatus = 'preliminary' | 'confirmed' | 'reviewed' | 'final' | 'rejected';
 
-export type OriginDepthType =
-  | 'from location'
-  | 'from moment tensor inversion'
-  | 'from modeling of broad-band P waveforms'
-  | 'constrained by depth phases'
-  | 'constrained by direct phases'
-  | 'constrained by depth and direct phases'
-  | 'operator assigned'
-  | 'other';
+/** QuakeML 1.2 BED OriginDepthType enumeration (QuakeML-BED-1.2.xsd). */
+export const QUAKEML_ORIGIN_DEPTH_TYPES = [
+  'from location',
+  'from moment tensor inversion',
+  'from modeling of broad-band P waveforms',
+  'constrained by depth phases',
+  'constrained by direct phases',
+  'constrained by depth and direct phases',
+  'operator assigned',
+  'other',
+] as const;
+
+export type OriginDepthType = typeof QUAKEML_ORIGIN_DEPTH_TYPES[number];
 
 export type OriginUncertaintyDescription =
   | 'horizontal uncertainty'

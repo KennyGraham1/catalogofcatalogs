@@ -11,8 +11,44 @@ GeoNet Quality Score Implementation Guide
 Overview
 --------
 
+.. important::
+   This page documents the platform's own **in-house QS0-QS6 location-quality
+   heuristic**, inspired by but **not a reproduction of** the published
+   GeoNet Quality Score (Warren-Smith et al., 2025). The two use different
+   methods and different inputs, and a QS0-QS6 number from this platform is
+   **not comparable** to a QS number GeoNet would report for the same event.
+   See *Relationship to the published GeoNet Quality Score* below.
 
-This guide documents the implementation of the **GeoNet Quality Score (QS) system** alongside our existing quality scoring system, creating a **dual-system approach** that provides both detailed analysis and standardized quality classification.
+This guide documents the implementation of the platform's **in-house QS0-QS6
+location-quality heuristic** alongside our existing 0-100 quality scoring
+system, creating a **dual-system approach** that provides both detailed
+analysis and a standardized-looking (but platform-specific) quality
+classification.
+
+Relationship to the published GeoNet Quality Score
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The module's own header (``lib/geonet-quality-score.ts``) states its
+provenance directly: this heuristic is inspired by the goal of the GeoNet
+location-quality study (Warren-Smith et al., 2025, NZJGG,
+doi:10.1080/00288306.2024.2421309) but is **not** a reproduction of its
+method, and its results are **not comparable** to the published QS.
+
+The published method **sums** up to six independent **binary** criteria
+(azimuthal gap <= 180°, >= 8 arrivals, >= 1 P pick, >= 1 S pick,
+nearest-station distance <= hypocentral depth, and a fixed-depth flag; a
+QS5 variant applies when depth-fixing is not used). This platform's
+heuristic instead takes the **minimum** across six **graded** thresholds on
+different inputs entirely (RMS residual and horizontal/depth uncertainty,
+which are not paper inputs at all, alongside azimuthal gap, station count
+and nearest-station distance with project-chosen thresholds) -- because
+this codebase has no phase-level picks or a fixed-depth flag to compute the
+published criteria from. Both scales happen to run QS0-QS6, which invites
+comparison, but a QS5 event under this heuristic and a QS5 event in the
+GeoNet catalogue were reached by different arithmetic on different data and
+should not be presented as the same measurement. To reproduce the
+published method, see the criteria above and the authors' reference
+implementation (github.com/calum-chamberlain/EQ_catalog_location_quality).
 
 
 
@@ -288,6 +324,20 @@ Minimum Distance Thresholds
    * - QS0
      - > 800
      - Unconstrained
+   * - QS0
+     - not reported
+     - "No data" -- a missing minimum distance is scored the same as every
+       other missing criterion (see note below).
+
+An earlier version of this heuristic scored a *missing* minimum distance as
+QS3 ("Unknown, assume fair") rather than QS0, which meant omitting the
+field could outscore honestly reporting a station beyond 200 km (QS2 or
+worse). Because the overall QS is the **minimum** across all six criteria,
+that one inconsistency could inflate the reported QS for records that
+simply left the field out. This has been corrected: a missing value now
+scores QS0 ("No data"), the same treatment every other criterion gives a
+missing value, so withholding this field can no longer score better than
+reporting it.
 
 
 
@@ -365,7 +415,7 @@ Example 3: Display Quality Information
    // Output:
    // Overall Quality: Very Good
    // Detailed Score: 85/100 (B)
-   // GeoNet QS: QS5 - Very Well Constrained
+   // Location quality heuristic (in-house, not the GeoNet QS): QS5 - Very Well Constrained
    //
    // Recommendation: High-quality location suitable for all applications...
    //
@@ -505,9 +555,15 @@ References
 ----------
 
 
-- **Research Paper**: "A quantitative assessment of GeoNet earthquake location quality in Aotearoa New Zealand"
-- **DOI**: 10.1080/00288306.2024.2421309
-- **Analysis Document**: ``docs/GEONET_QUALITY_SCORE_ANALYSIS.md``
+- **Research Paper** (the inspiration for this heuristic, not a specification it
+  implements): Warren-Smith, E., et al. (2025). "A quantitative assessment of
+  GeoNet earthquake location quality in Aotearoa New Zealand." *New Zealand
+  Journal of Geology and Geophysics.*
+- **DOI**: 10.1080/00288306.2024.2421309 -- this platform's QS0-QS6 heuristic
+  does **not** reproduce the method behind this DOI and its scores are not
+  comparable to the published QS; see *Relationship to the published GeoNet
+  Quality Score* above.
+- **Analysis Document**: :doc:`/appendix/geonet_quality_score_analysis`
 
 
 
@@ -516,7 +572,7 @@ Summary
 
 
 ✅ **Core implementation complete** with:
-- GeoNet QS calculation (QS0-QS6)
+- In-house location-quality heuristic (QS0-QS6; not the published GeoNet QS)
 - Integrated quality assessment
 - Comprehensive test suite (13 tests passing)
 - Detailed documentation

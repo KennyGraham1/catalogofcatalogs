@@ -6,56 +6,51 @@
  * This script promotes a user to admin role by email address.
  *
  * Usage:
- *   npx tsx scripts/promote-to-admin.ts <email>
+ *   npx tsx scripts/promote-to-admin.ts <email> [--yes]
  *
  * Example:
  *   npx tsx scripts/promote-to-admin.ts test@example.com
  */
 
-import { MongoClient } from 'mongodb';
-import { config } from 'dotenv';
-import { resolve } from 'path';
+import { resolveDbTarget } from './lib/db-target';
+import { confirmWrite } from './lib/confirm';
 
-// Load environment variables from .env file
-config({ path: resolve(__dirname, '../.env') });
-
-const MONGODB_URI = process.env.MONGODB_URI || '';
-const MONGODB_DATABASE = process.env.MONGODB_DATABASE || 'earthquake_catalogue';
+const ASSUME_YES = process.argv.includes('--yes');
 
 async function promoteToAdmin(email: string) {
-  if (!MONGODB_URI) {
-    console.error('❌ Error: MONGODB_URI environment variable is not set');
-    process.exit(1);
-  }
-
   if (!email) {
     console.error('❌ Error: Email address is required');
     console.log('\nUsage: npx tsx scripts/promote-to-admin.ts <email>');
     console.log('Example: npx tsx scripts/promote-to-admin.ts test@example.com');
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
-  const client = new MongoClient(MONGODB_URI);
+  // See scripts/migrate-add-region.ts for why this goes through lib/mongodb.ts's
+  // getDb() instead of resolving MONGODB_URI/MONGODB_DATABASE itself (gs#3/gs#4).
+  const target = await resolveDbTarget();
 
   try {
-    console.log('🔌 Connecting to MongoDB...');
-    await client.connect();
-    console.log('✓ Connected to MongoDB\n');
+    // getUserByEmail (lib/auth/utils.ts) matches case-insensitively, the same way
+    // login does. An exact-case findOne({ email }) here would miss an account
+    // whose stored (createUser-normalised, lower-cased) email differs only in
+    // case from what the operator typed, and report "not found" even though the
+    // account exists — the same root cause as gs#6, applied to this script's own
+    // lookup. Deferred import: see migrate-auth-schema.ts for why.
+    const { getUserByEmail } = await import('../lib/auth/utils');
 
-    const db = client.db(MONGODB_DATABASE);
-    const usersCollection = db.collection('users');
-
-    // Find the user
-    const user = await usersCollection.findOne({ email });
+    const user = await getUserByEmail(email);
 
     if (!user) {
       console.error(`❌ Error: User with email "${email}" not found`);
       console.log('\nAvailable users:');
+      const usersCollection = target.db.collection('users');
       const allUsers = await usersCollection.find({}, { projection: { email: 1, name: 1, role: 1 } }).toArray();
-      allUsers.forEach(u => {
+      allUsers.forEach((u: any) => {
         console.log(`  - ${u.email} (${u.name}) - Role: ${u.role}`);
       });
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
 
     console.log('📋 Current user details:');
@@ -66,17 +61,30 @@ async function promoteToAdmin(email: string) {
 
     if (user.role === 'admin') {
       console.log('ℹ️  User is already an admin!');
-      process.exit(0);
+      return;
     }
 
-    // Promote to admin
+    const decision = await confirmWrite(
+      target,
+      `About to grant ADMIN to "${user.email}" (currently "${user.role}") in database "${target.db.databaseName}".`,
+      'yes',
+      ASSUME_YES,
+    );
+    if (!decision.ok) {
+      console.error(`❌ ${decision.reason}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    // Match by the stable id, not by (possibly differently-cased) email.
+    const usersCollection = target.db.collection('users');
     const result = await usersCollection.updateOne(
-      { email },
-      { 
-        $set: { 
+      { id: user.id },
+      {
+        $set: {
           role: 'admin',
           updated_at: new Date().toISOString()
-        } 
+        }
       }
     );
 
@@ -91,18 +99,22 @@ async function promoteToAdmin(email: string) {
       console.log('🔄 The user needs to log out and log back in for changes to take effect.');
     } else {
       console.error('❌ Error: Failed to update user role');
-      process.exit(1);
+      process.exitCode = 1;
     }
 
   } catch (error) {
     console.error('❌ Error:', error);
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
-    await client.close();
+    await target.close();
     console.log('\n✓ Disconnected from MongoDB');
   }
 }
 
 // Get email from command line arguments
-const email = process.argv[2];
-promoteToAdmin(email);
+if (require.main === module) {
+  const email = process.argv[2];
+  promoteToAdmin(email).then(() => process.exit(process.exitCode ?? 0));
+}
+
+export { promoteToAdmin };

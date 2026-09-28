@@ -10,6 +10,11 @@ import { isEventInBounds } from '@/lib/earthquake-utils';
 import { GeoNetClient } from '@/lib/geonet-client';
 import { retry, retryFetch } from '@/lib/retry-utils';
 
+// The route now requires a viewer session; these tests exercise the search logic.
+jest.mock('@/lib/auth/middleware', () => ({
+  requireViewer: jest.fn(async () => ({ session: {}, user: { id: 'viewer', role: 'viewer' } })),
+}));
+
 const feature = (id: string, coords: number[][]) => ({ type: 'Feature', id, geometry: { type: 'MultiLineString', coordinates: [coords] }, properties: { name: id } });
 
 /** WFS stub honouring bbox, count and startIndex like GeoServer. */

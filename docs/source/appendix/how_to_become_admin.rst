@@ -28,10 +28,10 @@ The system has 4 user roles:
            GUI["User Management UI"]
        end
 
-       Logout("Log out &amp; log back in")
+       NextReq("Make any request (e.g. reload a page)")
        Verify{"User Management menu appears?"}
        OK("Admin access confirmed")
-       Retry("Re-check role &amp; session")
+       Retry("Reload &amp; re-check role")
        Done(["Done"])
 
        Start --> Method
@@ -39,14 +39,14 @@ The system has 4 user roles:
        Method -->|"database shell"| DBSet
        Method -->|"existing admin"| GUI
 
-       Script --> Logout
-       DBSet --> Logout
-       GUI --> Logout
+       Script --> NextReq
+       DBSet --> NextReq
+       GUI --> NextReq
 
-       Logout --> Verify
+       NextReq --> Verify
        Verify -->|"yes"| OK
        Verify -->|"no"| Retry
-       Retry --> Logout
+       Retry --> NextReq
        OK --> Done
 
        style Promote fill:#F7F9FC,stroke:#AEBED2,stroke-width:1px,color:#0F3D6B
@@ -56,7 +56,7 @@ The system has 4 user roles:
        class Script process
        class DBSet datastore
        class GUI frontend
-       class Logout,Retry userAction
+       class NextReq,Retry userAction
        class OK success
 
        classDef userAction fill:#E8EEF6,stroke:#0F3D6B,stroke-width:1.5px,color:#0B2B4A
@@ -127,18 +127,19 @@ Step 2: Run the Promotion Script
       New Role: admin
    
    🔄 The user needs to log out and log back in for changes to take effect.
-   
+
    ✓ Disconnected from MongoDB
 
+**Note:** the script's own reminder above is out of date — role changes now
+take effect on the user's next request. No sign-out/sign-in is required (see
+"Changes Not Taking Effect" below).
 
-Step 3: Log Out and Log Back In
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Step 3: Confirm the New Role
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
-1. Click your avatar in the top right
-2. Click "Sign Out"
-3. Log back in with your credentials
-4. You should now see "User Management" in your user menu
+1. Navigate to any page, or reload the current one — no sign-out is required
+2. You should now see "User Management" in your user menu
 
 
 
@@ -204,8 +205,8 @@ Step 3: Verify the Change
    }
 
 
-Step 4: Log Out and Log Back In
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Step 4: Confirm the New Role
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
 Same as Method 1, Step 3.
@@ -245,8 +246,8 @@ Step 3: Find and Edit Your User
 4. Update the ``updated_at`` field to the current date/time
 5. Click "Update"
 
-Step 4: Log Out and Log Back In
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Step 4: Confirm the New Role
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
 Same as Method 1, Step 3.
@@ -282,7 +283,8 @@ Step 3: Promote a User
 3. Change their role to "Admin"
 4. Save the changes
 
-The user will need to log out and log back in for the changes to take effect.
+The change takes effect on the user's next request — no sign-out or
+sign-in is required.
 
 
 
@@ -290,7 +292,8 @@ Verifying Admin Access
 ----------------------
 
 
-After promoting to admin and logging back in, you should see:
+After promoting to admin, on your next request (e.g. reloading the page or
+navigating elsewhere) you should see:
 
 In the User Menu (Top Right Avatar)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -339,14 +342,21 @@ Changes Not Taking Effect
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
-**You MUST log out and log back in** for role changes to take effect. The role is stored in the JWT session token, which is only updated on login.
+Role changes take effect on your **next request** — typically the next page
+navigation or API call — with no sign-out or sign-in required. On every
+request after the first sign-in, the server re-reads your current role (and
+active/deactivated status) from the database and updates your session in
+place; a deactivated or deleted account is revoked within one request too.
 
-Steps:
-1. Click avatar → Sign Out
-2. Go to ``/login``
-3. Enter your credentials
-4. Log in
-5. Check avatar menu for "User Management"
+If the change doesn't seem to have taken effect, it's usually just that the
+browser hasn't yet re-rendered a permission-gated part of the page (such as
+the avatar menu) with the refreshed session. Steps:
+
+1. Navigate to a different page, or reload the current one
+2. Check the avatar menu again for "User Management"
+3. If it still doesn't appear, verify the role was actually saved (Method 2,
+   Step 3 above) — a full sign-out/sign-in is never required to pick up a
+   role change, though it will also work if you do it
 
 Can't Connect to MongoDB
 ^^^^^^^^^^^^^^^^^^^^^^^^

@@ -2,19 +2,40 @@
  * GeoNet Import API Endpoint
  *
  * POST /api/import/geonet - Trigger a GeoNet import
- * Protected by CSRF token validation
+ *
+ * Requires the Editor role (requireEditor checks the NextAuth session). There is no
+ * CSRF token: cross-site requests are kept out by the session cookie's SameSite=Lax
+ * attribute, and middleware.ts refuses any state-changing /api request whose Origin
+ * names another host.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { geonetImportService } from '@/lib/geonet-import-service';
-import { apiCache } from '@/lib/cache';
+import { geonetImportService, GeoNetImportTargetError } from '@/lib/geonet-import-service';
 import { requireEditor } from '@/lib/auth/middleware';
+import { normalizeTimestamp } from '@/lib/earthquake-utils';
+import { writeAuditLog } from '@/lib/audit';
 
 // A broad import fans out into hundreds of serial GeoNet requests (the time-window
 // chunker bisects until every window is under GeoNet's 10,000-event cap) plus the
 // batched database writes, so this route needs the same extended budget the bulk
 // upload routes get instead of the platform default. Seconds; Vercel Pro/Enterprise.
 export const maxDuration = 300;
+
+/** The earliest origin time the platform stores (lib/db.ts validateMergedEvent). */
+const EARLIEST_EVENT_TIME = Date.UTC(1000, 0, 1);
+
+/**
+ * An ISO 8601 date or date-time as a UTC instant, or null. The import form sends
+ * datetime-local values ('2024-10-24T00:00') and labels them UTC; new Date() reads an
+ * offset-less date-time as SERVER-LOCAL time, which on a Pacific/Auckland host moved
+ * the requested window 12-13 hours. normalizeTimestamp reads it as UTC and honours an
+ * explicit Z or offset.
+ */
+function parseUtcDate(value: unknown): Date | null {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(value.trim())) return null;
+  const iso = normalizeTimestamp(value);
+  return iso ? new Date(iso) : null;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -48,30 +69,49 @@ export async function POST(request: NextRequest) {
     let parsedStartDate: Date | undefined;
     let parsedEndDate: Date | undefined;
 
-    if (startDate) {
-      parsedStartDate = new Date(startDate);
-      if (isNaN(parsedStartDate.getTime())) {
-        return NextResponse.json(
-          { error: 'Invalid start date format' },
-          { status: 400 }
-        );
-      }
-    }
-
-    if (endDate) {
-      parsedEndDate = new Date(endDate);
-      if (isNaN(parsedEndDate.getTime())) {
-        return NextResponse.json(
-          { error: 'Invalid end date format' },
-          { status: 400 }
-        );
-      }
-    }
-
-    // Validate hours
-    if (hours !== undefined && (typeof hours !== 'number' || hours <= 0)) {
+    // A lone start or end used to be dropped silently, importing the last 24 hours.
+    if ((startDate != null) !== (endDate != null)) {
       return NextResponse.json(
-        { error: 'Hours must be a positive number' },
+        { error: 'Provide both startDate and endDate, or neither' },
+        { status: 400 }
+      );
+    }
+
+    if (startDate != null) {
+      parsedStartDate = parseUtcDate(startDate) ?? undefined;
+      if (!parsedStartDate) {
+        return NextResponse.json(
+          { error: 'Invalid start date format (expected ISO 8601; a time without an offset is read as UTC)' },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (endDate != null) {
+      parsedEndDate = parseUtcDate(endDate) ?? undefined;
+      if (!parsedEndDate) {
+        return NextResponse.json(
+          { error: 'Invalid end date format (expected ISO 8601; a time without an offset is read as UTC)' },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (parsedStartDate && parsedStartDate.getTime() < EARLIEST_EVENT_TIME) {
+      return NextResponse.json(
+        { error: 'Start date must be in or after the year 1000' },
+        { status: 400 }
+      );
+    }
+
+    // Validate hours. The window must start at a date GeoNet can be asked for: an
+    // hours value reaching past year 0 produced a negative-year ISO string.
+    if (hours !== undefined && (
+      typeof hours !== 'number' || !Number.isFinite(hours) || hours <= 0 ||
+      Date.now() - hours * 60 * 60 * 1000 < EARLIEST_EVENT_TIME
+    )) {
+      return NextResponse.json(
+        { error: 'Hours must be a positive number that does not reach back before the year 1000' },
         { status: 400 }
       );
     }
@@ -169,6 +209,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate the target catalogue id if provided (the service checks the catalogue)
+    if (catalogueId !== undefined && (typeof catalogueId !== 'string' || catalogueId.trim() === '')) {
+      return NextResponse.json(
+        { error: 'Catalogue id must be a non-empty string' },
+        { status: 400 }
+      );
+    }
+
     // Validate catalogue name if provided
     if (catalogueName !== undefined && (typeof catalogueName !== 'string' || catalogueName.trim() === '')) {
       return NextResponse.json(
@@ -177,8 +225,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Trigger import
-    console.log('[API] Starting GeoNet import with options:', {
+    if (updateExisting !== undefined && typeof updateExisting !== 'boolean') {
+      return NextResponse.json(
+        { error: 'updateExisting must be true or false' },
+        { status: 400 }
+      );
+    }
+
+    const query = {
       startDate: parsedStartDate?.toISOString(),
       endDate: parsedEndDate?.toISOString(),
       hours,
@@ -190,10 +244,10 @@ export async function POST(request: NextRequest) {
       maxLatitude,
       minLongitude,
       maxLongitude,
-      updateExisting,
-      catalogueId,
-      catalogueName,
-    });
+    };
+
+    // Trigger import
+    console.log('[API] Starting GeoNet import with options:', { ...query, updateExisting, catalogueId, catalogueName });
 
     const result = await geonetImportService.importEvents({
       startDate: parsedStartDate,
@@ -210,16 +264,54 @@ export async function POST(request: NextRequest) {
       updateExisting: updateExisting ?? false,
       catalogueId,
       catalogueName,
+      // Recorded as the new catalogue's created_by.
+      userId: authResult.user.id,
     });
 
     console.log('[API] Import completed:', result);
 
-    // Clear cache since new events were imported
-    apiCache.clearAll();
+    await writeAuditLog({
+      action: 'import.geonet',
+      actor_id: authResult.user.id,
+      actor_email: authResult.user.email,
+      target_id: result.catalogueId || undefined,
+      target_type: 'catalogue',
+      metadata: {
+        catalogueCreated: !catalogueId && !!result.catalogueId,
+        success: result.success,
+        updateExisting: updateExisting ?? false,
+        query,
+        totalFetched: result.totalFetched,
+        newEvents: result.newEvents,
+        updatedEvents: result.updatedEvents,
+        skippedEvents: result.skippedEvents,
+        collidedEvents: result.collidedEvents,
+        invalidEvents: result.invalidEvents,
+        excludedEvents: result.excludedEvents,
+        failedEvents: result.failedEvents,
+        errorCount: result.errors.length,
+      },
+    }, request);
 
+    // No cache clearing here: lib/db.ts invalidates the server caches on every
+    // catalogue and event write the import makes.
     return NextResponse.json(result);
   } catch (error) {
     console.error('[API] Import error:', error);
+
+    // The chosen catalogue cannot take this import (missing, not a GeoNet import
+    // catalogue, or another import into it is running). Nothing was fetched or written.
+    if (error instanceof GeoNetImportTargetError) {
+      return NextResponse.json(
+        {
+          error: 'Import failed',
+          message: error.message,
+          errorType: error.name,
+          timestamp: new Date().toISOString(),
+        },
+        { status: error.status }
+      );
+    }
 
     // Extract detailed error information
     let errorMessage = 'Unknown error occurred';
@@ -275,4 +367,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

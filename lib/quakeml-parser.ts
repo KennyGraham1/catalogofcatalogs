@@ -7,6 +7,8 @@
 
 import * as fs from 'fs';
 import * as sax from 'sax';
+import { Transform } from 'stream';
+import { normalizeRake } from './focal-mechanism-utils';
 import type {
   QuakeMLEvent,
   Origin,
@@ -89,6 +91,109 @@ function escapeXml(text: string): string {
 
 function isEventTagName(tagName: string): boolean {
   return tagName === 'event' || tagName.endsWith(':event');
+}
+
+/** A complete entity or character reference starting at the given '&'. */
+const ENTITY_REFERENCE = /&(?:[A-Za-z][A-Za-z0-9._-]*|#[0-9]+|#x[0-9A-Fa-f]+);/y;
+/** An '&' whose reference may still be completed by the next chunk. */
+const PARTIAL_ENTITY_REFERENCE = /&(?:[A-Za-z][A-Za-z0-9._-]*|#[0-9]*|#x[0-9A-Fa-f]*)?$/y;
+
+/**
+ * Streaming form of the bare-ampersand repair. A bare '&' (not the start of an entity
+ * or character reference) is the one well-formedness error real bulletins commonly
+ * carry ("Cook Strait & Marlborough"); it is escaped to '&amp;' so the strict SAX
+ * parser can read the file. CDATA sections and comments are literal text and are left
+ * alone. Text arrives in chunks of any size, so a reference, a CDATA or comment marker,
+ * or a CDATA/comment end split across two chunks is held back until it can be decided:
+ * the output is the same however the input is chunked. Every other error still fails
+ * the document.
+ */
+export function createBareAmpersandEscaper(): { push(chunk: string): string; flush(): string } {
+  let mode: 'text' | 'cdata' | 'comment' = 'text';
+  let carry = '';
+
+  const process = (input: string, final: boolean): string => {
+    let out = '';
+    let i = 0;
+    // Next '&' and next '<!' at or after i, found once and reused until passed: a fresh
+    // search for '<!' at every '&' rescanned the rest of a multi-megabyte document.
+    let nextAmp = -2;
+    let nextMarkup = -2;
+    while (i < input.length) {
+      if (mode !== 'text') {
+        const terminator = mode === 'cdata' ? ']]>' : '-->';
+        const end = input.indexOf(terminator, i);
+        if (end === -1) {
+          // Keep enough of the tail to recognise a terminator split across chunks.
+          const keep = final ? 0 : Math.min(terminator.length - 1, input.length - i);
+          out += input.slice(i, input.length - keep);
+          carry = input.slice(input.length - keep);
+          return out;
+        }
+        out += input.slice(i, end + terminator.length);
+        i = end + terminator.length;
+        mode = 'text';
+        continue;
+      }
+
+      if (nextAmp !== -1 && nextAmp < i) nextAmp = input.indexOf('&', i);
+      if (nextMarkup !== -1 && nextMarkup < i) nextMarkup = input.indexOf('<!', i);
+      const amp = nextAmp;
+      const lt = nextMarkup;
+      const next = amp === -1 ? lt : lt === -1 ? amp : Math.min(amp, lt);
+      if (next === -1) {
+        // A '<' ending the chunk may open a CDATA section or comment in the next one.
+        const keep = !final && input.endsWith('<') ? 1 : 0;
+        out += input.slice(i, input.length - keep);
+        carry = input.slice(input.length - keep);
+        return out;
+      }
+      out += input.slice(i, next);
+      i = next;
+
+      if (input[i] === '<') {
+        const rest = input.slice(i, i + 9);
+        if (rest.startsWith('<![CDATA[')) { out += '<![CDATA['; i += 9; mode = 'cdata'; continue; }
+        if (rest.startsWith('<!--')) { out += '<!--'; i += 4; mode = 'comment'; continue; }
+        if (!final && i + rest.length === input.length && ('<![CDATA['.startsWith(rest) || '<!--'.startsWith(rest))) {
+          carry = rest;
+          return out;
+        }
+        out += '<!';
+        i += 2;
+        continue;
+      }
+
+      ENTITY_REFERENCE.lastIndex = i;
+      const reference = ENTITY_REFERENCE.exec(input);
+      if (reference) {
+        out += reference[0];
+        i += reference[0].length;
+        continue;
+      }
+      PARTIAL_ENTITY_REFERENCE.lastIndex = i;
+      if (!final && PARTIAL_ENTITY_REFERENCE.test(input)) {
+        carry = input.slice(i);
+        return out;
+      }
+      out += '&amp;';
+      i += 1;
+    }
+    return out;
+  };
+
+  return {
+    push(chunk: string): string {
+      const input = carry + chunk;
+      carry = '';
+      return process(input, false);
+    },
+    flush(): string {
+      const input = carry;
+      carry = '';
+      return process(input, true);
+    },
+  };
 }
 
 /**
@@ -457,17 +562,23 @@ function extractOriginUncertainty(xml: string): OriginUncertainty | undefined {
   const content = match[1];
   const uncertainty: OriginUncertainty = {};
 
-  const horizontalUncertainty = extractTagValue(content, 'horizontalUncertainty');
-  if (horizontalUncertainty) uncertainty.horizontalUncertainty = parseFloat(horizontalUncertainty);
+  // xs:double values, read strictly like every RealQuantity: '4200abc' is not 4200.
+  const xsDouble = (tag: string): number | undefined => {
+    const text = extractTagValue(content, tag);
+    return text ? parseXsDouble(text) : undefined;
+  };
 
-  const minHorizontalUncertainty = extractTagValue(content, 'minHorizontalUncertainty');
-  if (minHorizontalUncertainty) uncertainty.minHorizontalUncertainty = parseFloat(minHorizontalUncertainty);
+  const horizontalUncertainty = xsDouble('horizontalUncertainty');
+  if (horizontalUncertainty !== undefined) uncertainty.horizontalUncertainty = horizontalUncertainty;
 
-  const maxHorizontalUncertainty = extractTagValue(content, 'maxHorizontalUncertainty');
-  if (maxHorizontalUncertainty) uncertainty.maxHorizontalUncertainty = parseFloat(maxHorizontalUncertainty);
+  const minHorizontalUncertainty = xsDouble('minHorizontalUncertainty');
+  if (minHorizontalUncertainty !== undefined) uncertainty.minHorizontalUncertainty = minHorizontalUncertainty;
 
-  const azimuthMaxHorizontalUncertainty = extractTagValue(content, 'azimuthMaxHorizontalUncertainty');
-  if (azimuthMaxHorizontalUncertainty) uncertainty.azimuthMaxHorizontalUncertainty = parseFloat(azimuthMaxHorizontalUncertainty);
+  const maxHorizontalUncertainty = xsDouble('maxHorizontalUncertainty');
+  if (maxHorizontalUncertainty !== undefined) uncertainty.maxHorizontalUncertainty = maxHorizontalUncertainty;
+
+  const azimuthMaxHorizontalUncertainty = xsDouble('azimuthMaxHorizontalUncertainty');
+  if (azimuthMaxHorizontalUncertainty !== undefined) uncertainty.azimuthMaxHorizontalUncertainty = azimuthMaxHorizontalUncertainty;
 
   const ellipsoidMatch = content.match(/<(?:[\w.-]+:)?confidenceEllipsoid\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?confidenceEllipsoid>/);
   if (ellipsoidMatch) {
@@ -487,8 +598,9 @@ function extractOriginUncertainty(xml: string): OriginUncertainty | undefined {
   const preferredDescription = extractTagValue(content, 'preferredDescription');
   if (preferredDescription) uncertainty.preferredDescription = preferredDescription as OriginUncertainty['preferredDescription'];
 
-  const confidenceLevel = extractTagValue(content, 'confidenceLevel');
-  if (confidenceLevel && !isNaN(parseFloat(confidenceLevel))) uncertainty.confidenceLevel = parseFloat(confidenceLevel);
+  // Percent (BED); carried to the confidence_level column (contract C16).
+  const confidenceLevel = xsDouble('confidenceLevel');
+  if (confidenceLevel !== undefined) uncertainty.confidenceLevel = confidenceLevel;
 
   return Object.keys(uncertainty).length > 0 ? uncertainty : undefined;
 }
@@ -913,7 +1025,9 @@ function extractNodalPlane(xml: string, planeTag: string): NodalPlane | undefine
   const rake = extractRealQuantity(content, 'rake');
   if (!strike || !dip || !rake) return undefined;
 
-  return { strike, dip, rake };
+  // BED rake is on (-180, 180]; a file written on 0-360 (270 for a pure normal fault)
+  // is stored in that range, the same slip direction.
+  return { strike, dip, rake: { ...rake, value: normalizeRake(rake.value) } };
 }
 
 /**
@@ -1497,6 +1611,18 @@ export async function parseQuakeMLStream(
       reject(error);
     });
 
-    fileStream.pipe(parser);
+    // Repair bare '&' exactly as the in-memory parser does (createBareAmpersandEscaper).
+    const ampersands = createBareAmpersandEscaper();
+    const escaper = new Transform({
+      decodeStrings: false,
+      transform(chunk, _encoding, callback) {
+        callback(null, ampersands.push(String(chunk)));
+      },
+      flush(callback) {
+        callback(null, ampersands.flush());
+      },
+    });
+
+    fileStream.pipe(escaper).pipe(parser);
   });
 }

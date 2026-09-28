@@ -10,9 +10,16 @@
 # Usage:
 #   docker-compose -f docker-compose.prod.yml up -d
 #
+# Recommended: run behind the bundled reverse proxy so clients cannot forge the
+# address the rate limits key on (see nginx/nginx.conf):
+#   APP_BIND_ADDRESS=127.0.0.1 \
+#     docker-compose -f docker-compose.prod.yml --profile with-nginx up -d
+#
 # Prerequisites:
 #   - Create a .env file with production values
 #   - Set up SSL/TLS termination (nginx, Traefik, or cloud load balancer)
+#   - Whatever proxy you use must overwrite X-Forwarded-For with the peer address
+#     and be the only way in; set TRUSTED_PROXY_HOPS to the number of such proxies.
 # =============================================================================
 
 version: '3.8'
@@ -30,10 +37,16 @@ services:
     container_name: earthquake-catalogue-app
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      # Published on all interfaces by default. Behind a reverse proxy on this host
+      # (e.g. the with-nginx profile) set APP_BIND_ADDRESS=127.0.0.1 so clients
+      # cannot bypass it: a client that reaches the app directly chooses its own
+      # X-Forwarded-For, and with it its rate-limit key.
+      - "${APP_BIND_ADDRESS:-0.0.0.0}:3000:3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
+      # Number of trusted reverse proxies that set X-Forwarded-For (see .env.example)
+      - TRUSTED_PROXY_HOPS=${TRUSTED_PROXY_HOPS:-1}
       # Database connection (use external MongoDB Atlas for production)
       - MONGODB_URI=${MONGODB_URI}
       - MONGODB_DATABASE=${MONGODB_DATABASE:-earthquake_catalogue}
@@ -114,6 +127,8 @@ services:
 
   # ---------------------------------------------------------------------------
   # REVERSE PROXY (Optional - Recommended for production)
+  # nginx/nginx.conf overwrites X-Forwarded-For with the peer address; pair it
+  # with APP_BIND_ADDRESS=127.0.0.1 so the app is reachable only through it.
   # ---------------------------------------------------------------------------
   nginx:
     image: nginx:alpine

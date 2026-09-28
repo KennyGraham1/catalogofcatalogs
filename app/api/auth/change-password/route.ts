@@ -5,6 +5,7 @@ import { getUserById, hashPassword, verifyPassword } from '@/lib/auth/utils';
 import { getCollection, COLLECTIONS } from '@/lib/mongodb';
 import { AppError } from '@/lib/errors';
 import { applyRateLimit, authRateLimiter } from '@/lib/rate-limiter';
+import { writeAuditLog } from '@/lib/audit';
 
 /**
  * POST /api/auth/change-password
@@ -57,12 +58,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify current password
+    // Verify current password. 400, not 401: the caller is signed in, one field of the
+    // form is wrong (401 would read as "session expired" to API clients).
     const isValidPassword = await verifyPassword(currentPassword, user.password_hash);
     if (!isValidPassword) {
       return NextResponse.json(
         { error: 'Current password is incorrect' },
-        { status: 401 }
+        { status: 400 }
       );
     }
 
@@ -85,6 +87,14 @@ export async function POST(request: NextRequest) {
     if (result.modifiedCount === 0) {
       throw new AppError('Failed to update password', 500);
     }
+
+    await writeAuditLog({
+      action: 'user.password_change',
+      actor_id: user.id,
+      actor_email: user.email,
+      target_id: user.id,
+      target_type: 'user',
+    }, request);
 
     return NextResponse.json({
       message: 'Password changed successfully',

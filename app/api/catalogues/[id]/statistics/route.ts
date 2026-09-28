@@ -19,6 +19,8 @@ const logger = new Logger('CatalogueStatisticsAPI');
  */
 export interface CatalogueStatistics {
   catalogueId: string;
+  /** Catalogue version (MAJOR.MINOR.PATCH, contract C3). */
+  version: string;
   eventCount: number;
   dateRange: {
     earliest: string;
@@ -43,8 +45,17 @@ export interface CatalogueStatistics {
   qualityMetrics: {
     averageAzimuthalGap?: number;
     averageStationCount?: number;
+    /** Events reporting any location uncertainty (horizontal in any form, or depth). */
     eventsWithUncertainty: number;
+    eventsWithHorizontalUncertainty: number;
+    eventsWithDepthUncertainty: number;
     eventsWithFocalMechanism: number;
+    /** Events carrying a stored quality score Q; rows stored before scores were persisted do not. */
+    eventsWithQualityScore: number;
+    /** Mean stored Q over the scored events (0-100), absent when none is scored. */
+    averageQualityScore?: number;
+    /** Stored quality grades, best first (A+ .. F); only grades that occur. */
+    gradeDistribution: Array<{ grade: string; count: number }>;
   } | null;
 }
 
@@ -85,6 +96,7 @@ export async function GET(
     if (stats.eventCount === 0) {
       const empty: CatalogueStatistics = {
         catalogueId,
+        version: catalogue.version ?? '1.0.0',
         eventCount: 0,
         dateRange: null,
         magnitudeRange: null,
@@ -125,11 +137,14 @@ export async function GET(
 
     const statistics: CatalogueStatistics = {
       catalogueId,
+      version: catalogue.version ?? '1.0.0',
       eventCount: stats.eventCount,
       dateRange,
       magnitudeRange,
-      // No depth on any event keeps the historical all-zero placeholder rather
-      // than nulls, so existing clients render the same thing as before.
+      // No event with a depth means no depth range, as for magnitudes. The old
+      // {min: 0, max: 0, average: 0} placeholder was indistinguishable from a
+      // catalogue whose events are all genuinely at 0 km (the datum, a common fixed
+      // depth).
       depthRange:
         stats.minDepth != null && stats.maxDepth != null && stats.averageDepth != null
           ? {
@@ -137,17 +152,18 @@ export async function GET(
               max: stats.maxDepth,
               average: stats.averageDepth
             }
-          : {
-              min: 0,
-              max: 0,
-              average: 0
-            },
+          : null,
       magnitudeTypes: stats.magnitudeTypes,
       qualityMetrics: {
         averageAzimuthalGap: stats.averageAzimuthalGap ?? undefined,
         averageStationCount: stats.averageStationCount ?? undefined,
         eventsWithUncertainty: stats.eventsWithUncertainty,
-        eventsWithFocalMechanism: stats.eventsWithFocalMechanism
+        eventsWithHorizontalUncertainty: stats.eventsWithHorizontalUncertainty ?? 0,
+        eventsWithDepthUncertainty: stats.eventsWithDepthUncertainty ?? 0,
+        eventsWithFocalMechanism: stats.eventsWithFocalMechanism,
+        eventsWithQualityScore: stats.qualityScoreCount ?? 0,
+        averageQualityScore: stats.averageQualityScore ?? undefined,
+        gradeDistribution: stats.qualityGrades ?? []
       }
     };
 

@@ -1,32 +1,25 @@
 /**
+ * @jest-environment node
+ *
  * Integration tests for authentication flows
  *
  * These tests verify the complete authentication workflow including:
  * - User registration
- * - Login/logout
  * - Password change
  * - Password reset flow
  * - Role-based access control
  *
- * NOTE: These tests require Node.js 18+ for native Web API support (Request/Response).
- * They will be skipped on older Node versions.
+ * The real route handlers and auth helpers run against per-test MongoDB mocks.
+ *
+ * This suite used to run in the project's default jsdom environment, where Request is
+ * undefined, so every test was silently skipped; when forced to run, four expectations
+ * were stale (finding #120). It now declares the node environment, sends each request
+ * from its own client address (the auth routes' per-IP limiter would otherwise carry
+ * over between tests), and mocks the reset-token store the way the route uses it.
  */
 
-// Ensure this file is treated as a module (prevents global scope pollution)
-export {};
-
-// Skip entire test suite if Request is not available (Node < 18)
-const hasWebAPIs = typeof globalThis.Request !== 'undefined';
-const describeIfWebAPIs = hasWebAPIs ? describe : describe.skip;
-
-// Only import NextRequest/NextResponse if Web APIs are available
-let NextRequest: any;
-let NextResponse: any;
-if (hasWebAPIs) {
-  const nextServer = require('next/server');
-  NextRequest = nextServer.NextRequest;
-  NextResponse = nextServer.NextResponse;
-}
+import { createHash } from 'crypto';
+import { NextRequest, NextResponse } from 'next/server';
 
 // Mock NextAuth
 jest.mock('next-auth', () => ({
@@ -41,6 +34,8 @@ jest.mock('@/lib/mongodb', () => ({
     USERS: 'users',
     SESSIONS: 'sessions',
     PASSWORD_RESET_TOKENS: 'password_reset_tokens',
+    AUDIT_LOGS: 'audit_logs',
+    AUTH_RATE_LIMITS: 'auth_rate_limits',
   },
 }));
 
@@ -50,25 +45,44 @@ jest.mock('bcryptjs', () => ({
   compare: jest.fn(),
 }));
 
-// Conditionally import modules that depend on Web APIs
-let bcrypt: any;
-let getServerSession: any;
-let getCollection: any;
-let getSession: any;
-let requireAdmin: any;
-let requireEditor: any;
+import * as bcrypt from 'bcryptjs';
+import { getServerSession } from 'next-auth';
+import { getCollection } from '@/lib/mongodb';
+import { getSession, requireAdmin, requireEditor } from '@/lib/auth/middleware';
 
-if (hasWebAPIs) {
-  bcrypt = require('bcryptjs');
-  getServerSession = require('next-auth').getServerSession;
-  getCollection = require('@/lib/mongodb').getCollection;
-  const authMiddleware = require('@/lib/auth/middleware');
-  getSession = authMiddleware.getSession;
-  requireAdmin = authMiddleware.requireAdmin;
-  requireEditor = authMiddleware.requireEditor;
+type MockCollection = Record<string, jest.Mock>;
+
+/** Route getCollection(name) to this test's collection mocks. */
+function useCollections(map: Record<string, MockCollection>) {
+  const collections: Record<string, MockCollection> = {
+    // Side collections the routes write to; not under test here.
+    audit_logs: { insertOne: jest.fn().mockResolvedValue({ acknowledged: true }) },
+    auth_rate_limits: {
+      createIndex: jest.fn().mockResolvedValue('expires_at_1'),
+      updateOne: jest.fn().mockResolvedValue({ matchedCount: 1 }),
+      deleteOne: jest.fn().mockResolvedValue({ deletedCount: 1 }),
+    },
+    ...map,
+  };
+  (getCollection as jest.Mock).mockImplementation(async (name: string) => {
+    if (!collections[name]) throw new Error(`unexpected collection ${name}`);
+    return collections[name];
+  });
 }
 
-describeIfWebAPIs('Authentication Integration Tests', () => {
+let nextClient = 0;
+
+/** A JSON POST from its own client address. */
+function post(url: string, body: unknown): NextRequest {
+  nextClient += 1;
+  return new NextRequest(`http://localhost:3000${url}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-forwarded-for': `198.51.100.${nextClient}` },
+    body: JSON.stringify(body),
+  });
+}
+
+describe('Authentication Integration Tests', () => {
   // Reset mocks before each test
   beforeEach(() => {
     jest.clearAllMocks();
@@ -79,10 +93,7 @@ describeIfWebAPIs('Authentication Integration Tests', () => {
     const mockFindOne = jest.fn();
 
     beforeEach(() => {
-      (getCollection as jest.Mock).mockResolvedValue({
-        insertOne: mockInsertOne,
-        findOne: mockFindOne,
-      });
+      useCollections({ users: { insertOne: mockInsertOne, findOne: mockFindOne } });
     });
 
     it('should register a new user with valid credentials', async () => {
@@ -90,90 +101,67 @@ describeIfWebAPIs('Authentication Integration Tests', () => {
       mockFindOne.mockResolvedValue(null); // No existing user
       mockInsertOne.mockResolvedValue({ insertedId: 'new-user-id' });
 
-      const requestBody = {
+      // Act
+      const { POST } = await import('@/app/api/auth/register/route');
+      const response = await POST(post('/api/auth/register', {
         email: 'newuser@example.com',
         password: 'SecurePassword123!',
         name: 'New User',
-      };
-
-      // Act
-      const { POST } = await import('@/app/api/auth/register/route');
-      const request = new NextRequest('http://localhost:3000/api/auth/register', {
-        method: 'POST',
-        body: JSON.stringify(requestBody),
-      });
-
-      const response = await POST(request);
+      }));
 
       // Assert
       expect(response.status).toBe(201);
-      expect(mockInsertOne).toHaveBeenCalled();
+      expect(mockInsertOne).toHaveBeenCalledWith(expect.objectContaining({
+        email: 'newuser@example.com',
+        role: 'viewer',
+        password_hash: 'hashed_password',
+      }));
     });
 
     it('should reject registration with existing email', async () => {
       // Arrange
       mockFindOne.mockResolvedValue({ email: 'existing@example.com' });
 
-      const requestBody = {
+      // Act
+      const { POST } = await import('@/app/api/auth/register/route');
+      const response = await POST(post('/api/auth/register', {
         email: 'existing@example.com',
         password: 'SecurePassword123!',
         name: 'Existing User',
-      };
-
-      // Act
-      const { POST } = await import('@/app/api/auth/register/route');
-      const request = new NextRequest('http://localhost:3000/api/auth/register', {
-        method: 'POST',
-        body: JSON.stringify(requestBody),
-      });
-
-      const response = await POST(request);
+      }));
       const body = await response.json();
 
       // Assert
       expect(response.status).toBe(409);
       expect(body.error).toContain('already exists');
+      expect(mockInsertOne).not.toHaveBeenCalled();
     });
 
     it('should reject registration with weak password', async () => {
       // Arrange
       mockFindOne.mockResolvedValue(null);
 
-      const requestBody = {
+      // Act
+      const { POST } = await import('@/app/api/auth/register/route');
+      const response = await POST(post('/api/auth/register', {
         email: 'newuser@example.com',
         password: 'weak', // Too short
         name: 'New User',
-      };
-
-      // Act
-      const { POST } = await import('@/app/api/auth/register/route');
-      const request = new NextRequest('http://localhost:3000/api/auth/register', {
-        method: 'POST',
-        body: JSON.stringify(requestBody),
-      });
-
-      const response = await POST(request);
+      }));
 
       // Assert
       expect(response.status).toBe(400);
+      expect(mockInsertOne).not.toHaveBeenCalled();
     });
 
     it('should reject registration with invalid email', async () => {
-      // Arrange
-      const requestBody = {
+      // Act
+      const { POST } = await import('@/app/api/auth/register/route');
+      const response = await POST(post('/api/auth/register', {
         email: 'not-an-email',
         password: 'SecurePassword123!',
         name: 'New User',
-      };
-
-      // Act
-      const { POST } = await import('@/app/api/auth/register/route');
-      const request = new NextRequest('http://localhost:3000/api/auth/register', {
-        method: 'POST',
-        body: JSON.stringify(requestBody),
-      });
-
-      const response = await POST(request);
+      }));
 
       // Assert
       expect(response.status).toBe(400);
@@ -185,10 +173,7 @@ describeIfWebAPIs('Authentication Integration Tests', () => {
     const mockUpdateOne = jest.fn();
 
     beforeEach(() => {
-      (getCollection as jest.Mock).mockResolvedValue({
-        findOne: mockFindOne,
-        updateOne: mockUpdateOne,
-      });
+      useCollections({ users: { findOne: mockFindOne, updateOne: mockUpdateOne } });
     });
 
     it('should change password with valid current password', async () => {
@@ -204,25 +189,24 @@ describeIfWebAPIs('Authentication Integration Tests', () => {
       });
 
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
-      mockUpdateOne.mockResolvedValue({ modifiedCount: 1 });
-
-      const requestBody = {
-        currentPassword: 'CurrentPassword123!',
-        newPassword: 'NewSecurePassword456!',
-      };
+      mockUpdateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
 
       // Act
       const { POST } = await import('@/app/api/auth/change-password/route');
-      const request = new NextRequest('http://localhost:3000/api/auth/change-password', {
-        method: 'POST',
-        body: JSON.stringify(requestBody),
-      });
+      const response = await POST(post('/api/auth/change-password', {
+        currentPassword: 'CurrentPassword123!',
+        newPassword: 'NewSecurePassword456!',
+      }));
 
-      const response = await POST(request);
-
-      // Assert
+      // Assert: the hash and the session version change in one conditional write.
       expect(response.status).toBe(200);
-      expect(mockUpdateOne).toHaveBeenCalled();
+      expect(mockUpdateOne).toHaveBeenCalledWith(
+        { id: 'user-123', password_hash: 'current_hash' },
+        {
+          $set: { password_hash: 'hashed_password', updated_at: expect.any(String) },
+          $inc: { jwt_version: 1 },
+        },
+      );
     });
 
     it('should reject password change with incorrect current password', async () => {
@@ -239,41 +223,28 @@ describeIfWebAPIs('Authentication Integration Tests', () => {
 
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
-      const requestBody = {
-        currentPassword: 'WrongPassword!',
-        newPassword: 'NewSecurePassword456!',
-      };
-
       // Act
       const { POST } = await import('@/app/api/auth/change-password/route');
-      const request = new NextRequest('http://localhost:3000/api/auth/change-password', {
-        method: 'POST',
-        body: JSON.stringify(requestBody),
-      });
+      const response = await POST(post('/api/auth/change-password', {
+        currentPassword: 'WrongPassword!',
+        newPassword: 'NewSecurePassword456!',
+      }));
 
-      const response = await POST(request);
-
-      // Assert
+      // Assert: a wrong field, not a missing session (the route used to answer 401).
       expect(response.status).toBe(400);
+      expect(mockUpdateOne).not.toHaveBeenCalled();
     });
 
     it('should reject password change for unauthenticated user', async () => {
       // Arrange
       (getServerSession as jest.Mock).mockResolvedValue(null);
 
-      const requestBody = {
-        currentPassword: 'CurrentPassword123!',
-        newPassword: 'NewSecurePassword456!',
-      };
-
       // Act
       const { POST } = await import('@/app/api/auth/change-password/route');
-      const request = new NextRequest('http://localhost:3000/api/auth/change-password', {
-        method: 'POST',
-        body: JSON.stringify(requestBody),
-      });
-
-      const response = await POST(request);
+      const response = await POST(post('/api/auth/change-password', {
+        currentPassword: 'CurrentPassword123!',
+        newPassword: 'NewSecurePassword456!',
+      }));
 
       // Assert
       expect(response.status).toBe(401);
@@ -284,9 +255,7 @@ describeIfWebAPIs('Authentication Integration Tests', () => {
     const mockFindOne = jest.fn();
 
     beforeEach(() => {
-      (getCollection as jest.Mock).mockResolvedValue({
-        findOne: mockFindOne,
-      });
+      useCollections({ users: { findOne: mockFindOne } });
     });
 
     it('should allow admin to access admin routes', async () => {
@@ -396,153 +365,160 @@ describeIfWebAPIs('Authentication Integration Tests', () => {
   });
 });
 
-describeIfWebAPIs('Password Reset Flow', () => {
-  const mockFindOne = jest.fn();
-  const mockInsertOne = jest.fn();
-  const mockUpdateOne = jest.fn();
-  const mockUpdateMany = jest.fn();
+describe('Password Reset Flow', () => {
+  const GENERIC_REPLY = 'If an account exists for that email, a reset link has been sent.';
+  const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (getCollection as jest.Mock).mockResolvedValue({
-      findOne: mockFindOne,
-      insertOne: mockInsertOne,
-      updateOne: mockUpdateOne,
-      updateMany: mockUpdateMany,
-    });
+    jest.spyOn(console, 'log').mockImplementation(() => {});
   });
+
+  afterEach(() => jest.restoreAllMocks());
 
   describe('Forgot Password', () => {
     it('should create reset token for valid email', async () => {
       // Arrange
-      mockFindOne.mockResolvedValue({
-        id: 'user-123',
-        email: 'user@example.com',
+      const tokens = {
+        deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }),
+        insertOne: jest.fn().mockResolvedValue({ acknowledged: true }),
+      };
+      useCollections({
+        users: { findOne: jest.fn().mockResolvedValue({ id: 'user-123', email: 'user@example.com', is_active: true }) },
+        password_reset_tokens: tokens,
       });
-      mockInsertOne.mockResolvedValue({ insertedId: 'token-123' });
-
-      const requestBody = { email: 'user@example.com' };
 
       // Act
       const { POST } = await import('@/app/api/auth/forgot-password/route');
-      const request = new NextRequest('http://localhost:3000/api/auth/forgot-password', {
-        method: 'POST',
-        body: JSON.stringify(requestBody),
-      });
+      const response = await POST(post('/api/auth/forgot-password', { email: 'user@example.com' }));
 
-      const response = await POST(request);
-
-      // Assert - Should return 200 even if email doesn't exist (security)
+      // Assert: same reply either way; only the token's hash is stored.
       expect(response.status).toBe(200);
+      expect((await response.json()).message).toBe(GENERIC_REPLY);
+      expect(tokens.insertOne).toHaveBeenCalledWith(expect.objectContaining({
+        user_id: 'user-123',
+        token_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+        used_at: null,
+        expires_at: expect.any(Date),
+      }));
     });
 
     it('should not reveal if email exists', async () => {
       // Arrange
-      mockFindOne.mockResolvedValue(null); // User doesn't exist
-
-      const requestBody = { email: 'nonexistent@example.com' };
+      const tokens = { deleteMany: jest.fn(), insertOne: jest.fn() };
+      useCollections({
+        users: { findOne: jest.fn().mockResolvedValue(null) }, // User doesn't exist
+        password_reset_tokens: tokens,
+      });
 
       // Act
       const { POST } = await import('@/app/api/auth/forgot-password/route');
-      const request = new NextRequest('http://localhost:3000/api/auth/forgot-password', {
-        method: 'POST',
-        body: JSON.stringify(requestBody),
-      });
-
-      const response = await POST(request);
+      const response = await POST(post('/api/auth/forgot-password', { email: 'nonexistent@example.com' }));
       const body = await response.json();
 
       // Assert - Same response for existing and non-existing emails
       expect(response.status).toBe(200);
-      expect(body.message).toBeDefined();
+      expect(body.message).toBe(GENERIC_REPLY);
+      expect(tokens.insertOne).not.toHaveBeenCalled();
     });
   });
 
   describe('Reset Password', () => {
+    /**
+     * A token store that answers the route's findOne filter the way MongoDB would
+     * (token_hash match, used_at null, expires_at in the future).
+     */
+    function tokenStore(doc: Record<string, any>) {
+      return {
+        findOne: jest.fn(async (filter: Record<string, any>) => (
+          filter.token_hash === doc.token_hash &&
+          filter.used_at === null && doc.used_at === null &&
+          doc.expires_at > filter.expires_at.$gt
+        ) ? { ...doc } : null),
+        updateOne: jest.fn().mockResolvedValue({ matchedCount: 1, modifiedCount: 1 }),
+        updateMany: jest.fn().mockResolvedValue({ matchedCount: 0, modifiedCount: 0 }),
+      };
+    }
+
+    function usersStore() {
+      return {
+        findOne: jest.fn().mockResolvedValue({ id: 'user-123', email: 'user@example.com', password_hash: 'old_hash' }),
+        updateOne: jest.fn().mockResolvedValue({ matchedCount: 1, modifiedCount: 1 }),
+      };
+    }
+
+    const tokenDoc = (overrides: Record<string, unknown>) => ({
+      id: 'token-123',
+      user_id: 'user-123',
+      token_hash: sha256('the_token'),
+      expires_at: new Date(Date.now() + 3600000), // 1 hour from now
+      used_at: null,
+      ...overrides,
+    });
+
     it('should reset password with valid token', async () => {
       // Arrange
-      mockFindOne.mockResolvedValue({
-        id: 'token-123',
-        user_id: 'user-123',
-        token_hash: 'hashed_token',
-        expires_at: new Date(Date.now() + 3600000), // 1 hour from now
-        used: false,
-      });
-      mockUpdateOne.mockResolvedValue({ modifiedCount: 1 });
-      mockUpdateMany.mockResolvedValue({ modifiedCount: 1 });
-
-      const requestBody = {
-        token: 'valid_token',
-        newPassword: 'NewSecurePassword123!',
-      };
+      const tokens = tokenStore(tokenDoc({}));
+      const users = usersStore();
+      useCollections({ users, password_reset_tokens: tokens });
 
       // Act
       const { POST } = await import('@/app/api/auth/reset-password/route');
-      const request = new NextRequest('http://localhost:3000/api/auth/reset-password', {
-        method: 'POST',
-        body: JSON.stringify(requestBody),
-      });
+      const response = await POST(post('/api/auth/reset-password', {
+        token: 'the_token',
+        newPassword: 'NewSecurePassword123!',
+      }));
 
-      const response = await POST(request);
-
-      // Assert
+      // Assert: the token is claimed atomically, then hash and session version change together.
       expect(response.status).toBe(200);
+      expect(tokens.updateOne).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'token-123', used_at: null, expires_at: { $gt: expect.any(Date) } }),
+        { $set: { used_at: expect.any(Date) } },
+      );
+      expect(users.updateOne).toHaveBeenCalledWith(
+        { id: 'user-123', password_hash: 'old_hash' },
+        { $set: { password_hash: 'hashed_password', updated_at: expect.any(String) }, $inc: { jwt_version: 1 } },
+      );
     });
 
     it('should reject expired token', async () => {
       // Arrange
-      mockFindOne.mockResolvedValue({
-        id: 'token-123',
-        user_id: 'user-123',
-        token_hash: 'hashed_token',
-        expires_at: new Date(Date.now() - 3600000), // Expired 1 hour ago
-        used: false,
+      const users = usersStore();
+      useCollections({
+        users,
+        password_reset_tokens: tokenStore(tokenDoc({ expires_at: new Date(Date.now() - 3600000) })), // Expired 1 hour ago
       });
-
-      const requestBody = {
-        token: 'expired_token',
-        newPassword: 'NewSecurePassword123!',
-      };
 
       // Act
       const { POST } = await import('@/app/api/auth/reset-password/route');
-      const request = new NextRequest('http://localhost:3000/api/auth/reset-password', {
-        method: 'POST',
-        body: JSON.stringify(requestBody),
-      });
-
-      const response = await POST(request);
+      const response = await POST(post('/api/auth/reset-password', {
+        token: 'the_token',
+        newPassword: 'NewSecurePassword123!',
+      }));
 
       // Assert
       expect(response.status).toBe(400);
+      expect(users.updateOne).not.toHaveBeenCalled();
     });
 
     it('should reject already used token', async () => {
       // Arrange
-      mockFindOne.mockResolvedValue({
-        id: 'token-123',
-        user_id: 'user-123',
-        token_hash: 'hashed_token',
-        expires_at: new Date(Date.now() + 3600000),
-        used: true, // Already used
+      const users = usersStore();
+      useCollections({
+        users,
+        password_reset_tokens: tokenStore(tokenDoc({ used_at: new Date(Date.now() - 60000) })), // Already used
       });
-
-      const requestBody = {
-        token: 'used_token',
-        newPassword: 'NewSecurePassword123!',
-      };
 
       // Act
       const { POST } = await import('@/app/api/auth/reset-password/route');
-      const request = new NextRequest('http://localhost:3000/api/auth/reset-password', {
-        method: 'POST',
-        body: JSON.stringify(requestBody),
-      });
-
-      const response = await POST(request);
+      const response = await POST(post('/api/auth/reset-password', {
+        token: 'the_token',
+        newPassword: 'NewSecurePassword123!',
+      }));
 
       // Assert
       expect(response.status).toBe(400);
+      expect(users.updateOne).not.toHaveBeenCalled();
     });
   });
 });

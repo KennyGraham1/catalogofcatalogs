@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { Logger, formatErrorResponse } from '@/lib/errors';
-import { eventCache, generateCacheKey } from '@/lib/cache';
+import { catalogueScope, eventCache, generateCacheKey, getCacheGeneration } from '@/lib/cache';
 import { requireViewer } from '@/lib/auth/middleware';
 import { decodeEventCursor } from '@/lib/event-cursor';
 
@@ -65,6 +65,16 @@ export async function GET(
     let events;
     let cacheKey: string;
 
+    // Cached pages are keyed by the catalogue's cache generation, taken before the
+    // database is read: any write to the catalogue (in this or another server
+    // instance) moves it on, so a page read before the write is never served after
+    // it. A null generation means it could not be read; the cache is then bypassed.
+    const generation = await getCacheGeneration(catalogueScope(catalogueId));
+    const cachedPage = (key: string) => (generation === null ? null : eventCache.get(key));
+    const cachePage = (key: string, value: unknown) => {
+      if (generation !== null) eventCache.set(key, value);
+    };
+
     // Performance Optimization: Prefer cursor-based pagination for better performance
     if (summary || cursor !== null || (limit && !page && !pageSize && !offset)) {
       // Cursor-based pagination (most efficient for large datasets)
@@ -93,11 +103,12 @@ export async function GET(
         cursor: cursor || 'start',
         limit: limitNum,
         direction: validDirection,
-        summary
+        summary,
+        generation
       });
 
       // Try cache first
-      const cached = eventCache.get(cacheKey);
+      const cached = cachedPage(cacheKey);
       if (cached) {
         events = cached;
       } else {
@@ -107,7 +118,7 @@ export async function GET(
           direction: validDirection,
           summary
         });
-        eventCache.set(cacheKey, events);
+        cachePage(cacheKey, events);
       }
     } else if (page && pageSize) {
       // Page-based pagination
@@ -136,10 +147,10 @@ export async function GET(
         );
       }
 
-      cacheKey = generateCacheKey('events', { catalogueId, page: pageNum, pageSize: pageSizeNum });
+      cacheKey = generateCacheKey('events', { catalogueId, page: pageNum, pageSize: pageSizeNum, generation });
 
       // Try cache first
-      const cached = eventCache.get(cacheKey);
+      const cached = cachedPage(cacheKey);
       if (cached) {
         events = cached;
       } else {
@@ -147,7 +158,7 @@ export async function GET(
           page: pageNum,
           pageSize: pageSizeNum
         });
-        eventCache.set(cacheKey, events);
+        cachePage(cacheKey, events);
       }
     } else if (limit || offset) {
       // Limit/offset pagination
@@ -172,10 +183,10 @@ export async function GET(
         );
       }
 
-      cacheKey = generateCacheKey('events', { catalogueId, limit: limitNum, offset: offsetNum });
+      cacheKey = generateCacheKey('events', { catalogueId, limit: limitNum, offset: offsetNum, generation });
 
       // Try cache first
-      const cached = eventCache.get(cacheKey);
+      const cached = cachedPage(cacheKey);
       if (cached) {
         events = cached;
       } else {
@@ -188,19 +199,19 @@ export async function GET(
           offset: offsetNum,
           pageSize: limitNum
         });
-        eventCache.set(cacheKey, events);
+        cachePage(cacheKey, events);
       }
     } else {
       // No pagination - return all events (backward compatibility)
-      cacheKey = generateCacheKey('events', { catalogueId, all: true });
+      cacheKey = generateCacheKey('events', { catalogueId, all: true, generation });
 
       // Try cache first
-      const cached = eventCache.get(cacheKey);
+      const cached = cachedPage(cacheKey);
       if (cached) {
         events = cached;
       } else {
         events = await dbQueries.getEventsByCatalogueId(catalogueId);
-        eventCache.set(cacheKey, events);
+        cachePage(cacheKey, events);
       }
     }
 

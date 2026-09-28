@@ -13,7 +13,11 @@ export type { UploadStage, UploadProgressInfo } from '@/types/upload';
 interface FileUploaderProps {
   files: File[];
   onFilesAdded: (files: File[]) => void;
-  onFileRemoved: (fileName: string) => void;
+  // The row's position in `files`, not the name: two selected files can share
+  // a name (e.g. picked from different folders), and a name-keyed removal
+  // would remove the first match rather than the row the user actually
+  // clicked (or, with a naive filter, every same-named file at once).
+  onFileRemoved: (index: number) => void;
   uploading?: boolean;
   progressInfo?: UploadProgressInfo;
   disabled?: boolean;
@@ -38,7 +42,8 @@ function formatBytes(bytes: number): string {
 }
 
 // Drag-drop bypasses the <input accept=...> filter, so enforce type/size in JS too.
-const ACCEPTED_EXTENSIONS = ['csv', 'txt', 'dat', 'qml', 'json', 'geojson', 'xml'];
+// Keep in sync with lib/upload-limits.ts ALLOWED_UPLOAD_EXTENSIONS (server-side).
+const ACCEPTED_EXTENSIONS = ['csv', 'txt', 'dat', 'qml', 'quakeml', 'json', 'geojson', 'xml'];
 const MAX_FILE_BYTES = 500 * 1024 * 1024; // 500 MB hard ceiling per file
 
 function formatTimeRemaining(seconds: number): string {
@@ -167,6 +172,7 @@ export function FileUploader({
       case 'geojson':
       case 'xml':
       case 'qml':
+      case 'quakeml':
         return FileJson;
       default:
         return File;
@@ -195,7 +201,7 @@ export function FileUploader({
             <h3 className="font-semibold text-lg mb-1">Upload Earthquake Catalogues</h3>
             <p className="text-muted-foreground max-w-md mx-auto">
               Drag and drop your catalogue files here, or click to browse.
-              Supported formats: CSV, TXT, DAT, QML, JSON, GeoJSON, XML (max 500 MB each).
+              Supported formats: CSV, TXT, DAT, QML/QuakeML, JSON, GeoJSON, XML (max 500 MB each).
             </p>
           </div>
 
@@ -217,7 +223,7 @@ export function FileUploader({
             onChange={handleFileInputChange}
             style={{ display: 'none' }}
             multiple
-            accept=".csv,.txt,.dat,.qml,.json,.geojson,.xml"
+            accept=".csv,.txt,.dat,.qml,.quakeml,.json,.geojson,.xml"
             disabled={uploading || disabled}
             aria-label="File input for catalogue upload"
           />
@@ -343,9 +349,10 @@ export function FileUploader({
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        onFileRemoved(file.name);
+                        onFileRemoved(index);
                       }}
                       className="h-7 w-7"
+                      aria-label={`Remove ${file.name}`}
                     >
                       <X className="h-4 w-4" />
                     </Button>

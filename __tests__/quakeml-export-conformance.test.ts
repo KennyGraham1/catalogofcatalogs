@@ -13,7 +13,9 @@
  *   4. A merged row's authoritative hypocentre/magnitude live in the scalar columns
  *      (lib/merge.ts spreads the best-quality source event's origins/magnitudes JSON
  *      verbatim and overwrites only the scalars), so the export must publish the
- *      merged values, not the source ones.
+ *      merged values as the preferred solution. (Cluster C, #66: the merged values
+ *      are their own origin; the source origin is left intact rather than overwritten
+ *      under the source's identity, so these tests assert on the preferred origin.)
  *   5. validateQuakeMLStructure counted <eventParameters> as an event and used an
  *      open/close tag count that every well-formed document fails.
  *
@@ -240,16 +242,20 @@ describe('merged catalogue rows export the merged solution, not the source one',
 
   it('publishes the merged hypocentre from the scalar columns', () => {
     const xml = eventToQuakeML(mergedRow);
+    const preferredID = xml.match(/<preferredOriginID>([^<]+)<\/preferredOriginID>/)?.[1];
+    const preferred = xml.match(new RegExp(`<origin publicID="${preferredID}">[\\s\\S]*?</origin>`))?.[0] ?? '';
 
-    expect(xml).toContain('<value>2016-11-13T11:02:56.100Z</value>');
-    expect(xml).toContain('<value>-42.715</value>');
-    expect(xml).toContain('<value>173.035</value>');
-    expect(xml).toContain('<value>22000</value>');   // 22.0 km x 1000
-    expect(xml).toContain('<uncertainty>1500</uncertainty>'); // 1.5 km x 1000
-    expect(xml).toContain('<horizontalUncertainty>2800</horizontalUncertainty>'); // 2.8 km x 1000
-    expect(xml).not.toContain('<value>-42.69</value>');
-    expect(xml).not.toContain('<value>15110</value>');
-    expect(xml).not.toContain('<horizontalUncertainty>9900</horizontalUncertainty>');
+    expect(preferred).toContain('<value>2016-11-13T11:02:56.100Z</value>');
+    expect(preferred).toContain('<value>-42.715</value>');
+    expect(preferred).toContain('<value>173.035</value>');
+    expect(preferred).toContain('<value>22000</value>');   // 22.0 km x 1000
+    expect(preferred).toContain('<uncertainty>1500</uncertainty>'); // 1.5 km x 1000
+    expect(preferred).toContain('<horizontalUncertainty>2800</horizontalUncertainty>'); // 2.8 km x 1000
+    // The source's values stay on the source's own origin, never on the merged solution.
+    expect(preferred).not.toContain('<value>-42.69</value>');
+    expect(preferred).not.toContain('<value>15110</value>');
+    expect(preferred).not.toContain('<horizontalUncertainty>9900</horizontalUncertainty>');
+    expect(preferredID).not.toBe('smi:nz.org.geonet/origin/1');
   });
 
   it('publishes the merged magnitude and its scale', () => {
@@ -275,7 +281,7 @@ describe('merged catalogue rows export the merged solution, not the source one',
     expect(xml).toContain('<magnitude publicID="smi:nz.org.geonet/magnitude/1">');
   });
 
-  it('leaves non-preferred origins alone (they remain the contributing solutions)', () => {
+  it('leaves every contributing origin alone and publishes the merged solution beside them', () => {
     const twoOrigins: MergedEvent = {
       ...mergedRow,
       origins: JSON.stringify([
@@ -285,12 +291,17 @@ describe('merged catalogue rows export the merged solution, not the source one',
     };
     const xml = eventToQuakeML(twoOrigins);
 
-    // The non-preferred ISC origin is untouched…
+    // Both contributing origins are untouched (neither is overwritten with the merge)…
     expect(xml).toContain('<value>-42.6</value>');
     expect(xml).toContain('<value>30000</value>');
-    // …while the preferred one now carries the merged solution.
-    expect(xml).toContain('<value>-42.715</value>');
-    expect(xml).toContain('<value>22000</value>');
+    expect(xml).toContain('<value>-42.69</value>');
+    expect(xml).toContain('<value>15110</value>');
+    // …and the merged solution is a third origin, which is the preferred one.
+    const preferredID = xml.match(/<preferredOriginID>([^<]+)<\/preferredOriginID>/)?.[1];
+    expect(['smi:isc/origin/9', 'smi:nz.org.geonet/origin/1']).not.toContain(preferredID);
+    const preferred = xml.match(new RegExp(`<origin publicID="${preferredID}">[\\s\\S]*?</origin>`))?.[0] ?? '';
+    expect(preferred).toContain('<value>-42.715</value>');
+    expect(preferred).toContain('<value>22000</value>');
   });
 
   it('does not rewrite single-source rows', () => {

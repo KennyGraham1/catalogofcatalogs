@@ -10,6 +10,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { InfoTooltip } from '@/components/ui/info-tooltip';
 import { MapPin, Search, X, Map as MapIcon, Edit3, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { NZ_NATIONAL_BOUNDS } from '@/lib/geo-bounds-utils';
 import dynamic from 'next/dynamic';
 
 // Dynamically import the map component to avoid SSR issues
@@ -151,11 +152,12 @@ export const GeographicSearchPanel = memo(function GeographicSearchPanel({
   }, []);
 
   const setPresetRegion = (region: 'nz') => {
-    // New Zealand region
-    setMinLat('-47.5');
-    setMaxLat('-34.0');
-    setMinLon('166.0');
-    setMaxLon('179.0');
+    // New Zealand region: the map's national preset, which crosses the date line
+    // (min longitude greater than max longitude) to take in the Chatham and Kermadec Islands.
+    setMinLat(NZ_NATIONAL_BOUNDS.minLatitude.toFixed(2));
+    setMaxLat(NZ_NATIONAL_BOUNDS.maxLatitude.toFixed(2));
+    setMinLon(NZ_NATIONAL_BOUNDS.minLongitude.toFixed(2));
+    setMaxLon(NZ_NATIONAL_BOUNDS.maxLongitude.toFixed(2));
   };
 
   return (

@@ -15,6 +15,8 @@ import {
   Layers
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { resolveEventQuality } from './event-quality';
+import { getQualityBadgeVariant, type QualityGrade } from '@/lib/quality-scoring';
 
 interface Event {
   id: string | number;
@@ -27,6 +29,7 @@ interface Event {
   location_name?: string | null;
   event_type?: string | null;
   quality_score?: number | null;
+  quality_grade?: string | null;
   azimuthal_gap?: number | null;
   used_station_count?: number | null;
   public_id?: string | null;
@@ -82,10 +85,20 @@ export function VirtualizedEventTable({
   const [sortField, setSortField] = useState<SortField>(defaultSortField);
   const [sortDirection, setSortDirection] = useState<SortDirection>(defaultSortDirection);
 
+  // Resolve Quality once per event list (idempotent if EventTable already resolved it before
+  // delegating here): prefer stored quality_score/quality_grade (C1), else compute Q
+  // client-side for legacy rows, so this table is correct even when used on its own.
+  const displayEvents = useMemo(() => events.map(event => {
+    const { score, grade } = resolveEventQuality(event);
+    return event.quality_score === score && event.quality_grade === grade
+      ? event
+      : { ...event, quality_score: score, quality_grade: grade };
+  }), [events]);
+
   // Sort events
   const sortedEvents = useMemo(() => {
-    return sortTableEvents(events, sortField, sortDirection);
-  }, [events, sortField, sortDirection]);
+    return sortTableEvents(displayEvents, sortField, sortDirection);
+  }, [displayEvents, sortField, sortDirection]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -121,18 +134,19 @@ export function VirtualizedEventTable({
     return 'text-gray-600 dark:text-gray-400';
   };
 
-  const getQualityBadge = (score: number | null | undefined) => {
-    if (score === null || score === undefined) {
+  // Same 0-100 scale and grade->variant mapping as EventTable's getQualityBadge (both read
+  // getQualityBadgeVariant from lib/quality-scoring): the table that appears above 100 events
+  // must not silently switch scales from the one below it.
+  const getQualityBadge = (score: number | null | undefined, grade: string | null | undefined) => {
+    if (score == null || !grade) {
       return <Badge variant="outline" className="text-xs">N/A</Badge>;
     }
-    
-    if (score >= 0.8) {
-      return <Badge variant="default" className="bg-green-500 text-xs">High</Badge>;
-    } else if (score >= 0.5) {
-      return <Badge variant="default" className="bg-yellow-500 text-xs">Medium</Badge>;
-    } else {
-      return <Badge variant="default" className="bg-red-500 text-xs">Low</Badge>;
-    }
+
+    return (
+      <Badge variant={getQualityBadgeVariant(grade as QualityGrade)} className="text-xs">
+        {`${score.toFixed(0)} ${grade}`}
+      </Badge>
+    );
   };
 
   // Row renderer for react-window (new API)
@@ -203,7 +217,7 @@ export function VirtualizedEventTable({
 
         {/* Quality */}
         <div className="flex-1 min-w-0 pr-4">
-          {getQualityBadge(event.quality_score)}
+          {getQualityBadge(event.quality_score, event.quality_grade)}
         </div>
 
         {/* Type */}

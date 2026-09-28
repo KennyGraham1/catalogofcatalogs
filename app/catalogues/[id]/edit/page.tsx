@@ -13,6 +13,7 @@ import { CatalogueMetadataForm, CatalogueMetadata } from '@/components/upload/Ca
 import { useAuth } from '@/lib/auth/hooks';
 import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import { UserRole } from '@/lib/auth/types';
+import { invalidateCatalogueData } from '@/lib/client-cache';
 
 interface Catalogue {
   id: string;
@@ -47,7 +48,7 @@ interface Catalogue {
   usage_terms?: string;
   citation?: string;
   doi?: string;
-  version?: string;
+  source_version?: string;
   keywords?: string[];
   reference_links?: string[];
   notes?: string;
@@ -131,7 +132,7 @@ export default function EditCataloguePage() {
         usage_terms: data.usage_terms || '',
         citation: data.citation || '',
         doi: data.doi || '',
-        version: data.version || '',
+        source_version: data.source_version || '',
         keywords: parseArrayField(data.keywords),
         reference_links: parseArrayField(data.reference_links),
         notes: data.notes || '',
@@ -180,6 +181,10 @@ export default function EditCataloguePage() {
       });
 
       if (!response.ok) throw new Error('Failed to update catalogue');
+
+      // C5: invalidate every client cache of /api/catalogues* so the list and detail pages
+      // don't keep showing the pre-edit name/metadata.
+      invalidateCatalogueData();
 
       toast({
         title: "Success",

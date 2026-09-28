@@ -17,10 +17,11 @@ const customJestConfig = {
     '**/__tests__/**/*.test.tsx',
   ],
   // Coverage is gated on the unit-tested library core. The Next.js UI pages,
-  // API route handlers, and auth wiring (app/**, lib/auth/**) are exercised by
-  // integration/manual testing rather than Jest unit tests, so they are
-  // excluded from the unit-coverage gate (they would otherwise pin global
-  // coverage near 20%).
+  // API route handlers, and auth wiring (app/**, lib/auth/**) are covered by
+  // route- and page-level Jest suites (including __tests__/integration/*, which
+  // run in the node environment) plus the runtime/browser checks in scripts/,
+  // but they are excluded from this unit-coverage gate, which would otherwise
+  // be dominated by UI code.
   collectCoverageFrom: [
     'lib/**/*.{js,jsx,ts,tsx}',
     '!lib/auth/**',

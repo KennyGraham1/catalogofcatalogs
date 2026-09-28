@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { Logger, formatErrorResponse } from '@/lib/errors';
-import { apiCache } from '@/lib/cache';
+import { apiCache, CATALOGUE_LIST_SCOPE, getCacheGeneration, REGION_SEARCH_CACHE_PREFIX } from '@/lib/cache';
 import { randomUUID } from 'crypto';
 import { requireViewer } from '@/lib/auth/middleware';
 
@@ -98,10 +98,15 @@ export async function GET(request: NextRequest) {
     // two different queries share one answer: a catalogue whose extent lay between
     // west 10.001 and west 10.004 was reported for both, and the cached count could
     // not be corrected within the TTL.
-    const cacheKey = `region:${clampedMinLat},${clampedMaxLat},${clampedMinLon},${clampedMaxLon}:${crossesDateline ? 'wrap' : 'normal'}`;
+    // It also carries the catalogue-list cache generation, taken before the database
+    // is read: creating, deleting or re-bounding any catalogue (in any server
+    // instance) moves it on, so a result read before that write is never served after
+    // it. A null generation means it could not be read; the cache is then bypassed.
+    const generation = await getCacheGeneration(CATALOGUE_LIST_SCOPE);
+    const cacheKey = `${REGION_SEARCH_CACHE_PREFIX}${clampedMinLat},${clampedMaxLat},${clampedMinLon},${clampedMaxLon}:${crossesDateline ? 'wrap' : 'normal'}:${generation}`;
 
     // Check cache first
-    const cachedResult = apiCache.get<any>(cacheKey);
+    const cachedResult = generation === null ? null : apiCache.get<any>(cacheKey);
     if (cachedResult) {
       logger.info('Returning cached region search result', { cacheKey, requestId });
       return NextResponse.json({ ...cachedResult, requestId });
@@ -138,7 +143,7 @@ export async function GET(request: NextRequest) {
     };
 
     // Cache the result
-    apiCache.set(cacheKey, result);
+    if (generation !== null) apiCache.set(cacheKey, result);
 
     return NextResponse.json({ ...result, requestId });
 

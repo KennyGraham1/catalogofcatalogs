@@ -26,6 +26,14 @@ export interface UncertaintyData {
   max_horizontal_uncertainty?: number | null;
   /** OriginUncertainty.azimuthMaxHorizontalUncertainty — degrees clockwise from north. */
   azimuth_max_horizontal_uncertainty?: number | null;
+  /**
+   * OriginUncertainty.confidenceLevel (C16): the confidence, percent 0-100, that the
+   * agency's ellipse/circle above is quoted at. Only meaningful alongside a reported
+   * ellipse or circle (min/max_horizontal_uncertainty or horizontal_uncertainty) — it
+   * says nothing about the independent lat/lon-marginal fallback, which stays an
+   * uncalibrated extent regardless of this field.
+   */
+  confidence_level?: number | null;
 }
 
 export interface UncertaintyEllipse {
@@ -48,6 +56,21 @@ export interface UncertaintyEllipse {
   displayWeight: number;
   /** Provenance of the geometry, so the renderer can label it honestly. */
   source: 'origin-uncertainty' | 'horizontal-circle' | 'latlon-marginals';
+  /**
+   * False when the source gave the ellipse semi-axes but no azimuth for the major axis.
+   * The shape is then a circle of the semi-major radius (no orientation is invented), and
+   * reportedSemiMinorAxis (m) keeps the reported minor axis for labelling.
+   */
+  orientationKnown?: boolean;
+  reportedSemiMinorAxis?: number;
+  /**
+   * OriginUncertainty.confidenceLevel (percent, 0-100), carried through from
+   * UncertaintyData.confidence_level when the source event has it AND this ellipse was
+   * built from a reported ellipse/circle (source 'origin-uncertainty' or
+   * 'horizontal-circle'). describeUncertaintyEllipse shows "N% confidence ellipse" when
+   * set, instead of the generic "level the agency states (not recorded here)".
+   */
+  confidenceLevel?: number;
 }
 
 /** Degrees of latitude to km (WGS84 mean); longitude scales by cos(latitude). */
@@ -79,6 +102,11 @@ function positiveOrNull(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
+/** Finite percent in [0, 100], or undefined. Anything else is treated as "not recorded". */
+function confidenceOrUndefined(value: number | null | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100 ? value : undefined;
+}
+
 /**
  * Calculate uncertainty ellipse parameters from QuakeML uncertainty data.
  */
@@ -95,16 +123,37 @@ export function calculateUncertaintyEllipse(data: UncertaintyData): UncertaintyE
   const semiMajorKm = positiveOrNull(data.max_horizontal_uncertainty);
   const semiMinorKm = positiveOrNull(data.min_horizontal_uncertainty);
   if (semiMajorKm !== null && semiMinorKm !== null && semiMajorKm > 0) {
-    const azimuth = positiveOrNull(data.azimuth_max_horizontal_uncertainty) ?? 0;
+    const majorM = Math.max(semiMajorKm, semiMinorKm) * 1000;
+    const minorM = Math.min(semiMajorKm, semiMinorKm) * 1000;
+    const azimuth = positiveOrNull(data.azimuth_max_horizontal_uncertainty);
+    if (azimuth === null) {
+      // azimuthMaxHorizontalUncertainty is its own optional BED element, and CSV imports
+      // can carry the axes without it. Reading the absence as azimuth 0 drew the major
+      // axis N-S as if the agency had said so. The circle of the semi-major radius is the
+      // smallest shape that contains the ellipse in any orientation.
+      return {
+        center: [latitude, longitude],
+        semiMajorAxis: majorM,
+        semiMinorAxis: majorM,
+        rotation: 0,
+        displayWeight,
+        source: 'origin-uncertainty',
+        orientationKnown: false,
+        reportedSemiMinorAxis: minorM,
+        confidenceLevel: confidenceOrUndefined(data.confidence_level),
+      };
+    }
     return {
       center: [latitude, longitude],
-      semiMajorAxis: Math.max(semiMajorKm, semiMinorKm) * 1000,
-      semiMinorAxis: Math.min(semiMajorKm, semiMinorKm) * 1000,
+      semiMajorAxis: majorM,
+      semiMinorAxis: minorM,
       // azimuth is clockwise from north; the renderer measures counter-clockwise
       // from east, so rotation = 90 - azimuth (az 0 -> 90, az 90 -> 0).
       rotation: ((90 - azimuth) % 360 + 360) % 360,
       displayWeight,
       source: 'origin-uncertainty',
+      orientationKnown: true,
+      confidenceLevel: confidenceOrUndefined(data.confidence_level),
     };
   }
 
@@ -123,6 +172,7 @@ export function calculateUncertaintyEllipse(data: UncertaintyData): UncertaintyE
       rotation: 0,
       displayWeight,
       source: 'horizontal-circle',
+      confidenceLevel: confidenceOrUndefined(data.confidence_level),
     };
   }
 
@@ -154,6 +204,38 @@ export function calculateUncertaintyEllipse(data: UncertaintyData): UncertaintyE
     displayWeight,
     source: 'latlon-marginals'
   };
+}
+
+/**
+ * Tooltip text for a drawn uncertainty shape: what was reported and what is drawn.
+ * An agency's OriginUncertainty ellipse or circle IS a confidence region, at the
+ * OriginUncertainty.confidenceLevel the agency states (e.g. 90% for ISC). When the source
+ * event carries that level (C16's confidence_level), it is shown verbatim as "N%
+ * confidence ellipse"; otherwise the text calls it unrecorded rather than denying it is a
+ * confidence region. Only the lat/lon-marginal construction is an uncalibrated extent:
+ * scaling a bivariate normal to probability p needs both semi-axes multiplied by
+ * k = sqrt(-2 ln(1 - p)) (1.515 for 68%, 2.448 for 95%), and the marginals carry no
+ * covariance. The colour encodes the azimuthal gap, not a confidence level.
+ */
+export function describeUncertaintyEllipse(ellipse: UncertaintyEllipse): string {
+  const km = (m: number) => (m / 1000).toFixed(1);
+  const axes = `${km(ellipse.semiMajorAxis)} × ${km(ellipse.semiMinorAxis)} km`;
+  const formatConfidence = (level: number) => (Number.isInteger(level) ? String(level) : level.toFixed(1));
+  const agencyLevel = ellipse.confidenceLevel !== undefined
+    ? `<em>${formatConfidence(ellipse.confidenceLevel)}% confidence ellipse</em>`
+    : '<em>Confidence region at the level the agency states (not recorded here)</em>';
+  if (ellipse.source === 'origin-uncertainty' && ellipse.orientationKnown === false) {
+    const minor = km(ellipse.reportedSemiMinorAxis ?? ellipse.semiMinorAxis);
+    return `Location uncertainty<br/>Semi-axes: ${km(ellipse.semiMajorAxis)} × ${minor} km, azimuth not reported<br/>` +
+      `QuakeML OriginUncertainty horizontal error ellipse, drawn as a circle of the semi-major axis because its orientation is unknown<br/>${agencyLevel}`;
+  }
+  if (ellipse.source === 'origin-uncertainty') {
+    return `Location uncertainty<br/>Semi-axes: ${axes}<br/>QuakeML OriginUncertainty horizontal error ellipse<br/>${agencyLevel}`;
+  }
+  if (ellipse.source === 'horizontal-circle') {
+    return `Location uncertainty<br/>Radius: ${km(ellipse.semiMajorAxis)} km<br/>QuakeML OriginUncertainty circular horizontal uncertainty (radius)<br/>${agencyLevel}`;
+  }
+  return `Location uncertainty extent<br/>Semi-axes: ${axes}<br/>Approximate: axis-aligned from independent lat/lon uncertainties (no covariance)<br/><em>Not a 68%/95% confidence region</em>`;
 }
 
 /**
@@ -212,6 +294,28 @@ export function generateEllipsePoints(
   }
 
   return points;
+}
+
+/**
+ * Continuous colour ramp for the station-coverage "azimuthal gap" map colour mode
+ * (paper sec:viz): green (well-constrained) through yellow to red as the largest gap
+ * between reporting stations widens, matching a standard "good to bad" traffic-light
+ * hue sweep. Beyond the widely-used 180-degree usability threshold (Havskov &
+ * Ottemoller, 2010, sec. 6.3; GeoNet quality flags) the ramp keeps going but swings
+ * into magenta/violet hues instead of staying red, so poorly-constrained events are
+ * unmistakably highlighted rather than blending into the same red as a 175-degree gap.
+ * A missing gap is grey, never a guessed position on the ramp.
+ */
+export function getAzimuthalGapColor(gap: number | null | undefined): string {
+  if (gap === null || gap === undefined || !Number.isFinite(gap)) return '#94a3b8'; // slate-400: unknown
+  const clamped = Math.max(0, Math.min(360, gap));
+  if (clamped <= 180) {
+    const hue = 142 - 142 * (clamped / 180); // 142 (green) at 0 deg -> 0 (red) at 180 deg
+    return `hsl(${hue.toFixed(1)}, 85%, 45%)`;
+  }
+  const over = clamped - 180; // 0..180 beyond the 180 deg threshold
+  const hue = 360 - 100 * (over / 180); // continues 0/360 (red) -> 260 (blue-violet)
+  return `hsl(${hue.toFixed(1)}, 100%, 38%)`;
 }
 
 /**

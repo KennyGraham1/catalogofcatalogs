@@ -4,9 +4,13 @@ import { useMapEventSelection } from '@/hooks/use-map-event-selection';
 import { MapViewportObserver } from '@/components/map/MapViewportObserver';
 import { MapDetailControl } from '@/components/map/MapDetailControl';
 import type { MapDetail } from '@/lib/map-event-selection';
+import { EarthquakeMarkerLayer } from '@/components/map/EarthquakeMarkerLayer';
+import { DepthLegendItems, MagnitudeLegendItems } from '@/components/map/MapLegend';
+import { formatOriginTime } from '@/components/map/OptimizedEventPopup';
+import { useEventMapPopup } from '@/hooks/use-event-map-popup';
 
-import { useEffect, useState } from 'react';
-import { MapContainer, Circle, Popup } from 'react-leaflet';
+import { useCallback, useEffect, useState } from 'react';
+import { MapContainer, Popup } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -14,20 +18,84 @@ import { Activity, Ruler, Calendar, Info } from 'lucide-react';
 import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { getMagnitudeColor, getMagnitudeRadius, getMagnitudeLabel, getEarthquakeColor } from '@/lib/earthquake-utils';
+import { getMagnitudeLabel, getEarthquakeColor } from '@/lib/earthquake-utils';
 import { useMapColors } from '@/hooks/use-map-theme';
 
+interface MergeMapEvent {
+  id?: number | string;
+  latitude: number;
+  longitude: number;
+  magnitude: number;
+  depth?: number | null;
+  time: string;
+  region?: string;
+  source?: string;
+}
+
 interface MapComponentProps {
-  events: Array<{
-    id?: number;
-    latitude: number;
-    longitude: number;
-    magnitude: number;
-    depth?: number;
-    time: string;
-    region?: string;
-    source?: string;
-  }>;
+  events: MergeMapEvent[];
+}
+
+function MergeEventPopupContent({ event }: { event: MergeMapEvent }) {
+  return (
+    <div className="p-2 min-w-[250px]">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-bold text-base">{event.region || 'New Zealand'}</h3>
+        <Badge variant={event.magnitude >= 5.0 ? 'destructive' : 'default'}>
+          {getMagnitudeLabel(event.magnitude)}
+        </Badge>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-sm">
+          <Activity className="h-4 w-4 text-primary" />
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">Magnitude:</span>
+            <TechnicalTermTooltip term="magnitude" />
+          </div>
+          <span>{event.magnitude.toFixed(1)}</span>
+        </div>
+
+        <div className="flex items-center gap-2 text-sm">
+          <Ruler className="h-4 w-4 text-primary" />
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">Depth:</span>
+            <TechnicalTermTooltip term="depth" />
+          </div>
+          <span>{event.depth != null ? `${event.depth} km` : 'Unknown'}</span>
+        </div>
+
+        <div className="flex items-center gap-2 text-sm">
+          <Calendar className="h-4 w-4 text-primary" />
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">Time:</span>
+            <InfoTooltip content="Event origin time in UTC, the reference frame catalogues report origin times in." />
+          </div>
+          <span className="text-xs">{formatOriginTime(event.time)}</span>
+        </div>
+
+        {event.source && (
+          <div className="flex items-center gap-2 text-sm pt-2 border-t">
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium">Source:</span>
+              <InfoTooltip content="Catalogue or agency that reported the event." />
+            </div>
+            <span className="text-xs">{event.source}</span>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 text-sm">
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">Location:</span>
+            <InfoTooltip content="Epicenter coordinates in decimal degrees." />
+          </div>
+          <span className="text-xs">
+            {event.latitude.toFixed(4)}°, {event.longitude.toFixed(4)}°
+          </span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function MapComponent({ events }: MapComponentProps) {
@@ -35,7 +103,7 @@ export default function MapComponent({ events }: MapComponentProps) {
   const [sampleSize, setSampleSize] = useState<MapDetail>('auto');
 
   // Sample events for performance
-  const { sampled: sampledEvents, total, displayCount, visibleCount, isSampled, onViewportChange, getPosition } = useMapEventSelection(events, sampleSize);
+  const { sampled: sampledEvents, total, displayCount, visibleCount, isSampled, onViewportChange } = useMapEventSelection(events, sampleSize);
 
   // Fix for Leaflet icons in Next.js
   useEffect(() => {
@@ -46,6 +114,13 @@ export default function MapComponent({ events }: MapComponentProps) {
       shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
     });
   }, []);
+
+  // One popup, mounted only for the clicked event, as on the other live maps.
+  const { activePopup, onEventClick } = useEventMapPopup(events);
+  // An unknown depth keeps getEarthquakeColor's unknown-depth grey (keyed in the legend)
+  // rather than being coerced to 0 km and drawn as a shallow event.
+  const getEventColor = useCallback((event: MergeMapEvent) =>
+    getEarthquakeColor(event.depth, mapColors.isDark), [mapColors.isDark]);
 
   return (
     <div className="h-full w-full rounded-lg overflow-hidden border relative">
@@ -73,122 +148,35 @@ export default function MapComponent({ events }: MapComponentProps) {
         <MapLayerControl position="topright" />
         <MapViewportObserver onChange={onViewportChange} />
 
-        {/* Earthquake markers - using intelligent sampling for performance */}
-        {/* Sort by magnitude (small to large) so larger events render on top */}
-        {[...sampledEvents].sort((a, b) => a.magnitude - b.magnitude).map((event, index) => {
-          const eventDate = new Date(event.time).toLocaleDateString('en-GB', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-          });
-          const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
-
-          return (
-            <Circle
-              // A merge map deliberately shows duplicate events across catalogues, so the
-              // same event.id can appear more than once — append the array index (unique per
-              // render) so React keys never collide.
-              key={`${event.id ?? 'evt'}-${index}`}
-              center={getPosition(event)}
-              radius={getMagnitudeRadius(event.magnitude)}
-              pathOptions={{
-                color: getEarthquakeColor(event.depth || 0, mapColors.isDark),
-                fillColor: getEarthquakeColor(event.depth || 0, mapColors.isDark),
-                fillOpacity: mapColors.markerOpacity,
-                weight: 1,
-                // Add title for accessibility (shows on hover)
-                title: ariaLabel,
-              } as any}
-            >
-              <Popup>
-                <div className="p-2 min-w-[250px]">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-bold text-base">{event.region || 'New Zealand'}</h3>
-                    <Badge variant={event.magnitude >= 5.0 ? 'destructive' : 'default'}>
-                      {getMagnitudeLabel(event.magnitude)}
-                    </Badge>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm">
-                      <Activity className="h-4 w-4 text-primary" />
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-medium">Magnitude:</span>
-                        <TechnicalTermTooltip term="magnitude" />
-                      </div>
-                      <span>{event.magnitude.toFixed(1)}</span>
-                    </div>
-
-                    {event.depth !== undefined && (
-                      <div className="flex items-center gap-2 text-sm">
-                        <Ruler className="h-4 w-4 text-primary" />
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-medium">Depth:</span>
-                          <TechnicalTermTooltip term="depth" />
-                        </div>
-                        <span>{event.depth} km</span>
-                      </div>
-                    )}
-
-                    <div className="flex items-center gap-2 text-sm">
-                      <Calendar className="h-4 w-4 text-primary" />
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-medium">Time:</span>
-                        <InfoTooltip content="Event origin time in local timezone." />
-                      </div>
-                      <span className="text-xs">{event.time}</span>
-                    </div>
-
-                    {event.source && (
-                      <div className="flex items-center gap-2 text-sm pt-2 border-t">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-medium">Source:</span>
-                          <InfoTooltip content="Catalogue or agency that reported the event." />
-                        </div>
-                        <span className="text-xs">{event.source}</span>
-                      </div>
-                    )}
-
-                    <div className="flex items-center gap-2 text-sm">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-medium">Location:</span>
-                        <InfoTooltip content="Epicenter coordinates in decimal degrees." />
-                      </div>
-                      <span className="text-xs">
-                        {event.latitude.toFixed(4)}°, {event.longitude.toFixed(4)}°
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </Popup>
-            </Circle>
-          );
-        })}
+        {/* Screen-pixel CircleMarkers sized by getMagnitudePixelRadius, larger events on top.
+            The metre-radius Circles drawn here before changed size with every zoom, so no
+            fixed legend swatch could match them. */}
+        <EarthquakeMarkerLayer
+          events={sampledEvents}
+          getColor={getEventColor}
+          opacity={mapColors.markerOpacity}
+          onEventClick={onEventClick}
+        />
+        {activePopup && (
+          <Popup key={activePopup.seq} position={activePopup.position}>
+            <MergeEventPopupContent event={activePopup.event} />
+          </Popup>
+        )}
       </MapContainer>
 
-      {/* Legend */}
+      {/* Legend: built from the same colour and size functions as the markers */}
       <Card className="absolute bottom-4 right-4 z-[1000] max-w-[240px] border-border/60 bg-background/90 px-3 py-2.5 text-[11px] leading-tight backdrop-blur-sm shadow-lg">
         <div className="flex items-center justify-between gap-2">
-          <h4 className="text-[11px] font-semibold">Magnitude Scale</h4>
-          <TechnicalTermTooltip term="magnitude" />
+          <h4 className="text-[11px] font-semibold">Depth (Color)</h4>
+          <TechnicalTermTooltip term="depth" />
         </div>
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-          <div className="flex items-center gap-1.5">
-            <div className="h-2 w-2 rounded-full bg-blue-500 flex-shrink-0"></div>
-            <span>M2</span>
+        <DepthLegendItems isDark={mapColors.isDark} />
+        <div className="mt-2 border-t border-border/60 pt-2">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-[11px] font-semibold">Magnitude (Size)</h4>
+            <TechnicalTermTooltip term="magnitude" />
           </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-3 w-3 rounded-full bg-blue-500 flex-shrink-0"></div>
-            <span>M4</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-4 w-4 rounded-full bg-blue-500 flex-shrink-0"></div>
-            <span>M6</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-5 w-5 rounded-full bg-blue-500 flex-shrink-0"></div>
-            <span>M7+</span>
-          </div>
+          <MagnitudeLegendItems />
         </div>
         <div className="mt-2 border-t border-border/60 pt-2">
           <div className="text-[10px] text-muted-foreground">

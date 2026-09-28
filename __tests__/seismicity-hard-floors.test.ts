@@ -43,18 +43,26 @@ function expand(table: Array<[number, number]>): number[] {
 }
 
 describe('Gutenberg-Richter hard floors are withheld, not silently relaxed', () => {
-  it('withholds the fit when fewer than 10 events lie above the estimated Mc', () => {
-    // A 14-event aftershock sequence, the size the per-cluster b-values are
-    // computed on. Non-cumulative FMD: 1.0 -> 5, and 1.1, 1.2, 1.3, 1.5, 1.8,
-    // 2.2, 2.7, 3.4, 4.6 -> 1 each. MAXC picks M1.0, so Mc = 1.0 + 0.2 = 1.2 and
-    // only 8 events (1.2, 1.3, 1.5, 1.8, 2.2, 2.7, 3.4, 4.6) sit at or above it.
-    // Eight is below the floor of ten, so no estimate may be returned.
+  it('withholds an estimated Mc, and so the fit, below 50 events', () => {
+    // A 14-event aftershock sequence. The paper (sec:mc) withholds an Mc estimated
+    // from fewer than 50 events, and without a cut-off the fit estimates Mc itself.
+    // (Older code fell back to the catalogue floor here and reported completeness
+    // = 1.0 with b = 0.5287.)
     const sequence = [1.0, 1.0, 1.0, 1.0, 1.0, 1.1, 1.2, 1.3, 1.5, 1.8, 2.2, 2.7, 3.4, 4.6];
-    const events = eventsWithMagnitudes(sequence);
+    expect(() => calculateGutenbergRichter(eventsWithMagnitudes(sequence))).toThrow(
+      /need at least 50 events/
+    );
+  });
 
-    // The old behaviour fell back to the catalogue floor and reported
-    // completeness = 1.0 with b = 0.5287 - a b-value anchored where the
-    // catalogue is not complete.
+  it('withholds the fit when fewer than 10 events lie above the estimated Mc', () => {
+    // 52 events, enough to estimate Mc. Non-cumulative FMD: 1.0 -> 42, 1.1 -> 2,
+    // and 1.2, 1.3, 1.5, 1.8, 2.2, 2.7, 3.4, 4.6 -> 1 each. MAXC picks M1.0, so
+    // Mc = 1.0 + 0.2 = 1.2 and only those 8 events sit at or above it. Eight is
+    // below the floor of ten, so no estimate may be returned.
+    const events = eventsWithMagnitudes(
+      expand([[1.0, 42], [1.1, 2], [1.2, 1], [1.3, 1], [1.5, 1], [1.8, 1], [2.2, 1], [2.7, 1], [3.4, 1], [4.6, 1]])
+    );
+
     expect(() => calculateGutenbergRichter(events)).toThrow(
       /Insufficient data above the completeness magnitude/
     );
@@ -64,7 +72,7 @@ describe('Gutenberg-Richter hard floors are withheld, not silently relaxed', () 
     // Two populated bins only (M1.0 and M4.0). The cumulative FMD still has 31
     // entries between them, which is why counting cumulative points passed this
     // through and returned b = 0.1524 with R^2 = -13.54.
-    const events = eventsWithMagnitudes(expand([[1.0, 20], [4.0, 15]]));
+    const events = eventsWithMagnitudes(expand([[1.0, 35], [4.0, 20]]));
 
     expect(() => calculateGutenbergRichter(events)).toThrow(
       /at least 3 populated bins/

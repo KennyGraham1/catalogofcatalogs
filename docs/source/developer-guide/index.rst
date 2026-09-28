@@ -10,7 +10,7 @@ Overview
 
 The Earthquake Catalogue Platform is built with modern web technologies:
 
-* **Frontend:** Next.js 13+ with App Router, React, TypeScript
+* **Frontend:** Next.js 15 with App Router, React, TypeScript
 * **Backend:** Next.js API Routes (serverless)
 * **Database:** MongoDB with full QuakeML 1.2 schema
 * **UI:** Tailwind CSS, shadcn/ui components
@@ -44,7 +44,7 @@ Frontend
 
    * - Technology
      - Purpose
-   * - Next.js 13+
+   * - Next.js 15
      - React framework with App Router
    * - TypeScript
      - Type-safe development

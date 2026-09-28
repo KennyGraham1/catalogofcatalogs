@@ -1,41 +1,19 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { Database, Upload, Layers, BarChart, Globe, Activity, TrendingUp } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-
-interface Stats {
-  catalogueCount: number;
-  eventCount: number;
-  loading: boolean;
-}
+import { useCatalogues } from '@/contexts/CatalogueContext';
 
 export default function Home() {
-  const [stats, setStats] = useState<Stats>({ catalogueCount: 0, eventCount: 0, loading: true });
-
-  // Fetch statistics from API
-  useEffect(() => {
-    async function fetchStats() {
-      try {
-        const response = await fetch('/api/catalogues');
-        if (response.ok) {
-          const catalogues = await response.json();
-          const catalogueCount = Array.isArray(catalogues) ? catalogues.length : 0;
-          const eventCount = Array.isArray(catalogues)
-            ? catalogues.reduce((sum: number, cat: { event_count?: number }) => sum + (cat.event_count || 0), 0)
-            : 0;
-          setStats({ catalogueCount, eventCount, loading: false });
-        } else {
-          setStats({ catalogueCount: 0, eventCount: 0, loading: false });
-        }
-      } catch {
-        setStats({ catalogueCount: 0, eventCount: 0, loading: false });
-      }
-    }
-    fetchStats();
-  }, []);
+  // Read from the shared CatalogueProvider (mounted in components/layout/Layout.tsx)
+  // instead of fetching independently: a second, uncached fetch on every landing-page
+  // load was redundant, and it never saw a mutation invalidated elsewhere (gc#0). The
+  // provider's own stats also exclude merge outputs from the event total (gc#3) — see
+  // contexts/CatalogueContext.tsx calculateStats — so "Earthquake Events" here no
+  // longer counts a merged catalogue's events on top of its sources.
+  const { stats, loading } = useCatalogues();
 
   const features = [
     {
@@ -68,14 +46,14 @@ export default function Home() {
     {
       icon: Database,
       label: 'Catalogues',
-      value: stats.catalogueCount,
-      loading: stats.loading,
+      value: stats.totalCatalogues,
+      loading,
     },
     {
       icon: Activity,
       label: 'Earthquake Events',
-      value: stats.eventCount,
-      loading: stats.loading,
+      value: stats.totalEvents,
+      loading,
     },
     {
       icon: Globe,

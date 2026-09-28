@@ -51,7 +51,12 @@ const emptyAggregate = {
   averageAzimuthalGap: null,
   averageStationCount: null,
   eventsWithUncertainty: 0,
+  eventsWithHorizontalUncertainty: 0,
+  eventsWithDepthUncertainty: 0,
   eventsWithFocalMechanism: 0,
+  qualityScoreCount: 0,
+  averageQualityScore: null,
+  qualityGrades: [],
 };
 
 beforeEach(() => {
@@ -108,8 +113,10 @@ describe('server2 :: catalogue statistics nullability', () => {
       latest: '2016-11-14T23:02:56.100Z',
       spanDays: 2,
     });
-    // The all-zero depth placeholder is unchanged for clients that render it.
-    expect(body.depthRange).toEqual({ min: 0, max: 0, average: 0 });
+    // No event carries a depth either: no depth range, exactly as for magnitudes.
+    // (The old {min: 0, max: 0, average: 0} placeholder claimed every event sat at
+    // 0 km, which is a real depth — gap finding gt#6.)
+    expect(body.depthRange).toBeNull();
   });
 
   it('reports the ranges when the aggregation has them', async () => {
@@ -131,7 +138,12 @@ describe('server2 :: catalogue statistics nullability', () => {
       averageAzimuthalGap: 62.5,
       averageStationCount: 31,
       eventsWithUncertainty: 2,
+      eventsWithHorizontalUncertainty: 2,
+      eventsWithDepthUncertainty: 1,
       eventsWithFocalMechanism: 1,
+      qualityScoreCount: 3,
+      averageQualityScore: 61.5,
+      qualityGrades: [{ grade: 'B', count: 1 }, { grade: 'C', count: 2 }],
     });
 
     const body = await (await get()).json();
@@ -142,7 +154,12 @@ describe('server2 :: catalogue statistics nullability', () => {
       averageAzimuthalGap: 62.5,
       averageStationCount: 31,
       eventsWithUncertainty: 2,
+      eventsWithHorizontalUncertainty: 2,
+      eventsWithDepthUncertainty: 1,
       eventsWithFocalMechanism: 1,
+      eventsWithQualityScore: 3,
+      averageQualityScore: 61.5,
+      gradeDistribution: [{ grade: 'B', count: 1 }, { grade: 'C', count: 2 }],
     });
   });
 });

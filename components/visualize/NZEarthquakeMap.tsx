@@ -5,11 +5,13 @@ import { MapViewportObserver } from '@/components/map/MapViewportObserver';
 import { MapDetailControl } from '@/components/map/MapDetailControl';
 import type { MapDetail } from '@/lib/map-event-selection';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useEventMapPopup } from '@/hooks/use-event-map-popup';
-import { dedupeById } from '@/lib/utils';
-import { MapContainer, Circle, Popup, GeoJSON } from 'react-leaflet';
+import { MapContainer, Popup, GeoJSON } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
+import { EarthquakeMarkerLayer } from '@/components/map/EarthquakeMarkerLayer';
+import { DepthLegendItems, MagnitudeLegendItems, QualityLegendItems } from '@/components/map/MapLegend';
+import { formatOriginTime } from '@/components/map/OptimizedEventPopup';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -20,7 +22,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useMapColors } from '@/hooks/use-map-theme';
 import { calculateQualityScore, getQualityColor, metricsFromEvent } from '@/lib/quality-scoring';
-import { getMagnitudeRadius, getMagnitudeColor, getMagnitudeLabel } from '@/lib/earthquake-utils';
+import { getEarthquakeColor, getMagnitudeColor, getMagnitudeLabel } from '@/lib/earthquake-utils';
 import { loadFaultData, FaultCollection } from '@/lib/fault-data';
 import type { PathOptions } from 'leaflet';
 
@@ -50,7 +52,7 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
   const mapColors = useMapColors();
 
   // Sample earthquakes for performance
-  const { sampled: sampledEarthquakes, displayCount, visibleCount, isSampled, onViewportChange, getPosition } = useMapEventSelection(earthquakes, sampleSize);
+  const { sampled: sampledEarthquakes, displayCount, visibleCount, isSampled, onViewportChange } = useMapEventSelection(earthquakes, sampleSize);
 
   const { activePopup, onEventClick } = useEventMapPopup(earthquakes);
 
@@ -79,37 +81,19 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
     }));
   }, [sampledEarthquakes]);
 
-  const getDepthColor = (depth: number): string => {
-    if (depth >= 40) return '#000080'; // Navy
-    if (depth >= 30) return '#0000FF'; // Blue
-    if (depth >= 20) return '#4169E1'; // Royal blue
-    if (depth >= 10) return '#87CEEB'; // Sky blue
-    return '#ADD8E6'; // Light blue
-  };
-
   const qualityScoreMap = useMemo(() => new Map(qualityScores.map(q => [q.eventId, q.score])), [qualityScores]);
 
-  const getEventColor = (eq: Earthquake): string => {
+  // Depth uses the shared palette (and legend) of the other maps, including grey for an
+  // unknown depth, which the private blue ramp drew as its shallowest colour.
+  const getEventColor = useCallback((eq: Earthquake): string => {
     if (colorMode === 'quality') {
       const quality = qualityScoreMap.get(eq.id);
       return quality ? getQualityColor(quality.overall) : getMagnitudeColor(eq.magnitude);
     } else if (colorMode === 'depth') {
-      return getDepthColor(eq.depth);
+      return getEarthquakeColor(eq.depth, mapColors.isDark);
     }
     return getMagnitudeColor(eq.magnitude);
-  };
-
-
-  // Table 2 thresholds (see lib/quality-scoring.ts scoreToGrade)
-  const getQualityGrade = (score: number): string => {
-    if (score >= 95) return 'A+';
-    if (score >= 85) return 'A';
-    if (score >= 75) return 'B+';
-    if (score >= 65) return 'B';
-    if (score >= 45) return 'C';
-    if (score >= 35) return 'D';
-    return 'F';
-  };
+  }, [colorMode, qualityScoreMap, mapColors.isDark]);
 
   return (
     <div className="relative">
@@ -212,6 +196,7 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
           zoom={6}
           className="h-full w-full"
           scrollWheelZoom={true}
+          preferCanvas={true}
         >
           <MapLayerControl position="topright" />
           <MapViewportObserver onChange={onViewportChange} />
@@ -231,35 +216,12 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
             />
           )}
 
-          {/* Earthquake markers - using intelligent sampling for performance */}
-          {dedupeById(sampledEarthquakes).map((eq) => {
-            const eventDate = new Date(eq.time).toLocaleDateString('en-GB', {
-              day: '2-digit',
-              month: '2-digit',
-              year: 'numeric',
-            });
-            const ariaLabel = `Magnitude ${eq.magnitude} earthquake at ${eq.latitude.toFixed(2)}, ${eq.longitude.toFixed(2)} on ${eventDate}`;
-
-            return (
-              <Circle
-                key={eq.id}
-                center={getPosition(eq)}
-                radius={getMagnitudeRadius(eq.magnitude)}
-                pathOptions={{
-                  color: getEventColor(eq),
-                  fillColor: getEventColor(eq),
-                  fillOpacity: mapColors.markerOpacity,
-                  weight: 2,
-                  // Add title for accessibility (shows on hover)
-                  title: ariaLabel,
-                } as any}
-                eventHandlers={{ click: () => onEventClick(eq, getPosition(eq)) }}
-              />
-            );
-          })}
+          {/* Earthquake markers - screen-pixel circles sized like the legend, using
+              intelligent sampling for performance */}
+          <EarthquakeMarkerLayer events={sampledEarthquakes} getColor={getEventColor} opacity={mapColors.markerOpacity} onEventClick={onEventClick} />
           {activePopup && <Popup key={activePopup.seq} position={activePopup.position}>
             <EventPopup eq={activePopup.event} qualityScores={qualityScores}
-              getMagnitudeLabel={getMagnitudeLabel} getQualityGrade={getQualityGrade} />
+              getMagnitudeLabel={getMagnitudeLabel} />
           </Popup>}
         </MapContainer>
       </div>
@@ -267,6 +229,7 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
       {/* Legend */}
       <LegendPanel
         colorMode={colorMode}
+        isDark={mapColors.isDark}
         showFaults={showFaults}
         faultCount={faultData?.features.length}
       />
@@ -274,8 +237,8 @@ export default function NZEarthquakeMap({ earthquakes, colorBy = 'magnitude' }: 
   );
 }
 
-// Legend panel component
-function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string; showFaults: boolean; faultCount?: number }) {
+// Legend panel component (swatches come from the functions that draw the markers)
+function LegendPanel({ colorMode, isDark, showFaults, faultCount }: { colorMode: string; isDark: boolean; showFaults: boolean; faultCount?: number }) {
   return (
     <Card className="absolute bottom-4 right-4 z-[1000] max-w-[240px] border-border/60 bg-background/90 px-3 py-2.5 text-[11px] leading-tight backdrop-blur-sm shadow-lg">
       <div className="flex items-center justify-between gap-2">
@@ -292,70 +255,11 @@ function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string;
       </div>
 
       {colorMode === 'quality' ? (
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#22c55e' }}></div>
-            <span>A+ / A (90-100)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#84cc16' }}></div>
-            <span>B (80-89)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#eab308' }}></div>
-            <span>C (70-79)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#f97316' }}></div>
-            <span>D (60-69)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#ef4444' }}></div>
-            <span>F (&lt; 60)</span>
-          </div>
-        </div>
+        <QualityLegendItems />
       ) : colorMode === 'depth' ? (
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#000080' }}></div>
-            <span>≥ 40 km (Deep)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#0000FF' }}></div>
-            <span>30 - 39 km</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#4169E1' }}></div>
-            <span>20 - 29 km</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#87CEEB' }}></div>
-            <span>10 - 19 km</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#ADD8E6' }}></div>
-            <span>&lt; 10 km (Shallow)</span>
-          </div>
-        </div>
+        <DepthLegendItems isDark={isDark} />
       ) : (
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-          <div className="flex items-center gap-1.5">
-            <div className="h-2 w-2 rounded-full bg-blue-500 flex-shrink-0"></div>
-            <span>M2</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-3 w-3 rounded-full bg-blue-500 flex-shrink-0"></div>
-            <span>M4</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-4 w-4 rounded-full bg-blue-500 flex-shrink-0"></div>
-            <span>M6</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-5 w-5 rounded-full bg-blue-500 flex-shrink-0"></div>
-            <span>M7+</span>
-          </div>
-        </div>
+        <MagnitudeLegendItems getColor={getMagnitudeColor} />
       )}
 
       {showFaults && (
@@ -381,13 +285,11 @@ function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string;
 function EventPopup({
   eq,
   qualityScores,
-  getMagnitudeLabel,
-  getQualityGrade
+  getMagnitudeLabel
 }: {
   eq: Earthquake;
   qualityScores: any[];
   getMagnitudeLabel: (mag: number) => string;
-  getQualityGrade: (score: number) => string;
 }) {
   const quality = qualityScores.find(q => q.eventId === eq.id);
 
@@ -418,15 +320,8 @@ function EventPopup({
         <div className="flex items-center gap-2 text-sm">
           <Calendar className="h-4 w-4 text-primary" />
           <div className="flex items-center gap-1.5">
-            <span className="text-xs">{new Date(eq.time).toLocaleString('en-GB', {
-              day: '2-digit',
-              month: '2-digit',
-              year: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-            })}</span>
-            <InfoTooltip content="Event origin time in local timezone." />
+            <span className="text-xs">{formatOriginTime(eq.time)}</span>
+            <InfoTooltip content="Event origin time in UTC, the reference frame catalogues report origin times in." />
           </div>
         </div>
         <div className="flex items-center gap-2 text-sm">
@@ -452,7 +347,7 @@ function EventPopup({
                   borderColor: getQualityColor(quality.score.overall)
                 }}
               >
-                {getQualityGrade(quality.score.overall)} ({quality.score.overall.toFixed(0)})
+                {quality.score.grade} ({quality.score.overall.toFixed(0)})
               </Badge>
             </div>
           </div>

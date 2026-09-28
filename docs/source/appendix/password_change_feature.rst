@@ -43,18 +43,20 @@ I've successfully implemented a comprehensive password change feature for the Ea
        API->>API: bcrypt.compare(current, hash)
        alt Invalid password
            rect rgb(251,224,218)
-               API-->>UI: 401 Unauthorized
+               API-->>UI: 400 Bad Request
                UI-->>User: Error: current password incorrect
            end
        else Valid password
            rect rgb(213,239,224)
                API->>API: bcrypt.hash(new, 10)
-               API->>DB: Update password hash
+               API->>DB: Update password hash & bump jwt_version
                activate DB
                DB-->>API: Success
                deactivate DB
                API-->>UI: 200 OK
-               UI-->>User: Success & redirect to profile
+               UI-->>User: All sessions signed out, sign in again
+               UI->>Auth: signOut after 2s, redirect to /login
+               Auth-->>User: Redirect to /login with callbackUrl=/profile
            end
        end
        deactivate API
@@ -243,13 +245,13 @@ Test Steps
    - Confirm New Password: ``newpassword123``
 
 4. **Submit**
-   - Should see success message
-   - Auto-redirect to profile
+   - Should see a message that all sessions were signed out
+   - After ~2 seconds, you're signed out automatically and redirected to
+     ``/login``
 
 5. **Test new password**
-   - Sign out
    - Log in with new password: ``newpassword123``
-   - Should work!
+   - Should land back on ``/profile``
 
 Test Cases
 ^^^^^^^^^^
@@ -311,9 +313,9 @@ Error Responses
    * - 401
      - Unauthorized
      - Not logged in
-   * - 401
+   * - 400
      - Current password is incorrect
-     - Wrong current password
+     - Wrong current password (you are signed in, so this is not a 401)
    * - 400
      - Current password and new password are required
      - Missing fields

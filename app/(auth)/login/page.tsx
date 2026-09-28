@@ -16,21 +16,21 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { LoadingCard } from '@/components/ui/loading-spinner';
-
-/** Map NextAuth error codes to human-readable copy. */
-function humanizeAuthError(code: string): string {
-  if (code === 'CredentialsSignin') return 'Invalid email or password.';
-  return 'Unable to sign in. Please try again.';
-}
+import { describeAuthError, safeCallbackPath } from '@/lib/auth/errors';
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const justRegistered = searchParams.get('registered') === 'true';
+  const passwordChanged = searchParams.get('passwordChanged') === '1';
+  // Where the middleware (or a page) sent the user from; same-origin paths only.
+  const callbackUrl = safeCallbackPath(searchParams.get('callbackUrl'));
+  // NextAuth redirects here with ?error=<code> when it handles a sign-in itself.
+  const redirectError = searchParams.get('error');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useState(redirectError ? describeAuthError(redirectError) : '');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -46,9 +46,9 @@ function LoginForm() {
       });
 
       if (result?.error) {
-        setError(humanizeAuthError(result.error));
+        setError(describeAuthError(result.error));
       } else if (result?.ok) {
-        router.push('/');
+        router.push(callbackUrl);
         router.refresh();
       }
     } catch (err) {
@@ -72,6 +72,12 @@ function LoginForm() {
             {justRegistered && !error && (
               <Alert className="border-green-500/50 bg-green-50 text-green-900 dark:bg-green-950/40 dark:text-green-100">
                 <AlertDescription>Account created. Please sign in.</AlertDescription>
+              </Alert>
+            )}
+
+            {passwordChanged && !error && (
+              <Alert className="border-green-500/50 bg-green-50 text-green-900 dark:bg-green-950/40 dark:text-green-100">
+                <AlertDescription>Your password was changed. Please sign in with your new password.</AlertDescription>
               </Alert>
             )}
 

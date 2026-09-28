@@ -4,7 +4,7 @@
  */
 
 import type { MergedEvent } from './db';
-import { csvField, csvRow } from './export-utils';
+import { csvField, csvRow, Sha256, stripXmlIllegalChars, toUtcIsoString } from './export-utils';
 
 /**
  * Target size, in characters, of one streamed chunk.
@@ -116,14 +116,362 @@ export interface ExportMetadata {
   mergeMethodology?: string;
   mergeQualityAssessment?: string;
   // Catalogue-level merge strategy and threshold parameters (MergedCatalogue.merge_config).
-  // NOTE: this is catalogue-level only. MergedEvent carries no per-event merge strategy or
-  // quality score, so neither can be exported — see the handoff note in lib/merge.ts.
+  // The per-event strategy, parameters and quality score (contracts C1/C2) travel with each
+  // event instead; see eventLineage().
   mergeConfig?: unknown;
   // Provenance
   createdBy?: string;
   modifiedAt?: string;
   // Source catalogues (parsed from JSON string in database)
   sourceCatalogues?: unknown;
+  // Catalogue identity (C3). `version` above is the catalogue version ("MAJOR.MINOR.PATCH").
+  catalogueId?: string;
+  versionUpdatedAt?: string;
+  /** The depositor's own release label for the source data (MergedCatalogue.source_version). */
+  sourceVersion?: string;
+  // Export provenance (C12). `generatedAt` above is the export timestamp (UTC).
+  /** SHA-256 of the canonical exported event rows; computed when absent. */
+  checksum?: ExportChecksum;
+  /** The event filter applied (C4); null or absent when the whole catalogue was exported. */
+  filter?: Record<string, unknown> | null;
+  /** Declustering applied to the exported events; absent means none. */
+  declustering?: ExportDeclustering;
+}
+
+/**
+ * Event row fields read by the exporters beyond lib/db.ts MergedEvent: the per-event quality
+ * score (contract C1), merge provenance (C2), the agency's raw event type (C8) and the
+ * origin-uncertainty confidence level (C16). All optional: rows stored before those fields
+ * existed export them empty.
+ */
+export type ExportableEvent = MergedEvent & {
+  quality_score?: number | null;
+  quality_grade?: string | null;
+  merge_strategy?: string | null;
+  merge_parameters?: string | null;
+  source_catalogue_ids?: string[] | string | null;
+  source_event_type?: string | null;
+  confidence_level?: number | null;
+};
+
+/** Checksum recorded by every export format (see computeEventRowsChecksum). */
+export interface ExportChecksum {
+  algorithm: 'SHA-256';
+  /** 64 lowercase hex digits. */
+  value: string;
+  /** What exactly was hashed, stated in the file so the value can be re-derived. */
+  scope: string;
+}
+
+/** Per-event declustering tag (contract C7). */
+export interface DeclusterTag {
+  /** The cluster's identifier (its mainshock's event id); null for an event in no cluster. */
+  clusterId: string | null;
+  /** True for independent events: cluster mainshocks and events in no cluster. */
+  isMainshock: boolean;
+}
+
+/** Declustering applied to an export (C12). */
+export interface ExportDeclustering {
+  algorithm: 'none' | 'gardner-knopoff';
+  /** Algorithm settings (window definitions), recorded verbatim in the export metadata. */
+  parameters?: Record<string, unknown>;
+  /** Counts over the exported events. */
+  summary?: { eventCount: number; mainshockCount: number; dependentCount: number; clusterCount: number };
+  /** Per-event tags keyed by event row id. Emitted per event, never serialised as a whole. */
+  tags?: ReadonlyMap<string, DeclusterTag>;
+}
+
+/** One contributing source event of a row, as recorded in its `source_events` JSON. */
+export interface SourceEventMember {
+  catalogueId: string | null;
+  source: string | null;
+  /** The member's identifier: its recorded eventId, else the source row's source_id / public id. */
+  eventId: string | null;
+  /** `eventId` exactly as the entry recorded it (importers store the agency's event id here). */
+  recordedEventId: string | null;
+  /** C2: the member whose solution (time and epicentre) the row publishes. */
+  selected: boolean;
+  /** The contributing row as it was stored at merge time (merged rows only). */
+  originalData: Record<string, unknown> | null;
+}
+
+/** Per-event provenance carried by every format (C12). */
+export interface EventLineage {
+  /**
+   * Source whose solution the row publishes: the C2-selected member, else the agency that
+   * qualifies the row's source_id, else 'merged' for an averaged solution.
+   */
+  source: string;
+  selectedSource: string | null;
+  selectedSourceCatalogueId: string | null;
+  sourceCatalogueIds: string[];
+  mergeStrategy: string | null;
+  /** The effective merge configuration for this event (C2), as JSON text. */
+  mergeParameters: string | null;
+  qualityScore: number | null;
+  qualityGrade: string | null;
+  members: SourceEventMember[];
+}
+
+function textOrNull(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed === '' ? null : trimmed;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function finiteOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/** Parse a row's `source_events` (JSON text, or an already-parsed array) into its members. */
+export function parseSourceEvents(value: unknown): SourceEventMember[] {
+  let parsed: unknown = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+  const members: SourceEventMember[] = [];
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const record = entry as Record<string, unknown>;
+    const data = record.originalData && typeof record.originalData === 'object' && !Array.isArray(record.originalData)
+      ? record.originalData as Record<string, unknown>
+      : null;
+    const recordedEventId = textOrNull(record.eventId);
+    members.push({
+      catalogueId: textOrNull(record.catalogueId),
+      source: textOrNull(record.source),
+      eventId: recordedEventId ?? textOrNull(data?.source_id) ?? textOrNull(data?.event_public_id) ?? textOrNull(data?.id),
+      recordedEventId,
+      selected: record.selected === true,
+      originalData: data,
+    });
+  }
+  return members;
+}
+
+/** True when the row is the product of merging two or more source events. */
+export function isMultiSourceRow(event: Pick<MergedEvent, 'source_events'>): boolean {
+  return parseSourceEvents(event.source_events).length > 1;
+}
+
+// A date-time with no zone designator. Stored event times are UTC, but the JS Date parser
+// reads an offset-less date-time as local time.
+const OFFSETLESS_DATE_TIME = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/;
+
+/** Epoch milliseconds of an ISO 8601 timestamp (offset-less read as UTC); null if unparseable. */
+export function utcEpoch(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  const raw = value.trim();
+  const offsetless = raw.match(OFFSETLESS_DATE_TIME);
+  const epoch = Date.parse(offsetless ? `${offsetless[1]}T${offsetless[2]}Z` : raw);
+  return Number.isFinite(epoch) ? epoch : null;
+}
+
+interface Hypocentre {
+  time?: unknown;
+  latitude?: unknown;
+  longitude?: unknown;
+  depth?: unknown;
+}
+
+/**
+ * Whether two stored records carry the same hypocentre: origin time equal to the millisecond,
+ * equal latitude, equal longitude modulo 360 and equal depth in km (both unknown, or equal
+ * within floating-point noise).
+ */
+export function sameHypocentre(a: Hypocentre, b: Hypocentre): boolean {
+  const ta = utcEpoch(a.time);
+  if (ta === null || ta !== utcEpoch(b.time)) return false;
+  const latA = finiteOrNull(a.latitude);
+  const latB = finiteOrNull(b.latitude);
+  if (latA === null || latB === null || Math.abs(latA - latB) > 1e-9) return false;
+  const lonA = finiteOrNull(a.longitude);
+  const lonB = finiteOrNull(b.longitude);
+  if (lonA === null || lonB === null) return false;
+  const lonDiff = Math.abs(((lonA - lonB) % 360 + 540) % 360 - 180);
+  if (lonDiff > 1e-9) return false;
+  const depthA = finiteOrNull(a.depth);
+  const depthB = finiteOrNull(b.depth);
+  if (depthA === null || depthB === null) return depthA === depthB;
+  return Math.abs(depthA - depthB) <= 1e-9 * Math.max(1, Math.abs(depthA));
+}
+
+/**
+ * The contributing member whose own stored solution is exactly the hypocentre the row
+ * publishes: the C2-selected member when it carries it, else the only member that does.
+ * null for a single-source row, an averaged solution, a member list without stored rows, or
+ * a tie between members reporting the same values.
+ */
+export function publishedSolutionMember(
+  event: Hypocentre & Pick<MergedEvent, 'source_events'>,
+  members: SourceEventMember[] = parseSourceEvents(event.source_events)
+): SourceEventMember | null {
+  if (members.length < 2) return null;
+  const carries = (member: SourceEventMember) =>
+    member.originalData !== null && sameHypocentre(member.originalData, event);
+  const selected = members.find(member => member.selected);
+  if (selected && carries(selected)) return selected;
+  const matching = members.filter(carries);
+  return matching.length === 1 ? matching[0] : null;
+}
+
+/** The catalogue-level merge strategy from a merge_config (legacy rows carry no per-event one). */
+function catalogueMergeStrategy(metadata?: ExportMetadata): string | null {
+  const config = metadata?.mergeConfig;
+  if (!config || typeof config !== 'object') return null;
+  const record = config as Record<string, unknown>;
+  return textOrNull(record.mergeStrategy) ?? textOrNull(record.strategy);
+}
+
+/**
+ * Attribute the published solution of a row to a source. Never the first member by array
+ * position: source_events is in group (time) order, so members[0] is the earliest report,
+ * which is the published one only by coincidence.
+ */
+function attributedSource(
+  event: ExportableEvent,
+  members: SourceEventMember[],
+  strategy: string | null
+): string {
+  const selected = members.find(member => member.selected);
+  if (selected?.source) return selected.source;
+  if (members.length <= 1) return members[0]?.source || 'unknown';
+  // An averaged hypocentre is no single source's solution (C2 selects no member for it),
+  // although lib/merge.ts still qualifies the kept source_id by the base event's agency.
+  if (strategy === 'average') return 'merged';
+  // lib/merge.ts qualifies a merged row's source_id by the agency whose record (and so whose
+  // solution) the strategy kept: "<source>:<id>". Longest label first, so "GeoNet NZ" wins
+  // over a "GeoNet" that merely prefixes it.
+  const sourceId = textOrNull(event.source_id);
+  if (sourceId) {
+    const labels = Array.from(new Set(members.map(member => member.source).filter((s): s is string => !!s)))
+      .sort((a, b) => b.length - a.length);
+    const qualifying = labels.find(label => sourceId.startsWith(`${label}:`));
+    if (qualifying) return qualifying;
+  }
+  return publishedSolutionMember(event, members)?.source || 'unknown';
+}
+
+/**
+ * Per-event lineage (C12): the contributing catalogues, merge strategy and parameters,
+ * quality score and selected source. Fields the row does not carry (rows stored before
+ * contracts C1/C2) come back empty; source catalogue IDs are read from the members'
+ * catalogueId, which is what C2's source_catalogue_ids records, when the row lacks the column.
+ */
+export function eventLineage(event: ExportableEvent, catalogueStrategy?: string | null): EventLineage {
+  const members = parseSourceEvents(event.source_events);
+  const selected = members.find(member => member.selected) ?? null;
+
+  let storedIds: unknown = event.source_catalogue_ids;
+  if (typeof storedIds === 'string') {
+    const text = storedIds;
+    try {
+      storedIds = JSON.parse(text);
+    } catch {
+      storedIds = text.split(';');
+    }
+  }
+  const sourceCatalogueIds = Array.isArray(storedIds)
+    ? storedIds.map(textOrNull).filter((id): id is string => id !== null)
+    : Array.from(new Set(members.map(member => member.catalogueId).filter((id): id is string => id !== null)));
+
+  const mergeStrategy = textOrNull(event.merge_strategy);
+  const rawParameters: unknown = event.merge_parameters;
+  const mergeParameters = typeof rawParameters === 'string'
+    ? textOrNull(rawParameters)
+    : rawParameters && typeof rawParameters === 'object' ? JSON.stringify(rawParameters) : null;
+
+  return {
+    source: attributedSource(event, members, mergeStrategy ?? (members.length > 1 ? catalogueStrategy ?? null : null)),
+    selectedSource: selected?.source ?? null,
+    selectedSourceCatalogueId: selected?.catalogueId ?? null,
+    sourceCatalogueIds,
+    mergeStrategy,
+    mergeParameters,
+    qualityScore: finiteOrNull(event.quality_score),
+    qualityGrade: textOrNull(event.quality_grade),
+    members,
+  };
+}
+
+/** The declustering an export records: the one applied, or `{ algorithm: 'none' }`. */
+function declusteringOf(metadata?: ExportMetadata): ExportDeclustering {
+  return metadata?.declustering ?? { algorithm: 'none' };
+}
+
+/** Per-event declustering tags, when declustering was applied. */
+function declusterTagsOf(metadata?: ExportMetadata): ReadonlyMap<string, DeclusterTag> | null {
+  const declustering = metadata?.declustering;
+  return declustering && declustering.algorithm !== 'none' && declustering.tags ? declustering.tags : null;
+}
+
+/** One-line text form of the declustering record, for the text-based formats. */
+function declusteringText(metadata?: ExportMetadata): string {
+  const record = describeDeclustering(metadata);
+  return record.algorithm === 'none' ? 'none' : JSON.stringify(record);
+}
+
+/** The declustering record written into export metadata (the per-event tag map is not). */
+export function describeDeclustering(metadata?: ExportMetadata): Record<string, unknown> {
+  const declustering = declusteringOf(metadata);
+  if (declustering.algorithm === 'none') return { algorithm: 'none' };
+  return {
+    algorithm: declustering.algorithm,
+    ...(declustering.parameters ? { parameters: declustering.parameters } : {}),
+    ...(declustering.summary ? { summary: declustering.summary } : {}),
+  };
+}
+
+/** Time-period bounds as UTC ISO strings (C11), whatever form they were stored in. */
+function timePeriodOf(metadata?: ExportMetadata): { start?: string; end?: string } | undefined {
+  const start = toUtcIsoString(metadata?.timePeriodStart);
+  const end = toUtcIsoString(metadata?.timePeriodEnd);
+  return start || end ? { start, end } : undefined;
+}
+
+/**
+ * What the export checksum covers. The canonical rows are the plain CSV rendering (the body of
+ * `?format=csv`), so every format of the same selection carries the same value, and for a
+ * plain CSV download it is simply the SHA-256 of the file.
+ */
+export const EVENT_ROWS_CHECKSUM_SCOPE =
+  'SHA-256 of the UTF-8 plain-CSV rendering of the exported event rows (the header record and ' +
+  'one record per event, LF-separated, no trailing newline): the body of the format=csv export ' +
+  'with the same filter and declustering options';
+
+/** Minimal incremental hasher, so the server can use node:crypto for the same canonical rows. */
+export interface IncrementalHasher {
+  update(text: string): unknown;
+  digestHex(): string;
+}
+
+/**
+ * SHA-256 over the canonical exported event rows (EVENT_ROWS_CHECKSUM_SCOPE). The rows include
+ * each event's CatalogueVersion and, when applied, its declustering tags, so the same metadata
+ * must be passed here and to the exporter.
+ */
+export function computeEventRowsChecksum(
+  events: ExportableEvent[],
+  metadata?: ExportMetadata,
+  hasher: IncrementalHasher = new Sha256()
+): ExportChecksum {
+  const rows = csvBodyParts(events, metadata, { neutralizeFormulas: true });
+  for (let step = rows.next(); !step.done; step = rows.next()) hasher.update(step.value);
+  return { algorithm: 'SHA-256', value: hasher.digestHex(), scope: EVENT_ROWS_CHECKSUM_SCOPE };
+}
+
+/** The checksum an export records: the one supplied by the caller, else computed here. */
+export function exportChecksumOf(events: ExportableEvent[], metadata?: ExportMetadata): ExportChecksum {
+  return metadata?.checksum ?? computeEventRowsChecksum(events, metadata);
 }
 
 /**
@@ -132,7 +480,7 @@ export interface ExportMetadata {
  * https://geojson.org/
  */
 export function eventsToGeoJSON(
-  events: MergedEvent[],
+  events: ExportableEvent[],
   metadata?: ExportMetadata
 ): string {
   return joinChunks(eventsToGeoJSONChunks(events, metadata));
@@ -143,14 +491,15 @@ export function eventsToGeoJSON(
  * export never has to exist as a single JS string.
  */
 export function eventsToGeoJSONChunks(
-  events: MergedEvent[],
+  events: ExportableEvent[],
   metadata?: ExportMetadata
 ): Generator<string> {
+  const context = eventExportContext(metadata);
   return coalesce(
     jsonArrayMember(
-      buildGeoJSONHead(events.length, metadata),
+      buildGeoJSONHead(events.length, metadata, exportChecksumOf(events, metadata)),
       'features',
-      iterate(events, buildGeoJSONFeature)
+      iterate(events, event => buildGeoJSONFeature(event, context))
     )
   );
 }
@@ -160,10 +509,63 @@ function* iterate<T, R>(items: T[], map: (item: T) => R): Generator<R> {
   for (const item of items) yield map(item);
 }
 
+/** Catalogue-level values every per-event record needs. */
+interface EventExportContext {
+  catalogueStrategy: string | null;
+  catalogueVersion: string | null;
+  tags: ReadonlyMap<string, DeclusterTag> | null;
+}
+
+function eventExportContext(metadata?: ExportMetadata): EventExportContext {
+  return {
+    catalogueStrategy: catalogueMergeStrategy(metadata),
+    catalogueVersion: textOrNull(metadata?.version),
+    tags: declusterTagsOf(metadata),
+  };
+}
+
+/**
+ * The per-event provenance members shared by the JSON and GeoJSON records: lineage (C1/C2),
+ * the catalogue version the event was exported from (C3) and, when declustering was applied,
+ * its tags (C7). Keys are always present (null when the row lacks the value).
+ */
+function lineageProperties(event: ExportableEvent, context: EventExportContext): Record<string, unknown> {
+  const lineage = eventLineage(event, context.catalogueStrategy);
+  const properties: Record<string, unknown> = {
+    source: lineage.source,
+    sourceCatalogueIds: lineage.sourceCatalogueIds,
+    mergeStrategy: lineage.mergeStrategy,
+    mergeParameters: lineage.mergeParameters === null
+      ? null
+      : safeParseJsonField(lineage.mergeParameters) ?? lineage.mergeParameters,
+    selectedSource: lineage.selectedSource,
+    selectedSourceCatalogueId: lineage.selectedSourceCatalogueId,
+    qualityScore: lineage.qualityScore,
+    qualityGrade: lineage.qualityGrade,
+    catalogueVersion: context.catalogueVersion,
+  };
+  if (context.tags) {
+    const tag = context.tags.get(event.id);
+    properties.clusterId = tag ? tag.clusterId : null;
+    properties.isMainshock = tag ? tag.isMainshock : null;
+  }
+  return properties;
+}
+
+/** Export-provenance members shared by the JSON and GeoJSON metadata heads (C12). */
+function exportProvenanceMembers(metadata: ExportMetadata | undefined, checksum: ExportChecksum): Record<string, unknown> {
+  return {
+    checksum,
+    filter: metadata?.filter ?? null,
+    declustering: describeDeclustering(metadata),
+  };
+}
+
 /** The FeatureCollection document with the `features` member omitted (spliced in on stream). */
 function buildGeoJSONHead(
   count: number,
-  metadata?: ExportMetadata
+  metadata: ExportMetadata | undefined,
+  checksum: ExportChecksum
 ): Record<string, unknown> {
   // No bbox. RFC 7946 §5 requires 2n values for n-dimensional geometry, and every event
   // with a known depth is emitted as a 3D point, so a 4-value bbox was non-conformant for
@@ -174,16 +576,15 @@ function buildGeoJSONHead(
     type: 'FeatureCollection',
     metadata: {
       title: metadata?.catalogueName || 'Earthquake Catalogue',
+      catalogueId: metadata?.catalogueId,
       description: metadata?.description,
       generated: metadata?.generatedAt || new Date().toISOString(),
       count,
+      ...exportProvenanceMembers(metadata, checksum),
       source: metadata?.source,
       provider: metadata?.provider,
       region: metadata?.region,
-      timePeriod: metadata?.timePeriodStart || metadata?.timePeriodEnd ? {
-        start: metadata?.timePeriodStart,
-        end: metadata?.timePeriodEnd,
-      } : undefined,
+      timePeriod: timePeriodOf(metadata),
       boundingBox: metadata?.boundingBox,
       license: metadata?.license,
       citation: metadata?.citation,
@@ -199,6 +600,8 @@ function buildGeoJSONHead(
       // Additional metadata
       doi: metadata?.doi,
       version: metadata?.version,
+      versionUpdatedAt: metadata?.versionUpdatedAt,
+      sourceVersion: metadata?.sourceVersion,
       keywords: metadata?.keywords,
       referenceLinks: metadata?.referenceLinks,
       usageTerms: metadata?.usageTerms,
@@ -225,7 +628,7 @@ function buildGeoJSONHead(
 }
 
 /** One GeoJSON Feature for a single event. */
-function buildGeoJSONFeature(event: MergedEvent): Record<string, unknown> {
+function buildGeoJSONFeature(event: ExportableEvent, context: EventExportContext): Record<string, unknown> {
   return {
     type: 'Feature',
     id: event.id,
@@ -258,6 +661,8 @@ function buildGeoJSONFeature(event: MergedEvent): Record<string, unknown> {
       // Event classification
       eventType: event.event_type,
       eventTypeCertainty: event.event_type_certainty,
+      // The event type exactly as the source agency reported it (C8).
+      sourceEventType: event.source_event_type ?? null,
 
       // Magnitude
       magnitude: event.magnitude,
@@ -304,6 +709,11 @@ function buildGeoJSONFeature(event: MergedEvent): Record<string, unknown> {
       minHorizontalUncertainty: event.min_horizontal_uncertainty,
       maxHorizontalUncertainty: event.max_horizontal_uncertainty,
       azimuthMaxHorizontalUncertainty: event.azimuth_max_horizontal_uncertainty,
+      // Confidence level (%) of the origin uncertainty above (C16).
+      confidenceLevel: event.confidence_level ?? null,
+
+      // Per-event lineage, catalogue version and declustering tags (C12).
+      ...lineageProperties(event, context),
 
       // Complex nested data — parsed from JSON strings stored in the database.
       // GeoJSON properties may contain any valid JSON value (RFC 7946 §3.2).
@@ -329,7 +739,7 @@ function buildGeoJSONFeature(event: MergedEvent): Record<string, unknown> {
  * https://developers.google.com/kml/documentation/kmlreference
  */
 export function eventsToKML(
-  events: MergedEvent[],
+  events: ExportableEvent[],
   metadata?: ExportMetadata
 ): string {
   return joinChunks(eventsToKMLChunks(events, metadata));
@@ -340,25 +750,27 @@ export function eventsToKML(
  * export never has to exist as a single JS string.
  */
 export function eventsToKMLChunks(
-  events: MergedEvent[],
+  events: ExportableEvent[],
   metadata?: ExportMetadata
 ): Generator<string> {
   return coalesce(kmlParts(events, metadata));
 }
 
 function* kmlParts(
-  events: MergedEvent[],
+  events: ExportableEvent[],
   metadata?: ExportMetadata
 ): Generator<string> {
   const escapeXml = (str: string | null | undefined): string => {
     if (!str) return '';
-    return str
+    return stripXmlIllegalChars(String(str))
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&apos;');
   };
+  const context = eventExportContext(metadata);
+  const checksum = exportChecksumOf(events, metadata);
 
   // Returns a KML icon scale (0.5–3.0) that grows with magnitude.
   const getMagnitudeScale = (magnitude: number): number =>
@@ -372,17 +784,24 @@ function* kmlParts(
   // Build comprehensive description with all metadata
   const descriptionParts: string[] = [];
   if (metadata?.description) descriptionParts.push(metadata.description);
+  if (metadata?.catalogueId) descriptionParts.push(`Catalogue ID: ${metadata.catalogueId}`);
   if (metadata?.source) descriptionParts.push(`Source: ${metadata.source}`);
   if (metadata?.provider) descriptionParts.push(`Provider: ${metadata.provider}`);
   if (metadata?.region) descriptionParts.push(`Region: ${metadata.region}`);
-  if (metadata?.timePeriodStart || metadata?.timePeriodEnd) {
-    descriptionParts.push(`Time Period: ${metadata.timePeriodStart ?? '?'} to ${metadata.timePeriodEnd ?? '?'}`);
+  const timePeriod = timePeriodOf(metadata);
+  if (timePeriod) {
+    descriptionParts.push(`Time Period: ${timePeriod.start ?? '?'} to ${timePeriod.end ?? '?'}`);
   }
   if (metadata?.eventCount != null) descriptionParts.push(`Event Count: ${metadata.eventCount}`);
   if (metadata?.license) descriptionParts.push(`License: ${metadata.license}`);
   if (metadata?.citation) descriptionParts.push(`Citation: ${metadata.citation}`);
   if (metadata?.doi) descriptionParts.push(`DOI: ${metadata.doi}`);
   if (metadata?.version) descriptionParts.push(`Version: ${metadata.version}`);
+  if (metadata?.versionUpdatedAt) descriptionParts.push(`Version Updated At: ${metadata.versionUpdatedAt}`);
+  if (metadata?.sourceVersion) descriptionParts.push(`Source Version: ${metadata.sourceVersion}`);
+  descriptionParts.push(`Event Rows SHA-256: ${checksum.value} (${checksum.scope})`);
+  descriptionParts.push(`Filter: ${metadata?.filter ? JSON.stringify(metadata.filter) : 'none'}`);
+  descriptionParts.push(`Declustering: ${declusteringText(metadata)}`);
   if (metadata?.contactName || metadata?.contactEmail || metadata?.contactOrganization) {
     const contactParts = [];
     if (metadata?.contactName) contactParts.push(metadata.contactName);
@@ -428,7 +847,9 @@ function* kmlParts(
     descriptionParts.push(`Source Catalogues: ${JSON.stringify(metadata.sourceCatalogues)}`);
   }
 
-  const cdata = (value: string): string => `<![CDATA[${value.replace(/]]>/g, ']]]]><![CDATA[>')}]]>`;
+  // CDATA does not make an XML-illegal character legal (XML 1.0 §2.7 CharData is Char*).
+  const cdata = (value: string): string =>
+    `<![CDATA[${stripXmlIllegalChars(value).replace(/]]>/g, ']]]]><![CDATA[>')}]]>`;
 
   if (descriptionParts.length > 0) {
     yield `    <description>${cdata(descriptionParts.join('\n'))}</description>\n`;
@@ -570,6 +991,31 @@ function* kmlParts(
         if (event.evaluation_status) {
           yield `            <tr><td><b>Eval Status:</b></td><td>${escapeXml(event.evaluation_status)}</td></tr>\n`;
         }
+        // Per-event lineage and declustering tags (C12).
+        const lineage = eventLineage(event, context.catalogueStrategy);
+        if (lineage.members.length > 0) {
+          yield `            <tr><td><b>Source:</b></td><td>${escapeXml(lineage.source)}</td></tr>\n`;
+        }
+        if (lineage.sourceCatalogueIds.length > 0) {
+          yield `            <tr><td><b>Source Catalogues:</b></td><td>${escapeXml(lineage.sourceCatalogueIds.join('; '))}</td></tr>\n`;
+        }
+        if (lineage.mergeStrategy) {
+          yield `            <tr><td><b>Merge Strategy:</b></td><td>${escapeXml(lineage.mergeStrategy)}</td></tr>\n`;
+        }
+        if (lineage.selectedSource) {
+          yield `            <tr><td><b>Selected Source:</b></td><td>${escapeXml(lineage.selectedSource)}</td></tr>\n`;
+        }
+        if (lineage.qualityScore !== null) {
+          const grade = lineage.qualityGrade ? ` (${escapeXml(lineage.qualityGrade)})` : '';
+          yield `            <tr><td><b>Quality Score:</b></td><td>${lineage.qualityScore}${grade}</td></tr>\n`;
+        }
+        if (context.tags) {
+          const tag = context.tags.get(event.id);
+          if (tag) {
+            yield `            <tr><td><b>Cluster ID:</b></td><td>${escapeXml(tag.clusterId ?? '')}</td></tr>\n`;
+            yield `            <tr><td><b>Mainshock:</b></td><td>${tag.isMainshock ? 'yes' : 'no'}</td></tr>\n`;
+          }
+        }
         // Note: complex nested fields (origins, magnitudes, picks, arrivals, focal_mechanisms,
         // amplitudes, station_magnitudes, etc.) cannot be meaningfully represented in KML
         // balloon HTML tables. Use JSON or QuakeML export for full fidelity.
@@ -613,7 +1059,7 @@ function safeParseJsonField(value: string | null | undefined): unknown | undefin
  * station_magnitudes, event_descriptions, comments, creation_info, source_events).
  */
 export function eventsToJSON(
-  events: MergedEvent[],
+  events: ExportableEvent[],
   metadata?: ExportMetadata
 ): string {
   return joinChunks(eventsToJSONChunks(events, metadata));
@@ -624,14 +1070,15 @@ export function eventsToJSON(
  * export never has to exist as a single JS string.
  */
 export function eventsToJSONChunks(
-  events: MergedEvent[],
+  events: ExportableEvent[],
   metadata?: ExportMetadata
 ): Generator<string> {
+  const context = eventExportContext(metadata);
   return coalesce(
     jsonArrayMember(
-      { metadata: buildJSONMetadata(events.length, metadata) },
+      { metadata: buildJSONMetadata(events.length, metadata, exportChecksumOf(events, metadata)) },
       'events',
-      iterate(events, buildJSONEvent)
+      iterate(events, event => buildJSONEvent(event, context))
     )
   );
 }
@@ -639,23 +1086,23 @@ export function eventsToJSONChunks(
 /** The export document's metadata member. */
 function buildJSONMetadata(
   count: number,
-  metadata?: ExportMetadata
+  metadata: ExportMetadata | undefined,
+  checksum: ExportChecksum
 ): Record<string, unknown> {
   return {
     catalogueName: metadata?.catalogueName,
+    catalogueId: metadata?.catalogueId,
     description: metadata?.description,
     source: metadata?.source,
     provider: metadata?.provider,
     region: metadata?.region,
-    timePeriod: metadata?.timePeriodStart || metadata?.timePeriodEnd ? {
-      start: metadata?.timePeriodStart,
-      end: metadata?.timePeriodEnd
-    } : undefined,
+    timePeriod: timePeriodOf(metadata),
     boundingBox: metadata?.boundingBox,
     license: metadata?.license,
     citation: metadata?.citation,
     generated: metadata?.generatedAt || new Date().toISOString(),
     eventCount: count,
+    ...exportProvenanceMembers(metadata, checksum),
     // Contact information
     contact: (metadata?.contactName || metadata?.contactEmail || metadata?.contactOrganization) ? {
       name: metadata?.contactName,
@@ -668,6 +1115,8 @@ function buildJSONMetadata(
     // Additional metadata
     doi: metadata?.doi,
     version: metadata?.version,
+    versionUpdatedAt: metadata?.versionUpdatedAt,
+    sourceVersion: metadata?.sourceVersion,
     keywords: metadata?.keywords,
     referenceLinks: metadata?.referenceLinks,
     usageTerms: metadata?.usageTerms,
@@ -693,7 +1142,7 @@ function buildJSONMetadata(
 }
 
 /** One JSON export record for a single event. */
-function buildJSONEvent(event: MergedEvent): Record<string, unknown> {
+function buildJSONEvent(event: ExportableEvent, context: EventExportContext): Record<string, unknown> {
   return {
     // Identifiers
     id: event.id,
@@ -716,6 +1165,8 @@ function buildJSONEvent(event: MergedEvent): Record<string, unknown> {
     // Event classification
     eventType: event.event_type,
     eventTypeCertainty: event.event_type_certainty,
+    // The event type exactly as the source agency reported it (C8).
+    sourceEventType: event.source_event_type ?? null,
 
     // Region / location description
     region: event.region,
@@ -732,13 +1183,21 @@ function buildJSONEvent(event: MergedEvent): Record<string, unknown> {
       evaluationStatus: event.magnitude_evaluation_status,
     },
 
-    // All location uncertainties (individual + combined horizontal)
+    // All location uncertainties (individual + combined horizontal + error ellipse)
     uncertainties: {
       time: event.time_uncertainty,
       latitude: event.latitude_uncertainty,
       longitude: event.longitude_uncertainty,
       depth: event.depth_uncertainty,
       horizontal: event.horizontal_uncertainty,  // km
+      // QuakeML OriginUncertainty error ellipse: semi-minor / semi-major axes (km) and the
+      // azimuth of the semi-major axis (degrees). Stored since the parser gained them, but
+      // exported only by GeoJSON and QuakeML until now.
+      minHorizontal: event.min_horizontal_uncertainty,
+      maxHorizontal: event.max_horizontal_uncertainty,
+      azimuthMaxHorizontal: event.azimuth_max_horizontal_uncertainty,
+      // Confidence level (%) of the uncertainties above (C16).
+      confidenceLevel: event.confidence_level ?? null,
     },
 
     // Origin provenance
@@ -771,6 +1230,10 @@ function buildJSONEvent(event: MergedEvent): Record<string, unknown> {
     // Preferred IDs (for QuakeML cross-referencing within this event)
     preferredOriginId: event.preferred_origin_id,
     preferredMagnitudeId: event.preferred_magnitude_id,
+    preferredFocalMechanismId: event.preferred_focal_mechanism_id,
+
+    // Per-event lineage, catalogue version and declustering tags (C12).
+    ...lineageProperties(event, context),
 
     // Complex nested data — parsed from JSON strings stored in the database.
     // These are omitted (undefined) when absent, so JSON.stringify drops them.
@@ -844,7 +1307,31 @@ export const CSV_EVENT_HEADERS: readonly string[] = [
   'EvaluationStatus',
   'PreferredOriginID',
   'PreferredMagnitudeID',
+  // Columns added after the original 45 are appended, so positional readers of the older
+  // layout keep working.
+  // Error ellipse (km, km, degrees) and its confidence level in % (C16)
+  'MinHorizontalUncertainty',
+  'MaxHorizontalUncertainty',
+  'AzimuthMaxHorizontalUncertainty',
+  'ConfidenceLevel',
+  'PreferredFocalMechanismID',
+  // The event type exactly as the source agency reported it (C8)
+  'SourceEventType',
+  // Per-event lineage (C1/C2); empty for rows stored before those fields existed
+  'SourceCatalogueIDs',
+  'MergeStrategy',
+  'MergeParameters',
+  'SelectedSource',
+  'SelectedSourceCatalogueID',
+  'QualityScore',
+  'QualityGrade',
+  // The catalogue version this row was exported from (C3): a plain CSV has no other place
+  // to carry it, and a per-row value survives filtering and concatenating exports.
+  'CatalogueVersion',
 ];
+
+/** Columns appended to CSV_EVENT_HEADERS when the export was declustered (C7). */
+export const CSV_DECLUSTER_HEADERS: readonly string[] = ['ClusterID', 'IsMainshock'];
 
 export interface CSVExportOptions {
   /**
@@ -863,7 +1350,7 @@ export interface CSVExportOptions {
  * Convert events to CSV.
  */
 export function eventsToCSV(
-  events: MergedEvent[],
+  events: ExportableEvent[],
   metadata?: ExportMetadata,
   options?: CSVExportOptions
 ): string {
@@ -875,36 +1362,54 @@ export function eventsToCSV(
  * export never has to exist as a single JS string.
  */
 export function eventsToCSVChunks(
-  events: MergedEvent[],
+  events: ExportableEvent[],
   metadata?: ExportMetadata,
   options?: CSVExportOptions
 ): Generator<string> {
   return coalesce(csvParts(events, metadata, options));
 }
 
+/** The CSV header record for an export with these options. */
+export function csvHeadersFor(metadata?: ExportMetadata): readonly string[] {
+  return declusterTagsOf(metadata) ? CSV_EVENT_HEADERS.concat(CSV_DECLUSTER_HEADERS) : CSV_EVENT_HEADERS;
+}
+
 function* csvParts(
-  events: MergedEvent[],
+  events: ExportableEvent[],
   metadata?: ExportMetadata,
   options?: CSVExportOptions
 ): Generator<string> {
   if (options?.metadataComments) {
-    for (const line of csvMetadataComments(events.length, metadata)) {
+    const checksum = exportChecksumOf(events, metadata);
+    for (const line of csvMetadataComments(events.length, metadata, checksum)) {
       yield `${line}\n`;
     }
   }
 
-  yield CSV_EVENT_HEADERS.join(',');
+  const body = csvBodyParts(events, metadata, { neutralizeFormulas: options?.neutralizeFormulas !== false });
+  for (let step = body.next(); !step.done; step = body.next()) yield step.value;
+}
+
+/**
+ * The plain CSV body (header record, then one record per event, LF-separated, no trailing
+ * newline). This is both the CSV export and the canonical rendering the export checksum is
+ * computed over (EVENT_ROWS_CHECKSUM_SCOPE).
+ */
+function* csvBodyParts(
+  events: ExportableEvent[],
+  metadata: ExportMetadata | undefined,
+  fieldOptions: { neutralizeFormulas: boolean }
+): Generator<string> {
+  const context = eventExportContext(metadata);
+
+  yield csvHeadersFor(metadata).join(',');
 
   // Emit a nullable number/string as an empty field when null/undefined.
   const n = (v: number | string | null | undefined) => (v !== null && v !== undefined ? v : '');
 
-  const fieldOptions = { neutralizeFormulas: options?.neutralizeFormulas !== false };
-
   for (const event of events) {
-    const sourceEvents = safeParseJsonField(event.source_events) as Array<{ source?: string }> | undefined;
-    const source = sourceEvents?.[0]?.source || 'unknown';
-
-    yield '\n' + csvRow([
+    const lineage = eventLineage(event, context.catalogueStrategy);
+    const record: Array<string | number | null | undefined> = [
       event.id,
       event.catalogue_id,
       event.time,
@@ -919,7 +1424,9 @@ function* csvParts(
       // Region: prefer region, fall back to location_name
       event.region || event.location_name || '',
       event.location_name,
-      source,
+      // The source whose solution this row publishes (see eventLineage), never simply the
+      // first source_events entry, which is the earliest report of the group.
+      lineage.source,
       event.source_events,
       event.source_id,
       event.event_public_id,
@@ -956,7 +1463,28 @@ function* csvParts(
       event.evaluation_status,
       event.preferred_origin_id,
       event.preferred_magnitude_id,
-    ], fieldOptions);
+      // Error ellipse and confidence level
+      n(event.min_horizontal_uncertainty),
+      n(event.max_horizontal_uncertainty),
+      n(event.azimuth_max_horizontal_uncertainty),
+      n(event.confidence_level),
+      event.preferred_focal_mechanism_id,
+      event.source_event_type,
+      // Per-event lineage
+      lineage.sourceCatalogueIds.join(';'),
+      lineage.mergeStrategy,
+      lineage.mergeParameters,
+      lineage.selectedSource,
+      lineage.selectedSourceCatalogueId,
+      n(lineage.qualityScore),
+      lineage.qualityGrade,
+      context.catalogueVersion,
+    ];
+    if (context.tags) {
+      const tag = context.tags.get(event.id);
+      record.push(tag ? tag.clusterId : '', tag ? String(tag.isMainshock) : '');
+    }
+    yield '\n' + csvRow(record, fieldOptions);
   }
 }
 
@@ -965,7 +1493,7 @@ function* csvParts(
  * Each value is escaped and flattened to a single line so the prologue can never be mistaken
  * for data by a reader that does strip comments.
  */
-function csvMetadataComments(eventCount: number, metadata?: ExportMetadata): string[] {
+function csvMetadataComments(eventCount: number, metadata: ExportMetadata | undefined, checksum: ExportChecksum): string[] {
   const lines: string[] = [];
   const commentValue = (value: unknown): string => {
     const str = typeof value === 'string' ? value : JSON.stringify(value);
@@ -978,20 +1506,28 @@ function csvMetadataComments(eventCount: number, metadata?: ExportMetadata): str
   };
 
   add('Catalogue', metadata?.catalogueName);
+  add('Catalogue ID', metadata?.catalogueId);
   add('Description', metadata?.description);
   add('Source', metadata?.source);
   add('Provider', metadata?.provider);
   add('Region', metadata?.region);
-  if (metadata?.timePeriodStart || metadata?.timePeriodEnd) {
-    add('Time Period', `${metadata?.timePeriodStart ?? '?'} to ${metadata?.timePeriodEnd ?? '?'}`);
+  const timePeriod = timePeriodOf(metadata);
+  if (timePeriod) {
+    add('Time Period', `${timePeriod.start ?? '?'} to ${timePeriod.end ?? '?'}`);
   }
   lines.push(`# Event Count: ${eventCount}`);
   lines.push(`# Generated: ${metadata?.generatedAt || new Date().toISOString()}`);
+  add('Event Rows SHA-256', checksum.value);
+  add('Checksum Scope', checksum.scope);
+  add('Filter', metadata?.filter ?? 'none');
+  add('Declustering', declusteringText(metadata));
 
   add('License', metadata?.license);
   add('Citation', metadata?.citation);
   add('DOI', metadata?.doi);
   add('Version', metadata?.version);
+  add('Version Updated At', metadata?.versionUpdatedAt);
+  add('Source Version', metadata?.sourceVersion);
   add('Contact Name', metadata?.contactName);
   add('Contact Email', metadata?.contactEmail);
   add('Contact Organization', metadata?.contactOrganization);

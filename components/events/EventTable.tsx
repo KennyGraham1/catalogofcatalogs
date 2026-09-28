@@ -23,6 +23,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { VirtualizedEventTable } from './VirtualizedEventTable';
+import { resolveEventQuality } from './event-quality';
+import { getQualityBadgeVariant, type QualityGrade } from '@/lib/quality-scoring';
 import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 
 interface Event {
@@ -36,6 +38,7 @@ interface Event {
   location_name?: string | null;
   event_type?: string | null;
   quality_score?: number | null;
+  quality_grade?: string | null;
   azimuthal_gap?: number | null;
   used_station_count?: number | null;
   public_id?: string | null;
@@ -90,17 +93,27 @@ export function EventTable({
   const [sortField, setSortField] = useState<SortField>(defaultSortField);
   const [sortDirection, setSortDirection] = useState<SortDirection>(defaultSortDirection);
 
+  // Resolve Quality once per event list: prefer the stored quality_score/quality_grade (C1)
+  // and fall back to computing Q client-side for legacy rows that lack it, so the Quality
+  // column and quality sort always have a real number to work with, on one 0-100 scale.
+  const displayEvents = useMemo(() => events.map(event => {
+    const { score, grade } = resolveEventQuality(event);
+    return event.quality_score === score && event.quality_grade === grade
+      ? event
+      : { ...event, quality_score: score, quality_grade: grade };
+  }), [events]);
+
   // Sort events
   const sortedEvents = useMemo(() => {
-    if (events.length > virtualizationThreshold) return events;
-    return sortTableEvents(events, sortField, sortDirection);
-  }, [events, sortField, sortDirection, virtualizationThreshold]);
+    if (displayEvents.length > virtualizationThreshold) return displayEvents;
+    return sortTableEvents(displayEvents, sortField, sortDirection);
+  }, [displayEvents, sortField, sortDirection, virtualizationThreshold]);
 
   // Use virtualized table for large datasets (after hooks are called)
-  if (events.length > virtualizationThreshold) {
+  if (displayEvents.length > virtualizationThreshold) {
     return (
       <VirtualizedEventTable
-        events={events}
+        events={displayEvents}
         onEventClick={onEventClick}
         className={className}
         defaultSortField={defaultSortField}
@@ -145,17 +158,14 @@ export function EventTable({
     return 'text-muted-foreground';
   };
 
-  const getQualityBadge = (score?: number | null) => {
-    if (!score) return null;
-
-    let variant: 'default' | 'secondary' | 'destructive' | 'outline' = 'secondary';
-    if (score >= 80) variant = 'default';
-    else if (score >= 60) variant = 'secondary';
-    else variant = 'destructive';
+  // One 0-100 scale, shared with VirtualizedEventTable via getQualityBadgeVariant: a Q of 45
+  // must read the same "needs review" way regardless of which table renders it.
+  const getQualityBadge = (score?: number | null, grade?: string | null) => {
+    if (score == null || !grade) return null;
 
     return (
-      <Badge variant={variant} className="text-xs">
-        {score.toFixed(0)}
+      <Badge variant={getQualityBadgeVariant(grade as QualityGrade)} className="text-xs">
+        {`${score.toFixed(0)} ${grade}`}
       </Badge>
     );
   };
@@ -291,7 +301,7 @@ export function EventTable({
                   </div>
                 </TableCell>
                 <TableCell>
-                  {getQualityBadge(event.quality_score)}
+                  {getQualityBadge(event.quality_score, event.quality_grade)}
                 </TableCell>
                 <TableCell>
                   {event.event_type && (

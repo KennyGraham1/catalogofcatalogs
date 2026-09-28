@@ -1,49 +1,33 @@
-import { ensureEventIntegrityIndexes } from '../lib/event-indexes';
-import { getDb, COLLECTIONS } from '../lib/mongodb';
+// Loads .env before lib/mongodb reads the environment.
+import 'dotenv/config';
+import { closeConnection, getDb } from '../lib/mongodb';
+import { ensureDatabaseIndexes, type IndexSetupReport } from '../lib/event-indexes';
 
 /**
  * Ensure database indexes exist for optimal performance and data integrity.
  * Run on deployment / DB setup:  npx tsx scripts/ensure-indexes.ts
  *
- * Uses the canonical COLLECTIONS names (previously this script targeted the wrong
- * 'catalogues' collection, so the unique id index never took effect).
+ * Applies the shared index list in lib/event-indexes.ts, the same one
+ * scripts/init-database.ts and scripts/create-indexes.ts apply, so all three agree on
+ * every index name and none aborts on an index another created.
  */
-export async function ensureIndexes() {
+export async function ensureIndexes(): Promise<IndexSetupReport> {
   console.log('Ensuring database indexes...');
   const db = await getDb();
-
-  const eventsCollection = db.collection(COLLECTIONS.EVENTS);
-
-  await ensureEventIntegrityIndexes(eventsCollection);
-
-  await eventsCollection.createIndex({ catalogue_id: 1, time: -1 }, { name: 'catalogue_time_idx', background: true });
-  console.log('✓ Created index: catalogue_time_idx');
-  await eventsCollection.createIndex(
-    { catalogue_id: 1, time: -1, id: -1 },
-    { name: 'catalogue_time_id_idx', background: true }
-  );
-  console.log('✓ Created index: catalogue_time_id_idx');
-
-  await eventsCollection.createIndex({ catalogue_id: 1, magnitude: 1 }, { name: 'catalogue_magnitude_idx', background: true });
-  console.log('✓ Created index: catalogue_magnitude_idx');
-  await eventsCollection.createIndex({ catalogue_id: 1, latitude: 1, longitude: 1 }, { name: 'catalogue_geo_idx', background: true });
-  console.log('✓ Created index: catalogue_geo_idx');
-
-  const cataloguesCollection = db.collection(COLLECTIONS.CATALOGUES);
-  await cataloguesCollection.createIndex({ id: 1 }, { name: 'catalogue_id_idx', unique: true, background: true });
-  console.log('✓ Created index: catalogue_id_idx');
-  await cataloguesCollection.createIndex({ name: 1 }, { name: 'catalogue_name_idx', background: true });
-  console.log('✓ Created index: catalogue_name_idx');
-
-  const historyCollection = db.collection(COLLECTIONS.IMPORT_HISTORY);
-  await historyCollection.createIndex({ catalogue_id: 1, created_at: -1 }, { name: 'import_history_idx', background: true });
-  console.log('✓ Created index: import_history_idx');
-
+  const report = await ensureDatabaseIndexes(db);
+  if (report.failed.length > 0) {
+    throw new Error(`${report.failed.length} index(es) could not be ensured: ${report.failed.map((f) => f.index).join(', ')}`);
+  }
   console.log('All indexes ensured successfully!');
+  return report;
 }
 
 if (require.main === module) {
   ensureIndexes()
-    .then(() => { console.log('Done.'); process.exit(0); })
-    .catch((error) => { console.error('Error creating indexes:', error); process.exit(1); });
+    .then(async () => { await closeConnection(); console.log('Done.'); process.exit(0); })
+    .catch(async (error) => {
+      console.error('Error creating indexes:', error instanceof Error ? error.message : error);
+      await closeConnection().catch(() => undefined);
+      process.exit(1);
+    });
 }

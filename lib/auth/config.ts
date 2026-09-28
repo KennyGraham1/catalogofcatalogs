@@ -8,7 +8,9 @@ import CredentialsProvider from 'next-auth/providers/credentials';
 import { getUserByEmail, verifyPassword, updateLastLogin, toSafeUser, getSessionUserState } from './utils';
 import { UserRole } from './types';
 import { writeAuditLog } from '../audit';
-import { allowCredentialAttempt } from './login-rate-limit';
+import { beginCredentialAttempt } from './login-rate-limit';
+import { toHeaders } from '../rate-limiter';
+import { AuthErrorCode } from './errors';
 
 // Validate NEXTAUTH_SECRET at module load time so the application fails fast if
 // the secret is not configured at runtime. The check is skipped during
@@ -38,6 +40,13 @@ if (
   }
 }
 
+/**
+ * A bcrypt hash (cost 10, as hashPassword uses) of a random secret that was never
+ * stored. Sign-in compares against it when the email is unknown, so an unknown email
+ * costs the same bcrypt work, and takes the same time, as a wrong password.
+ */
+const DUMMY_PASSWORD_HASH = '$2b$10$66IzwhFASyioiEBWkRf/IeFfY94GaBg8R0c9XEI5kSiCjrOmneDfu';
+
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
@@ -46,41 +55,53 @@ export const authOptions: NextAuthOptions = {
         email: { label: 'Email', type: 'email', placeholder: 'user@example.com' },
         password: { label: 'Password', type: 'password' },
       },
+      // Errors are thrown as codes (lib/auth/errors.ts): NextAuth returns the message to
+      // the client verbatim, and the sign-in page turns the code into text.
       async authorize(credentials, request) {
         if (!credentials?.email || !credentials?.password) {
-          throw new Error('Email and password are required');
+          throw new Error(AuthErrorCode.MissingCredentials);
         }
 
         const email = credentials.email.trim().toLowerCase();
-        if (!await allowCredentialAttempt(email, request.headers)) {
-          throw new Error('Too many login attempts. Please try again later.');
+        // Audit entries record the client address, resolved as the limiter resolves it.
+        const client = { headers: toHeaders(request.headers) };
+        // Check the shared quota before user lookup or expensive bcrypt work.
+        const attempt = await beginCredentialAttempt(email, client.headers);
+        if (!attempt) {
+          throw new Error(AuthErrorCode.TooManyAttempts);
         }
 
-        // Check the shared quota before user lookup or expensive bcrypt work.
         const user = await getUserByEmail(email);
 
         if (!user) {
-          await writeAuditLog({ action: 'user.login_failed', metadata: { reason: 'user_not_found' } });
-          throw new Error('Invalid email or password');
+          // Same bcrypt cost as a real check: response time must not reveal whether
+          // the account exists.
+          await verifyPassword(credentials.password, DUMMY_PASSWORD_HASH);
+          await writeAuditLog({ action: 'user.login_failed', metadata: { reason: 'user_not_found' } }, client);
+          throw new Error(AuthErrorCode.InvalidCredentials);
+        }
+
+        // Verify password first: a wrong password gets the same answer whatever the
+        // account's state, so only its owner can learn that it is disabled.
+        const isValid = await verifyPassword(credentials.password, user.password_hash);
+
+        if (!isValid) {
+          await writeAuditLog({ action: 'user.login_failed', target_id: user.id, metadata: { reason: 'bad_password' } }, client);
+          throw new Error(AuthErrorCode.InvalidCredentials);
         }
 
         // Check if user is active
         if (!user.is_active) {
-          await writeAuditLog({ action: 'user.login_failed', target_id: user.id, metadata: { reason: 'account_disabled' } });
-          throw new Error('Account is disabled. Please contact an administrator.');
+          await writeAuditLog({ action: 'user.login_failed', target_id: user.id, metadata: { reason: 'account_disabled' } }, client);
+          throw new Error(AuthErrorCode.AccountDisabled);
         }
 
-        // Verify password
-        const isValid = await verifyPassword(credentials.password, user.password_hash);
-
-        if (!isValid) {
-          await writeAuditLog({ action: 'user.login_failed', target_id: user.id, metadata: { reason: 'bad_password' } });
-          throw new Error('Invalid email or password');
-        }
+        // Successful sign-ins are not counted against the quota.
+        await attempt.succeeded();
 
         // Update last login
         await updateLastLogin(user.id);
-        await writeAuditLog({ action: 'user.login', actor_id: user.id, actor_email: user.email });
+        await writeAuditLog({ action: 'user.login', actor_id: user.id, actor_email: user.email }, client);
 
         // Return safe user data
         const safeUser = toSafeUser(user);

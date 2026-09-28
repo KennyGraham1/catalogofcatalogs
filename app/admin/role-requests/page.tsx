@@ -23,14 +23,26 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
-import type { RoleChangeRequest } from '@/lib/auth/types';
+import type { RoleChangeRequest, RoleChangeRequestForReview } from '@/lib/auth/types';
 import { UserRole } from '@/lib/auth/types';
 
 type StatusFilter = 'pending' | 'approved' | 'rejected' | 'all';
 
+/**
+ * Why a request can no longer be approved as filed, if it can't. The server refuses
+ * these too (409); this just says so before the reviewer clicks.
+ */
+function staleReason(item: RoleChangeRequestForReview): string | null {
+  if (item.live_role === undefined) return null; // response from an older server
+  if (item.live_role === null) return 'Account no longer exists';
+  if (item.live_is_active === false) return 'Account is deactivated';
+  if (item.live_role !== item.current_role) return 'Role changed since the request';
+  return null;
+}
+
 export default function AdminRoleRequestsPage() {
   const { user, isLoading } = useAuth();
-  const [requests, setRequests] = useState<RoleChangeRequest[]>([]);
+  const [requests, setRequests] = useState<RoleChangeRequestForReview[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
@@ -203,7 +215,19 @@ export default function AdminRoleRequestsPage() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline">{requestItem.current_role.toUpperCase()}</Badge>
+                    <div className="space-y-1">
+                      <Badge variant="outline">
+                        {(requestItem.live_role ?? requestItem.current_role).toUpperCase()}
+                      </Badge>
+                      {requestItem.live_role && requestItem.live_role !== requestItem.current_role && (
+                        <p className="text-xs text-muted-foreground">
+                          was {requestItem.current_role.toUpperCase()} when requested
+                        </p>
+                      )}
+                      {requestItem.status === 'pending' && staleReason(requestItem) && (
+                        <p className="text-xs text-destructive">{staleReason(requestItem)}</p>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{requestItem.requested_role.toUpperCase()}</Badge>
@@ -249,7 +273,8 @@ export default function AdminRoleRequestsPage() {
                         <Button
                           size="sm"
                           onClick={() => handleDecision(requestItem.id, 'approved')}
-                          disabled={actionId === requestItem.id}
+                          disabled={actionId === requestItem.id || staleReason(requestItem) !== null}
+                          title={staleReason(requestItem) ?? undefined}
                         >
                           Approve
                         </Button>

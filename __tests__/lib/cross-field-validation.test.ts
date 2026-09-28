@@ -134,14 +134,14 @@ describe('Cross-Field Validation', () => {
       expect(checks.some(c => c.severity === 'warning' && c.field === 'used_station_count')).toBe(true);
     });
 
-    it('should warn when magnitude stations exceed location stations', () => {
+    it('does not flag magnitude stations exceeding location stations (independent counts in QuakeML)', () => {
       const event = {
         used_station_count: 15,
         magnitude_station_count: 20,
       };
 
       const checks = validateQualityMetricsConsistency(event);
-      expect(checks.some(c => c.severity === 'warning' && c.field === 'magnitude_station_count')).toBe(true);
+      expect(checks.some(c => c.field === 'magnitude_station_count')).toBe(false);
     });
 
     it('should warn about large gap with many stations', () => {

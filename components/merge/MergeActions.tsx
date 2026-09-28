@@ -17,6 +17,8 @@ import 'leaflet/dist/leaflet.css';
 import { generateMergedCatalogueFilename } from '@/lib/export-utils';
 import { eventsToCSV, eventsToGeoJSON, eventsToJSON, eventsToKML } from '@/lib/exporters';
 import { eventsToQuakeMLDocument } from '@/lib/quakeml-exporter';
+import { getApiError } from '@/lib/api';
+import { toast } from '@/hooks/use-toast';
 import { EventTable } from '@/components/events/EventTable';
 
 const MapWithNoSSR = dynamic(
@@ -65,6 +67,10 @@ interface CatalogueMetadata {
   merge_use_case?: string;
   merge_methodology?: string;
   merge_quality_assessment?: string;
+  // Merge strategy/thresholds/priority and the catalogues read, as stored on a saved merged
+  // catalogue (MergedCatalogue.merge_config / source_catalogues); may arrive as JSON strings.
+  merge_config?: Record<string, unknown> | string;
+  source_catalogues?: unknown[] | string;
   // Provenance
   created_by?: string;
   modified_at?: string;
@@ -75,6 +81,23 @@ interface MergeActionsProps {
   events: any[];
   onDownload?: () => void;
   catalogueMetadata?: CatalogueMetadata;
+  /**
+   * Id of the saved merged catalogue. When set, downloads come from the server export route
+   * (GET /api/catalogues/{id}/export), which reads every stored event even when
+   * UNPAGINATED_EVENTS_LIMIT caps plain reads, streams the file, and embeds the saved
+   * catalogue's merge_config and source_catalogues; `events` is then only what the map and
+   * table show. An export-only merge saves nothing, so without an id the files are built in
+   * the browser from `events`, which is then the complete merge result.
+   */
+  catalogueId?: string | null;
+}
+
+type ExportFormat = 'csv' | 'json' | 'geojson' | 'kml' | 'quakeml';
+
+/** The filename the export route suggests in its Content-Disposition header, if any. */
+function suggestedFilename(response: Response): string | null {
+  const match = response.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/);
+  return match ? match[1] : null;
 }
 
 /**
@@ -105,6 +128,25 @@ function buildExportMetadata(meta: CatalogueMetadata, eventCount: number) {
     try {
       const rl = typeof meta.reference_links === 'string' ? JSON.parse(meta.reference_links) : meta.reference_links;
       if (Array.isArray(rl)) referenceLinks = rl;
+    } catch { /* ignore */ }
+  }
+
+  // The merge configuration and source catalogue list make the file reproducible. The server
+  // export route embeds both for a saved catalogue; an export-only merge is never saved, so
+  // this download is its only record of how it was produced.
+  let mergeConfig: unknown;
+  if (meta.merge_config) {
+    try {
+      mergeConfig = typeof meta.merge_config === 'string' ? JSON.parse(meta.merge_config) : meta.merge_config;
+    } catch { /* ignore */ }
+  }
+
+  let sourceCatalogues: unknown;
+  if (meta.source_catalogues) {
+    try {
+      sourceCatalogues = typeof meta.source_catalogues === 'string'
+        ? JSON.parse(meta.source_catalogues)
+        : meta.source_catalogues;
     } catch { /* ignore */ }
   }
 
@@ -144,21 +186,22 @@ function buildExportMetadata(meta: CatalogueMetadata, eventCount: number) {
     mergeUseCase: meta.merge_use_case,
     mergeMethodology: meta.merge_methodology,
     mergeQualityAssessment: meta.merge_quality_assessment,
+    mergeConfig,
     createdBy: meta.created_by,
     modifiedAt: meta.modified_at,
+    sourceCatalogues,
   };
 }
 
-export function MergeActions({ events, catalogueMetadata = {} }: MergeActionsProps) {
+export function MergeActions({ events, catalogueMetadata = {}, catalogueId }: MergeActionsProps) {
   const exportMetadata = useMemo(
     () => buildExportMetadata(catalogueMetadata, events.length),
     [catalogueMetadata, events.length]
   );
 
-  const downloadFile = (content: string, filename: string, mimeType: string) => {
+  const saveBlob = (blob: Blob, filename: string) => {
     if (typeof window === 'undefined') return;
 
-    const blob = new Blob([content], { type: mimeType });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -167,6 +210,41 @@ export function MergeActions({ events, catalogueMetadata = {} }: MergeActionsPro
     a.click();
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
+  };
+
+  const downloadFile = (content: string, filename: string, mimeType: string) => {
+    saveBlob(new Blob([content], { type: mimeType }), filename);
+  };
+
+  // A saved merge is exported by the server (see `catalogueId`), so the file holds every
+  // stored event rather than whatever subset this page holds in memory.
+  const downloadFromServer = async (id: string, format: ExportFormat) => {
+    try {
+      const response = await fetch(`/api/catalogues/${encodeURIComponent(id)}/export?format=${format}`);
+      if (!response.ok) {
+        const errorInfo = await getApiError(response, 'Export failed');
+        throw new Error(errorInfo.message);
+      }
+      const blob = await response.blob();
+      saveBlob(
+        blob,
+        suggestedFilename(response) ?? generateMergedCatalogueFilename(format === 'quakeml' ? 'xml' : format)
+      );
+    } catch (error) {
+      toast({
+        title: 'Export failed',
+        description: error instanceof Error ? error.message : 'Failed to export the merged catalogue',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleExport = (format: ExportFormat, buildInBrowser: () => void) => {
+    if (catalogueId) {
+      void downloadFromServer(catalogueId, format);
+    } else {
+      buildInBrowser();
+    }
   };
 
   const downloadCSV = () => {
@@ -226,23 +304,23 @@ export function MergeActions({ events, catalogueMetadata = {} }: MergeActionsPro
           <DropdownMenuContent align="end" className="w-56 z-50">
             <DropdownMenuLabel>Export Format</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={downloadQuakeML}>
+            <DropdownMenuItem onClick={() => handleExport('quakeml', downloadQuakeML)}>
               <Download className="mr-2 h-4 w-4" />
               QuakeML (XML)
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={downloadCSV}>
+            <DropdownMenuItem onClick={() => handleExport('csv', downloadCSV)}>
               <Download className="mr-2 h-4 w-4" />
               CSV
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={downloadJSON}>
+            <DropdownMenuItem onClick={() => handleExport('json', downloadJSON)}>
               <Download className="mr-2 h-4 w-4" />
               JSON
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={downloadGeoJSON}>
+            <DropdownMenuItem onClick={() => handleExport('geojson', downloadGeoJSON)}>
               <Download className="mr-2 h-4 w-4" />
               GeoJSON
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={downloadKML}>
+            <DropdownMenuItem onClick={() => handleExport('kml', downloadKML)}>
               <Download className="mr-2 h-4 w-4" />
               KML (Google Earth)
             </DropdownMenuItem>
@@ -275,7 +353,9 @@ export function MergeActions({ events, catalogueMetadata = {} }: MergeActionsPro
               time: e.time,
               latitude: e.latitude,
               longitude: e.longitude,
-              depth: e.depth ?? 0,
+              // Unknown depth stays unknown: EventTable shows '—' and sorts it last, where a 0
+              // would read (and sort) as a surface event.
+              depth: e.depth ?? null,
               magnitude: e.magnitude,
               magnitude_type: e.magnitude_type ?? null,
               location_name: e.location_name ?? e.region ?? null,

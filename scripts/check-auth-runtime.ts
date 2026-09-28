@@ -20,6 +20,16 @@ async function main() {
   const response = await (middleware as Function)(protectedRequest, {});
   assert.equal(response.status, 307);
   assert.match(response.headers.get('location'), /\/login/);
-  console.log('Authentication import and malformed-header middleware checks passed.');
+  // Every map base layer's tile host is allowed by img-src.
+  const imgSrc = login.headers.get('content-security-policy').split(';').find((d: string) => d.trim().startsWith('img-src'));
+  for (const host of ['tile.openstreetmap.org', 'server.arcgisonline.com', 'basemaps.cartocdn.com', 'tile.opentopomap.org']) {
+    assert.ok(imgSrc.includes(host), `img-src must allow ${host}`);
+  }
+  // A cross-origin write to the API is refused before any route runs.
+  const forged = await (middleware as Function)(new NextRequest('http://localhost/api/import/geonet', {
+    method: 'POST', headers: { host: 'localhost', origin: 'https://evil.example', 'content-type': 'text/plain' }, body: '{}',
+  }), {});
+  assert.equal(forged.status, 403);
+  console.log('Authentication import, malformed-header, CSP tile-host and cross-origin write middleware checks passed.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

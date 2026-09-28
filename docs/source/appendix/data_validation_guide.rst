@@ -54,7 +54,7 @@ All earthquake events must include the following required fields:
      - Longitude in decimal degrees
    * - ``magnitude``
      - Number
-     - -2 to 10
+     - -3 to 10
      - Event magnitude
 
 
@@ -72,8 +72,10 @@ Optional Fields with Validation
      - Description
    * - ``depth``
      - Number
-     - 0 to 1000 km
-     - Depth below surface
+     - -5 to 1000 km
+     - Depth of the hypocentre below sea level. Negative values are
+       intentionally valid: they describe a source above sea level (a
+       volcanic event beneath a summit, a mining event), not an error.
    * - ``magnitude_type``
      - String
      - Max 10 chars
@@ -100,8 +102,9 @@ Optional Fields with Validation
      - Depth uncertainty
    * - ``time_uncertainty``
      - Number
-     - 0 to 60 s
-     - Time uncertainty
+     - 0 to 86400 s
+     - Time uncertainty (the wide upper bound covers pre-instrumental origin
+       times known only to the nearest hour or day)
    * - ``magnitude_uncertainty``
      - Number
      - 0 to 5
@@ -112,11 +115,11 @@ Optional Fields with Validation
      - Largest azimuthal gap
    * - ``used_phase_count``
      - Integer
-     - 0 to 1000
+     - 0 to 10000
      - Number of phases used
    * - ``used_station_count``
      - Integer
-     - 0 to 500
+     - 0 to 5000
      - Number of stations used
    * - ``standard_error``
      - Number
@@ -124,7 +127,7 @@ Optional Fields with Validation
      - RMS residual
    * - ``magnitude_station_count``
      - Integer
-     - 0 to 500
+     - 0 to 5000
      - Stations used for magnitude
 
 
@@ -158,17 +161,20 @@ Location Validation
 Magnitude Validation
 ~~~~~~~~~~~~~~~~~~~~
 
-- Must be between -2 and 10
-- Warning if magnitude > 9 (extremely rare)
-- Warning if magnitude < -1 (unusual)
+- Must be between -3 and 10
+- Warning if magnitude > 9 or magnitude < -1 (extreme, unusual -- flagged together as one check)
 
 Depth Validation
 ~~~~~~~~~~~~~~~~
 
-- Must be >= 0 km (cannot be negative)
-- Must be <= 1000 km (maximum observed depth)
+- Must be between -5 and 1000 km. **Negative depth is intentionally valid**:
+  QuakeML measures origin depth from sea level, so a source above sea level
+  (a volcanic event beneath a summit, a mining event) is a negative depth,
+  not an error -- it is never clamped to zero.
 - Warning if depth > 700 km (very deep, rare)
-- Info if depth = 0 (may indicate missing data)
+- Warning if more than 10% of a catalogue's events have exactly zero depth
+  (may indicate a missing-data placeholder rather than genuine surface
+  events; a single zero-depth event is not flagged)
 
 
 
@@ -204,9 +210,16 @@ Checks for internal consistency and logical relationships:
 - Geographic bounds validity
 
 **Deductions**:
-- -10 points: Duplicate timestamps found
-- -5 points: Suspicious shallow large-magnitude events
-- -5 points: Other consistency issues
+
+- Duplicate timestamps: proportional, not a flat penalty --
+  ``100 x extraCopies / totalEvents``, where ``extraCopies`` is the number
+  of events beyond one in each group that shares a timestamp. One
+  coincident pair in a catalogue of thousands costs almost nothing; a file
+  where every row repeats the same timestamp costs close to 100 points.
+- -5 points: suspicious shallow (< 5 km) large-magnitude (> 8) events found
+  (the same check as the Magnitude-Depth Relationships warning below)
+- The consistency score is clamped at a minimum of 0; there is no separate
+  flat deduction for "other consistency issues".
 
 3. Accuracy Score (0-100%)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -219,9 +232,17 @@ Based on uncertainty values and quality metrics:
 - **Low accuracy**: Large uncertainties, poor station coverage
 
 **Deductions**:
-- -30 points: >50% of events have high location uncertainty (>10km)
-- -20 points: >50% of events have high depth uncertainty
-- -10 points: Poor quality metrics overall
+
+Proportional across the whole catalogue, not a flat penalty past a 50%
+threshold: ``accuracyScore = 100 - round(30 x (missing + highUncertainty) /
+totalEvents)``, where ``missing`` is the count of events that report no
+horizontal location uncertainty at all and ``highUncertainty`` is the count
+of events whose *reported* horizontal uncertainty exceeds 10 km (uncertainty
+in degrees is converted to km at the event's latitude before comparing).
+A missing uncertainty is scored exactly as harshly as a bad one, so a
+catalogue can never raise its score by omitting uncertainty metadata
+instead of honestly reporting a poor one. There is no separate deduction
+for depth uncertainty or for "poor quality metrics overall" in this score.
 
 Overall Quality Grade
 ^^^^^^^^^^^^^^^^^^^^^
@@ -293,17 +314,30 @@ Uncertainty-Value Relationships
 **Rules**:
 
 1. **Depth Uncertainty vs Depth**
+
    - **Warning**: Depth uncertainty > 2 × Depth
    - **Info**: Depth uncertainty > Depth
    - Indicates poorly constrained depth
 
 2. **Magnitude Uncertainty**
+
    - **Warning**: Magnitude uncertainty > 1.0
-   - **Error**: Magnitude uncertainty > |Magnitude|
+   - **Warning**: Magnitude uncertainty > \|Magnitude\|, but only when
+     \|Magnitude\| >= 1 -- magnitude is logarithmic, so this comparison is
+     meaningless near zero (an M0.1 +/- 0.2 microearthquake is routine and
+     correctly raises nothing here). This was previously an unconditional
+     Error; it is a Warning, and only fires at or above M1.
    - Indicates unreliable magnitude
 
 3. **Location Uncertainty Asymmetry**
-   - **Warning**: Ratio of lat/lon uncertainties > 10:1
+
+   - **Warning**: Ratio of the lat/lon uncertainties, converted to physical
+     (km) distances at the event's latitude, exceeds 10:1
+   - Comparing physical distances rather than raw degree values matters
+     away from the equator: a degree of longitude is ``cos(latitude)``
+     shorter than a degree of latitude, so at high latitude a genuinely
+     isotropic (circular) uncertainty would misreport as asymmetric under a
+     raw-degree comparison
    - Indicates poor station distribution
 
 Quality Metrics Consistency
@@ -313,19 +347,40 @@ Quality Metrics Consistency
 **Rules**:
 
 1. **Station vs Phase Count**
-   - **Error**: Station count > Phase count (impossible)
+
+   - **Warning**: Station count > Phase count -- each station should
+     contribute at least one phase, so this suggests the station and phase
+     count fields may be swapped (this was previously an Error; it is a
+     Warning)
    - **Info**: Phase count < 1.2 × Station count (unusual)
 
-2. **Magnitude Stations**
-   - **Warning**: Magnitude stations > Location stations
+2. **Azimuthal Gap vs Station Count**
 
-3. **Azimuthal Gap vs Station Count**
-   - **Warning**: Gap > 180° with >= 10 stations
-   - **Info**: Gap < 90° with < 6 stations
+   - **Warning**: Gap > 180° -- this fires on the gap alone and is **not**
+     conditioned on any station count (a large gap is diagnostic whether or
+     not a station count was even reported); when a station count is
+     present it is only added to the message text, not used as a trigger.
+   - **Warning**: Gap below the geometric floor ``360/N - 0.5`` degrees,
+     where N is the used station count (the 0.5-degree allowance absorbs
+     gap values agencies round to whole degrees). The N azimuthal
+     separations between N stations sum to 360°, so the largest of them
+     (the reported gap) can never be smaller than 360/N; a reported gap
+     below that floor is geometrically impossible and indicates a corrupt,
+     mis-scaled or swapped field, not "station clustering" -- clustering
+     makes the gap *larger*, never smaller. This replaces an older, backwards
+     "gap < 90° with < 6 stations = clustering" framing.
 
-4. **RMS Residual (Standard Error)**
+   There is no separate rule comparing magnitude-station count against
+   location-station count: in QuakeML, ``Magnitude.stationCount`` and
+   ``OriginQuality.usedStationCount`` are independent quantities (a
+   magnitude routinely uses amplitudes or waveforms from stations the
+   location itself did not use), so a magnitude count above the location
+   count is ordinary and is not flagged.
+
+3. **RMS Residual (Standard Error)**
    - **Warning**: RMS > 5.0 seconds (poor fit)
-   - **Info**: RMS < 0.01 seconds (unusually good)
+   - **Info**: RMS < 0.001 seconds (unusually good -- verify this is not a
+     rounding or calculation artefact)
 
 
 
@@ -490,16 +545,30 @@ Minimum Quality Standards
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
-For data to be accepted:
+Data is not rejected or blocked for a low quality score. What actually
+gates whether an upload proceeds is narrower:
 
-- **Completeness**: >= 50% (all required fields)
-- **No Critical Errors**: No validation errors
-- **Overall Score**: >= 60/100
+- **Completeness**: >= 50% (all required fields) -- enforced.
+- **No Critical Errors**: no validation errors -- enforced.
 
-Recommended for high-quality analysis:
+A 60/100 threshold does exist in the code, but it is easy to misread as an
+acceptance gate and is not one in the current upload flow. It applies only
+to the **data-integrity** sub-score -- the average of completeness,
+consistency and accuracy, deliberately excluding the mean per-event quality
+index Q, which depends on optional solution metadata (uncertainties,
+azimuthal gap, station/phase counts) that a plain CSV catalogue can never
+be expected to supply. Even that 60%-data-integrity figure is not wired up
+to block the upload in the current flow: the headline "Overall Quality
+Score" shown after upload (data-integrity averaged together with the mean
+event quality Q) is purely informational, an indication of what to review,
+never an admission gate.
+
+Recommended (not enforced) for high-quality analysis:
 
 - **Completeness**: >= 90%
-- **Overall Score**: >= 75/100 (Grade B+ or better)
+- **Data-integrity score** (completeness, consistency and accuracy,
+  averaged): >= 75%, i.e. Grade B+ or better on the same A+-F scale used
+  elsewhere
 - **Uncertainties**: Present for >= 50% of events
 - **Quality Metrics**: Present for >= 50% of events
 
@@ -533,10 +602,6 @@ Common Errors
      - Error
      - Unrealistic magnitude
      - Verify magnitude value
-   * - "Station count > Phase count"
-     - Error
-     - Impossible relationship
-     - Check quality metrics
    * - "Event time is in the future"
      - Error
      - Invalid timestamp
@@ -557,6 +622,10 @@ Common Warnings
    * - "High location uncertainty"
      - Poor location constraint
      - Add more stations or fix depth
+   * - "Station count exceeds phase count"
+     - Each station should contribute at least one phase; this is unusual,
+       not impossible
+     - Verify the station and phase count fields are not swapped
    * - "Large azimuthal gap"
      - Poor station distribution
      - Use more distant stations

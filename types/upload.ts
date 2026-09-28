@@ -282,7 +282,11 @@ export interface CatalogueMetadata {
 
   // Additional
   doi?: string;
-  version?: string;
+  // The depositor's own free-text release label for the source data (e.g. "GeoNet
+  // 2024.1"), distinct from the catalogue's server-managed MAJOR.MINOR.PATCH
+  // `version` (C3, lib/db.ts). Named to match the API/DB field it round-trips
+  // through (app/api/catalogues/[id]/route.ts, lib/db.ts).
+  source_version?: string;
   keywords?: string[];        // Array of keywords
   reference_links?: string[]; // Array of reference URLs
   notes?: string;
@@ -358,24 +362,93 @@ export interface ValidationReportStorage {
 }
 
 /**
- * API response for file upload
+ * API response for one file from POST /api/upload and POST /api/upload/finalize
+ * (contract C15).
+ *
+ * Parsed events are never sent to the browser in bulk — they stay in the server's
+ * pending-upload store (lib/pending-uploads.ts) under `pendingUploadId`, which
+ * /api/catalogues later reads from directly to create the catalogue. The response
+ * instead carries counts, the parser's column-resolution and file-level decisions
+ * (contract C14), a bounded slice of errors/warnings, and an evenly spaced preview
+ * sample — each bounded well under Vercel's 4.5 MB response limit regardless of
+ * catalogue size. This was previously shaped around a full `events` array; both
+ * routes now build this exact bounded shape via their own `buildUploadResponse()`.
  */
 export interface FileUploadResponse {
   fileName: string;
-  isValid?: boolean;
-  errors?: ValidationError[];
-  warnings?: ValidationWarning[];
-  format?: string;
-  events?: ParsedEvent[];
-  eventCount?: number;
-  detectedFields?: string[];
-  validationReport?: ValidationReport;
+  fileSize: number;
+  format: string;
+  success: boolean;
+  eventCount: number;
+  detectedFields: string[];
+
+  /** Canonical target field -> the source column/key the parser actually used (C14). */
+  resolvedFieldSources: Record<string, string>;
+  /** File-level decisions (date format, depth unit, ...) applied to every row (C14). */
+  fileDecisions: Record<string, unknown>;
+
+  /** Bounded to the first 200; errorCount/errorsTruncated describe the full total. */
+  errors: Array<{ line: number; message: string }>;
+  errorCount: number;
+  errorsTruncated: boolean;
+  /** Bounded to the first 200; warningCount/warningsTruncated describe the full total. */
+  warnings: Array<{ line: number; message: string }>;
+  warningsTruncated: boolean;
+
+  /** Present only when at least one event failed validation. */
+  validationReport?: {
+    generatedAt: string;
+    summary: {
+      totalEvents: number;
+      validEvents: number;
+      invalidEvents: number;
+      failureCount: number;
+      errorCount: number;
+      warningCount: number;
+      infoCount: number;
+      byCategory: Record<string, number>;
+    };
+    /** Bounded to the first 500; failuresTruncated says whether more exist. */
+    failures: Array<{
+      line?: number;
+      eventIndex?: number;
+      eventId?: string | null;
+      field?: string;
+      value?: unknown;
+      expected?: string;
+      message: string;
+      category: string;
+      severity: 'error' | 'warning' | 'info';
+    }>;
+    failuresTruncated: boolean;
+  };
+
+  /**
+   * An evenly spaced sample of the parsed events (never every event — see above),
+   * with each sample's 0-based position in the file (previewIndices), and whether
+   * the sample omits events the file actually has (previewTruncated).
+   */
+  previewEvents: ParsedEvent[];
+  previewIndices: number[];
+  previewTruncated: boolean;
+
+  /** Present only when at least one event was parsed. */
+  pendingUploadId?: string;
 }
 
 /**
- * Delimiter options for CSV parsing
+ * Delimiter options for CSV parsing.
+ *
+ * This is the single source of truth: the named options DelimiterSelector
+ * presents ('comma', 'tab', ...), which is also what /api/upload/init
+ * validates and stores for chunked uploads (findings #36/#46). Previously
+ * this type was declared twice — once here as the literal characters, which
+ * nothing imported, and once (correctly) in DelimiterSelector.tsx — and the
+ * unused character-based version masked the fact that the chunked upload
+ * path passed the name straight through as if it were a character.
+ * components/upload/DelimiterSelector.tsx re-exports this.
  */
-export type DelimiterOption = 'auto' | ',' | '\t' | ';' | '|' | ' ';
+export type DelimiterOption = 'auto' | 'comma' | 'tab' | 'semicolon' | 'pipe' | 'space';
 
 /**
  * Date format options for parsing

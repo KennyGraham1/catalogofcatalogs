@@ -1,13 +1,13 @@
 /**
  * Merge-engine reproduction for the SRL paper's worked example.
  *
- * The tabulated funnel counts in the worked example (218,000 -> 169,000 unique, i.e. a 50%
- * duplicate overlap of the smaller catalogue) are DESIGN CONSTANTS of the synthetic
- * construction, drawn in paper/figures/generate_figures.py. This test instead runs the
- * ACTUAL CofC merge matching engine (groupMatchingEvents from lib/merge) on a seeded
- * two-catalogue synthetic construction with the same 50%-overlap design, and confirms the
- * engine recovers the injected duplicates end-to-end. Scale is reduced for CI runtime; the
- * dedup fraction is the invariant, and matches the full-scale figure (49,000 of 98,000 = 50%).
+ * The worked example's merge numbers (duplicate groups found, pairs missed or wrongly
+ * associated) are outputs of the platform's matcher on the seeded synthetic catalogues,
+ * computed by paper/figures/worked_example_engine.ts. This test keeps a small, fully
+ * controlled check of the same matcher (groupMatchingEvents from lib/merge): on a seeded
+ * two-catalogue construction in which half of catalogue B duplicates catalogue A with
+ * small space-time scatter, the matcher must pair the injected duplicates and nothing
+ * else. Scale is reduced for CI runtime; the duplicate fraction is the invariant.
  */
 import { groupMatchingEvents } from '@/lib/merge';
 

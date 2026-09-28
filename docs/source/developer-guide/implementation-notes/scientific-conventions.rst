@@ -4,7 +4,16 @@ Scientific Conventions
 
 This page records the scientific and data-handling conventions the platform
 follows: the choices that the code alone cannot explain. Each one is enforced
-by the implementation and covered by the test suite.
+by the raw-file parser (``parseCSV`` and its JSON/QuakeML/GeoJSON
+counterparts in ``lib/parsers.ts``) taken in isolation, and that parser-level
+behaviour is covered by the test suite (for example
+``__tests__/lib/review-followups.test.ts`` and
+``__tests__/lib/science-ingest-residue.test.ts``, which call ``parseCSV``
+directly). The magnitude-column priority and the per-file depth-unit decision
+described below are what the parser resolves a file to on first read; the
+upload flow's schema-mapping step can still change the result after parsing
+for those two conventions specifically, as noted where each is described
+below.
 
 Scientific conventions decided
 ==============================
@@ -13,9 +22,9 @@ Gardner-Knopoff window direction
    The window is applied **forward in time** from each mainshock, as in
    Gardner and Knopoff (1974) and as OpenQuake's ``hmtk`` does when its
    foreshock proportion is set to zero. Foreshocks are therefore retained. On
-   the paper's synthetic catalogue a symmetric window removes a further 2,635
-   events and lowers the declustered *b* by 0.05, so the convention is stated
-   wherever a declustered *b* is quoted. Cluster heads are reserved so a later,
+   the paper's synthetic catalogue (quality-filtered events at or above M2.7) a
+   symmetric window removes a further 970 events and lowers the declustered *b*
+   by 0.06, so the convention is stated wherever a declustered *b* is quoted. Cluster heads are reserved so a later,
    smaller candidate cannot reassign them.
 
 Reasenberg linking
@@ -82,13 +91,25 @@ Data conventions decided
 CSV numeric fields
    Numeric literals only. A cell such as ``4.1garbage`` or ``10 km`` is
    rejected with a message rather than truncated to a number. Units are decided
-   per file (depth unit inference), not per cell.
+   per file (depth unit inference), not per cell. This holds end-to-end: if the
+   schema-mapping step re-sources ``depth`` from a different column, the upload
+   route re-reads that column's raw cells under the same file-level unit
+   decision the parser made, rather than inspecting each cell on its own. See
+   :doc:`../../appendix/default_field_mappings` for how an explicit remap is
+   applied.
 
 Magnitude columns
    Resolved from the raw row independent of column order: a scale-named ``Mw``
    column wins, then the generic magnitude with its stated type, then ``ML``.
    Every other value present is kept as an alternative in ``magnitudes`` and is
-   exported beside the selected one.
+   exported beside the selected one. This is the parser's default choice of
+   preferred magnitude. The upload's schema-mapping UI lets a user explicitly
+   map a different column onto the event magnitude, overriding that default;
+   the parser's original selection is then kept only as an alternative
+   measurement in ``magnitudes`` rather than as the preferred
+   ``magnitude``/``magnitude_type``. See
+   :doc:`../../appendix/default_field_mappings` for the mapping-override
+   mechanics.
 
 Dates
    Split date columns must be valid calendar values (no roll-over of month 13

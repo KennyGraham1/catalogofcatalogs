@@ -13,6 +13,17 @@ import { useCatalogues } from '@/contexts/CatalogueContext';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useRouter } from 'next/navigation';
+import { getCatalogueSourceType } from '@/lib/catalogue-source-type';
+
+/** Entries in a catalogue's source list; 0 when it is missing or unreadable. */
+function countSourceCatalogues(raw: string | null | undefined): number {
+  try {
+    const sources = JSON.parse(raw || '[]');
+    return Array.isArray(sources) ? sources.length : 0;
+  } catch {
+    return 0;
+  }
+}
 
 type ActivityType = 'upload' | 'merge' | 'error' | 'complete';
 
@@ -42,21 +53,15 @@ export function ActivityFeed() {
   const { catalogues, loading } = useCatalogues();
   const router = useRouter();
 
-  // Generate activities from real catalogue data
-  const activities: Activity[] = catalogues
+  // Generate activities from real catalogue data. Sorted on a copy: the provider's
+  // array is shared state and must not be reordered in place.
+  const activities: Activity[] = [...catalogues]
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 10)
     .map(catalogue => {
-      // Determine if it's a merged catalogue
-      let isMerged = false;
-      let sourceCount = 0;
-      try {
-        const sources = JSON.parse(catalogue.source_catalogues || '[]');
-        isMerged = Array.isArray(sources) && sources.length > 0;
-        sourceCount = sources.length;
-      } catch {
-        isMerged = false;
-      }
+      const isMerged = getCatalogueSourceType(catalogue) === 'merged';
+      // A merge recognised by its merge_config alone may carry no readable source list.
+      const sourceCount = isMerged ? countSourceCatalogues(catalogue.source_catalogues) : 0;
 
       // Calculate time ago
       const createdDate = new Date(catalogue.created_at);
@@ -95,7 +100,9 @@ export function ActivityFeed() {
       } else if (isMerged) {
         type = 'merge';
         title = 'Catalogues merged';
-        description = `${catalogue.name} created from ${sourceCount} source catalogue${sourceCount > 1 ? 's' : ''}`;
+        description = sourceCount > 0
+          ? `${catalogue.name} created from ${sourceCount} source catalogue${sourceCount > 1 ? 's' : ''}`
+          : `${catalogue.name} created by merging catalogues`;
       } else if (catalogue.status === 'complete') {
         type = 'complete';
         title = 'Catalogue created';

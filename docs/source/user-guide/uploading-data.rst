@@ -95,11 +95,47 @@ CSV and TXT Files
 
 **Automatic date format detection:**
 
-* ISO 8601: ``YYYY-MM-DDTHH:MM:SS.sssZ`` or ``YYYY-MM-DD HH:MM:SS``
+The day/month order (US ``MM/DD/YYYY`` vs. International ``DD/MM/YYYY``) is decided once
+for the whole file, from every date-like value in the time column considered together —
+not row by row, so a file can never end up with some rows read as US and others as
+International.
+
+* ISO 8601 and other year-first dates: ``YYYY-MM-DDTHH:MM:SS.sssZ``, ``YYYY-MM-DD HH:MM:SS``,
+  ``YYYY/MM/DD`` and ``YYYY.MM.DD`` (the time part, and seconds within it, are optional)
 * US format: ``MM/DD/YYYY HH:MM:SS``
 * International format: ``DD/MM/YYYY HH:MM:SS``
-* Unix timestamp: ``1705315845`` (seconds since epoch)
-* Excel serial date: ``45306.4380`` (days since 1900-01-01)
+* Month names, with an optional weekday, including RFC 2822: ``15 Jan 2024 10:30:00``,
+  ``Jan 15, 2024``, ``Mon, 15 Jan 2024 10:30:00 +1300``
+* Compact forms: ``20240115``, ``20240115T103000Z``
+* Two-digit years on slash, dot and month-name dates (e.g. ``15/01/24``), resolved to the
+  most recent year ending in those digits that is not in the future — plain numeric
+  ``DD-MM-YYYY``-style dates still require a full four-digit year
+* Fractional seconds of any number of digits (truncated to millisecond precision)
+* Unix timestamp: ``1705315845`` (seconds since epoch) or ``1705315845123`` (milliseconds)
+
+A time with no UTC offset or zone letter is read as **UTC**. A shape the detector does not
+recognise, or a named local zone abbreviation (e.g. ``EST``, ``NZDT``), is **rejected**
+rather than guessed, since it cannot be placed exactly. Excel serial date numbers (e.g.
+``45306.4380``, days since 1900) are **not** supported or converted — export dates as text
+first if your spreadsheet stores them as serial numbers.
+
+**Other parsing notes:**
+
+* A leading block of comment lines (starting ``#`` or ``%``) is skipped, including the
+  FDSN event-text header line (``#EventID|Time|Latitude|...``), which is read and used
+  rather than discarded.
+* Separate date and time columns (e.g. ``date`` + ``time``) are combined into a single
+  origin time.
+* Longitude values outside -180..180 are wrapped into a consistent -180..180 range, so
+  events reported on the 0-360 convention (e.g. east of the antimeridian) are not rejected.
+* A negative value in a column that cannot be negative (uncertainties, counts, azimuthal
+  gap, distances) is read as a "not determined" sentinel (e.g. ``-1``, ``-999``) rather
+  than a literal negative measurement.
+* A confidence-level column for the horizontal error ellipse is recognised.
+* Rake, for focal mechanism data, is normalised to the range -180° (exclusive) to 180°
+  (inclusive).
+* Magnitude descriptor classes used across the platform (e.g. in chart tooltips): Great
+  ≥ 8, Major 7-7.9, Strong 6-6.9, Moderate 5-5.9, Light 4-4.9, Minor 2-3.9, Micro < 2.
 
 **Example CSV with common fields:**
 
@@ -114,9 +150,19 @@ CSV and TXT Files
 
 .. code-block:: text
 
-   time,lat,lon,depth,mag,mag_type,lat_err,lon_err,depth_err,azimuthal_gap,stations
-   2024-01-15T10:30:45Z,-41.286,174.776,25.3,4.5,ML,0.5,0.5,2.1,85,24
-   2024-01-15T11:22:10Z,-42.123,173.876,15.7,3.2,ML,1.2,1.1,5.3,142,12
+   time,lat,lon,depth,mag,mag_type,lat_error,lon_error,depth_err,azimuthal_gap,stations
+   2024-01-15T10:30:45Z,-41.286,174.776,25.3,4.5,ML,0.022,0.030,2.1,85,24
+   2024-01-15T11:22:10Z,-42.123,173.876,15.7,3.2,ML,0.015,0.020,5.3,142,12
+
+.. important::
+   ``lat_error``/``lon_error`` map to ``latitude_uncertainty``/``longitude_uncertainty``,
+   which the platform reads in **decimal degrees**, not kilometres. A degree of latitude is
+   about 111 km, so a value like ``0.5`` does not mean "0.5 km" — it is read as roughly
+   55 km of uncertainty, which is almost certainly not what was intended. The values above
+   (``0.015``-``0.030``) correspond to roughly 1.5-2.5 km at these latitudes (multiply by
+   ~111 km/degree for latitude, and by ~111 km/degree x cos(latitude) for longitude). If
+   your source data reports uncertainty in kilometres, either convert it to degrees before
+   uploading, or map it to the kilometre-based ``horizontal_uncertainty`` field instead.
 
 JSON Files
 ==========
@@ -136,8 +182,8 @@ Two formats are supported:
        "magnitude": 4.5,
        "magnitude_type": "ML",
        "uncertainties": {
-         "latitude": 0.5,
-         "longitude": 0.5,
+         "latitude": 0.022,
+         "longitude": 0.030,
          "depth": 2.1
        }
      },
@@ -150,6 +196,11 @@ Two formats are supported:
        "magnitude_type": "ML"
      }
    ]
+
+.. note::
+   ``uncertainties.latitude``/``uncertainties.longitude`` are in decimal degrees, the same
+   as the CSV ``lat_error``/``lon_error`` columns above — see the note there on why a
+   kilometre value should not be placed here directly.
 
 **Object format** (events nested under key):
 
@@ -327,11 +378,17 @@ Drag your file directly onto the upload area.
 **File Limits:**
 
 * Maximum size: 500 MB
-* Supported extensions: ``.csv``, ``.txt``, ``.json``, ``.geojson``, ``.xml``, ``.qml``
+* Supported extensions: ``.csv``, ``.txt``, ``.dat``, ``.json``, ``.geojson``, ``.xml``,
+  ``.qml``, ``.quakeml`` (``.xml``, ``.qml`` and ``.quakeml`` are all parsed as QuakeML)
 
 .. tip::
    For very large files (>100MB), the platform uses streaming parsers to process
    data efficiently without loading the entire file into memory.
+
+.. note::
+   Large files are uploaded to the server in chunks from your browser. The upload session
+   belongs to your account, and its expiry is refreshed every time a chunk is received, so
+   a slow connection does not by itself cause the session to expire mid-upload.
 
 **Progress Indicator:**
 
@@ -352,11 +409,28 @@ After upload, the platform displays a preview:
 
 Review this to ensure the file was parsed correctly.
 
+.. note::
+   The upload response carries a bounded sample of parsed events — at most 1,000 events or
+   1.5 MB, whichever is smaller — rather than the full file, so the response stays under
+   Vercel's response-size limit. For a file larger than that, the preview and any
+   correctness checks shown at this stage run on that sample only; the interface labels
+   results as sample-based when the file is bigger than the preview.
+
 Step 5: Map Fields to Schema
 ============================
 
-The platform attempts to auto-map fields based on common naming conventions.
+For CSV, TXT, JSON and GeoJSON files, the mapping shown on this step starts from what the
+parser itself already resolved for each column — including magnitude-scale priority, the
+depth unit and date format it inferred for that file, and any longitude wrapping — rather
+than a blank or independent guess. A fuzzy, auto-detected suggestion may be shown for a
+column the parser could not resolve, but it is never applied on its own: only an explicit
+change you make to a specific file's mapping is applied on top of the parser's baseline.
+
 Review and adjust mappings as needed.
+
+.. note::
+   QuakeML files are not shown on this step: they are already structured, so their fields
+   need no mapping.
 
 **Required Fields:**
 
@@ -368,7 +442,7 @@ Review and adjust mappings as needed.
      - Valid Range
      - Description
    * - ``time``
-     - 1900 - present
+     - Year 1000 CE - present
      - Event origin time (ISO 8601 or parseable format)
    * - ``latitude``
      - -90 to 90
@@ -377,7 +451,7 @@ Review and adjust mappings as needed.
      - -180 to 180
      - Longitude in decimal degrees (WGS84)
    * - ``magnitude``
-     - -2 to 10
+     - -3 to 10
      - Event magnitude
 
 **Optional Core Fields:**
@@ -389,7 +463,8 @@ Review and adjust mappings as needed.
    * - Field
      - Description
    * - ``depth``
-     - Depth in kilometers (0-1000)
+     - Depth in kilometers (-5 to 1000). Negative values are valid and mean above sea
+       level (e.g. volcanic events); QuakeML measures depth from sea level.
    * - ``magnitude_type``
      - Magnitude scale: ML, Mw, mb, Ms, Md, etc.
    * - ``region``
@@ -410,9 +485,11 @@ Review and adjust mappings as needed.
    * - ``time_uncertainty``
      - Origin time uncertainty in seconds
    * - ``latitude_uncertainty``
-     - Latitude uncertainty in degrees
+     - Latitude uncertainty in **decimal degrees**, not kilometres (multiply by
+       ~111 km/degree; values are capped at 10°, a ~1100 km sanity bound)
    * - ``longitude_uncertainty``
-     - Longitude uncertainty in degrees
+     - Longitude uncertainty in **decimal degrees**, not kilometres (multiply by
+       ~111 km/degree x cos(latitude); also capped at 10°)
    * - ``depth_uncertainty``
      - Depth uncertainty in kilometers
    * - ``magnitude_uncertainty``
@@ -490,8 +567,10 @@ Each validation error shows:
      - Use ISO 8601 format or configure date format manually
    * - "Magnitude out of range"
      - Verify values are actual magnitudes, not intensity
-   * - "Depth cannot be negative"
-     - Check for elevation vs. depth confusion
+   * - "Depth outside -5 to 1000 km"
+     - Not a rejection: the event is kept and its depth is set to "unknown" (a warning).
+       Negative depth (down to -5 km) is valid and means above sea level, e.g. volcanic
+       events — check for a metres/kilometres mix-up only if the value looks unexpected.
    * - "Missing required field: time"
      - Map the time column in field mapping
 
@@ -502,6 +581,12 @@ Step 7: Name and Create Catalogue
 
 * **Name** (required): Descriptive name for your catalogue
 * **Description** (optional): Additional context or notes
+
+Further metadata — data source, provider, geographic region, a **Source dataset version**
+label (the depositor's own release label, separate from the platform-managed catalogue
+version described in :doc:`exporting-data`), time period coverage (entered and stored as
+UTC), contact details, licensing and keywords — can be filled in on the **Basic Info**,
+**Quality & Coverage**, **Contact & License** and **Additional** tabs of this same step.
 
 **Naming Best Practices:**
 
@@ -520,6 +605,13 @@ Step 7: Name and Create Catalogue
 **Create the Catalogue:**
 
 Click **Create Catalogue** to process and store your data.
+
+Behind the scenes, **Create Catalogue** does not re-send every parsed event: it references
+the files you already uploaded (each held server-side as a pending upload tied to your
+account) and is validated as a dry run — counting and checking every event across all the
+files — before anything is written. If a pending upload has expired, or its event count no
+longer matches what was originally parsed, catalogue creation is rejected and you are
+asked to upload the files again.
 
 The platform will:
 
@@ -604,15 +696,20 @@ Validation Rules
 Required Field Validation
 =========================
 
-* **time**: Must be a valid date/time, not in the future, after 1900
+* **time**: Must be a valid date/time, not in the future, no earlier than year 1000 CE
 * **latitude**: Must be between -90 and 90 degrees
 * **longitude**: Must be between -180 and 180 degrees
-* **magnitude**: Must be between -2 and 10
+* **magnitude**: Must be between -3 and 10
 
 Optional Field Validation
 =========================
 
-* **depth**: 0 to 1000 km (warning if > 700 km)
+* **depth**: -5 to 1000 km. Negative values (down to -5 km) are valid and represent events
+  above sea level (e.g. volcanic events); QuakeML measures depth from sea level. A depth
+  outside this range is not rejected — it is set to "unknown" and the event is kept, with
+  a warning, on every input format (CSV, TXT, JSON, GeoJSON and QuakeML alike). Very deep
+  events (> 700 km) are separately flagged as an informational note, since they are rare
+  but do occur in subduction zones.
 * **azimuthal_gap**: 0 to 360 degrees
 * **used_phase_count**: Positive integer
 * **used_station_count**: Positive integer, ≤ used_phase_count
@@ -625,8 +722,12 @@ The platform checks for logical consistency:
 
 * Station count cannot exceed phase count
 * Very shallow events (< 5 km) with large magnitudes (> 8) trigger warnings
-* Very deep events (> 300 km) with small magnitudes (< 3) trigger warnings
-* Location uncertainty should not exceed 10 degrees
+* Very deep events (> 300 km) with small magnitudes (< 3) trigger warnings, and events
+  deeper than 700 km with magnitude < 4 trigger a further warning
+* Latitude and longitude uncertainty are compared as physical distances (~111 km/degree
+  for latitude, adjusted by cos(latitude) for longitude, so the comparison stays accurate
+  away from the equator); an asymmetry ratio greater than 10:1 between them triggers a
+  warning, which may indicate poor station distribution or a systematic error
 
 -----------------
 Troubleshooting

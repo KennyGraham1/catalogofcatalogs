@@ -1,156 +1,47 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { useTheme } from 'next-themes';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
-import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DefaultFieldMappings } from '@/components/settings/DefaultFieldMappings';
 import { useAuth } from '@/lib/auth/hooks';
 import { UserRole } from '@/lib/auth/types';
-import { toast } from '@/hooks/use-toast';
-import {
-  Settings,
-  Database,
-  Sliders,
-  Save,
-  Map,
-  Lock,
-  RotateCcw
-} from 'lucide-react';
+import { getMagnitudeColor } from '@/lib/earthquake-utils';
+import { DepthLegendItems, MagnitudeLegendItems } from '@/components/map/MapLegend';
+import { Settings, Database, Map, Lock } from 'lucide-react';
 
-const SETTINGS_STORAGE_KEY = 'eqcat:settings';
-
-interface AppSettings {
-  language: string;
-  emailNotifications: boolean;
-  importFormat: string;
-  exportFormat: string;
-  mapProvider: string;
-  defaultView: string;
-  mapApiKey: string;
-  clusterEvents: boolean;
-  depthScale: string;
-  symbolSize: string;
-  batchSize: string;
-  cacheLimit: string;
-  parallelProcessing: boolean;
-  apiEndpoint: string;
-  externalFetch: string;
-  customScript: string;
-}
-
-const DEFAULT_SETTINGS: AppSettings = {
-  language: 'en',
-  emailNotifications: false,
-  importFormat: 'csv',
-  exportFormat: 'csv',
-  mapProvider: 'leaflet',
-  defaultView: 'global',
-  mapApiKey: '',
-  clusterEvents: true,
-  depthScale: 'rainbow',
-  symbolSize: 'magnitude',
-  batchSize: '1000',
-  cacheLimit: '256',
-  parallelProcessing: true,
-  apiEndpoint: 'https://api.example.com/earthquake-service',
-  externalFetch: '12',
-  customScript: '',
-};
-
-function loadSettings(): AppSettings {
-  if (typeof window === 'undefined') return DEFAULT_SETTINGS;
-  try {
-    const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (!raw) return DEFAULT_SETTINGS;
-    return { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<AppSettings>) };
-  } catch {
-    return DEFAULT_SETTINGS;
-  }
-}
-
+/**
+ * gc#5: this page used to offer 16 General/Visualization/Advanced controls (batch
+ * size, cache limit, map provider, an "External Data Fetch Interval", a "Custom
+ * Python script to run after catalogue processing", ...) that were written to
+ * localStorage and read back only to refill the same form — nothing else in the app
+ * (server or client) ever consulted them, so "Settings saved" was a placebo, and
+ * admin-only gating implied an app-wide effect none of them had. A post-processing
+ * script setting in particular would mean running arbitrary user-supplied code on
+ * the server, which this app must never do.
+ *
+ * Only two things on the old page had a real effect: the theme toggle (next-themes)
+ * and the embedded schema mapping panel (its own working save via
+ * /api/settings/field-mappings). Both are kept below. Everything else is removed
+ * rather than kept disabled: none of it has a reachable implementation in the files
+ * this page can call into, so a "coming soon" placeholder would just be a second
+ * kind of dead control. See the fix log / final report "Doc/paper updates needed"
+ * for which documented settings this removes.
+ *
+ * The old "Magnitude Color Scale" legend is replaced by a live reference that reuses
+ * the exact colour functions and legend components the maps render with
+ * (lib/earthquake-utils.ts, components/map/MapLegend.tsx), so it cannot drift from
+ * what a map actually shows the way the old hard-coded swatches had.
+ */
 export default function SettingsPage() {
   const { user } = useAuth();
   const canManageSettings = user?.role === UserRole.ADMIN;
   const isReadOnly = !canManageSettings;
-
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
-  const [saved, setSaved] = useState<AppSettings>(DEFAULT_SETTINGS);
-
-  // Hydrate from localStorage on mount (client-only).
-  useEffect(() => {
-    const loaded = loadSettings();
-    setSettings(loaded);
-    setSaved(loaded);
-  }, []);
-
-  const isDirty = JSON.stringify(settings) !== JSON.stringify(saved);
-
-  const set = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    setSettings((prev) => ({ ...prev, [key]: value }));
-  };
-
-  const handleSave = () => {
-    if (isReadOnly || !isDirty) return;
-    try {
-      window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-      setSaved(settings);
-      toast({ title: 'Settings saved', description: 'Your preferences have been stored in this browser.' });
-    } catch {
-      toast({ title: 'Could not save settings', description: 'Your browser blocked local storage.', variant: 'destructive' });
-    }
-  };
-
-  const handleReset = () => {
-    setSettings(saved);
-  };
-
-  const renderSaveButton = () => {
-    const saveButton = (
-      <Button disabled={isReadOnly || !isDirty} onClick={handleSave}>
-        <Save className="mr-2 h-4 w-4" aria-hidden="true" />
-        Save Changes
-      </Button>
-    );
-
-    return (
-      <div className="flex items-center gap-2">
-        {isDirty && !isReadOnly && (
-          <Button variant="ghost" onClick={handleReset}>
-            <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
-            Discard
-          </Button>
-        )}
-        {isReadOnly ? (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">{saveButton}</span>
-              </TooltipTrigger>
-              <TooltipContent>Admin access required to save settings.</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        ) : (
-          saveButton
-        )}
-      </div>
-    );
-  };
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === 'dark';
 
   return (
     <div className="container py-6 max-w-7xl mx-auto">
@@ -167,7 +58,7 @@ export default function SettingsPage() {
             <Lock className="h-4 w-4" />
             <AlertTitle>View-only settings</AlertTitle>
             <AlertDescription>
-              Only administrators can change settings. Log in with an Admin account to make updates.
+              Only administrators can change schema mapping settings. Log in with an Admin account to make updates.
             </AlertDescription>
           </Alert>
         )}
@@ -176,10 +67,8 @@ export default function SettingsPage() {
           <TabsList>
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="schema">Schema Mapping</TabsTrigger>
-            <TabsTrigger value="visualization">Visualization</TabsTrigger>
-            <TabsTrigger value="advanced">Advanced</TabsTrigger>
+            <TabsTrigger value="visualization">Visualization Reference</TabsTrigger>
           </TabsList>
-
 
           <TabsContent value="general" className="space-y-4">
             <Card className="shadow-sm">
@@ -189,102 +78,18 @@ export default function SettingsPage() {
                   General Settings
                 </CardTitle>
                 <CardDescription className="text-xs">
-                  Configure basic application settings and preferences
+                  Interface preferences stored in this browser
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="space-y-4">
-                  <h3 className="text-lg font-medium">Interface</h3>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="language">Language</Label>
-                      <Select value={settings.language} onValueChange={(v) => set('language', v)} disabled={isReadOnly}>
-                        <SelectTrigger id="language">
-                          <SelectValue placeholder="Select language" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="en">English</SelectItem>
-                          <SelectItem value="es">Spanish</SelectItem>
-                          <SelectItem value="fr">French</SelectItem>
-                          <SelectItem value="ja">Japanese</SelectItem>
-                          <SelectItem value="de">German</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Theme</Label>
-                      <div className="flex items-center gap-2">
-                        <ThemeToggle disabled={isReadOnly} />
-                        <span className="text-sm text-muted-foreground">
-                          Select your preferred theme
-                        </span>
-                      </div>
-                    </div>
+                <div className="space-y-2">
+                  <Label>Theme</Label>
+                  <div className="flex items-center gap-2">
+                    <ThemeToggle disabled={isReadOnly} />
+                    <span className="text-sm text-muted-foreground">
+                      Select your preferred theme
+                    </span>
                   </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="notifications" className="text-base">
-                        Email Notifications
-                      </Label>
-                      <Switch
-                        id="notifications"
-                        checked={settings.emailNotifications}
-                        onCheckedChange={(v) => set('emailNotifications', v)}
-                        disabled={isReadOnly}
-                        aria-describedby="notifications-desc"
-                      />
-                    </div>
-                    <p id="notifications-desc" className="text-sm text-muted-foreground">
-                      Receive email notifications for completed catalogue processing
-                    </p>
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-4">
-                  <h3 className="text-lg font-medium">Default File Formats</h3>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="import-format">Default Import Format</Label>
-                      <Select value={settings.importFormat} onValueChange={(v) => set('importFormat', v)} disabled={isReadOnly}>
-                        <SelectTrigger id="import-format">
-                          <SelectValue placeholder="Select format" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="csv">CSV</SelectItem>
-                          <SelectItem value="qml">QuakeML</SelectItem>
-                          <SelectItem value="json">GeoJSON</SelectItem>
-                          <SelectItem value="xml">XML</SelectItem>
-                          <SelectItem value="txt">Plain Text</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="export-format">Default Export Format</Label>
-                      <Select value={settings.exportFormat} onValueChange={(v) => set('exportFormat', v)} disabled={isReadOnly}>
-                        <SelectTrigger id="export-format">
-                          <SelectValue placeholder="Select format" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="csv">CSV</SelectItem>
-                          <SelectItem value="qml">QuakeML</SelectItem>
-                          <SelectItem value="json">GeoJSON</SelectItem>
-                          <SelectItem value="xml">XML</SelectItem>
-                          <SelectItem value="kml">KML</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex justify-end">
-                  {renderSaveButton()}
                 </div>
               </CardContent>
             </Card>
@@ -312,268 +117,33 @@ export default function SettingsPage() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Map className="h-4 w-4" />
-                  Visualization Settings
+                  Map Colour Reference
                 </CardTitle>
                 <CardDescription className="text-xs">
-                  Configure how earthquake data is displayed in maps and charts
+                  How the catalogue and analytics maps colour events, read live from the same
+                  colour functions the maps call — not an editable setting.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="space-y-4">
-                  <h3 className="text-lg font-medium">Map Configuration</h3>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="map-provider">Map Provider</Label>
-                      <Select value={settings.mapProvider} onValueChange={(v) => set('mapProvider', v)} disabled={isReadOnly}>
-                        <SelectTrigger id="map-provider">
-                          <SelectValue placeholder="Select provider" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="leaflet">Leaflet (OpenStreetMap)</SelectItem>
-                          <SelectItem value="mapbox">Mapbox</SelectItem>
-                          <SelectItem value="google">Google Maps</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="default-view">Default Map View</Label>
-                      <Select value={settings.defaultView} onValueChange={(v) => set('defaultView', v)} disabled={isReadOnly}>
-                        <SelectTrigger id="default-view">
-                          <SelectValue placeholder="Select view" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="global">Global</SelectItem>
-                          <SelectItem value="europe">Europe</SelectItem>
-                          <SelectItem value="namerica">North America</SelectItem>
-                          <SelectItem value="pacific">Pacific Ring</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="api-key">Map API Key (if applicable)</Label>
-                    <Input id="api-key" type="password" placeholder="Enter your API key" value={settings.mapApiKey} onChange={(e) => set('mapApiKey', e.target.value)} disabled={isReadOnly} />
-                    <p className="text-xs text-muted-foreground">
-                      Required for some map providers like Mapbox or Google Maps
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="cluster-events" className="text-base">
-                        Cluster Nearby Events
-                      </Label>
-                      <Switch
-                        id="cluster-events"
-                        checked={settings.clusterEvents}
-                        onCheckedChange={(v) => set('clusterEvents', v)}
-                        disabled={isReadOnly}
-                        aria-describedby="cluster-events-desc"
-                      />
-                    </div>
-                    <p id="cluster-events-desc" className="text-sm text-muted-foreground">
-                      Group nearby earthquake events when zoomed out
-                    </p>
-                  </div>
+                <div className="space-y-2">
+                  <Label>Magnitude colour mode</Label>
+                  <MagnitudeLegendItems getColor={getMagnitudeColor} />
+                  <p className="text-xs text-muted-foreground">
+                    getMagnitudeColor is deprecated: it returns the same blue for every
+                    magnitude, because magnitude is encoded by marker size (shown above), not
+                    colour, on every map in this app.
+                  </p>
                 </div>
 
-                <Separator />
-
-                <div className="space-y-4">
-                  <h3 className="text-lg font-medium">Event Visualization</h3>
-
-                  <div className="space-y-2">
-                    <Label>Magnitude Color Scale</Label>
-                    <div className="grid grid-cols-5 gap-2 mt-2">
-                      <div className="h-8 rounded bg-green-500 flex items-center justify-center text-white text-xs">
-                        &lt; 3.0
-                      </div>
-                      <div className="h-8 rounded bg-yellow-500 flex items-center justify-center text-white text-xs">
-                        3.0-4.0
-                      </div>
-                      <div className="h-8 rounded bg-orange-500 flex items-center justify-center text-white text-xs">
-                        4.0-5.0
-                      </div>
-                      <div className="h-8 rounded bg-red-500 flex items-center justify-center text-white text-xs">
-                        5.0-6.0
-                      </div>
-                      <div className="h-8 rounded bg-purple-500 flex items-center justify-center text-white text-xs">
-                        &gt; 6.0
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="depth-scale">Depth Visualization Scale</Label>
-                    <Select value={settings.depthScale} onValueChange={(v) => set('depthScale', v)} disabled={isReadOnly}>
-                      <SelectTrigger id="depth-scale">
-                        <SelectValue placeholder="Select scale" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="rainbow">Rainbow (Multi-color)</SelectItem>
-                        <SelectItem value="redblue">Red to Blue</SelectItem>
-                        <SelectItem value="grayscale">Grayscale</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="symbol-size">Symbol Size Based On</Label>
-                    <Select value={settings.symbolSize} onValueChange={(v) => set('symbolSize', v)} disabled={isReadOnly}>
-                      <SelectTrigger id="symbol-size">
-                        <SelectValue placeholder="Select property" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="magnitude">Magnitude</SelectItem>
-                        <SelectItem value="depth">Depth</SelectItem>
-                        <SelectItem value="fixed">Fixed Size</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                <div className="space-y-2">
+                  <Label>Depth colour mode</Label>
+                  <DepthLegendItems isDark={isDark} />
                 </div>
 
-                <div className="flex justify-end">
-                  {renderSaveButton()}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="advanced" className="space-y-4">
-            <Card className="shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Sliders className="h-4 w-4" />
-                  Advanced Settings
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Configure advanced application settings for performance and compatibility
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-4">
-                  <h3 className="text-lg font-medium">Performance</h3>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="batch-size">Processing Batch Size</Label>
-                    <Select value={settings.batchSize} onValueChange={(v) => set('batchSize', v)} disabled={isReadOnly}>
-                      <SelectTrigger id="batch-size">
-                        <SelectValue placeholder="Select batch size" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="500">500 events</SelectItem>
-                        <SelectItem value="1000">1,000 events</SelectItem>
-                        <SelectItem value="5000">5,000 events</SelectItem>
-                        <SelectItem value="10000">10,000 events</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      Number of events processed in each batch
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="cache-limit">Cache Limit</Label>
-                    <Select value={settings.cacheLimit} onValueChange={(v) => set('cacheLimit', v)} disabled={isReadOnly}>
-                      <SelectTrigger id="cache-limit">
-                        <SelectValue placeholder="Select cache limit" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="128">128 MB</SelectItem>
-                        <SelectItem value="256">256 MB</SelectItem>
-                        <SelectItem value="512">512 MB</SelectItem>
-                        <SelectItem value="1024">1 GB</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      Maximum memory used for caching data
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="parallel-processing" className="text-base">
-                        Parallel Processing
-                      </Label>
-                      <Switch
-                        id="parallel-processing"
-                        checked={settings.parallelProcessing}
-                        onCheckedChange={(v) => set('parallelProcessing', v)}
-                        disabled={isReadOnly}
-                        aria-describedby="parallel-processing-desc"
-                      />
-                    </div>
-                    <p id="parallel-processing-desc" className="text-sm text-muted-foreground">
-                      Enable multi-threaded processing for faster catalogue operations
-                    </p>
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-4">
-                  <h3 className="text-lg font-medium">Integration</h3>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="api-endpoint">API Endpoint URL</Label>
-                    <Input
-                      id="api-endpoint"
-                      value={settings.apiEndpoint}
-                      onChange={(e) => set('apiEndpoint', e.target.value)}
-                      disabled={isReadOnly}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      URL for the backend API service
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="external-fetch">External Data Fetch Interval</Label>
-                    <Select value={settings.externalFetch} onValueChange={(v) => set('externalFetch', v)} disabled={isReadOnly}>
-                      <SelectTrigger id="external-fetch">
-                        <SelectValue placeholder="Select interval" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="1">1 hour</SelectItem>
-                        <SelectItem value="6">6 hours</SelectItem>
-                        <SelectItem value="12">12 hours</SelectItem>
-                        <SelectItem value="24">24 hours</SelectItem>
-                        <SelectItem value="0">Manual only</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      How often to fetch updates from external sources
-                    </p>
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-4">
-                  <h3 className="text-lg font-medium">Custom Script</h3>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="custom-script">Post-Processing Script</Label>
-                    <Textarea
-                      id="custom-script"
-                      placeholder="Enter custom processing script (Python)"
-                      className="font-mono h-32"
-                      value={settings.customScript}
-                      onChange={(e) => set('customScript', e.target.value)}
-                      disabled={isReadOnly}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Custom Python script to run after catalogue processing
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex justify-end">
-                  {renderSaveButton()}
-                </div>
+                <p className="text-xs text-muted-foreground">
+                  Charts (magnitude histograms, frequency-magnitude plots) use a separate
+                  scale (lib/chart-config.ts) and do not follow the map colours above.
+                </p>
               </CardContent>
             </Card>
           </TabsContent>

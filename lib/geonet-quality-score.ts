@@ -95,11 +95,20 @@ export function calculateGeoNetQS(criteria: GeoNetQSCriteria): GeoNetQSResult {
 }
 
 /**
+ * A criterion value that was actually reported: finite and not negative. Anything else,
+ * including a -999 / -1 missing-value sentinel, is "No data" and scores 0; a negative
+ * value used to pass every "<=" threshold and score Excellent.
+ */
+function isReported(value: number | null | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+/**
  * Score azimuthal gap (angular distribution of stations)
  * Lower gap = better station coverage
  */
 function scoreAzimuthalGap(gap?: number | null): { score: number; label: string } {
-  if (gap === null || gap === undefined) return { score: 0, label: 'No data' };
+  if (!isReported(gap)) return { score: 0, label: 'No data' };
   
   if (gap <= 90) return { score: 6, label: 'Excellent (<90°)' };
   if (gap <= 120) return { score: 5, label: 'Very Good (90-120°)' };
@@ -115,7 +124,7 @@ function scoreAzimuthalGap(gap?: number | null): { score: number; label: string 
  * More stations = better constraint
  */
 function scoreStationCount(count?: number | null): { score: number; label: string } {
-  if (count === null || count === undefined) return { score: 0, label: 'No data' };
+  if (!isReported(count)) return { score: 0, label: 'No data' };
   
   if (count >= 30) return { score: 6, label: 'Excellent (≥30)' };
   if (count >= 20) return { score: 5, label: 'Very Good (20-29)' };
@@ -131,7 +140,7 @@ function scoreStationCount(count?: number | null): { score: number; label: strin
  * Lower RMS = better fit to velocity model
  */
 function scoreRMSResidual(rms?: number | null): { score: number; label: string } {
-  if (rms === null || rms === undefined) return { score: 0, label: 'No data' };
+  if (!isReported(rms)) return { score: 0, label: 'No data' };
   
   if (rms <= 0.2) return { score: 6, label: 'Excellent (≤0.2s)' };
   if (rms <= 0.3) return { score: 5, label: 'Very Good (0.2-0.3s)' };
@@ -147,7 +156,7 @@ function scoreRMSResidual(rms?: number | null): { score: number; label: string }
  * Lower uncertainty = better precision
  */
 function scoreHorizontalUncertainty(uncert?: number | null): { score: number; label: string } {
-  if (uncert === null || uncert === undefined) return { score: 0, label: 'No data' };
+  if (!isReported(uncert)) return { score: 0, label: 'No data' };
   
   if (uncert <= 1) return { score: 6, label: 'Excellent (≤1km)' };
   if (uncert <= 2) return { score: 5, label: 'Very Good (1-2km)' };
@@ -163,7 +172,7 @@ function scoreHorizontalUncertainty(uncert?: number | null): { score: number; la
  * Lower uncertainty = better depth constraint
  */
 function scoreDepthUncertainty(uncert?: number | null): { score: number; label: string } {
-  if (uncert === null || uncert === undefined) return { score: 0, label: 'No data' };
+  if (!isReported(uncert)) return { score: 0, label: 'No data' };
   
   if (uncert <= 2) return { score: 6, label: 'Excellent (≤2km)' };
   if (uncert <= 5) return { score: 5, label: 'Very Good (2-5km)' };
@@ -179,12 +188,11 @@ function scoreDepthUncertainty(uncert?: number | null): { score: number; label: 
  * Closer station = better constraint
  */
 function scoreMinimumDistance(dist?: number | null): { score: number; label: string } {
-  // NOTE: missing data defaults to 3 ("fair") here, whereas every other criterion
-  // defaults to 0 ("no data") and therefore caps the min()-aggregated QS at 0.
-  // This inconsistency is deliberate-but-debatable and depends on product intent
-  // for how to treat missing nearest-station distance; left unchanged pending that
-  // decision.
-  if (dist === null || dist === undefined) return { score: 3, label: 'Unknown (assume fair)' };
+  // A missing distance scores 0 ("No data") like every other criterion. It used to
+  // default to 3 ("assume fair"), so leaving the value out beat honestly reporting any
+  // nearest station beyond 200 km (QS3 against QS2 / QS1): withholding data must never
+  // score better than publishing it.
+  if (!isReported(dist)) return { score: 0, label: 'No data' };
   
   if (dist <= 30) return { score: 6, label: 'Excellent (≤30km)' };
   if (dist <= 50) return { score: 5, label: 'Very Good (30-50km)' };

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, memo } from 'react';
+import { useEffect, useMemo, useState, memo } from 'react';
 import { Card } from '@/components/ui/card';
 import { MapPin, Filter } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -49,6 +49,14 @@ export const CatalogueMap = memo(function CatalogueMap() {
   const { events, loading: eventsLoading, complete, loadedCount, error: eventsError, retry: reload } = useCatalogueEvents(catalogues, selectedCatalogue);
   const loading = cataloguesLoading || (eventsLoading && events.length === 0);
   const error = cataloguesError || eventsError;
+
+  // Already-fetched id -> name lookup for the map's source-catalogue colour mode, so a
+  // merged row's contributing catalogues (C2 source_catalogue_ids) show real names instead
+  // of raw ids, with no extra request.
+  const catalogueNames = useMemo(
+    () => Object.fromEntries(catalogues.map((c) => [c.id, c.name])),
+    [catalogues]
+  );
 
   const emptyHeight = 'h-[600px] w-full relative flex items-center justify-center bg-muted/20';
 
@@ -106,6 +114,7 @@ export const CatalogueMap = memo(function CatalogueMap() {
       onSampleSizeChange={setSampleSize}
       mapKey={`catalogue-map-${selectedCatalogue}`}
       height="600px"
+      catalogueNames={catalogueNames}
     />;
   };
 

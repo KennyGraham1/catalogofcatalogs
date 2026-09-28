@@ -13,23 +13,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireEditor } from '@/lib/auth/middleware';
 import { Logger } from '@/lib/errors';
-import { createUploadSession, CHUNK_SIZE } from '@/lib/upload-chunks';
-import { createUploadTooLargeResponse, getMaxSyncUploadParseBytes } from '@/lib/upload-limits';
+import { createUploadSession, CHUNK_SIZE, isValidStoredDelimiter } from '@/lib/upload-chunks';
+import {
+  createUploadTooLargeResponse,
+  getMaxSyncUploadParseBytes,
+  isAllowedUploadExtension,
+  isQuakeMLExtension,
+} from '@/lib/upload-limits';
 
 export const dynamic = 'force-dynamic';
 
 const logger = new Logger('UploadInitAPI');
 const MAX_FILE_SIZE = 500 * 1024 * 1024;
 
-function isQuakeMLFile(fileName: string): boolean {
-  const extension = fileName.split('.').pop()?.toLowerCase();
-  return extension === 'xml' || extension === 'qml';
-}
-
 export async function POST(request: NextRequest) {
   try {
     const authResult = await requireEditor(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { user } = authResult;
 
     const body = await request.json();
     const { fileName, fileSize, totalChunks, delimiter, dateFormat } = body;
@@ -38,11 +39,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'fileName is required' }, { status: 400 });
     }
 
-    const allowedExtensions = ['csv', 'txt', 'dat', 'json', 'geojson', 'xml', 'qml'];
-    const extension = fileName.split('.').pop()?.toLowerCase();
-    if (!extension || !allowedExtensions.includes(extension)) {
+    if (!isAllowedUploadExtension(fileName)) {
       return NextResponse.json(
-        { error: 'Invalid file type. Allowed: CSV, TXT, JSON, GeoJSON, XML, QML' },
+        { error: 'Invalid file type. Allowed: CSV, TXT, JSON, GeoJSON, XML, QML, QuakeML' },
         { status: 400 },
       );
     }
@@ -74,19 +73,38 @@ export async function POST(request: NextRequest) {
       );
     }
     const maxParseBytes = getMaxSyncUploadParseBytes();
-    if (fileSize > maxParseBytes && !isQuakeMLFile(fileName)) {
+    if (fileSize > maxParseBytes && !isQuakeMLExtension(fileName)) {
       return NextResponse.json(createUploadTooLargeResponse(fileSize), { status: 413 });
     }
 
+    // The client sends DelimiterSelector's named option ('comma', 'tab', ...).
+    // Validate it here, before it is ever stored, so an unmappable value can
+    // never reach finalize's parser: passing a 5-character name straight
+    // through as the delimiter character used to zero out every large
+    // CSV/TXT/DAT import (findings #36/#46). See lib/upload-chunks.ts for the
+    // validator and the canonical name → character map finalize maps through.
+    if (delimiter !== undefined && delimiter !== null && !isValidStoredDelimiter(delimiter)) {
+      return NextResponse.json(
+        {
+          error: `Invalid delimiter '${delimiter}'. Allowed: comma, tab, semicolon, pipe, space.`,
+          code: 'INVALID_DELIMITER',
+        },
+        { status: 400 },
+      );
+    }
+
+    // owner_id (C9): scopes this session to the authenticated user so
+    // /api/upload/chunk can refuse chunks posted by anyone else.
     const sessionId = await createUploadSession(
       fileName,
       fileSize,
       totalChunks,
       delimiter ?? undefined,
       dateFormat ?? undefined,
+      user.id,
     );
 
-    logger.info('Chunked upload session created', { sessionId, fileName, fileSize, totalChunks });
+    logger.info('Chunked upload session created', { sessionId, fileName, fileSize, totalChunks, ownerId: user.id });
 
     return NextResponse.json({ sessionId, chunkSize: CHUNK_SIZE });
   } catch (error) {

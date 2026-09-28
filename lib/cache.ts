@@ -259,16 +259,106 @@ export function generateCacheKey(prefix: string, params: Record<string, any>): s
   return `${prefix}:${sortedParams}`;
 }
 
+// ---------------------------------------------------------------------------
+// Cache generations
+//
+// Deleting entries after a write is not enough on its own. A request that read the
+// database just BEFORE a write can store its stale result just AFTER the write's
+// invalidation, and every server instance (a Vercel function, a second container) has
+// its own copy of these caches, which an invalidation in another instance never
+// reaches. Readers therefore put a generation in their cache keys: it changes on every
+// write to the data the key covers, so an entry stored under an older generation is
+// never looked up again (it simply ages out). The generation combines
+//   - a process-local counter, bumped by the invalidation functions below, and
+//   - a shared counter kept in the database, bumped by every catalogue mutation in
+//     lib/db.ts, which registers the reader for it (this module stays importable by
+//     client code, so it cannot import the database layer itself).
+// ---------------------------------------------------------------------------
+
+/** Generation scope of the catalogue list and region searches (any catalogue's fields). */
+export const CATALOGUE_LIST_SCOPE = 'catalogues';
+
+/** Generation scope of one catalogue's events and statistics. */
+export function catalogueScope(catalogueId: string): string {
+  return `catalogue:${catalogueId}`;
+}
+
+/** Key prefix of the catalogue list entries (GET /api/catalogues). */
+export const CATALOGUE_LIST_CACHE_PREFIX = 'catalogues';
+/** Key prefix of the region-search entries (GET /api/catalogues/search/region). */
+export const REGION_SEARCH_CACHE_PREFIX = 'region:';
+
+type SharedGenerationSource = (scope: string) => Promise<number>;
+
+let sharedGenerationSource: SharedGenerationSource | null = null;
+// Never reset: a counter that returned to an earlier value could make an entry keyed
+// under that value current again.
+let processEpoch = 0;
+const localGenerations = new Map<string, number>();
+
+function bumpLocalGeneration(scope: string): void {
+  localGenerations.set(scope, (localGenerations.get(scope) ?? 0) + 1);
+}
+
+/** Register the reader of the shared (database) generation. Server-side only. */
+export function registerCacheGenerationSource(source: SharedGenerationSource | null): void {
+  sharedGenerationSource = source;
+}
+
+/**
+ * The generation to put in a cache key for data in `scope`. Take it BEFORE reading
+ * the database. Resolves to null when the shared generation cannot be read: the
+ * caller must then neither read nor write the cache for this request, since it can
+ * no longer tell whether a cached entry is current.
+ */
+export async function getCacheGeneration(scope: string): Promise<string | null> {
+  const local = `${processEpoch}.${localGenerations.get(scope) ?? 0}`;
+  if (!sharedGenerationSource) return local;
+  try {
+    return `${await sharedGenerationSource(scope)}:${local}`;
+  } catch (error) {
+    console.warn(`[Cache] Shared cache generation for ${scope} unavailable; bypassing the cache:`,
+      error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
 /**
  * Performance Optimization: Invalidate all caches related to a catalogue
  * Uses substring matching instead of regex for better performance
  */
 export function invalidateCatalogueCache(catalogueId: string): void {
+  bumpLocalGeneration(catalogueScope(catalogueId));
   const catalogueCount = catalogueCache.invalidateBySubstring(catalogueId);
   const eventCount = eventCache.invalidateBySubstring(catalogueId);
   const statsCount = statisticsCache.invalidateBySubstring(catalogueId);
+  const apiCount = apiCache.invalidateBySubstring(catalogueId);
 
-  console.log(`[Cache] Invalidated ${catalogueCount + eventCount + statsCount} entries for catalogue ${catalogueId}`);
+  console.log(`[Cache] Invalidated ${catalogueCount + eventCount + statsCount + apiCount} entries for catalogue ${catalogueId}`);
+}
+
+/**
+ * Invalidate everything derived from the set of catalogues and their catalogue-level
+ * fields: the catalogue list and every region search. Keys of these never contain a
+ * catalogue id, so invalidateCatalogueCache cannot reach them.
+ */
+export function invalidateCatalogueListCaches(): number {
+  bumpLocalGeneration(CATALOGUE_LIST_SCOPE);
+  const count =
+    catalogueCache.invalidateByPrefix(CATALOGUE_LIST_CACHE_PREFIX) +
+    apiCache.invalidateByPrefix(CATALOGUE_LIST_CACHE_PREFIX) +
+    apiCache.invalidateByPrefix(REGION_SEARCH_CACHE_PREFIX);
+  console.log(`[Cache] Invalidated ${count} catalogue list / region search entries`);
+  return count;
+}
+
+/** Empty every server cache and retire every generation handed out so far. */
+export function clearAllCaches(): void {
+  processEpoch++;
+  apiCache.clearAll();
+  catalogueCache.clearAll();
+  eventCache.clearAll();
+  statisticsCache.clearAll();
 }
 
 /**

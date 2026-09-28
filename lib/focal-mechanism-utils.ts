@@ -45,8 +45,10 @@ export function isCompletePlane(plane: NodalPlane | null | undefined): plane is 
 /**
  * The plane geometry and interpretation should be built from: the stated preferred plane
  * when it is complete, otherwise whichever plane is complete (plane 1 first). The
- * double-couple beach ball is the same for either plane, so the fallback changes only
- * which plane's lateral sense is described.
+ * double-couple beach ball, its P/T/B axes and the faulting style classified from them
+ * (getMechanismFaultType) are the same for either plane. The choice changes only the
+ * plane-specific text: the lateral sense of a strike-slip mechanism and a plane's own
+ * rake interpretation. With no stated preference, plane 1 is an arbitrary pick for those.
  */
 export function selectPlane(mechanism: FocalMechanism): CompleteNodalPlane | null {
   const number = selectPlaneNumber(mechanism);
@@ -67,15 +69,26 @@ export function selectPlaneNumber(mechanism: FocalMechanism): 1 | 2 | null {
 /**
  * Parse focal mechanism data from JSON string
  * Supports both QuakeML format and simplified format
+ *
+ * `preferredId` is the event's QuakeML preferredFocalMechanismID (stored as
+ * preferred_focal_mechanism_id). BED gives the order of an event's mechanisms no
+ * meaning, so the mechanism whose publicID matches is the one shown; the first entry is
+ * used only when no ID is given or the ID does not resolve to any stored mechanism.
  */
-export function parseFocalMechanism(focalMechanismsJson: string | null | undefined): FocalMechanism | null {
+export function parseFocalMechanism(
+  focalMechanismsJson: string | null | undefined,
+  preferredId?: string | null
+): FocalMechanism | null {
   if (!focalMechanismsJson) return null;
 
   try {
     const mechanisms = JSON.parse(focalMechanismsJson);
     if (!Array.isArray(mechanisms) || mechanisms.length === 0) return null;
 
-    const fm = mechanisms[0]; // Use first focal mechanism
+    const preferred = preferredId
+      ? mechanisms.find((m: any) => m && typeof m === 'object' && m.publicID === preferredId)
+      : undefined;
+    const fm = preferred ?? mechanisms[0];
 
     // Simplified format (direct nodalPlane1/nodalPlane2 with scalar angles)
     const simple = (p: any): NodalPlane | undefined =>
@@ -177,6 +190,15 @@ function normalAndSlip(strike: number, dip: number, rake: number): { n: V3; u: V
   return { n: normalize3(n), u: normalize3(u) };
 }
 
+/** Tension, pressure and null (B) axes of the double couple with fault normal n and slip u. */
+function principalAxes(n: V3, u: V3): { T: V3; P: V3; B: V3 } {
+  return {
+    T: normalize3([n[0] + u[0], n[1] + u[1], n[2] + u[2]]),
+    P: normalize3([n[0] - u[0], n[1] - u[1], n[2] - u[2]]),
+    B: normalize3(cross3(n, u)),
+  };
+}
+
 /** Equal-area projection of a unit vector to the lower hemisphere (flips up vectors when allowed). */
 function projectLower(v: V3, cx: number, cy: number, R: number, allowFlip = false): { x: number; y: number } | null {
   let [vn, ve, vd] = v;
@@ -265,8 +287,7 @@ export function computeBeachball(mechanism: FocalMechanism, size: number = 100):
 
   const M = momentTensorNED(strike, dip, rake);
   const { n, u } = normalAndSlip(strike, dip, rake);
-  const T = normalize3([n[0] + u[0], n[1] + u[1], n[2] + u[2]]); // tension
-  const P = normalize3([n[0] - u[0], n[1] - u[1], n[2] - u[2]]); // pressure
+  const { T, P } = principalAxes(n, u);
   const tPt = projectLower(T, center, center, R, true)!;
   const pPt = projectLower(P, center, center, R, true)!;
 
@@ -342,14 +363,60 @@ export function generateBeachBallSVG(
 }
 
 /**
- * Get fault type description from rake angle
+ * Rake in (-180, 180]. Sources also write rakes on 0-360, where 270 is a pure normal
+ * fault, not the right-lateral strike-slip a raw 270 used to fall into; every rake-based
+ * text reads the rake through this.
  */
-export function getFaultType(rake: number): {
+export function normalizeRake(rake: number): number {
+  const r = ((rake % 360) + 360) % 360;
+  return r > 180 ? r - 360 : r;
+}
+
+export type FaultType = 'normal' | 'reverse' | 'strike-slip' | 'oblique-normal' | 'oblique-reverse' | 'oblique';
+
+/**
+ * Faulting style of the whole double couple, from the plunges of its P, T and B (null)
+ * axes, using the World Stress Map regime table (Zoback 1992, JGR 97, 11703): NF, NS, SS,
+ * TS and TF, with 'oblique' for the regime the table leaves unknown (U). The axes are the
+ * same for both nodal planes, so the style cannot change with the plane a source lists
+ * first, as a rake bin did (30/70/140 is oblique-reverse, its auxiliary plane 136/53/25
+ * would bin as strike-slip). Only the lateral sense of a strike-slip mechanism belongs to
+ * a plane; it is read from the selected plane's rake. Null when no plane is complete.
+ */
+export function getMechanismFaultType(mechanism: FocalMechanism): { type: FaultType; description: string } | null {
+  const plane = selectPlane(mechanism);
+  if (!plane) return null;
+  const { n, u } = normalAndSlip(plane.strike, plane.dip, plane.rake);
+  const axes = principalAxes(n, u);
+  // Rounded to 1e-6 deg so a textbook boundary case (P plunge of an 80-degree-dip thrust
+  // is 35) is not pushed across a threshold by floating-point noise.
+  const plunge = (v: V3) => Math.round(axisInfo(v).plunge * 1e6) / 1e6;
+  const p = plunge(axes.P), t = plunge(axes.T), b = plunge(axes.B);
+
+  if (p >= 52 && t <= 35) return { type: 'normal', description: 'Normal fault' };
+  if (p >= 40 && p < 52 && t <= 20) return { type: 'oblique-normal', description: 'Oblique-normal (strike-slip component)' };
+  if ((p < 40 && b >= 45 && t <= 20) || (p <= 20 && b >= 45 && t < 40)) {
+    // Rake 0 is left-lateral and 180 right-lateral on the plane described.
+    return Math.abs(normalizeRake(plane.rake)) < 90
+      ? { type: 'strike-slip', description: 'Left-lateral strike-slip' }
+      : { type: 'strike-slip', description: 'Right-lateral strike-slip' };
+  }
+  if (p <= 20 && t >= 40 && t < 52) return { type: 'oblique-reverse', description: 'Oblique-reverse (strike-slip component)' };
+  if (p <= 35 && t >= 52) return { type: 'reverse', description: 'Reverse/Thrust fault' };
+  return { type: 'oblique', description: 'Oblique slip (no dominant faulting style)' };
+}
+
+/**
+ * Get fault type description from ONE nodal plane's rake (normalised to (-180, 180]).
+ * The two planes of a mechanism can fall in different rake bins, so this describes a
+ * plane, not the mechanism; use getMechanismFaultType to classify a mechanism.
+ */
+export function getFaultType(rawRake: number): {
   type: 'normal' | 'reverse' | 'strike-slip' | 'oblique-normal' | 'oblique-reverse';
   description: string;
 } {
-  const absRake = Math.abs(rake);
-  
+  const rake = normalizeRake(rawRake);
+
   if (rake >= -30 && rake <= 30) {
     return { type: 'strike-slip', description: 'Left-lateral strike-slip' };
   } else if (rake >= 150 || rake <= -150) {
@@ -387,8 +454,7 @@ export function formatFocalMechanism(mechanism: FocalMechanism): {
   const plane1 = describe(mechanism.nodalPlane1);
   const plane2 = describe(mechanism.nodalPlane2);
 
-  const selected = selectPlane(mechanism);
-  const faultType = selected ? getFaultType(selected.rake).description : 'Unknown';
+  const faultType = getMechanismFaultType(mechanism)?.description ?? 'Unknown';
 
   const preferred = mechanism.preferredPlane ? `Plane ${mechanism.preferredPlane}` : 'Not stated';
 

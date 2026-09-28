@@ -8,6 +8,8 @@
  * and properly formatted before the application starts.
  */
 
+import { parseTrustedProxyHops } from './rate-limiter';
+
 /**
  * Required environment variables
  */
@@ -87,6 +89,12 @@ export function validateEnvironment(): void {
         errors.push(result.error!);
       }
     }
+  }
+
+  // Every per-client rate limit keys on this; a typo must not pass silently.
+  const trustedProxyHops = process.env.TRUSTED_PROXY_HOPS;
+  if (trustedProxyHops !== undefined && !parseTrustedProxyHops(trustedProxyHops).valid) {
+    errors.push(`TRUSTED_PROXY_HOPS must be a whole number >= 0 (got "${trustedProxyHops}")`);
   }
 
   // If there are errors, throw with detailed message

@@ -1,25 +1,82 @@
-import { dbQueries, MergedEvent } from './db';
+import { dbQueries, MergedEvent, MergedCatalogue } from './db';
 import type { ClientSession } from './mongodb';
 import { createId } from './id';
 import { calculateDistance, calculateTimeDifference } from './earthquake-utils';
-import type { SourceCatalogue, MergeConfig } from './validation';
-import type { QuakeMLEvent } from './types/quakeml';
-import { extractBoundsFromEvents } from './geo-bounds-utils';
+import { horizontalUncertaintyKm, type SourceCatalogue, type MergeConfig } from './validation';
+import type { QuakeMLEvent, FocalMechanism, Origin } from './types/quakeml';
+import { extractBoundsFromEvents, NZ_NATIONAL_BOUNDS } from './geo-bounds-utils';
+import { metricsFromEvent, scoreQualityMetrics } from './quality-scoring';
 
-/** Merge inputs must be complete even when API responses have an unpaginated cap. */
-async function loadCompleteCatalogueEvents(catalogueId: string): Promise<MergedEvent[]> {
+/** Rows per keyset page when reading a source catalogue for a merge. */
+const MERGE_INPUT_PAGE_SIZE = 10000;
+
+/**
+ * Every event of one source catalogue, complete even when API responses have an
+ * unpaginated cap.
+ *
+ * Pages are read with the (time, id) keyset cursor, not skip/offset: an event inserted
+ * while the merge is reading (e.g. a GeoNet import into a source catalogue) sorts to the
+ * front of a newest-first order and shifted every later offset page by one, so the last
+ * row of a page was read twice and the new rows never. A keyset page resumes strictly
+ * after the last row it returned, so no stored row is read twice or skipped.
+ */
+async function loadCompleteCatalogueEvents(
+  catalogueId: string,
+  pageSize: number = MERGE_INPUT_PAGE_SIZE
+): Promise<MergedEvent[]> {
   if (!dbQueries) throw new Error('Database not initialized');
+  const db = dbQueries;
+  if (typeof db.getEventsByCatalogueIdCursor === 'function') {
+    const events: MergedEvent[] = [];
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    for (;;) {
+      const page = await db.getEventsByCatalogueIdCursor(catalogueId, {
+        limit: pageSize,
+        direction: 'desc',
+        cursor,
+      });
+      for (const event of page.data as unknown as MergedEvent[]) {
+        // Belt and braces: the keyset cannot repeat a row, but a merge must never
+        // double-count one if an adapter's cursor is looser than MongoDB's.
+        if (typeof event.id === 'string') {
+          if (seen.has(event.id)) continue;
+          seen.add(event.id);
+        }
+        events.push(event);
+      }
+      if (!page.pagination.hasMore || !page.pagination.nextCursor || page.data.length === 0) return events;
+      cursor = page.pagination.nextCursor;
+    }
+  }
+
+  // Adapters without a keyset read (tests, alternate stores) page by offset.
   const events: MergedEvent[] = [];
   while (true) {
-    const result = await dbQueries.getEventsByCatalogueId(catalogueId, {
+    const result = await db.getEventsByCatalogueId(catalogueId, {
       offset: events.length,
-      pageSize: 10000,
+      pageSize,
     });
     // The database interface also permits complete arrays (e.g. alternate adapters).
     if (Array.isArray(result)) return result;
     for (const event of result.data) events.push(event);
     if (events.length >= result.pagination.totalItems) return events;
     if (result.data.length === 0) throw new Error('Catalogue changed while loading merge inputs; please retry');
+  }
+}
+
+/**
+ * The stored catalogue document behind a merge source, for its explicit agency metadata
+ * (provider, data source, import source). Best-effort: a missing document or an adapter
+ * without the lookup just means the agency is identified from the event rows instead.
+ */
+async function loadSourceCatalogueDocument(catalogueId: string): Promise<MergedCatalogue | null> {
+  const db = dbQueries;
+  if (!db || typeof db.getCatalogueById !== 'function') return null;
+  try {
+    return (await db.getCatalogueById(catalogueId)) ?? null;
+  } catch {
+    return null;
   }
 }
 
@@ -37,12 +94,26 @@ interface EventData {
   quakeml?: QuakeMLEvent;
 }
 
+/**
+ * One contributing report in a merged event's provenance (the `source_events` column).
+ * The optional flags say which report each published quantity came from (contract C2):
+ * `selected` marks the report whose solution (origin time and epicentre) was published;
+ * no report carries it when the epicentre was averaged. `magnitudeSelected` and
+ * `depthSelected` mark where the averaged strategy took its magnitude and depth, and
+ * `locationWeight` is that report's normalised share of the averaged epicentre.
+ */
+interface SourceEventEntry {
+  catalogueId: string | number;
+  source: string;
+  originalData: EventData;
+  selected?: true;
+  magnitudeSelected?: true;
+  depthSelected?: true;
+  locationWeight?: number;
+}
+
 interface MergedEventData extends EventData {
-  sourceEvents: Array<{
-    catalogueId: string | number;
-    source: string;
-    originalData: EventData;
-  }>;
+  sourceEvents: SourceEventEntry[];
 }
 
 // ============================================================================
@@ -206,6 +277,12 @@ export function getMergeConflictLog(): MergeConflictLog {
   return mergeConflictLog;
 }
 
+/** Server-side context of a merge request. */
+interface MergeOptions {
+  /** The session user's id, recorded as the merged catalogue's creator. */
+  createdBy?: string | null;
+}
+
 /**
  * Merge multiple earthquake catalogues based on spatial and temporal matching
  * Uses database transactions to ensure atomicity
@@ -215,7 +292,8 @@ export async function mergeCatalogues(
   sourceCatalogues: SourceCatalogue[],
   config: MergeConfig,
   metadata?: any,
-  exportOnly: boolean = false
+  exportOnly: boolean = false,
+  options: MergeOptions = {}
 ) {
   if (!dbQueries) {
     throw new Error('Database not initialized');
@@ -225,7 +303,7 @@ export async function mergeCatalogues(
 
   // If export-only mode, don't use transactions
   if (exportOnly) {
-    return await executeMergeOperation(catalogueId, name, sourceCatalogues, config, metadata, exportOnly);
+    return await executeMergeOperation(catalogueId, name, sourceCatalogues, config, metadata, exportOnly, undefined, options);
   }
 
   // Use transaction for database writes
@@ -238,7 +316,8 @@ export async function mergeCatalogues(
         config,
         metadata,
         exportOnly,
-        session
+        session,
+        options
       );
     });
   } catch (error) {
@@ -305,12 +384,18 @@ function buildMergedEventFields(
     if (!alreadyQualified && !rawSourceId.startsWith(prefix)) fields.source_id = prefix + rawSourceId;
   }
 
+  // An averaged record publishes an epicentre (and an earliest origin time) that no single
+  // agency solution produced, so nothing that describes one origin solution may be
+  // re-derived from the base event's QuakeML: its preferred origin describes a different
+  // hypocentre (finding #21).
+  const averagedOrigin = (event as { _averagedOrigin?: boolean })._averagedOrigin === true;
+
   if (quakeml) {
     fields.event_public_id = quakeml.publicID;
     fields.event_type = quakeml.type;
     fields.event_type_certainty = quakeml.typeCertainty;
 
-    if (preferredOrigin) {
+    if (preferredOrigin && !averagedOrigin) {
       // Uncertainties. QuakeML BED: depth.uncertainty and horizontalUncertainty are in metres;
       // DB stores lengths in km (see lib/quakeml-to-db.ts), angular uncertainties in degrees, time in seconds.
       fields.time_uncertainty = preferredOrigin.time.uncertainty;
@@ -326,6 +411,8 @@ function buildMergedEventFields(
       if (ou?.minHorizontalUncertainty != null) fields.min_horizontal_uncertainty = ou.minHorizontalUncertainty / 1000;
       if (ou?.maxHorizontalUncertainty != null) fields.max_horizontal_uncertainty = ou.maxHorizontalUncertainty / 1000;
       if (ou?.azimuthMaxHorizontalUncertainty != null) fields.azimuth_max_horizontal_uncertainty = ou.azimuthMaxHorizontalUncertainty;
+      // The confidence the ellipse above is quoted at belongs to the same origin (C16).
+      if (ou?.confidenceLevel != null) fields.confidence_level = ou.confidenceLevel;
 
       // Origin metadata
       fields.depth_type = preferredOrigin.depthType;
@@ -369,17 +456,19 @@ function buildMergedEventFields(
       fields.magnitude_evaluation_status = preferredMagnitude.evaluationStatus;
     }
 
-    // Complex nested data as JSON strings
+    // Complex nested data as JSON strings. Every origin is kept as a supplementary solution;
+    // the standalone arrivals and the event creationInfo describe the base event's own
+    // solution, so an averaged record does not inherit them.
     if (quakeml.origins?.length) fields.origins = JSON.stringify(quakeml.origins);
     if (quakeml.magnitudes?.length) fields.magnitudes = JSON.stringify(quakeml.magnitudes);
     if (quakeml.picks?.length) fields.picks = JSON.stringify(quakeml.picks);
-    if ((quakeml as any).arrivals?.length) fields.arrivals = JSON.stringify((quakeml as any).arrivals);
+    if (!averagedOrigin && (quakeml as any).arrivals?.length) fields.arrivals = JSON.stringify((quakeml as any).arrivals);
     if (quakeml.focalMechanisms?.length) fields.focal_mechanisms = JSON.stringify(quakeml.focalMechanisms);
     if (quakeml.amplitudes?.length) fields.amplitudes = JSON.stringify(quakeml.amplitudes);
     if (quakeml.stationMagnitudes?.length) fields.station_magnitudes = JSON.stringify(quakeml.stationMagnitudes);
     if (quakeml.description?.length) fields.event_descriptions = JSON.stringify(quakeml.description);
     if (quakeml.comment?.length) fields.comments = JSON.stringify(quakeml.comment);
-    if (quakeml.creationInfo) fields.creation_info = JSON.stringify(quakeml.creationInfo);
+    if (!averagedOrigin && quakeml.creationInfo) fields.creation_info = JSON.stringify(quakeml.creationInfo);
   }
 
   // Null-normalise every optional field so consumers never see `undefined`.
@@ -388,6 +477,26 @@ function buildMergedEventFields(
       fields[field] = null;
     }
   }
+
+  // Merged-event provenance (contract C2), on every row whatever the caller's field list:
+  // how the row was produced and from which catalogues. mergeEventGroup sets these.
+  const provenance = event as {
+    merge_strategy?: string;
+    merge_parameters?: string;
+    source_catalogue_ids?: string[];
+  };
+  fields.merge_strategy = provenance.merge_strategy ?? null;
+  fields.merge_parameters = provenance.merge_parameters ?? null;
+  fields.source_catalogue_ids = Array.isArray(provenance.source_catalogue_ids)
+    ? provenance.source_catalogue_ids
+    : null;
+
+  // Quality index Q of the PUBLISHED row (contracts C1/C2), from the same routine and default
+  // weights the database uses on insert. A score inherited from a contributing row would
+  // describe that row, not this one, so it is always recomputed here.
+  const quality = scoreQualityMetrics(metricsFromEvent(fields));
+  fields.quality_score = quality.overall;
+  fields.quality_grade = quality.grade;
 
   return fields;
 }
@@ -403,7 +512,8 @@ async function executeMergeOperation(
   config: MergeConfig,
   metadata?: any,
   exportOnly: boolean = false,
-  session?: ClientSession
+  session?: ClientSession,
+  options: MergeOptions = {}
 ) {
   if (!dbQueries) {
     throw new Error('Database not initialized');
@@ -439,6 +549,7 @@ async function executeMergeOperation(
         if (metadata.notes) dbMetadata.notes = metadata.notes;
       }
 
+      // The creator is server-attested (the session user), never client metadata.
       await dbQueries.insertCatalogue(
         catalogueId,
         name,
@@ -447,7 +558,8 @@ async function executeMergeOperation(
         0,
         'processing',
         dbMetadata,
-        session
+        session,
+        { createdBy: options.createdBy ?? null }
       );
     }
 
@@ -462,13 +574,14 @@ async function executeMergeOperation(
 
       const catalogueIdStr = String(catalogue.id);
       const eventsArray = await loadCompleteCatalogueEvents(catalogueIdStr);
+      const catalogueAgency = catalogueAgencyOf(catalogue, await loadSourceCatalogueDocument(catalogueIdStr));
 
       // A loop, not push(...spread): spreading a whole source catalogue as function
       // arguments throws RangeError past the V8 argument limit (~131k), so a
       // national-scale source could not be merged at all.
       const source = catalogue.source || catalogue.name || 'unknown';
       for (const e of eventsArray) {
-        allEvents.push({ ...e, source, catalogueId: catalogueIdStr } as EventData);
+        allEvents.push({ ...e, source, catalogueId: catalogueIdStr, _catalogueAgency: catalogueAgency } as EventData);
       }
     }
 
@@ -478,10 +591,11 @@ async function executeMergeOperation(
     // Optional MergedEvent fields — declared once to avoid per-event allocation.
     const OPTIONAL_DB_FIELDS: ReadonlyArray<string> = [
       'source_id', 'region', 'location_name',
-      'event_public_id', 'event_type', 'event_type_certainty',
+      'event_public_id', 'event_type', 'event_type_certainty', 'source_event_type',
       'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty',
       'depth_uncertainty', 'horizontal_uncertainty',
       'min_horizontal_uncertainty', 'max_horizontal_uncertainty', 'azimuth_max_horizontal_uncertainty',
+      'confidence_level',
       'depth_type', 'earth_model_id', 'method_id',
       'agency_id', 'author',
       'magnitude_type', 'magnitude_uncertainty', 'magnitude_station_count',
@@ -1027,14 +1141,34 @@ function getTimeMultiplier(magnitude: number): number {
 }
 
 /**
- * Check if two events match using adaptive thresholds
+ * How far apart two reports are in origin time and epicentre, measured against the
+ * matching windows the pair is judged by (the configured windows widened for the pair's
+ * magnitude and depth).
  */
-function eventsMatchAdaptive(
+interface PairSeparation {
+  /** |Δt| in seconds. */
+  timeDiff: number;
+  /** Great-circle epicentral distance in km. */
+  distance: number;
+  /** The pair's adaptive time window (s) and distance window (km). */
+  timeWindow: number;
+  distanceWindow: number;
+  /** Inside both windows: the pair is a duplicate candidate. */
+  matches: boolean;
+  /**
+   * Normalised space-time separation |Δt|/τ + d/δ. Each term is in [0, 1] for a matching
+   * pair, so time and distance count equally whatever the window sizes; this is the
+   * distance association ranks candidates by (Infinity when it cannot be measured).
+   */
+  cost: number;
+}
+
+function pairSeparation(
   event1: EventData,
   event2: EventData,
   configTimeThreshold: number,
   configDistanceThreshold: number
-): boolean {
+): PairSeparation {
   // Use average magnitude for threshold calculation. Only average over finite
   // magnitudes: at runtime `magnitude` can be null (coerces to 0) or undefined
   // (coerces to NaN), either of which would corrupt the adaptive widening — a null
@@ -1061,8 +1195,11 @@ function eventsMatchAdaptive(
   const effectiveTimeThreshold = configTimeThreshold * timeMultiplier;
   const effectiveDistanceThreshold = configDistanceThreshold * distanceMultiplier * depthMultiplier;
 
-  // Calculate actual differences
-  const timeDiff = calculateTimeDifference(event1.time, event2.time);
+  // Calculate actual differences (from the pre-computed timestamps when grouping set them).
+  const timeDiff =
+    typeof event1._timestamp === 'number' && typeof event2._timestamp === 'number'
+      ? Math.abs(event1._timestamp - event2._timestamp) / 1000
+      : calculateTimeDifference(event1.time, event2.time);
   const distance = calculateDistance(
     event1.latitude,
     event1.longitude,
@@ -1070,7 +1207,77 @@ function eventsMatchAdaptive(
     event2.longitude
   );
 
-  return timeDiff <= effectiveTimeThreshold && distance <= effectiveDistanceThreshold;
+  // A zero-width window admits only an exact coincidence, which then costs nothing.
+  const share = (value: number, window: number) => (window > 0 ? value / window : value > 0 ? Infinity : 0);
+  const cost = share(timeDiff, effectiveTimeThreshold) + share(distance, effectiveDistanceThreshold);
+
+  return {
+    timeDiff,
+    distance,
+    timeWindow: effectiveTimeThreshold,
+    distanceWindow: effectiveDistanceThreshold,
+    matches: timeDiff <= effectiveTimeThreshold && distance <= effectiveDistanceThreshold,
+    cost: Number.isFinite(cost) ? cost : Infinity,
+  };
+}
+
+/**
+ * Check if two events match using adaptive thresholds
+ */
+function eventsMatchAdaptive(
+  event1: EventData,
+  event2: EventData,
+  configTimeThreshold: number,
+  configDistanceThreshold: number
+): boolean {
+  return pairSeparation(event1, event2, configTimeThreshold, configDistanceThreshold).matches;
+}
+
+/** Total order on numbers that tolerates Infinity (a - b would give NaN for two of them). */
+function compareNumbers(a: number, b: number): number {
+  return a === b ? 0 : a < b ? -1 : 1;
+}
+
+/** Origin time of an event in ms, using the pre-computed value when there is one. */
+function eventTimestamp(e: EventData): number {
+  return typeof e._timestamp === 'number' ? e._timestamp : new Date(e.time).getTime();
+}
+
+/**
+ * The same-source rule's identity: the source CATALOGUE. Each catalogue is deduplicated
+ * internally, so two of its records inside one window are two earthquakes. Two catalogues
+ * that merely share a display name (two imports both called "GeoNet - Automated Import")
+ * are different sources whose common events must still pair; keying on the name kept such
+ * duplicates apart. Records without a catalogue id (direct callers) fall back to the label.
+ */
+function sourceKey(e: EventData): string {
+  const id = e.catalogueId;
+  return id != null && id !== '' ? `catalogue:${String(id)}` : `source:${String(e.source ?? '')}`;
+}
+
+/** A fixed record order — origin time, then source, then id — for every deterministic tie-break. */
+function compareRecordOrder(a: EventData, b: EventData): number {
+  const ta = eventTimestamp(a);
+  const tb = eventTimestamp(b);
+  const fa = Number.isFinite(ta);
+  const fb = Number.isFinite(tb);
+  if (fa && fb && ta !== tb) return ta - tb;
+  if (fa !== fb) return fa ? -1 : 1;
+  return sourceKey(a).localeCompare(sourceKey(b)) || String(a.id ?? '').localeCompare(String(b.id ?? ''));
+}
+
+/**
+ * How far apart two reports' magnitudes are, used ONLY to break ties between candidates
+ * that are equally close in time and space ("magnitude is not part of the matching test").
+ * Differences on the common Mw scale rank ahead of raw differences between scales that
+ * cannot be homogenised; with no usable magnitude the pair ranks last.
+ */
+function magnitudeTieKey(a: EventData, b: EventData): number {
+  const mwA = mwForOrdering(a);
+  const mwB = mwForOrdering(b);
+  if (mwA != null && mwB != null) return Math.abs(mwA - mwB);
+  if (Number.isFinite(a.magnitude) && Number.isFinite(b.magnitude)) return 100 + Math.abs(a.magnitude - b.magnitude);
+  return Infinity;
 }
 
 /**
@@ -1130,8 +1337,8 @@ function regroupFailedEvents(events: EventData[], config: MergeConfig): EventDat
 
 /**
  * Mw-equivalent of an event's magnitude, or null when it has no usable magnitude or no
- * magnitude type convertToMw understands. Used only to ORDER salvage candidates, never to
- * accept one — the gate still has the final say.
+ * magnitude type convertToMw understands. Used only to ORDER candidates, never to accept
+ * one — the gate still has the final say.
  */
 function mwForOrdering(e: EventData): number | null {
   if (e.magnitude == null || !Number.isFinite(e.magnitude)) return null;
@@ -1143,29 +1350,31 @@ function mwForOrdering(e: EventData): number | null {
  * validateEventGroup.
  */
 function splitInconsistentGroup(events: EventData[], config: MergeConfig): EventData[][] {
-  const remaining = events.slice();
+  // Seeds are taken in record order (earliest report first), never in whatever order the
+  // component search happened to visit them.
+  const remaining = events.slice().sort(compareRecordOrder);
   const result: EventData[][] = [];
 
   while (remaining.length > 0) {
     const seed = remaining.shift()!;
     const subGroup: EventData[] = [seed];
 
-    // Snapshot the candidate order before growing; accepted candidates are removed from
+    // Candidates are tried nearest first in the space-time separation the matching window
+    // itself measures (|Δt|/τ + d/δ); magnitude agreement only breaks exact ties. Ranking by
+    // magnitude closeness paired an agency's report with a distant, late report of equal
+    // magnitude and left its obvious 1 s / 0.4 km duplicate standing as a second earthquake
+    // (finding #26). Snapshot the order before growing; accepted candidates leave
     // `remaining` so they are not re-seeded on a later pass.
-    const seedMag = Number.isFinite(seed.magnitude) ? seed.magnitude : 0;
-    const seedMw = mwForOrdering(seed);
-    const orderKey = (e: EventData): [number, number] => {
-      if (seedMw != null) {
-        const mw = mwForOrdering(e);
-        if (mw != null) return [0, Math.abs(mw - seedMw)];
-      }
-      return [1, Math.abs((Number.isFinite(e.magnitude) ? e.magnitude! : seedMag!) - seedMag!)];
-    };
-    const ordered = remaining.slice().sort((a, b) => {
-      const [ka, da] = orderKey(a);
-      const [kb, db] = orderKey(b);
-      return ka - kb || da - db;
-    });
+    const ordered = remaining
+      .map(candidate => ({
+        candidate,
+        cost: pairSeparation(seed, candidate, config.timeThreshold, config.distanceThreshold).cost,
+        tie: magnitudeTieKey(seed, candidate),
+      }))
+      .sort((a, b) =>
+        compareNumbers(a.cost, b.cost) || compareNumbers(a.tie, b.tie) || compareRecordOrder(a.candidate, b.candidate)
+      )
+      .map(entry => entry.candidate);
 
     for (const candidate of ordered) {
       const matchesAll = subGroup.every(member =>
@@ -1194,181 +1403,304 @@ interface MatchGroup {
   // validateEventGroup (via regroupFailedEvents). Surfaced by the preview so the QC
   // panel can flag salvaged/separated clusters.
   regrouped: boolean;
+  // True when a member of this group lost an alternative pairing that was nearly as close
+  // as the one kept (AMBIGUITY_FACTOR): another report inside its matching window that the
+  // one-to-one rule assigned elsewhere. The closest pairing was kept; the preview flags the
+  // group for review because time and distance alone barely separate the two choices.
+  ambiguous: boolean;
+}
+
+/** A pair of reports from different catalogues that fall inside each other's window. */
+interface CandidateEdge {
+  a: number;
+  b: number;
+  cost: number;
+  tie: number;
 }
 
 /**
- * Core matching + grouping shared by BOTH the persist path (performMerge) and the
- * preview path (performMergeWithGroups). Extracting it guarantees the QC preview and
- * the saved catalogue group events identically — previously the two were copy-pasted
- * and had silently diverged (only the persist path split validation-failing groups).
+ * A pairing is a close call when the best alternative a report lost is within twice the
+ * normalised separation of the pairing it kept, plus a tenth of a window: on origin time
+ * and epicentre alone the two cannot be told apart with confidence, so the preview flags
+ * the group for review. A clearly worse alternative (the dense-sequence norm) is not flagged.
  */
-function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGroup[] {
-  const groups: MatchGroup[] = [];
-  const processedIndices = new Set<number>();
+const AMBIGUITY_FACTOR = 2;
+const AMBIGUITY_MARGIN = 0.1;
 
-  // Pre-compute timestamps once to avoid repeated date parsing during sort.
-  const eventsWithTimestamps = events.map(e => ({
-    ...e,
-    _timestamp: new Date(e.time).getTime(),
-  }));
-  // Anchor order decides how a non-transitive chain (L~M, M~R, not L~R) is cut, so
-  // equal timestamps must not fall back to input order: tie-break on source and id
-  // so the same catalogues merge the same way whichever way they were fetched.
-  const sortedEvents = eventsWithTimestamps.sort((a, b) =>
-    a._timestamp - b._timestamp ||
-    String(a.source ?? '').localeCompare(String(b.source ?? '')) ||
-    String(a.id).localeCompare(String(b.id))
-  );
+/**
+ * Upper bound on association rounds. A round only follows one in which a cluster failed
+ * the consistency gate (its members may then pair elsewhere), and each such round
+ * exhausts at least one pairing, so this is a safety net rather than a working limit.
+ */
+const MAX_ASSOCIATION_ROUNDS = 10;
 
-  const spatialIndex = createSpatialIndex(sortedEvents, config.distanceThreshold);
+/**
+ * Every pair of reports from different catalogues that match (eventsMatchAdaptive), with
+ * its normalised space-time separation. `sorted` is in record (time) order, so each
+ * report's candidates are the contiguous slice after it inside the widest window any
+ * pair can earn.
+ */
+function gatherCandidateEdges(sorted: EventData[], keys: string[], config: MergeConfig): CandidateEdge[] {
+  const edges: CandidateEdge[] = [];
+  const spatialIndex = createSpatialIndex(sorted, config.distanceThreshold);
 
   // Size the candidate neighbourhood to cover the widest effective distance threshold
-  // ANY pair can be accepted at — the GLOBAL max multipliers, not just the anchor's.
-  // A small/shallow anchor processed first would otherwise miss a large/deep duplicate
-  // that eventsMatchAdaptive (which uses the pair's avg magnitude / max depth) accepts.
+  // ANY pair can be accepted at — the GLOBAL max multipliers, not just this report's.
+  // A small/shallow report would otherwise miss a large/deep duplicate that
+  // eventsMatchAdaptive (which uses the pair's avg magnitude / max depth) accepts.
   // Also widen the longitude reach by 1/cos(lat): the grid cell is keyed to the tighter
   // latitude axis, so one cell spans fewer km E-W than N-S. Use the MAXIMUM |latitude| in
   // the set (not the average) so the neighbourhood is conservative for the highest-latitude
   // events too — an event poleward of the average needs more E-W cells, and under-sizing
   // here would silently drop its true duplicates.
-  const maxAbsLatDeg = sortedEvents.reduce((max, e) => Math.max(max, Math.abs(e.latitude)), 0);
-  // cos(latitude) is clamped at POLAR_LATITUDE_DEG; anchors beyond it bypass the cell
+  const maxAbsLatDeg = sorted.reduce((max, e) => Math.max(max, Math.abs(e.latitude)), 0);
+  // cos(latitude) is clamped at POLAR_LATITUDE_DEG; reports beyond it bypass the cell
   // test entirely (see `polar` below) so the clamp cannot drop a valid pair.
   const lonCoverageFactor = 1 / Math.max(Math.cos((maxAbsLatDeg * Math.PI) / 180), Math.cos((POLAR_LATITUDE_DEG * Math.PI) / 180));
   const distCells = Math.max(
     1,
     Math.ceil(MAX_DISTANCE_MULTIPLIER * MAX_DEPTH_MULTIPLIER * lonCoverageFactor)
   );
+  // The pair distance window uses the pair's AVERAGE magnitude and MAX depth, so one report
+  // alone cannot bound it; the global multipliers are the ceiling for the reach box.
+  const reachKm = config.distanceThreshold * MAX_DISTANCE_MULTIPLIER * MAX_DEPTH_MULTIPLIER;
+  const reachLatDeg = reachKm / 111;
+  const maxTimeWindowMs = config.timeThreshold * MAX_TIME_MULTIPLIER * 1000;
 
-  for (let i = 0; i < sortedEvents.length; i++) {
-    if (processedIndices.has(i)) continue;
-
-    const currentEvent = sortedEvents[i];
-    const matchingEvents: EventData[] = [currentEvent];
-    // Keyed by object identity: ids are optional and may repeat in caller-supplied
-    // input, and a member released by id could then vanish from the output.
-    const matchedIndex = new Map<EventData, number>();
-    processedIndices.add(i);
-
-    const nearbyCells = getNearbyCells(
-      currentEvent.latitude,
-      currentEvent.longitude,
-      spatialIndex.cellSize,
-      distCells
-    );
-
-    // The cell neighbourhood is sized for the widest pair ANY anchor could form
-    // (M>=7, deepest, highest latitude), so it admits ~13% of a national catalogue
-    // per anchor and the per-anchor sort below went quadratic. Prune with a cheap
-    // bounding box on THIS anchor's widest possible reach before anything is sorted.
-    // The pair distance window uses the pair's AVERAGE magnitude and MAX depth, so the
-    // anchor alone cannot bound it; the global multipliers stay as the ceiling, but the
-    // box is still far tighter than the cell neighbourhood in degrees.
-    const reachKm =
-      config.distanceThreshold * MAX_DISTANCE_MULTIPLIER * MAX_DEPTH_MULTIPLIER;
-    const reachLatDeg = reachKm / 111;
-    const maxTimeWindowMs = config.timeThreshold * MAX_TIME_MULTIPLIER * 1000;
+  for (let i = 0; i < sorted.length; i++) {
+    const current = sorted[i];
     // Past the latitude where the neighbourhood cell count was clamped, a fixed
     // longitude box cannot bound the reach (39 km at 89N spans 20 degrees); there
-    // the exact haversine test in eventsMatchAdaptive is the only spatial filter.
-    const polar = Math.abs(currentEvent.latitude) + reachLatDeg >= POLAR_LATITUDE_DEG;
+    // the exact haversine test in pairSeparation is the only spatial filter.
+    const polar = Math.abs(current.latitude) + reachLatDeg >= POLAR_LATITUDE_DEG;
     // cos is taken at the poleward edge of the reach, where a degree of longitude is
     // shortest, so the box is a superset of the great-circle window at every latitude.
     const reachLonDeg = polar
       ? 180
-      : reachKm / (111 * Math.cos(((Math.abs(currentEvent.latitude) + reachLatDeg) * Math.PI) / 180));
-    // sortedEvents is time-ordered, so every candidate inside the widest possible time
-    // window is a CONTIGUOUS slice starting at i+1. Walk that slice and filter by the
-    // spatial reach box, instead of touching every entry of a 361-cell neighbourhood and
-    // rejecting ~99.9% of them on time afterwards. Cells are still consulted only as a
-    // membership test so the antimeridian/polar coverage logic above stays authoritative.
-    // The cell set is only built once a candidate passes the time and box tests: on a
-    // sparse catalogue most anchors never get that far, and the 361+ key set was the
-    // dominant cost of grouping.
+      : reachKm / (111 * Math.cos(((Math.abs(current.latitude) + reachLatDeg) * Math.PI) / 180));
+    // Cells are consulted only as a membership test so the antimeridian/polar coverage
+    // logic stays authoritative. The cell set is built only once a candidate passes the
+    // time and box tests: on a sparse catalogue most reports never get that far.
     let nearbyCellSet: Set<string> | null = null;
-    const candidateIndices = new Set<number>();
-    const timeCeiling = currentEvent._timestamp + maxTimeWindowMs;
-    for (let idx = i + 1; idx < sortedEvents.length; idx++) {
-      const c = sortedEvents[idx];
+    const timeCeiling = current._timestamp + maxTimeWindowMs;
+    for (let j = i + 1; j < sorted.length; j++) {
+      const c = sorted[j];
       if (c._timestamp > timeCeiling) break;
-      if (processedIndices.has(idx)) continue;
-      // A group never holds two records from one source (validateEventGroup rejects
-      // it as network_mismatch), so same-source candidates are not gathered. Doing so
-      // turned a dense single-agency swarm into repeated salvage passes over the same
-      // members: quartic in the swarm size.
-      if (currentEvent.source !== undefined && c.source === currentEvent.source) continue;
-      if (Math.abs(c.latitude - currentEvent.latitude) > reachLatDeg) continue;
+      // One catalogue never contributes two reports of one earthquake (the same-source
+      // rule), so its own records are not candidates for each other. Gathering them
+      // turned a dense single-agency swarm into quadratic work for nothing.
+      if (keys[j] === keys[i]) continue;
+      if (Math.abs(c.latitude - current.latitude) > reachLatDeg) continue;
       // Longitude difference on the shorter arc, so a seam pair (+180/-180) is kept.
-      const dLon = Math.abs(((c.longitude - currentEvent.longitude + 540) % 360) - 180);
+      const dLon = Math.abs(((c.longitude - current.longitude + 540) % 360) - 180);
       if (dLon > reachLonDeg) continue;
       if (!polar) {
-        if (nearbyCellSet === null) nearbyCellSet = new Set(nearbyCells);
+        if (nearbyCellSet === null) {
+          nearbyCellSet = new Set(getNearbyCells(current.latitude, current.longitude, spatialIndex.cellSize, distCells));
+        }
         if (!nearbyCellSet.has(getGridKey(c.latitude, c.longitude, spatialIndex.cellSize))) continue;
       }
-      candidateIndices.add(idx);
-    }
-
-    // Sort candidates by timestamp so the early-termination break below is safe.
-    const candidateArray = Array.from(candidateIndices).sort(
-      (a, b) => sortedEvents[a]._timestamp - sortedEvents[b]._timestamp
-    );
-
-    for (let k = 0; k < candidateArray.length; k++) {
-      const j = candidateArray[k];
-      const candidateEvent = sortedEvents[j];
-
-      // Early termination is only safe against the WIDEST window any later candidate
-      // could earn, i.e. the global maximum multiplier - not the current pair's. The
-      // allowed window grows with the candidate's own magnitude, so breaking on a small
-      // unrelated event at 16 s used to skip a large true duplicate at 18 s whose own
-      // window was still open. Candidates are time-sorted, so once even the
-      // maximal window is exceeded every remaining candidate is out of reach.
-      const timeDiff = Math.abs(currentEvent._timestamp - candidateEvent._timestamp) / 1000;
-      if (timeDiff > config.timeThreshold * MAX_TIME_MULTIPLIER) {
-        break;
-      }
-      // Within the maximal window, a candidate outside ITS OWN pair window can still be
-      // skipped cheaply before the full adaptive match - as a skip, not a break, so it
-      // cannot hide a later candidate with a wider window.
-      const maxMagnitude = Math.max(
-        Number.isFinite(currentEvent.magnitude) ? currentEvent.magnitude : 0,
-        Number.isFinite(candidateEvent.magnitude) ? candidateEvent.magnitude : 0
-      );
-      if (timeDiff > config.timeThreshold * getTimeMultiplier(maxMagnitude)) {
-        continue;
-      }
-
-      if (
-        eventsMatchAdaptive(currentEvent, candidateEvent, config.timeThreshold, config.distanceThreshold)
-      ) {
-        matchingEvents.push(candidateEvent);
-        matchedIndex.set(candidateEvent, j);
-        processedIndices.add(j);
-      }
-    }
-
-    // Validate before merging; on failure salvage valid sub-groups instead of one big
-    // (or all-singleton) group. Done here so preview and persist behave identically.
-    if (matchingEvents.length > 1 && !validateEventGroup(matchingEvents)) {
-      // Members that the salvage leaves as singletons are NOT consumed: a rejected
-      // provisional group must not prevent a later anchor from forming the valid pair
-      // it would otherwise have found. Only members placed into a surviving
-      // multi-event sub-group are final. The anchor itself stays consumed so it is
-      // not re-emitted, and it is emitted here as its own singleton.
-      for (const subGroup of regroupFailedEvents(matchingEvents, config)) {
-        if (subGroup.length === 1 && subGroup[0] !== currentEvent) {
-          const idx = matchedIndex.get(subGroup[0]);
-          if (idx !== undefined) processedIndices.delete(idx);
-          continue;
-        }
-        groups.push({ events: subGroup, regrouped: true });
-      }
-    } else {
-      groups.push({ events: matchingEvents, regrouped: false });
+      const pair = pairSeparation(current, c, config.timeThreshold, config.distanceThreshold);
+      if (!pair.matches) continue;
+      edges.push({ a: i, b: j, cost: pair.cost, tie: magnitudeTieKey(current, c) });
     }
   }
+  return edges;
+}
 
-  return groups;
+/**
+ * One round of best-first association over the eligible edges: take candidate pairs in
+ * order of increasing normalised space-time separation and join their clusters when
+ *  - no catalogue would contribute two reports (the same-source rule, as a hard
+ *    one-to-one constraint rather than a gate that rejects a group after the fact), and
+ *  - some member of the joined cluster lies inside the matching window of every other
+ *    member (a common centre), so reports linked only through a chain of intermediate
+ *    reports are not fused.
+ * A report is therefore claimed by its CLOSEST counterpart in each other catalogue, not by
+ * whichever earlier report happened to reach it first (finding #20). A report whose
+ * best refused alternative was nearly as close as the pairing it kept is marked
+ * contested (AMBIGUITY_FACTOR). Returns the clusters of two or more.
+ */
+function associateBestFirst(
+  sorted: EventData[],
+  keys: string[],
+  edges: CandidateEdge[],
+  order: number[],
+  eligible: (edge: CandidateEdge) => boolean,
+  contested: Uint8Array,
+  config: MergeConfig
+): number[][] {
+  // Union-find over report indices; -1 marks a root.
+  const parent = new Int32Array(sorted.length).fill(-1);
+  const find = (x: number): number => {
+    let root = x;
+    while (parent[root] !== -1) root = parent[root];
+    // Path compression.
+    let node = x;
+    while (node !== root) {
+      const next = parent[node];
+      parent[node] = root;
+      node = next;
+    }
+    return root;
+  };
+  const members = new Map<number, number[]>();
+  const memberKeys = new Map<number, Set<string>>();
+  const matchCache = new Map<string, boolean>();
+  const pairMatches = (x: number, y: number): boolean => {
+    const cacheKey = x < y ? `${x},${y}` : `${y},${x}`;
+    let result = matchCache.get(cacheKey);
+    if (result === undefined) {
+      result = eventsMatchAdaptive(sorted[x], sorted[y], config.timeThreshold, config.distanceThreshold);
+      matchCache.set(cacheKey, result);
+    }
+    return result;
+  };
+  const hasCommonCentre = (cluster: number[]): boolean =>
+    cluster.some(centre => cluster.every(other => other === centre || pairMatches(centre, other)));
+  // Separation of the first (closest) pairing each report joined, and of the closest
+  // pairing it was refused; compared once every edge has been offered.
+  const joinedCost = new Map<number, number>();
+  const refusedCost = new Map<number, number>();
+
+  for (const index of order) {
+    const edge = edges[index];
+    if (!eligible(edge)) continue;
+    const ra = find(edge.a);
+    const rb = find(edge.b);
+    if (ra === rb) continue;
+    const ma = members.get(ra) ?? [ra];
+    const mb = members.get(rb) ?? [rb];
+    const ka = memberKeys.get(ra) ?? new Set([keys[ra]]);
+    const kb = memberKeys.get(rb) ?? new Set([keys[rb]]);
+    let sharesSource = false;
+    kb.forEach(key => { if (ka.has(key)) sharesSource = true; });
+    const joined = ma.concat(mb);
+    if (sharesSource || (joined.length > 2 && !hasCommonCentre(joined))) {
+      for (const x of [edge.a, edge.b]) {
+        if (!refusedCost.has(x)) refusedCost.set(x, edge.cost);
+      }
+      continue;
+    }
+    for (const x of [edge.a, edge.b]) {
+      if (!joinedCost.has(x)) joinedCost.set(x, edge.cost);
+    }
+    parent[rb] = ra;
+    members.set(ra, joined);
+    const unionKeys = new Set(ka);
+    kb.forEach(key => unionKeys.add(key));
+    memberKeys.set(ra, unionKeys);
+    members.delete(rb);
+    memberKeys.delete(rb);
+  }
+
+  // Edges arrive in increasing separation, so these are each report's closest joined and
+  // closest refused pairings.
+  refusedCost.forEach((refused, x) => {
+    const kept = joinedCost.get(x);
+    if (kept !== undefined && refused <= AMBIGUITY_FACTOR * kept + AMBIGUITY_MARGIN) contested[x] = 1;
+  });
+
+  return Array.from(members.values())
+    .filter(cluster => cluster.length > 1)
+    .map(cluster => cluster.slice().sort((x, y) => x - y));
+}
+
+/**
+ * Core matching + grouping shared by BOTH the persist path (performMerge) and the
+ * preview path (performMergeWithGroups). Extracting it guarantees the QC preview and
+ * the saved catalogue group events identically.
+ *
+ * Association is one-to-one and best-match: candidate pairs (reports from different
+ * catalogues inside each other's adaptive window) are joined in order of increasing
+ * normalised space-time separation |Δt|/τ + d/δ, with magnitude agreement only as a tie-
+ * breaker, and a group never holds two reports from one catalogue. The earlier anchor
+ * sweep let the first report in time claim every other-catalogue report in its window,
+ * so in an aftershock sequence another agency's report of the NEXT event was attached to
+ * the earlier one — deleting one real earthquake and duplicating the other (finding #20).
+ * Each resulting cluster must still pass validateEventGroup; one that fails is split by
+ * the salvage (regroupFailedEvents), and reports the salvage leaves alone may pair with
+ * other unassigned reports in a further round. The result does not depend on input order.
+ */
+function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGroup[] {
+  // Pre-compute timestamps once to avoid repeated date parsing; record order (time, then
+  // source, then id) makes every tie-break below independent of the order of the input.
+  const sorted = events
+    .map(e => ({ ...e, _timestamp: new Date(e.time).getTime() }))
+    .sort(compareRecordOrder);
+  const n = sorted.length;
+  if (n === 0) return [];
+  const keys = sorted.map(sourceKey);
+
+  const edges = gatherCandidateEdges(sorted, keys, config);
+  const order = edges.map((_, index) => index).sort((x, y) => {
+    const ex = edges[x];
+    const ey = edges[y];
+    return compareNumbers(ex.cost, ey.cost) || compareNumbers(ex.tie, ey.tie) || ex.a - ey.a || ex.b - ey.b;
+  });
+
+  const indexOf = new Map<EventData, number>(sorted.map((e, i) => [e, i] as [EventData, number]));
+  const contested = new Uint8Array(n);
+  const assigned = new Uint8Array(n);
+  // Pairs a salvage has already explored: never re-offered, so rounds always progress.
+  const exhausted = new Set<number>();
+  const pairKey = (x: number, y: number) => (x < y ? x * n + y : y * n + x);
+  const found: Array<{ members: number[]; regrouped: boolean }> = [];
+  const eligible = (edge: CandidateEdge) =>
+    !assigned[edge.a] && !assigned[edge.b] && !exhausted.has(pairKey(edge.a, edge.b));
+  let pending = order;
+
+  for (let round = 0; round < MAX_ASSOCIATION_ROUNDS; round++) {
+    // Each round only revisits the pairings still open, so a dense sequence whose best
+    // matches keep failing the gate does not rescan every candidate pair.
+    if (round > 0) pending = pending.filter(index => eligible(edges[index]));
+    const clusters = associateBestFirst(
+      sorted,
+      keys,
+      edges,
+      pending,
+      eligible,
+      contested,
+      config
+    );
+    let anyFailed = false;
+    for (const cluster of clusters) {
+      const clusterEvents = cluster.map(i => sorted[i]);
+      if (validateEventGroup(clusterEvents)) {
+        found.push({ members: cluster, regrouped: false });
+        cluster.forEach(i => { assigned[i] = 1; });
+        continue;
+      }
+      anyFailed = true;
+      for (let p = 0; p < cluster.length; p++) {
+        for (let q = p + 1; q < cluster.length; q++) exhausted.add(pairKey(cluster[p], cluster[q]));
+      }
+      // Salvage valid sub-groups instead of one big (or all-singleton) group. Members the
+      // salvage leaves on their own are not consumed: they may still pair with another
+      // unassigned report in the next round.
+      for (const subGroup of regroupFailedEvents(clusterEvents, config)) {
+        if (subGroup.length < 2) continue;
+        const subMembers = subGroup.map(e => indexOf.get(e)!).sort((x, y) => x - y);
+        found.push({ members: subMembers, regrouped: true });
+        subMembers.forEach(i => { assigned[i] = 1; });
+      }
+    }
+    // Without a failed cluster, every unassigned report has already been offered every
+    // pairing it could make.
+    if (!anyFailed) break;
+  }
+
+  for (let i = 0; i < n; i++) {
+    if (!assigned[i]) found.push({ members: [i], regrouped: false });
+  }
+  // Output in record order of each group's earliest report, as the sweep produced it.
+  found.sort((g, h) => g.members[0] - h.members[0]);
+
+  return found.map(({ members, regrouped }) => ({
+    events: members.map(i => sorted[i]),
+    regrouped,
+    ambiguous: members.length > 1 && members.some(i => contested[i] === 1),
+  }));
 }
 
 /**
@@ -1714,21 +2046,26 @@ function validateEventGroup(events: EventData[], logConflicts: boolean = true): 
   // IMPROVEMENT (Issue #7): network_mismatch — same source appearing more than once in a
   // group means the same network reported two events for the same physical earthquake.
   // Most likely these are two distinct earthquakes that happen to be close in time/space
-  // (e.g. foreshock/aftershock pair), so we should not merge them.
-  const sourceCounts = new Map<string, number>();
+  // (e.g. foreshock/aftershock pair), so we should not merge them. The source is the
+  // CATALOGUE (sourceKey), not its display name: two catalogues that share a name are
+  // still two sources.
+  const sourceCounts = new Map<string, { label: string; count: number }>();
   for (const e of events) {
-    sourceCounts.set(e.source, (sourceCounts.get(e.source) ?? 0) + 1);
+    const key = sourceKey(e);
+    const entry = sourceCounts.get(key);
+    if (entry) entry.count++;
+    else sourceCounts.set(key, { label: String(e.source ?? key), count: 1 });
   }
-  const duplicateSources = Array.from(sourceCounts.entries()).filter(([, count]) => count > 1);
+  const duplicateSources = Array.from(sourceCounts.values()).filter(({ count }) => count > 1);
   if (duplicateSources.length > 0) {
     logConflict(
       'network_mismatch',
       'warning',
-      `Same network appears multiple times in group: ${duplicateSources.map(([s]) => s).join(', ')} — likely distinct events`,
+      `Same network appears multiple times in group: ${duplicateSources.map(({ label }) => label).join(', ')} — likely distinct events`,
       {
         eventIds,
         sources,
-        values: { duplicateSources: Object.fromEntries(duplicateSources) },
+        values: { duplicateSources: Object.fromEntries(duplicateSources.map(({ label, count }) => [label, count])) },
         location: { lat: avgLat, lon: avgLon },
         time: avgTime,
       }
@@ -1769,7 +2106,8 @@ function validateEventGroup(events: EventData[], logConflicts: boolean = true): 
 // ============================================================================
 
 /**
- * Optional scalar fields from EventData that are eligible for field-level union.
+ * Optional scalar fields from EventData that are eligible for field-level union: they
+ * describe the EVENT (where it is, what kind of event it is), not one agency's solution.
  */
 const UNION_SCALAR_FIELDS: ReadonlyArray<keyof MergedEvent> = [
   'region',
@@ -1778,6 +2116,19 @@ const UNION_SCALAR_FIELDS: ReadonlyArray<keyof MergedEvent> = [
   // must not borrow another agency's, or it collides with that agency's real event.
   'event_type',
   'event_type_certainty',
+] as const;
+
+/**
+ * Fields that describe ONE origin solution — QuakeML 1.2 BED Origin (time uncertainty,
+ * method, earth model, evaluation mode/status), its OriginQuality (gap, phase and station
+ * counts, standard error, station distances) and its CreationInfo (agency, author) — plus
+ * the serialised forms of that same solution (its quality blob, its arrivals, the pointer
+ * to it and the record's creation info). They are published only with the origin they
+ * describe: the union never fills them from another report (finding #21), and a record
+ * whose epicentre was averaged carries none of them. Grafting them let a GeoNet origin
+ * leave the merge stamped agency ISC, method iscloc, gap 250°, 9 stations and 'reviewed'.
+ */
+const ORIGIN_META_FIELDS: ReadonlyArray<keyof MergedEvent> = [
   'time_uncertainty',
   'earth_model_id',
   'method_id',
@@ -1794,6 +2145,10 @@ const UNION_SCALAR_FIELDS: ReadonlyArray<keyof MergedEvent> = [
   'depth_phase_count',
   'evaluation_mode',
   'evaluation_status',
+  'origin_quality',
+  'arrivals',
+  'preferred_origin_id',
+  'creation_info',
 ] as const;
 
 // Magnitude-metadata fields that must travel atomically with the magnitude VALUE — never
@@ -1809,7 +2164,8 @@ const MAGNITUDE_META_FIELDS: ReadonlyArray<keyof MergedEvent> = [
 ] as const;
 
 // Location-uncertainty fields that must travel with the LOCATION — not grafted from a
-// source whose coordinates differ from the merged (possibly averaged) location.
+// source whose coordinates differ from the merged (possibly averaged) location. The
+// ellipse's confidence level (C16) qualifies the same ellipse, so it travels with it.
 const LOCATION_META_FIELDS: ReadonlyArray<keyof MergedEvent> = [
   'latitude_uncertainty',
   'longitude_uncertainty',
@@ -1817,6 +2173,7 @@ const LOCATION_META_FIELDS: ReadonlyArray<keyof MergedEvent> = [
   'min_horizontal_uncertainty',
   'max_horizontal_uncertainty',
   'azimuth_max_horizontal_uncertainty',
+  'confidence_level',
 ] as const;
 
 // Depth-metadata fields that must travel with the DEPTH VALUE. depth_type states how THAT
@@ -1830,22 +2187,20 @@ const DEPTH_META_FIELDS: ReadonlyArray<keyof MergedEvent> = [
 ] as const;
 
 /**
- * Optional JSON-blob fields: arrays of rich objects serialised as strings.
- * For these, the highest-quality source that carries the field wins, but if
- * the primary donor lacks the field entirely another source can fill it in.
+ * Optional JSON-blob fields: arrays of rich objects serialised as strings. These are
+ * supplementary products (every origin and magnitude an agency computed, phase picks,
+ * amplitudes, descriptions, comments) kept alongside the published solution, so when
+ * the base record carries none, the highest-quality source that does fills them in.
+ * Focal mechanisms are united across every source separately (see unionFocalMechanisms).
  */
 const UNION_BLOB_FIELDS: ReadonlyArray<keyof MergedEvent> = [
   'origins',
   'magnitudes',
   'picks',
-  'arrivals',
-  'focal_mechanisms',
   'amplitudes',
   'station_magnitudes',
   'event_descriptions',
   'comments',
-  'creation_info',
-  'origin_quality',
 ] as const;
 
 /**
@@ -1855,28 +2210,29 @@ const UNION_BLOB_FIELDS: ReadonlyArray<keyof MergedEvent> = [
 function unionMergeFields(base: MergedEventData, events: EventData[]): MergedEventData {
   if (events.length <= 1) return base;
 
-  // Sort sources by descending quality so better data fills gaps first.
+  // Sort sources by descending quality so better data fills gaps first; a fixed record
+  // order breaks ties so the donor never depends on input order.
   const ranked = events
     .map(e => ({ event: e, score: calculateQualityScore(e) }))
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => b.score - a.score || compareRecordOrder(a.event, b.event))
     .map(s => s.event);
 
   const result: MergedEventData = { ...base };
 
-  // Scalar fields: first non-null value across ranked sources wins.
+  // Event-level scalar fields: first non-null value across ranked sources wins. The
+  // agency's raw event type (C8) comes from whichever report supplied the event type.
   for (const field of UNION_SCALAR_FIELDS) {
     if (result[field] != null) continue; // base already has it
-    for (const src of ranked) {
-      if (src[field] != null) {
-        (result as any)[field] = src[field];
-        break;
-      }
-    }
+    const donor = ranked.find(src => src[field] != null);
+    if (!donor) continue;
+    (result as any)[field] = donor[field];
+    if (field === 'event_type') (result as any).source_event_type = donor.source_event_type ?? null;
   }
 
-  // JSON-blob fields: first source that carries the field wins.
-  // We also promote from the source event's quakeml when the field is absent
-  // on the top-level event object (quakeml blobs are serialised in executeMergeOperation).
+  // ORIGIN_META_FIELDS are deliberately absent here: they already come from the published
+  // report through the strategy's spread, and no other report's solution may fill a gap.
+
+  // Supplementary JSON blobs: first source that carries the field wins.
   for (const field of UNION_BLOB_FIELDS) {
     if (result[field] != null) continue;
     for (const src of ranked) {
@@ -1937,28 +2293,20 @@ function unionMergeFields(base: MergedEventData, events: EventData[]): MergedEve
     }
   }
 
-  // Focal mechanism: choose the single best mechanism across ALL sources by SOURCE
-  // AUTHORITY (GCMT > regional CMT > ...) then focal-mechanism quality — not the base
-  // event's general quality score. This also replaces an inferior mechanism already on
-  // the base when a higher-authority one exists elsewhere in the group (previously the
-  // promotion was skipped entirely whenever the base carried any mechanism, discarding a
-  // superior GCMT, and even the empty-base case picked by overall event quality).
-  const bestFm = selectBestFocalMechanism(events);
-  if (bestFm) {
-    // Preserve every mechanism across the group (lose none), but order the authority-
-    // selected best first and mark it preferred so downstream consumers use it.
-    const allFms: import('./types/quakeml').FocalMechanism[] = [];
-    for (const src of events) {
-      if (src.quakeml?.focalMechanisms?.length) {
-        allFms.push(...src.quakeml.focalMechanisms);
-      }
+  // Focal mechanisms: every mechanism any source stored is kept, ordered by the documented
+  // authority hierarchy, and the best becomes the preferred one (finding #30).
+  const mechanisms = unionFocalMechanisms(events);
+  if (mechanisms.length > 0) {
+    const preferredId = mechanisms[0].publicID ?? null;
+    (result as any).focal_mechanisms = JSON.stringify(mechanisms);
+    result.preferred_focal_mechanism_id = preferredId;
+    if (result.quakeml) {
+      result.quakeml = {
+        ...result.quakeml,
+        focalMechanisms: mechanisms,
+        preferredFocalMechanismID: preferredId ?? undefined,
+      };
     }
-    const orderedFms = [bestFm, ...allFms.filter(fm => fm !== bestFm)];
-    (result as any).quakeml = {
-      ...(result.quakeml ?? {}),
-      focalMechanisms: orderedFms,
-      preferredFocalMechanismID: bestFm.publicID,
-    };
   }
 
   return result;
@@ -1966,23 +2314,82 @@ function unionMergeFields(base: MergedEventData, events: EventData[]): MergedEve
 
 /**
  * Strip transient/redundant fields from an event before it is stored inside
- * the `source_events` JSON column.
+ * the `source_events` JSON column: the parsed QuakeML object and every `_`-prefixed
+ * working value the merge attaches (timestamps, catalogue agency, …).
  */
 function toSourceEventData(e: EventData): EventData {
-  const { _timestamp, quakeml, ...rest } = e as any;
+  const rest: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(e)) {
+    if (key === 'quakeml' || key.startsWith('_')) continue;
+    rest[key] = value;
+  }
   return rest as EventData;
 }
 
 /**
  * Build the `sourceEvents` provenance array shared by every merge strategy. Centralised so
  * the field that must stay consistent across all strategies cannot drift between them.
+ * `selectedIndex` is the member whose solution (origin time and epicentre) was published;
+ * pass a negative index when none was (an averaged epicentre).
  */
-function buildSourceEvents(events: EventData[]): MergedEventData['sourceEvents'] {
-  return events.map(e => ({
+function buildSourceEvents(events: EventData[], selectedIndex: number = -1): MergedEventData['sourceEvents'] {
+  return events.map((e, index) => ({
     catalogueId: e.catalogueId ?? e.id ?? 'unknown',
     source: e.source,
     originalData: toSourceEventData(e),
+    ...(index === selectedIndex ? { selected: true as const } : {}),
   }));
+}
+
+/** Strategy names a merged event may record (contract C2); anything else runs as 'priority'. */
+const MERGE_STRATEGY_NAMES = new Set(['quality', 'priority', 'newest', 'complete', 'average']);
+
+function mergeStrategyName(config: MergeConfig): string {
+  return MERGE_STRATEGY_NAMES.has(config.mergeStrategy) ? config.mergeStrategy : 'priority';
+}
+
+const mergeParameterCache = new WeakMap<object, string>();
+
+/**
+ * The effective merge configuration, as the JSON stored on every merged event
+ * (`merge_parameters`, contract C2). Computed once per configuration object.
+ */
+function describeMergeParameters(config: MergeConfig): string {
+  const cached = mergeParameterCache.get(config);
+  if (cached !== undefined) return cached;
+  const strategy = mergeStrategyName(config);
+  const customOrder = strategy === 'priority' && config.priority === 'custom' && Array.isArray(config.priorityOrder);
+  const description = JSON.stringify({
+    mergeStrategy: strategy,
+    timeThresholdSeconds: config.timeThreshold,
+    distanceThresholdKm: config.distanceThreshold,
+    priority: config.priority,
+    ...(customOrder ? { priorityOrder: config.priorityOrder } : {}),
+    // The configured windows are always widened by magnitude and depth (eventsMatchAdaptive).
+    adaptiveWindows: true,
+    association: 'one-to-one, best match on normalised time and distance',
+  });
+  mergeParameterCache.set(config, description);
+  return description;
+}
+
+/**
+ * Stamp a merged event with its provenance (contract C2): the strategy, the effective
+ * configuration and the distinct contributing catalogues in source_events order. Always
+ * overwrites, because a re-merged input row carries the provenance of its own merge.
+ */
+function withMergeProvenance(merged: MergedEventData, config: MergeConfig): MergedEventData {
+  const catalogueIds: string[] = [];
+  for (const entry of merged.sourceEvents) {
+    const id = entry.originalData?.catalogueId;
+    if (id == null || id === '') continue;
+    const text = String(id);
+    if (!catalogueIds.includes(text)) catalogueIds.push(text);
+  }
+  merged.merge_strategy = mergeStrategyName(config);
+  merged.merge_parameters = describeMergeParameters(config);
+  merged.source_catalogue_ids = catalogueIds;
+  return merged;
 }
 
 /**
@@ -1995,10 +2402,11 @@ function mergeEventGroup(
   config: MergeConfig
 ): MergedEventData {
   if (events.length === 1) {
-    return {
+    // A lone report is published as it stands, whatever the strategy.
+    return withMergeProvenance({
       ...events[0],
-      sourceEvents: buildSourceEvents([events[0]])
-    };
+      sourceEvents: buildSourceEvents([events[0]], 0)
+    }, config);
   }
 
   let mergedEvent: MergedEventData;
@@ -2018,13 +2426,13 @@ function mergeEventGroup(
       break;
     case 'priority':
     default:
-      mergedEvent = mergeByPriority(events, config.priority);
+      mergedEvent = mergeByPriority(events, config.priority, config.priorityOrder);
       break;
   }
 
   // Apply field-level union: fill optional fields the base event lacks
   // from other sources in the group.
-  return unionMergeFields(mergedEvent, events);
+  return withMergeProvenance(unionMergeFields(mergedEvent, events), config);
 }
 
 // ============================================================================
@@ -2032,37 +2440,35 @@ function mergeEventGroup(
 // ============================================================================
 
 /**
- * Focal mechanism source priority hierarchy
- * Based on reliability and methodology:
- * 1. GCMT/CMT - Gold standard for moment tensors
- * 2. Regional CMT solutions (e.g., GeoNet CMT)
- * 3. First motion solutions with many polarities
- * 4. Automated solutions
+ * Focal mechanism authority for moment-tensor solutions, in the order the white paper
+ * recommends (publication/merge_strategies.tex §Focal mechanism, after the ISC-GEM
+ * protocol): GCMT > USGS/NEIC broadband CMT or W-phase > GEOFON/GFZ > GeoNet CMT > INGV CMT.
+ * Mechanisms without a moment tensor rank below every moment tensor (see
+ * focalMechanismTier). The previous table put GeoNet above USGS/NEIC.
  */
-// NOTE: iteration order matters. More specific / regional patterns must be tested BEFORE
-// the generic 'cmt' catch-all so a regional source like 'GeoNet CMT' is classified as
-// Regional CMT (priority 2), not Global CMT (priority 1) — the substring 'cmt' would
-// otherwise match it first.
-const FOCAL_MECHANISM_HIERARCHY: Array<{ patterns: string[]; priority: number; description: string }> = [
-  { patterns: ['geonet', 'gns'], priority: 2, description: 'Regional CMT' },
-  { patterns: ['gcmt', 'globalcmt', 'cmt'], priority: 1, description: 'Global CMT' },
-  { patterns: ['usgs', 'neic'], priority: 3, description: 'USGS/NEIC' },
-  { patterns: ['isc'], priority: 4, description: 'ISC' },
+const FOCAL_MECHANISM_HIERARCHY: Array<{ patterns: string[]; priority: number; description: string; agency: AgencyKey }> = [
+  { patterns: ['gcmt', 'globalcmt', 'cmt'], priority: 1, description: 'Global CMT', agency: 'gcmt' },
+  { patterns: ['usgs', 'neic'], priority: 2, description: 'USGS/NEIC CMT or W-phase', agency: 'usgs' },
+  { patterns: ['geofon', 'gfz'], priority: 3, description: 'GEOFON/GFZ moment tensor', agency: 'geofon' },
+  { patterns: ['geonet', 'gns'], priority: 4, description: 'GeoNet CMT', agency: 'geonet' },
+  { patterns: ['ingv'], priority: 5, description: 'INGV CMT', agency: 'ingv' },
 ];
+/** A moment tensor from an agency the hierarchy does not name. */
+const OTHER_MOMENT_TENSOR_TIER = 6;
+/** First-motion solution from at least 20 station polarities, not automatic. */
+const FIRST_MOTION_TIER = 7;
+/** Automated or sparsely constrained first-motion solution. */
+const AUTOMATIC_FIRST_MOTION_TIER = 8;
 
 /**
- * Get focal mechanism priority for a source
+ * Get focal mechanism priority for a source, identified by whole words of its name
+ * ('GeoNet CMT' is GeoNet, not the Global CMT).
  */
 function getFocalMechanismPriority(source: string | undefined): number {
   if (!source) return 999;
-  const lowerSource = source.toLowerCase();
-
-  for (const { patterns, priority } of FOCAL_MECHANISM_HIERARCHY) {
-    if (patterns.some(p => lowerSource.includes(p))) {
-      return priority;
-    }
-  }
-  return 100; // Unknown source
+  const agency = agencyFromName(source);
+  const entry = agency ? FOCAL_MECHANISM_HIERARCHY.find(h => h.agency === agency) : undefined;
+  return entry ? entry.priority : 100; // Unknown source
 }
 
 /**
@@ -2073,7 +2479,7 @@ function getFocalMechanismPriority(source: string | undefined): number {
  * - Presence of moment tensor
  * - Variance reduction (higher is better)
  */
-function calculateFocalMechanismQuality(fm: import('./types/quakeml').FocalMechanism): number {
+function calculateFocalMechanismQuality(fm: FocalMechanism): number {
   let score = 0;
 
   // Station polarity count (0-25 points)
@@ -2152,54 +2558,115 @@ function calculateFocalMechanismQuality(fm: import('./types/quakeml').FocalMecha
 }
 
 /**
- * Select the best focal mechanism from a group of events
+ * Every focal mechanism a report carries: the parsed QuakeML when present, otherwise the
+ * stored `focal_mechanisms` JSON column. Stored rows never carry parsed QuakeML (uploads
+ * strip it), so reading only the former made mechanism selection dead code on every real
+ * merge and kept whichever single list the base row happened to hold.
  */
-function selectBestFocalMechanism(
-  events: EventData[]
-): import('./types/quakeml').FocalMechanism | null {
-  const focalMechanisms: Array<{
-    fm: import('./types/quakeml').FocalMechanism;
-    source: string;
-    priority: number;
-    quality: number;
-  }> = [];
+function focalMechanismsOf(event: EventData): { list: FocalMechanism[]; preferredId: string | null } {
+  let list: unknown = event.quakeml?.focalMechanisms;
+  let preferredId: unknown = event.quakeml?.preferredFocalMechanismID;
+  if (!Array.isArray(list) || list.length === 0) {
+    list = undefined;
+    const column = (event as { focal_mechanisms?: unknown }).focal_mechanisms;
+    if (typeof column === 'string' && column) {
+      try {
+        list = JSON.parse(column);
+      } catch {
+        list = undefined; // unparseable column: no mechanisms
+      }
+    } else if (Array.isArray(column)) {
+      list = column;
+    }
+    preferredId = event.preferred_focal_mechanism_id;
+  }
+  const mechanisms = Array.isArray(list)
+    ? (list as unknown[]).filter((fm): fm is FocalMechanism => fm != null && typeof fm === 'object')
+    : [];
+  return { list: mechanisms, preferredId: typeof preferredId === 'string' && preferredId ? preferredId : null };
+}
 
-  for (const event of events) {
-    if (!event.quakeml?.focalMechanisms) continue;
+/**
+ * Authority tier of one mechanism (lower is better). The agency is the mechanism's own
+ * creationInfo agency when it names one, else the agency of the report it came with.
+ */
+function focalMechanismTier(fm: FocalMechanism, reportAgency: AgencyKey | null): number {
+  const agency = agencyFromCode(fm.creationInfo?.agencyID) ?? agencyFromName(fm.creationInfo?.agencyID) ?? reportAgency;
+  // The Global CMT project publishes centroid moment tensors only.
+  if (agency === 'gcmt') return 1;
+  if (fm.momentTensor) {
+    const entry = FOCAL_MECHANISM_HIERARCHY.find(h => h.agency === agency);
+    return entry ? entry.priority : OTHER_MOMENT_TENSOR_TIER;
+  }
+  const polarities = typeof fm.stationPolarityCount === 'number' ? fm.stationPolarityCount : 0;
+  return polarities >= 20 && fm.evaluationMode !== 'automatic' ? FIRST_MOTION_TIER : AUTOMATIC_FIRST_MOTION_TIER;
+}
 
-    // Get preferred focal mechanism, falling back to the first one when the preferred
-    // ID is missing OR dangling (does not resolve to any mechanism). Previously a stale
-    // preferredFocalMechanismID caused find() to return undefined and the whole event's
-    // mechanism to be dropped even though a valid mechanism existed.
-    const preferredId = event.quakeml.preferredFocalMechanismID;
-    const fm =
-      (preferredId
-        ? event.quakeml.focalMechanisms.find(f => f.publicID === preferredId)
-        : undefined) ?? event.quakeml.focalMechanisms[0];
+interface RankedFocalMechanism {
+  fm: FocalMechanism;
+  source: string;
+  tier: number;
+  quality: number;
+}
 
-    if (fm) {
-      focalMechanisms.push({
+/**
+ * Every focal mechanism across a group, each once (by publicID), ranked best first:
+ * authority tier, then variance reduction (higher), station polarity count (more) and
+ * misfit (lower), as the white paper ranks within a tier; then the reporting agency's own
+ * preference, then report order.
+ */
+function rankFocalMechanisms(events: EventData[]): RankedFocalMechanism[] {
+  const entries: Array<RankedFocalMechanism & { preferred: boolean; order: number }> = [];
+  const seen = new Set<string>();
+  const ordered = events.slice().sort(compareRecordOrder);
+  for (const event of ordered) {
+    const { list, preferredId } = focalMechanismsOf(event);
+    if (list.length === 0) continue;
+    const reportAgency = resolveAgency(event);
+    // A dangling preferred id (it names no stored mechanism) falls back to the first one.
+    const preferredStored = preferredId != null && list.some(fm => fm.publicID === preferredId);
+    for (const fm of list) {
+      const id = typeof fm.publicID === 'string' ? fm.publicID : '';
+      if (id) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+      }
+      entries.push({
         fm,
         source: event.source,
-        priority: getFocalMechanismPriority(event.source),
+        tier: focalMechanismTier(fm, reportAgency),
         quality: calculateFocalMechanismQuality(fm),
+        preferred: preferredStored ? id === preferredId : fm === list[0],
+        order: entries.length,
       });
     }
   }
+  const num = (value: unknown, fallback: number) =>
+    typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  entries.sort((a, b) =>
+    a.tier - b.tier ||
+    num(b.fm.momentTensor?.varianceReduction, -1) - num(a.fm.momentTensor?.varianceReduction, -1) ||
+    num(b.fm.stationPolarityCount, -1) - num(a.fm.stationPolarityCount, -1) ||
+    num(a.fm.misfit, Infinity) - num(b.fm.misfit, Infinity) ||
+    Number(b.preferred) - Number(a.preferred) ||
+    a.order - b.order
+  );
+  return entries.map(({ fm, source, tier, quality }) => ({ fm, source, tier, quality }));
+}
 
-  if (focalMechanisms.length === 0) {
-    return null;
-  }
+/**
+ * Every mechanism of a group, best first, with its original publicID. The first becomes
+ * the merged record's preferred mechanism.
+ */
+function unionFocalMechanisms(events: EventData[]): FocalMechanism[] {
+  return rankFocalMechanisms(events).map(entry => entry.fm);
+}
 
-  // Sort by priority (lower = better), then by quality (higher = better)
-  focalMechanisms.sort((a, b) => {
-    if (a.priority !== b.priority) {
-      return a.priority - b.priority;
-    }
-    return b.quality - a.quality;
-  });
-
-  return focalMechanisms[0].fm;
+/**
+ * Select the best focal mechanism from a group of events
+ */
+function selectBestFocalMechanism(events: EventData[]): FocalMechanism | null {
+  return rankFocalMechanisms(events)[0]?.fm ?? null;
 }
 
 /**
@@ -2212,34 +2679,17 @@ function selectBestFocalMechanism(
  * @returns Merged focal mechanism data
  */
 function mergeFocalMechanisms(events: EventData[]): {
-  bestFocalMechanism: import('./types/quakeml').FocalMechanism | null;
+  bestFocalMechanism: FocalMechanism | null;
   allFocalMechanisms: Array<{
-    focalMechanism: import('./types/quakeml').FocalMechanism;
+    focalMechanism: FocalMechanism;
     source: string;
     quality: number;
   }>;
 } {
-  const allFocalMechanisms: Array<{
-    focalMechanism: import('./types/quakeml').FocalMechanism;
-    source: string;
-    quality: number;
-  }> = [];
-
-  for (const event of events) {
-    if (!event.quakeml?.focalMechanisms) continue;
-
-    for (const fm of event.quakeml.focalMechanisms) {
-      allFocalMechanisms.push({
-        focalMechanism: fm,
-        source: event.source,
-        quality: calculateFocalMechanismQuality(fm),
-      });
-    }
-  }
-
+  const ranked = rankFocalMechanisms(events);
   return {
-    bestFocalMechanism: selectBestFocalMechanism(events),
-    allFocalMechanisms,
+    bestFocalMechanism: ranked[0]?.fm ?? null,
+    allFocalMechanisms: ranked.map(({ fm, source, quality }) => ({ focalMechanism: fm, source, quality })),
   };
 }
 
@@ -2364,7 +2814,8 @@ function convertMdtoML(md: number): MagnitudeConversionResult {
  */
 function getMagnitudeTypeCategory(magType: string | undefined): MagnitudeType | null {
   if (!magType) return null;
-  const lower = magType.toLowerCase();
+  const trimmed = magType.trim();
+  const lower = trimmed.toLowerCase();
 
   if (lower.startsWith('mw')) return 'Mw';
   if (lower.startsWith('ms')) return 'Ms';
@@ -2374,13 +2825,34 @@ function getMagnitudeTypeCategory(magType: string | undefined): MagnitudeType | 
   if (/^mb[_ ]?lg/.test(lower)) return 'mbLg';
   // Only the mixed-case 'mB' spelling denotes ISC's broadband body-wave scale; an
   // all-caps 'MB' is the ordinary short-period mb written in upper case.
-  if (magType.startsWith('mB')) return 'mB';
+  if (trimmed.startsWith('mB')) return 'mB';
   if (lower.startsWith('mb')) return 'mb';
   if (lower.startsWith('ml')) return 'ML';
   if (lower === 'md' || lower === 'mc') return 'Md';
+  // GeoNet's bare 'M' is the SeisComP summary magnitude that the FDSN service reports for
+  // most of the New Zealand catalogue: essentially the local magnitude MLv for small and
+  // moderate events. It is the ML family here, as in lib/seismological-analysis.ts;
+  // unclassified, it scored no type points and could never join the cross-scale
+  // comparison, so the commonest NZ pairing (GeoNet M against ISC mb) split (finding #22).
+  if (lower === 'm') return 'ML';
 
   return null;
 }
+
+/**
+ * Moment-magnitude PROXIES: Mw-scale values an agency derived from another measurement —
+ * SeisComP/GeoNet Mw(mB) from the broadband body-wave magnitude, Mwp (and Mwpd) from the
+ * P-wave displacement — rather than from a moment-tensor inversion. They are on the Mw
+ * scale but carry that conversion's scatter, so they are not exact Mw and rank below it.
+ */
+function isMwProxy(magType: string | undefined): boolean {
+  if (!magType) return false;
+  const lower = magType.trim().toLowerCase();
+  return lower.startsWith('mw') && (lower.includes('(') || /^mwp(d)?$/.test(lower));
+}
+
+/** Typical scatter of an agency's Mw proxy about moment-tensor Mw. */
+const MW_PROXY_UNCERTAINTY = 0.3;
 
 /**
  * Convert any magnitude type to Mw (moment magnitude)
@@ -2394,6 +2866,14 @@ function convertToMw(value: number, magType: string | undefined): MagnitudeConve
 
   switch (category) {
     case 'Mw':
+      if (isMwProxy(magType)) {
+        return {
+          value,
+          uncertainty: MW_PROXY_UNCERTAINTY,
+          method: `Agency Mw proxy (${magType!.trim()}): on the Mw scale but derived from another measurement, not a moment tensor`,
+          isExact: false,
+        };
+      }
       // Already Mw, return as-is
       return {
         value,
@@ -2475,26 +2955,188 @@ function magnitudesEquivalent(
  * Based on ISC-GEM standards and IASPEI recommendations
  */
 const MAGNITUDE_HIERARCHY: Array<{ priority: number; patterns: string[] }> = [
-  // Priority 1: Moment magnitude variants (best)
-  { priority: 1, patterns: ['mw', 'mww', 'mwc', 'mwb', 'mwr', 'mwp'] },
+  // Priority 1: Moment magnitude from a moment tensor (best)
+  { priority: 1, patterns: ['mw', 'mww', 'mwc', 'mwb', 'mwr'] },
+  // Priority 1.5: Mw proxies (Mwp, Mw(mB), ...): Mw scale, conversion scatter (isMwProxy)
+  { priority: 1.5, patterns: ['mwp', 'mwpd', 'mw(mb)', 'mw(mwp)'] },
   // Priority 2: Surface wave magnitude
   { priority: 2, patterns: ['ms', 'ms_20', 'ms_bb'] },
   // Priority 3: Body wave magnitude
   { priority: 3, patterns: ['mb', 'mbb', 'mb_lg'] },
-  // Priority 4: Local/Richter magnitude
-  { priority: 4, patterns: ['ml', 'mlv', 'mlr'] },
+  // Priority 4: Local/Richter magnitude (GeoNet's bare 'M' is this family)
+  { priority: 4, patterns: ['ml', 'mlv', 'mlr', 'm'] },
   // Priority 5: Duration/Coda magnitude (least reliable)
   { priority: 5, patterns: ['md', 'mc'] },
 ];
 
 /**
- * Network authority hierarchy for prioritizing seismic data sources
+ * Magnitude at which the non-Mw preference changes. Below it (local and regional events,
+ * most of the New Zealand catalogue) the local magnitude is the best-calibrated non-Mw
+ * scale and short-period mb, measured teleseismically on a few stations, is poorer; from
+ * it upward mb saturates (from about 5.5-6) before ML (about 6.5-7) and Ms (about 8), so
+ * Ms then leads. 5.5 is also the lower bound the ISC-GEM hierarchy was built for.
+ */
+const LARGE_EVENT_MAGNITUDE = 5.5;
+
+// ============================================================================
+// AGENCY IDENTITY
+// ============================================================================
+
+/**
+ * Seismological agencies the merge recognises for network authority, the GeoNet/GNS
+ * priority options and focal-mechanism authority.
+ */
+type AgencyKey = 'geonet' | 'gcmt' | 'isc' | 'usgs' | 'emsc' | 'jma' | 'geofon' | 'iris' | 'ingv' | 'ign' | 'bgr';
+
+/**
+ * Agency codes as agencies write them in QuakeML creationInfo/agencyID (stored as
+ * agency_id) and as FDSN network codes: 'WEL' is GeoNet's ISC code, 'NZ' its FDSN network,
+ * 'US' the USGS, 'HRV' the Harvard/Global CMT project, 'ROM' INGV and 'MDD' IGN. A code is
+ * matched as a whole, so short codes such as 'nz' and 'us' are never looked for inside
+ * words — they are identity only where an agency code is expected.
+ */
+const AGENCY_CODES: ReadonlyMap<string, AgencyKey> = new Map<string, AgencyKey>([
+  ['wel', 'geonet'], ['nz', 'geonet'], ['gns', 'geonet'], ['geonet', 'geonet'],
+  ['gcmt', 'gcmt'], ['hrv', 'gcmt'], ['globalcmt', 'gcmt'],
+  ['isc', 'isc'], ['iscgem', 'isc'], ['isc-gem', 'isc'],
+  ['us', 'usgs'], ['usgs', 'usgs'], ['neic', 'usgs'],
+  ['emsc', 'emsc'], ['csem', 'emsc'],
+  ['jma', 'jma'],
+  ['gfz', 'geofon'], ['geofon', 'geofon'],
+  ['iris', 'iris'],
+  ['ingv', 'ingv'], ['rom', 'ingv'],
+  ['ign', 'ign'], ['mdd', 'ign'],
+  ['bgr', 'bgr'],
+]);
+
+/**
+ * Whole words that name an agency in free text (catalogue names, provider fields). Region
+ * words are deliberately absent: "Merged NZ Catalogue", "USGS ComCat NZ region" and
+ * "ISC bulletin (NZ)" are not GeoNet, and matching substrings made 'Franz Josef' ISC
+ * ('franz' has no 'isc', but 'San Francisco' did) and 'Tonga campaigns' GNS.
+ */
+const AGENCY_NAME_TOKENS: ReadonlyMap<string, AgencyKey> = new Map<string, AgencyKey>([
+  ['geonet', 'geonet'], ['gns', 'geonet'],
+  ['gcmt', 'gcmt'], ['globalcmt', 'gcmt'],
+  ['isc', 'isc'], ['iscgem', 'isc'],
+  ['usgs', 'usgs'], ['neic', 'usgs'], ['anss', 'usgs'], ['comcat', 'usgs'],
+  ['emsc', 'emsc'], ['csem', 'emsc'],
+  ['jma', 'jma'],
+  ['geofon', 'geofon'], ['gfz', 'geofon'],
+  ['iris', 'iris'],
+  ['ingv', 'ingv'],
+  ['ign', 'ign'],
+  ['bgr', 'bgr'],
+]);
+
+/**
+ * Product words that identify an agency only when no agency name appears beside them:
+ * a catalogue called "CMT" is the Global CMT, but "GeoNet CMT" is GeoNet's.
+ */
+const GENERIC_AGENCY_TOKENS: ReadonlyMap<string, AgencyKey> = new Map<string, AgencyKey>([
+  ['cmt', 'gcmt'],
+]);
+
+/** Lower-case alphanumeric words of a free-text name. */
+function nameTokens(text: string): string[] {
+  return text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+/**
+ * The agency a free-text name identifies by whole words, or null when it names none —
+ * or more than one ("GeoNet vs USGS comparison" identifies neither).
+ */
+function agencyFromName(text: unknown): AgencyKey | null {
+  if (typeof text !== 'string' || !text) return null;
+  const named = new Set<AgencyKey>();
+  const generic = new Set<AgencyKey>();
+  for (const token of nameTokens(text)) {
+    const agency = AGENCY_NAME_TOKENS.get(token);
+    if (agency) named.add(agency);
+    const product = GENERIC_AGENCY_TOKENS.get(token);
+    if (product) generic.add(product);
+  }
+  if (named.size > 0) return named.size === 1 ? Array.from(named)[0] : null;
+  return generic.size === 1 ? Array.from(generic)[0] : null;
+}
+
+/** The agency an agency code names ('WEL(GNS_Primary)' is GeoNet), or null. */
+function agencyFromCode(code: unknown): AgencyKey | null {
+  if (typeof code !== 'string') return null;
+  const bare = code.trim().toLowerCase().replace(/\s*\(.*\)\s*$/, '');
+  return AGENCY_CODES.get(bare) ?? null;
+}
+
+/** Preferred origin of an event's in-memory QuakeML, if it carries one. */
+function preferredQuakemlOrigin(e: EventData): Origin | undefined {
+  const quakeml = e.quakeml;
+  if (!quakeml?.origins?.length) return undefined;
+  return quakeml.origins.find(o => o.publicID === quakeml.preferredOriginID) ?? quakeml.origins[0];
+}
+
+/**
+ * The single source named by an import catalogue's source_catalogues record (the GeoNet
+ * importer writes [{ source: 'GeoNet', ... }]); null for merged catalogues, whose record
+ * lists several source catalogues.
+ */
+function importSourceOf(doc: MergedCatalogue): string | null {
+  for (const raw of [doc.source_catalogues, doc.merge_config]) {
+    if (typeof raw !== 'string' || !raw) continue;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      const entries = Array.isArray(parsed) ? parsed : [parsed];
+      if (entries.length !== 1) continue;
+      const entry = entries[0] as { id?: unknown; source?: unknown } | null;
+      if (entry && typeof entry.source === 'string' && entry.id === undefined) return entry.source;
+    } catch {
+      // not JSON: no import source recorded
+    }
+  }
+  return null;
+}
+
+/**
+ * Agency of a whole source catalogue, from explicit catalogue metadata first (provider,
+ * data source, the importer's source record), then from whole words of its name. Used
+ * only when an event carries no agency code of its own.
+ */
+function catalogueAgencyOf(catalogue: SourceCatalogue, doc: MergedCatalogue | null): AgencyKey | null {
+  const candidates: unknown[] = doc
+    ? [doc.provider, doc.data_source, importSourceOf(doc), doc.name]
+    : [];
+  candidates.push(catalogue.source, catalogue.name);
+  for (const candidate of candidates) {
+    const agency = agencyFromName(candidate);
+    if (agency) return agency;
+  }
+  return null;
+}
+
+/**
+ * The agency that produced an event's solution: its own agency code (QuakeML
+ * creationInfo/agencyID), then its catalogue's explicit agency, then whole words of the
+ * source label. Never a substring of a display name.
+ */
+function resolveAgency(e: EventData, sourceLabel: string | undefined = e.source): AgencyKey | null {
+  return (
+    agencyFromCode(e.agency_id) ??
+    agencyFromCode(preferredQuakemlOrigin(e)?.creationInfo?.agencyID) ??
+    ((e._catalogueAgency as AgencyKey | null | undefined) ?? null) ??
+    agencyFromName(sourceLabel)
+  );
+}
+
+/**
+ * Network authority hierarchy for prioritizing seismic data sources. `patterns` are
+ * whole words of a source name (or agency codes); `agency` ties an entry to the agency
+ * resolveAgency identifies.
  */
 interface NetworkAuthority {
   patterns: string[];
   priority: number;
   region?: string;
   description: string;
+  agency?: AgencyKey;
 }
 
 /**
@@ -2503,24 +3145,24 @@ interface NetworkAuthority {
  */
 const DEFAULT_NETWORK_HIERARCHY: NetworkAuthority[] = [
   // New Zealand authoritative networks
-  { patterns: ['geonet', 'gns', 'nz'], priority: 1, region: 'NZ', description: 'GeoNet (NZ authoritative)' },
+  { patterns: ['geonet', 'gns'], priority: 1, region: 'NZ', description: 'GeoNet (NZ authoritative)', agency: 'geonet' },
   // Global centroid moment tensor
-  { patterns: ['gcmt', 'cmt', 'globalcmt'], priority: 2, description: 'Global CMT' },
+  { patterns: ['gcmt', 'cmt', 'globalcmt'], priority: 2, description: 'Global CMT', agency: 'gcmt' },
   // International Seismological Centre
-  { patterns: ['isc', 'isc-gem'], priority: 3, description: 'ISC/ISC-GEM' },
+  { patterns: ['isc', 'iscgem'], priority: 3, description: 'ISC/ISC-GEM', agency: 'isc' },
   // USGS National Earthquake Information Center
-  { patterns: ['usgs', 'neic', 'anss'], priority: 4, description: 'USGS/NEIC' },
+  { patterns: ['usgs', 'neic', 'anss', 'comcat'], priority: 4, description: 'USGS/NEIC', agency: 'usgs' },
   // European-Mediterranean Seismological Centre
-  { patterns: ['emsc', 'csem'], priority: 5, description: 'EMSC' },
+  { patterns: ['emsc', 'csem'], priority: 5, description: 'EMSC', agency: 'emsc' },
   // Japan Meteorological Agency
-  { patterns: ['jma', 'japan'], priority: 6, region: 'JP', description: 'JMA' },
+  { patterns: ['jma'], priority: 6, region: 'JP', description: 'JMA', agency: 'jma' },
   // Geofon
-  { patterns: ['geofon', 'gfz'], priority: 7, description: 'GEOFON/GFZ' },
+  { patterns: ['geofon', 'gfz'], priority: 7, description: 'GEOFON/GFZ', agency: 'geofon' },
   // IRIS
-  { patterns: ['iris'], priority: 8, description: 'IRIS' },
+  { patterns: ['iris'], priority: 8, description: 'IRIS', agency: 'iris' },
   // Other regional networks
-  { patterns: ['ingv'], priority: 9, region: 'IT', description: 'INGV (Italy)' },
-  { patterns: ['ign'], priority: 10, region: 'ES', description: 'IGN (Spain)' },
+  { patterns: ['ingv'], priority: 9, region: 'IT', description: 'INGV (Italy)', agency: 'ingv' },
+  { patterns: ['ign'], priority: 10, region: 'ES', description: 'IGN (Spain)', agency: 'ign' },
 ];
 
 /**
@@ -2529,38 +3171,57 @@ const DEFAULT_NETWORK_HIERARCHY: NetworkAuthority[] = [
  */
 interface RegionalPriority {
   bounds: { minLat: number; maxLat: number; minLon: number; maxLon: number };
-  hierarchy: Array<{ patterns: string[]; priority: number }>;
+  hierarchy: Array<{ patterns: string[]; priority: number; agency?: AgencyKey }>;
 }
 
 const REGIONAL_PRIORITIES: Record<string, RegionalPriority> = {
   NZ: {
-    // minLon > maxLon marks a region that crosses the ±180 antimeridian, so NZ territory
-    // (Chatham Islands ~ -176.5, Kermadec arc) is detected as region NZ, not the global default.
-    bounds: { minLat: -50, maxLat: -34, minLon: 165, maxLon: -175 },
+    // The national extent the rest of the platform uses (lib/geo-bounds-utils
+    // NZ_NATIONAL_BOUNDS): the Kermadec Islands, the Chatham Rise and the subantarctic
+    // islands are GeoNet's area of responsibility too, and the old -50..-34 box ranked a
+    // Kermadec event by the global table. minLon > maxLon marks the antimeridian crossing.
+    bounds: {
+      minLat: NZ_NATIONAL_BOUNDS.minLatitude,
+      maxLat: NZ_NATIONAL_BOUNDS.maxLatitude,
+      minLon: NZ_NATIONAL_BOUNDS.minLongitude,
+      maxLon: NZ_NATIONAL_BOUNDS.maxLongitude,
+    },
     hierarchy: [
-      { patterns: ['geonet', 'gns', 'nz'], priority: 1 },
-      { patterns: ['gcmt', 'cmt'], priority: 2 },
-      { patterns: ['isc'], priority: 3 },
-      { patterns: ['usgs', 'neic'], priority: 4 },
+      { patterns: ['geonet', 'gns'], priority: 1, agency: 'geonet' },
+      { patterns: ['gcmt', 'cmt'], priority: 2, agency: 'gcmt' },
+      { patterns: ['isc'], priority: 3, agency: 'isc' },
+      { patterns: ['usgs', 'neic'], priority: 4, agency: 'usgs' },
     ],
   },
   JP: {
     bounds: { minLat: 24, maxLat: 46, minLon: 122, maxLon: 154 },
     hierarchy: [
-      { patterns: ['jma', 'japan'], priority: 1 },
-      { patterns: ['gcmt', 'cmt'], priority: 2 },
-      { patterns: ['isc'], priority: 3 },
-      { patterns: ['usgs', 'neic'], priority: 4 },
+      { patterns: ['jma'], priority: 1, agency: 'jma' },
+      { patterns: ['gcmt', 'cmt'], priority: 2, agency: 'gcmt' },
+      { patterns: ['isc'], priority: 3, agency: 'isc' },
+      { patterns: ['usgs', 'neic'], priority: 4, agency: 'usgs' },
     ],
   },
 };
+
+/** Longitude containment that supports antimeridian-crossing regions (minLon > maxLon). */
+function inRegionBounds(bounds: RegionalPriority['bounds'], latitude: number, longitude: number): boolean {
+  const inLon =
+    bounds.minLon <= bounds.maxLon
+      ? longitude >= bounds.minLon && longitude <= bounds.maxLon
+      : longitude >= bounds.minLon || longitude <= bounds.maxLon;
+  return latitude >= bounds.minLat && latitude <= bounds.maxLat && inLon;
+}
 
 /**
  * Get network priority for a source name
  * Lower priority = more authoritative (1 is best)
  *
+ * The agency is identified from the event's agency code or its catalogue's explicit
+ * agency when an event is given, otherwise from whole words of the source name.
+ *
  * @param source - Source name to check
- * @param event - Optional event for regional priority detection
+ * @param event - Optional event for agency identity and regional priority detection
  * @param customHierarchy - Optional custom hierarchy to use
  * @returns Priority value (lower = better)
  */
@@ -2569,44 +3230,25 @@ function getNetworkPriority(
   event?: EventData,
   customHierarchy?: NetworkAuthority[]
 ): number {
-  if (!source) return 999;
-
-  const lowerSource = source.toLowerCase();
-  const hierarchy = customHierarchy || DEFAULT_NETWORK_HIERARCHY;
+  const agency = event ? resolveAgency(event, source) : agencyFromName(source);
+  if (!source && !agency) return 999;
+  const words = new Set(source ? nameTokens(source) : []);
+  const matches = (entry: { patterns: string[]; agency?: AgencyKey }) =>
+    agency != null && entry.agency != null
+      ? entry.agency === agency
+      : entry.patterns.some(p => words.has(p.toLowerCase()));
 
   // Check for regional priority override
-  if (event) {
-    for (const [, regionConfig] of Object.entries(REGIONAL_PRIORITIES)) {
-      const { bounds, hierarchy: regionalHierarchy } = regionConfig;
-      // Longitude containment supports antimeridian-crossing regions (minLon > maxLon),
-      // so e.g. the NZ region includes both 165..180 and -180..-175.
-      const inLon =
-        bounds.minLon <= bounds.maxLon
-          ? event.longitude >= bounds.minLon && event.longitude <= bounds.maxLon
-          : event.longitude >= bounds.minLon || event.longitude <= bounds.maxLon;
-      if (
-        event.latitude >= bounds.minLat &&
-        event.latitude <= bounds.maxLat &&
-        inLon
-      ) {
-        // Use regional hierarchy
-        for (const { patterns, priority } of regionalHierarchy) {
-          if (patterns.some(p => lowerSource.includes(p))) {
-            return priority;
-          }
-        }
-      }
+  if (event && Number.isFinite(event.latitude) && Number.isFinite(event.longitude)) {
+    for (const regionConfig of Object.values(REGIONAL_PRIORITIES)) {
+      if (!inRegionBounds(regionConfig.bounds, event.latitude, event.longitude)) continue;
+      const entry = regionConfig.hierarchy.find(matches);
+      if (entry) return entry.priority;
     }
   }
 
-  // Use default hierarchy
-  for (const { patterns, priority } of hierarchy) {
-    if (patterns.some(p => lowerSource.includes(p))) {
-      return priority;
-    }
-  }
-
-  return 100; // Unknown network
+  const entry = (customHierarchy || DEFAULT_NETWORK_HIERARCHY).find(matches);
+  return entry ? entry.priority : 100; // Unknown network
 }
 
 /**
@@ -2638,12 +3280,13 @@ function selectByNetworkAuthority(
     qualityScore: calculateQualityScore(e),
   }));
 
-  // Sort by network priority (lower = better), then quality (higher = better)
+  // Sort by network priority (lower = better), then quality (higher = better), then a
+  // fixed record order so the choice never depends on the order the catalogues were read.
   scored.sort((a, b) => {
     if (a.networkPriority !== b.networkPriority) {
       return a.networkPriority - b.networkPriority;
     }
-    return b.qualityScore - a.qualityScore;
+    return b.qualityScore - a.qualityScore || compareRecordOrder(a.event, b.event);
   });
 
   return scored[0].event;
@@ -2651,10 +3294,34 @@ function selectByNetworkAuthority(
 
 /**
  * Get magnitude priority (lower = better)
+ *
+ * Without a reference magnitude this is the static type hierarchy (Mw, Mw proxies, Ms,
+ * mb, ML, Md). With one — the size of the earthquake being described — the non-Mw scales
+ * are ranked by which is not saturated and best calibrated at that size (finding #25):
+ * below LARGE_EVENT_MAGNITUDE the local magnitude ML leads, then the body-wave scales,
+ * then Ms; from it upward Ms leads, then broadband mB, then ML, then short-period mb.
+ * Publishing a raw mb 3.26 ahead of the ML 3.8 of the same M3.8 earthquake (the static
+ * order) biased the merged magnitude half a unit low, although both convert to Mw 3.80.
  */
-function getMagnitudePriority(magType: string | undefined): number {
+function getMagnitudePriority(magType: string | undefined, referenceMagnitude?: number | null): number {
   if (!magType) return 999;
-  const lowerType = magType.toLowerCase();
+  const category = getMagnitudeTypeCategory(magType);
+
+  if (typeof referenceMagnitude === 'number' && Number.isFinite(referenceMagnitude)) {
+    const large = referenceMagnitude >= LARGE_EVENT_MAGNITUDE;
+    switch (category) {
+      case 'Mw': return isMwProxy(magType) ? 1.5 : 1;
+      case 'ML': return large ? 3 : 2;
+      case 'mB': return large ? 2.5 : 3;
+      case 'mb':
+      case 'mbLg': return large ? 4 : 3;
+      case 'Ms': return large ? 2 : 4;
+      case 'Md': return 5;
+      default: return 100; // Genuinely unknown type
+    }
+  }
+
+  const lowerType = magType.trim().toLowerCase();
 
   // Fast path: exact match against the explicit variant whitelist.
   for (const group of MAGNITUDE_HIERARCHY) {
@@ -2667,8 +3334,8 @@ function getMagnitudePriority(magType: string | undefined): number {
   // (e.g. 'Mw(mB)', 'MLc', 'mbLg', 'Ms20') map to the correct tier instead of collapsing
   // to 'unknown' (which would rank a real Mw below a coda Md). Keeps this consistent with
   // getMagnitudeTypeCategory used by the conversion path.
-  switch (getMagnitudeTypeCategory(magType)) {
-    case 'Mw': return 1;
+  switch (category) {
+    case 'Mw': return isMwProxy(magType) ? 1.5 : 1;
     case 'Ms': return 2;
     case 'mb':
     case 'mB':
@@ -2693,6 +3360,15 @@ interface SelectedMagnitude {
   methodID: string | null;
   evaluationMode: string | null;
   evaluationStatus: string | null;
+  /** Index (into the events passed) of the report the measurement came from. */
+  sourceIndex: number | null;
+}
+
+/** Median of a non-empty list. */
+function median(values: number[]): number {
+  const sorted = values.slice().sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 function selectBestMagnitude(events: EventData[]): SelectedMagnitude {
@@ -2700,12 +3376,15 @@ function selectBestMagnitude(events: EventData[]): SelectedMagnitude {
   const candidates: Array<{
     value: number;
     type: string;
-    priority: number;
     uncertainty: number;
+    rejected: boolean;
+    /** The reporting agency's own preferred measurement. */
+    preferred: boolean;
+    order: number;
     meta: Omit<SelectedMagnitude, 'value' | 'type'>;
   }> = [];
 
-  for (const event of events) {
+  events.forEach((event, sourceIndex) => {
     // Track the (value|type) pairs already added for this event so a top-level magnitude
     // that duplicates a QuakeML entry is not double-counted.
     const seen = new Set<string>();
@@ -2716,7 +3395,9 @@ function selectBestMagnitude(events: EventData[]): SelectedMagnitude {
     // and the selector fell back to the preferred ML 5.4. Use whichever is present.
     let magnitudeList: Array<{ mag?: { value?: number | null; uncertainty?: number | null }; type?: string }> | undefined =
       event.quakeml?.magnitudes;
+    let preferredId: unknown = event.quakeml?.preferredMagnitudeID;
     if ((!magnitudeList || magnitudeList.length === 0) && typeof (event as { magnitudes?: unknown }).magnitudes === 'string') {
+      preferredId = event.preferred_magnitude_id;
       try {
         const parsed = JSON.parse((event as { magnitudes?: string }).magnitudes as string);
         if (Array.isArray(parsed)) magnitudeList = parsed;
@@ -2742,8 +3423,10 @@ function selectBestMagnitude(events: EventData[]): SelectedMagnitude {
         candidates.push({
           value,
           type,
-          priority: getMagnitudePriority(type === 'unknown' ? undefined : type),
           uncertainty: finite(mag.mag?.uncertainty) ?? 999,
+          rejected: str(m.evaluationStatus)?.toLowerCase() === 'rejected',
+          preferred: typeof preferredId === 'string' && preferredId !== '' && m.publicID === preferredId,
+          order: candidates.length,
           meta: {
             publicID: str(m.publicID),
             uncertainty: finite(mag.mag?.uncertainty),
@@ -2751,6 +3434,7 @@ function selectBestMagnitude(events: EventData[]): SelectedMagnitude {
             methodID: str(m.methodID),
             evaluationMode: str(m.evaluationMode),
             evaluationStatus: str(m.evaluationStatus),
+            sourceIndex,
           },
         });
       }
@@ -2767,8 +3451,11 @@ function selectBestMagnitude(events: EventData[]): SelectedMagnitude {
         candidates.push({
           value: event.magnitude,
           type,
-          priority: getMagnitudePriority(event.magnitude_type),
           uncertainty: event.magnitude_uncertainty ?? 999,
+          rejected: String(event.magnitude_evaluation_status ?? '').toLowerCase() === 'rejected',
+          // The scalar column IS the agency's preferred magnitude.
+          preferred: true,
+          order: candidates.length,
           meta: {
             publicID: null,
             uncertainty: event.magnitude_uncertainty ?? null,
@@ -2776,83 +3463,141 @@ function selectBestMagnitude(events: EventData[]): SelectedMagnitude {
             methodID: event.magnitude_method_id ?? null,
             evaluationMode: event.magnitude_evaluation_mode ?? null,
             evaluationStatus: event.magnitude_evaluation_status ?? null,
+            sourceIndex,
           },
         });
       }
     }
-  }
-
-  // Sort by priority (lower = better), then by uncertainty (lower = better)
-  candidates.sort((a, b) => {
-    if (a.priority !== b.priority) {
-      return a.priority - b.priority;
-    }
-    return a.uncertainty - b.uncertainty;
   });
 
-  if (candidates.length > 0) {
-    const best = candidates[0];
+  // An agency that marked a magnitude 'rejected' has withdrawn it (QuakeML
+  // evaluationStatus): never publish one while any other measurement is available.
+  const usable = candidates.some(c => !c.rejected) ? candidates.filter(c => !c.rejected) : candidates;
+
+  // The size the type preference is judged at: the median of the candidates on the common
+  // (Mw) scale where they convert, otherwise their raw values.
+  const sizes = usable.map(c => convertToMw(c.value, c.type === 'unknown' ? undefined : c.type)?.value ?? c.value);
+  const referenceMagnitude = sizes.length > 0 ? median(sizes) : null;
+  const priorityOf = (c: (typeof usable)[number]) =>
+    getMagnitudePriority(c.type === 'unknown' ? undefined : c.type, referenceMagnitude);
+
+  // Sort by priority (lower = better), then by uncertainty (lower = better), then the
+  // reporting agency's own preference, then report order.
+  const ranked = usable
+    .map(c => ({ c, priority: priorityOf(c) }))
+    .sort((a, b) =>
+      a.priority - b.priority ||
+      a.c.uncertainty - b.c.uncertainty ||
+      Number(b.c.preferred) - Number(a.c.preferred) ||
+      a.c.order - b.c.order
+    );
+
+  if (ranked.length > 0) {
+    const best = ranked[0].c;
     return { value: best.value, type: best.type, ...best.meta };
   }
 
   // Fallback: use simple magnitude field from first event with magnitude
-  const eventWithMag = events.find(e => e.magnitude != null);
+  const index = events.findIndex(e => e.magnitude != null);
   return {
-    value: eventWithMag?.magnitude || 0,
+    value: index >= 0 ? events[index].magnitude || 0 : 0,
     type: 'unknown',
     publicID: null,
     uncertainty: null, stationCount: null, methodID: null, evaluationMode: null, evaluationStatus: null,
+    sourceIndex: index >= 0 ? index : null,
   };
+}
+
+/**
+ * Whether a report's depth was FIXED rather than solved for: QuakeML depthType 'operator
+ * assigned' (or a legacy free-text label such as 'fixed'). A fixed depth carries no depth
+ * information, and the 0 km "uncertainty" many bulletins write beside it only records the
+ * fixing.
+ */
+function isFixedDepth(e: EventData, origin?: Origin): boolean {
+  const type = origin?.depthType ?? e.depth_type;
+  if (typeof type !== 'string') return false;
+  const lower = type.trim().toLowerCase();
+  return lower === 'operator assigned' || /\bfix/.test(lower);
+}
+
+/**
+ * The best-constrained depth of a group and the report it came from.
+ *
+ * Fixed depths are used only when no report solved for depth (publication/
+ * merge_strategies.tex §Depth fixing and §Depth selection: lowest priority, reported only
+ * when no free-depth solution exists; the record then carries that report's depth_type).
+ * A non-positive uncertainty is treated as absent, not as perfect: a fixed 5 km written
+ * with uncertainty 0 used to set the comparison band to 0-5 km and exclude every free
+ * solution (finding #27).
+ */
+function selectBestDepthCandidate(events: EventData[]): { depth: number; index: number } | null {
+  const candidates: Array<{
+    index: number;
+    depth: number;
+    uncertainty: number | null;
+    stationCount: number;
+    depthPhaseCount: number;
+    fixed: boolean;
+  }> = [];
+
+  events.forEach((e, index) => {
+    if (e.depth == null || !Number.isFinite(e.depth)) return;
+    const origin = preferredQuakemlOrigin(e);
+    // Normalise to KILOMETRES. QuakeML BED gives Origin/depth/uncertainty in metres
+    // (see lib/quakeml-to-db.ts, which divides by 1000 on the way into the DB), while the
+    // stored depth_uncertainty column is already km. Comparing the raw metre value against
+    // a "5 km" threshold ranked a 3000 m (3 km) real uncertainty below a missing one.
+    const raw = origin?.depth?.uncertainty != null ? origin.depth.uncertainty / 1000 : e.depth_uncertainty;
+    candidates.push({
+      index,
+      depth: e.depth,
+      uncertainty: typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : null,
+      stationCount: origin?.quality?.usedStationCount ?? e.used_station_count ?? 0,
+      depthPhaseCount: origin?.quality?.depthPhaseCount ?? e.depth_phase_count ?? 0,
+      fixed: isFixedDepth(e, origin),
+    });
+  });
+  if (candidates.length === 0) return null;
+
+  const free = candidates.filter(c => !c.fixed);
+  const pool = free.length > 0 ? free : candidates;
+  // Identical evidence is settled by record order, never by input order.
+  const earlier = (a: (typeof pool)[number], b: (typeof pool)[number]) =>
+    compareRecordOrder(events[a.index], events[b.index]) <= 0 ? a : b;
+
+  const measured = pool.filter(c => c.uncertainty != null);
+  let best: (typeof pool)[number];
+  if (measured.length > 0) {
+    // Depth uncertainties within 5 km of each other are not meaningfully different, so treat
+    // every candidate in that band as equally well constrained and prefer station coverage
+    // among them. Selecting the band from the group minimum (rather than comparing pairs) is
+    // what makes this a well-defined total order: a pairwise "difference > 5 km" comparator is
+    // not transitive, so Array.sort could return a different winner for a different input order.
+    const minUncertainty = Math.min(...measured.map(c => c.uncertainty!));
+    const comparable = measured.filter(c => c.uncertainty! <= minUncertainty + 5);
+    best = comparable.reduce((b, c) => {
+      if (c.stationCount !== b.stationCount) return c.stationCount > b.stationCount ? c : b;
+      if (c.uncertainty !== b.uncertainty) return c.uncertainty! < b.uncertainty! ? c : b;
+      return earlier(b, c);
+    });
+  } else {
+    // No formal depth uncertainty anywhere: the solution with the most depth-sensitive
+    // phases (pP, sP, ...), then the widest station coverage (merge_strategies.tex).
+    best = pool.reduce((b, c) => {
+      if (c.depthPhaseCount !== b.depthPhaseCount) return c.depthPhaseCount > b.depthPhaseCount ? c : b;
+      if (c.stationCount !== b.stationCount) return c.stationCount > b.stationCount ? c : b;
+      return earlier(b, c);
+    });
+  }
+  return { depth: best.depth, index: best.index };
 }
 
 /**
  * Select the best depth from a group of events based on uncertainty
  */
 function selectBestDepth(events: EventData[]): number | null {
-  // Sentinel for "no uncertainty reported" — effectively infinite on a km scale.
-  const NO_UNCERTAINTY_KM = 999;
-
-  const depthCandidates = events
-    .filter(e => e.depth != null)
-    .map(e => {
-      // Try to get origin data for uncertainty information
-      const origin = e.quakeml?.origins?.find(o =>
-        o.publicID === e.quakeml?.preferredOriginID
-      ) || e.quakeml?.origins?.[0];
-
-      // Normalise to KILOMETRES. QuakeML BED gives Origin/depth/uncertainty in metres
-      // (see lib/quakeml-to-db.ts, which divides by 1000 on the way into the DB), while the
-      // stored depth_uncertainty column is already km. Comparing the raw metre value against
-      // a "5 km" threshold — and against the 999 sentinel — ranked a 3000 m (3 km) real
-      // uncertainty below a missing one.
-      const uncertaintyKm = origin?.depth?.uncertainty != null
-        ? origin.depth.uncertainty / 1000
-        : e.depth_uncertainty ?? NO_UNCERTAINTY_KM;
-
-      return {
-        depth: e.depth!,
-        uncertainty: uncertaintyKm,
-        // Use station count if available, otherwise use 0
-        stationCount: origin?.quality?.usedStationCount ?? e.used_station_count ?? 0
-      };
-    });
-
-  if (depthCandidates.length === 0) return null;
-
-  // Depth uncertainties within 5 km of each other are not meaningfully different, so treat
-  // every candidate in that band as equally well constrained and prefer station coverage
-  // among them. Selecting the band from the group minimum (rather than comparing pairs) is
-  // what makes this a well-defined total order: a pairwise "difference > 5 km" comparator is
-  // not transitive, so Array.sort could return a different winner for a different input order.
-  const minUncertainty = Math.min(...depthCandidates.map(c => c.uncertainty));
-  const comparable = depthCandidates.filter(c => c.uncertainty <= minUncertainty + 5);
-
-  return comparable.reduce((best, curr) => {
-    if (curr.stationCount !== best.stationCount) {
-      return curr.stationCount > best.stationCount ? curr : best;
-    }
-    return curr.uncertainty < best.uncertainty ? curr : best;
-  }).depth;
+  return selectBestDepthCandidate(events)?.depth ?? null;
 }
 
 /**
@@ -2892,48 +3637,45 @@ function averageLongitudes(lons: number[]): number {
 }
 
 /**
- * Get location uncertainty weight for an event
+ * A report's horizontal location uncertainty in km, or null when it states none: the
+ * parsed QuakeML origin's error ellipse or circle (metres) when present, otherwise the
+ * stored columns through the platform's single resolver (lib/validation
+ * horizontalUncertaintyKm: ellipse semi-major axis, then circular radius, then the lat/lon
+ * marginals with the cos(latitude) the old geometric-mean ×111 left out). An ellipse-only
+ * origin used to count as undocumented. Non-positive values are not measurements.
  */
-function getLocationWeight(event: EventData): number {
-  // Try to get uncertainty from QuakeML origin data
-  const origin = event.quakeml?.origins?.find(o =>
-    o.publicID === event.quakeml?.preferredOriginID
-  ) || event.quakeml?.origins?.[0];
-
-  // Get horizontal uncertainty (prefer combined, fall back to lat/lon)
-  let horizontalUncertainty: number | null = null;
-
-  // Normalize everything to KILOMETRES before weighting: QuakeML horizontalUncertainty
-  // is in metres, and lat/lon uncertainties are in degrees (~111 km/deg). Mixing units
-  // here gave identical-quality events wildly different merge weights.
-  if (origin?.uncertainty?.horizontalUncertainty != null) {
-    horizontalUncertainty = origin.uncertainty.horizontalUncertainty / 1000; // m -> km
-  } else if (origin?.latitude?.uncertainty != null && origin?.longitude?.uncertainty != null) {
-    // Geometric mean of lat/lon uncertainty (degrees) converted to km
-    horizontalUncertainty = Math.sqrt(
-      origin.latitude.uncertainty * origin.longitude.uncertainty
-    ) * 111;
-  }
-
-  // Also check for top-level event uncertainty fields (from CSV/simple formats)
-  if (horizontalUncertainty == null) {
-    if (event.horizontal_uncertainty != null) {
-      horizontalUncertainty = event.horizontal_uncertainty;
-    } else if (event.latitude_uncertainty != null && event.longitude_uncertainty != null) {
-      // degrees -> km
-      horizontalUncertainty = Math.sqrt(
-        event.latitude_uncertainty * event.longitude_uncertainty
-      ) * 111;
+function locationUncertaintyKm(event: EventData): number | null {
+  const positive = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+  const origin = preferredQuakemlOrigin(event);
+  if (origin) {
+    const metres = positive(origin.uncertainty?.maxHorizontalUncertainty) ?? positive(origin.uncertainty?.horizontalUncertainty);
+    if (metres != null) return metres / 1000;
+    const latDeg = positive(origin.latitude?.uncertainty);
+    const lonDeg = positive(origin.longitude?.uncertainty);
+    if (latDeg != null || lonDeg != null) {
+      const cosLat = Math.cos(((Number.isFinite(event.latitude) ? event.latitude : 0) * Math.PI) / 180);
+      return Math.max((latDeg ?? 0) * 111, (lonDeg ?? 0) * 111 * cosLat);
     }
   }
+  return positive(horizontalUncertaintyKm(event));
+}
 
-  // If no uncertainty data, return neutral weight
-  if (horizontalUncertainty == null || horizontalUncertainty <= 0) {
-    return 1.0;
-  }
+/**
+ * Inverse-variance location weight 1/σ² of an event (σ in km, clamped to 0.1-100 km), or
+ * null when the event reports no usable horizontal uncertainty.
+ *
+ * The missing case used to return 1.0 — the weight of a σ = 1 km solution — so an
+ * undocumented location outweighed every documented one worse than 1 km (a GeoNet σ = 3 km
+ * epicentre was pulled 90% of the way to an undocumented CSV row). See weightedLocationAverage
+ * for how a group with a missing σ is averaged instead.
+ */
+function getLocationWeight(event: EventData): number | null {
+  const sigmaKm = locationUncertaintyKm(event);
+  if (sigmaKm == null) return null;
 
   // Clamp uncertainty to reasonable range (0.1 km to 100 km)
-  const clampedUncertainty = Math.max(0.1, Math.min(horizontalUncertainty, 100));
+  const clampedUncertainty = Math.max(0.1, Math.min(sigmaKm, 100));
   // Inverse-VARIANCE weighting: the minimum-variance unbiased combination of
   // independent location estimates is sum(x_i / s_i^2) / sum(1 / s_i^2). The
   // earlier 1/s weight under-weighted well-constrained solutions relative to
@@ -2941,48 +3683,54 @@ function getLocationWeight(event: EventData): number {
   return 1.0 / (clampedUncertainty * clampedUncertainty);
 }
 
+/** An averaged epicentre and the normalised weight each report contributed to it. */
+interface LocationAverage {
+  latitude: number;
+  longitude: number;
+  /** Normalised weights (summing to 1), in the order of the events passed. */
+  weights: number[];
+  /** True when every report stated σ and the weights are 1/σ²; false for equal weights. */
+  inverseVariance: boolean;
+}
+
 /**
- * Calculate uncertainty-weighted average location
+ * The averaged epicentre of a group.
  *
- * Uses inverse-variance weighting: events with lower location uncertainty
- * contribute more to the final average location.
- *
- * @param events - Array of events to average
- * @returns Object with weighted average latitude and longitude
+ * Inverse-variance weights need a σ for EVERY solution. When any report states none, the
+ * group is averaged with equal weights instead: inventing a σ for the missing report is
+ * exactly the placeholder the specification rules out (publication/main.tex §Catalogue
+ * Merge: a solution without a comparable quantified uncertainty is not given a placeholder
+ * value), any imputed value would decide the result, and with equal weights the epicentre
+ * no longer depends on which report happened to arrive with an uncertainty column — the
+ * same GeoNet solution imported through the FDSN service and through quakesearch CSV
+ * gives the same merged location.
  */
-function weightedLocationAverage(events: EventData[]): { latitude: number; longitude: number } {
+function locationAverage(events: EventData[]): LocationAverage {
   if (events.length === 0) {
-    return { latitude: 0, longitude: 0 };
+    return { latitude: 0, longitude: 0, weights: [], inverseVariance: false };
   }
   if (events.length === 1) {
-    return { latitude: events[0].latitude, longitude: events[0].longitude };
+    return { latitude: events[0].latitude, longitude: events[0].longitude, weights: [1], inverseVariance: false };
   }
 
-  // Calculate weights for each event
-  const weights = events.map(e => getLocationWeight(e));
-  const totalWeight = weights.reduce((sum, w) => sum + w, 0);
-
-  // If all weights are zero (shouldn't happen), fall back to simple average
-  if (totalWeight === 0) {
-    return {
-      latitude: events.reduce((sum, e) => sum + e.latitude, 0) / events.length,
-      longitude: averageLongitudes(events.map(e => e.longitude)),
-    };
-  }
+  const inverse = events.map(e => getLocationWeight(e));
+  const inverseVariance = inverse.every(w => w != null && w > 0);
+  const raw = inverseVariance ? (inverse as number[]) : events.map(() => 1);
+  const total = raw.reduce((sum, w) => sum + w, 0);
+  const weights = raw.map(w => w / total);
 
   // Weighted latitude average
-  const weightedLat = events.reduce((sum, e, i) => sum + e.latitude * weights[i], 0) / totalWeight;
+  const latitude = events.reduce((sum, e, i) => sum + e.latitude * weights[i], 0);
 
   // Weighted longitude average (with date line handling)
-  // Check for date line crossing
   const lons = events.map(e => e.longitude);
   const minLon = Math.min(...lons);
   const maxLon = Math.max(...lons);
 
-  let weightedLon: number;
+  let longitude: number;
   if (maxLon - minLon < 180) {
     // No date line crossing - simple weighted average
-    weightedLon = events.reduce((sum, e, i) => sum + e.longitude * weights[i], 0) / totalWeight;
+    longitude = events.reduce((sum, e, i) => sum + e.longitude * weights[i], 0);
   } else {
     // Date line crossing - use Cartesian method with weights
     let sumX = 0;
@@ -2992,10 +3740,24 @@ function weightedLocationAverage(events: EventData[]): { latitude: number; longi
       sumX += Math.cos(radians) * weights[i];
       sumY += Math.sin(radians) * weights[i];
     }
-    weightedLon = Math.atan2(sumY / totalWeight, sumX / totalWeight) * 180 / Math.PI;
+    longitude = Math.atan2(sumY, sumX) * 180 / Math.PI;
   }
 
-  return { latitude: weightedLat, longitude: weightedLon };
+  return { latitude, longitude, weights, inverseVariance };
+}
+
+/**
+ * Calculate uncertainty-weighted average location
+ *
+ * Uses inverse-variance weighting when every event reports a horizontal uncertainty
+ * (lower uncertainty contributes more), and equal weights otherwise (see locationAverage).
+ *
+ * @param events - Array of events to average
+ * @returns Object with weighted average latitude and longitude
+ */
+function weightedLocationAverage(events: EventData[]): { latitude: number; longitude: number } {
+  const { latitude, longitude } = locationAverage(events);
+  return { latitude, longitude };
 }
 
 /**
@@ -3007,27 +3769,24 @@ function weightedLocationAverage(events: EventData[]): { latitude: number; longi
  * IMPROVEMENT: Uses uncertainty-weighted location averaging
  */
 function mergeByAverage(events: EventData[]): MergedEventData {
-  // Use uncertainty-weighted location averaging
-  const { latitude: avgLat, longitude: avgLon } = weightedLocationAverage(events);
+  // Uncertainty-weighted location averaging (equal weights when any report lacks σ)
+  const location = locationAverage(events);
 
   // IMPROVEMENT: Use magnitude hierarchy instead of averaging
   // Averaging Mw=7.0 with ML=6.5 would give M=6.75 (incorrect due to saturation)
   const bestMagnitude = selectBestMagnitude(events);
 
   // IMPROVEMENT: Use best depth based on uncertainty instead of simple average
-  const bestDepth = selectBestDepth(events);
+  const depthChoice = selectBestDepthCandidate(events);
 
   // Use the earliest time - use pre-computed _timestamp if available for performance
-  const earliestEvent = events.reduce((earliest, e) => {
-    const eTime = e._timestamp ?? new Date(e.time).getTime();
-    const earliestTime = earliest._timestamp ?? new Date(earliest.time).getTime();
-    return eTime < earliestTime ? e : earliest;
-  });
+  const earliestEvent = events.reduce((earliest, e) => (compareRecordOrder(e, earliest) < 0 ? e : earliest));
 
-  // Spread the highest-quality source event so that QuakeML data, focal mechanisms,
-  // agency fields, and all other metadata are preserved on the merged record.
-  // The averaged location, best-hierarchy magnitude, best-uncertainty depth, and
-  // earliest time then overwrite only the fields that were actually computed.
+  // Spread the highest-quality source event so that its identity (source_id,
+  // event_public_id), event-level fields and supplementary products are kept. The averaged
+  // location, best-hierarchy magnitude, best-uncertainty depth and earliest time then
+  // overwrite the fields that were actually computed, and everything that described the
+  // spread event's OWN solution is cleared below.
   const bestQualityEvent = events
     .map(e => ({ event: e, score: calculateQualityScore(e) }))
     .reduce((best, curr) => curr.score > best.score ? curr : best)
@@ -3036,26 +3795,39 @@ function mergeByAverage(events: EventData[]): MergedEventData {
   const merged: MergedEventData = {
     ...bestQualityEvent,
     time: earliestEvent.time,
-    latitude: avgLat,
-    longitude: avgLon,
-    depth: bestDepth,
+    latitude: location.latitude,
+    longitude: location.longitude,
+    depth: depthChoice?.depth ?? null,
     magnitude: bestMagnitude.value,
     source: 'merged',
+    // No report's solution was published as a whole, so none is `selected` (C2).
     sourceEvents: buildSourceEvents(events)
   };
   // The source_id kept from the base event is qualified by ITS agency, not by 'merged'.
   (merged as { _sourceIdAgency?: string })._sourceIdAgency = bestQualityEvent.source;
 
-  // The spread above carries bestQualityEvent's OWN magnitude, location and depth metadata.
-  // Every one of those three quantities has just been replaced by something that event did
-  // not report — a hierarchy-selected magnitude that may come from another source, a
-  // weighted-average epicentre that matches no source, and the best-constrained depth — so
-  // leaving the metadata in place would mislabel the merged record (e.g. "Mw 5.9 ± 0.08 from
-  // 40 stations" when the Mw 5.9 came from a 12-station solution with ± 0.06, or a ± 1.2 km
+  // The spread above carries bestQualityEvent's OWN magnitude, location, depth and origin
+  // metadata. Every one of those quantities has just been replaced by something that event
+  // did not report — a hierarchy-selected magnitude that may come from another source, a
+  // weighted-average epicentre that matches no source, the best-constrained depth and the
+  // earliest origin time — so leaving the metadata in place would mislabel the merged
+  // record (e.g. "Mw 5.9 ± 0.08 from 40 stations" when the Mw 5.9 came from a 12-station
+  // solution, or another agency's time uncertainty, method, gap and station count on an
+  // epicentre no agency located).
   if (events.length > 1) {
     for (const field of MAGNITUDE_META_FIELDS) (merged as any)[field] = null;
     for (const field of LOCATION_META_FIELDS) (merged as any)[field] = null;
     for (const field of DEPTH_META_FIELDS) (merged as any)[field] = null;
+    for (const field of ORIGIN_META_FIELDS) (merged as any)[field] = null;
+    (merged as { _averagedOrigin?: boolean })._averagedOrigin = true;
+
+    // Provenance: which report each published quantity came from, and each report's share
+    // of the averaged epicentre (inverse-variance, or equal when a report stated no σ).
+    location.weights.forEach((weight, index) => {
+      merged.sourceEvents[index].locationWeight = Math.round(weight * 1e6) / 1e6;
+    });
+    if (bestMagnitude.sourceIndex != null) merged.sourceEvents[bestMagnitude.sourceIndex].magnitudeSelected = true;
+    if (depthChoice) merged.sourceEvents[depthChoice.index].depthSelected = true;
   }
 
   // Set after the clear: the selected magnitude's OWN metadata, from the measurement the
@@ -3077,20 +3849,117 @@ function mergeByAverage(events: EventData[]): MergedEventData {
   return merged;
 }
 
+/** Parse an ISO time, or null. */
+function parseTime(value: unknown): number | null {
+  if (typeof value !== 'string' || !value) return null;
+  const t = Date.parse(value);
+  return Number.isFinite(t) ? t : null;
+}
+
+/** Parse a JSON column that may already be an object. */
+function parseJsonColumn(value: unknown): unknown {
+  if (typeof value !== 'string') return value ?? null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Merge by selecting the newest event
- * Uses pre-computed _timestamp if available for performance
+ * When a report's solution was determined, in ms since the epoch: the creation time of the
+ * origin it publishes (QuakeML Origin/creationInfo/creationTime, from the parsed QuakeML or
+ * the stored `origins` column), else the latest of the event record's creation and
+ * modification times (`creation_info`). Null when the report does not say. The platform's
+ * own created_at is deliberately not used: it records when the file was uploaded, not
+ * when the agency computed the solution.
+ */
+function determinationTime(e: EventData): number | null {
+  let origin: { creationInfo?: { creationTime?: string } } | undefined = preferredQuakemlOrigin(e);
+  if (!origin) {
+    const stored = parseJsonColumn(e.origins);
+    if (Array.isArray(stored) && stored.length > 0) {
+      const list = stored.filter((o): o is Record<string, any> => o != null && typeof o === 'object');
+      origin =
+        list.find(o => typeof e.preferred_origin_id === 'string' && o.publicID === e.preferred_origin_id) ??
+        list.find(o => o.latitude?.value === e.latitude && o.longitude?.value === e.longitude) ??
+        (list.length === 1 ? list[0] : undefined);
+    }
+  }
+  const originTime = parseTime(origin?.creationInfo?.creationTime);
+  if (originTime != null) return originTime;
+
+  const info = (e.quakeml?.creationInfo ?? parseJsonColumn(e.creation_info)) as
+    | { creationTime?: unknown; modificationTime?: unknown }
+    | null
+    | undefined;
+  const times = [parseTime(info?.creationTime), parseTime(info?.modificationTime)].filter(
+    (t): t is number => t != null
+  );
+  return times.length > 0 ? Math.max(...times) : null;
+}
+
+/** Review stage of a solution: later analyses supersede earlier ones. */
+const EVALUATION_STATUS_RANK: Readonly<Record<string, number>> = {
+  final: 4,
+  reviewed: 3,
+  confirmed: 2,
+  preliminary: 1,
+  rejected: 0,
+};
+
+/** Rank of a report's evaluation status, or null when it reports none (or an unknown one). */
+function evaluationStatusRank(e: EventData): number | null {
+  const status = e.evaluation_status ?? preferredQuakemlOrigin(e)?.evaluationStatus;
+  if (typeof status !== 'string') return null;
+  const rank = EVALUATION_STATUS_RANK[status.trim().toLowerCase()];
+  return rank === undefined ? null : rank;
+}
+
+/**
+ * Reports ranked most recently determined first — the 'newest' strategy, specified as
+ * "the most recently determined solution is retained, where later analyses supersede
+ * earlier ones" (publication/main.tex §Catalogue Merge). Reports of one earthquake differ
+ * in ORIGIN time only by location and velocity-model scatter, so the latest origin time
+ * (what 'newest' used to pick) says nothing about which analysis is newer (finding #23).
+ *
+ * Each step is used only when every report in the group provides its evidence, so a
+ * report is never preferred merely because another one is silent:
+ *  1. determination time (see determinationTime), latest first;
+ *  2. evaluation status, final > reviewed > confirmed > preliminary > rejected;
+ *  3. the quality ranking (rankByQuality: common quality metrics, network authority when
+ *     a report has none, then a fixed record order).
+ * A report its agency marked 'rejected' never wins while another report is available.
+ */
+function rankByNewest(events: EventData[]): EventData[] {
+  const times = events.map(determinationTime);
+  const statuses = events.map(evaluationStatusRank);
+  const allTimed = times.every(t => t != null);
+  const allStatused = statuses.every(s => s != null);
+  const qualityPosition = new Map(rankByQuality(events).map((e, i) => [e, i] as [EventData, number]));
+  const indexOf = new Map(events.map((e, i) => [e, i] as [EventData, number]));
+
+  return events.slice().sort((a, b) => {
+    const ia = indexOf.get(a)!;
+    const ib = indexOf.get(b)!;
+    const rejectedA = statuses[ia] === 0;
+    const rejectedB = statuses[ib] === 0;
+    if (rejectedA !== rejectedB) return rejectedA ? 1 : -1;
+    if (allTimed && times[ia] !== times[ib]) return times[ib]! - times[ia]!;
+    if (allStatused && statuses[ia] !== statuses[ib]) return statuses[ib]! - statuses[ia]!;
+    return qualityPosition.get(a)! - qualityPosition.get(b)!;
+  });
+}
+
+/**
+ * Merge by keeping the most recently determined solution (see rankByNewest).
  */
 function mergeByNewest(events: EventData[]): MergedEventData {
-  const newestEvent = events.reduce((newest, e) => {
-    const eTime = e._timestamp ?? new Date(e.time).getTime();
-    const newestTime = newest._timestamp ?? new Date(newest.time).getTime();
-    return eTime > newestTime ? e : newest;
-  });
+  const newestEvent = rankByNewest(events)[0];
 
   return {
     ...newestEvent,
-    sourceEvents: buildSourceEvents(events)
+    sourceEvents: buildSourceEvents(events, events.indexOf(newestEvent))
   };
 }
 
@@ -3100,9 +3969,10 @@ function mergeByNewest(events: EventData[]): MergedEventData {
  */
 function mergeByCompleteness(events: EventData[]): MergedEventData {
   // Score each event once to avoid re-computing the accumulator's score on every
-  // reduce iteration (which was O(n²) field-count traversals).
+  // reduce iteration (which was O(n²) field-count traversals). Working values the merge
+  // attaches (`_`-prefixed) are not data and are not counted.
   const scoreEvent = (e: EventData): number => {
-    let score = Object.values(e).filter(v => v != null).length;
+    let score = Object.entries(e).filter(([key, v]) => v != null && !key.startsWith('_')).length;
     if (e.quakeml) {
       score += 10;
       if (e.quakeml.origins && e.quakeml.origins.length > 0) score += 5;
@@ -3120,199 +3990,283 @@ function mergeByCompleteness(events: EventData[]): MergedEventData {
 
   const mostComplete = events
     .map(e => ({ event: e, score: scoreEvent(e) }))
-    .reduce((best, curr) => curr.score > best.score ? curr : best)
+    .reduce((best, curr) =>
+      curr.score !== best.score
+        ? (curr.score > best.score ? curr : best)
+        : (compareRecordOrder(curr.event, best.event) < 0 ? curr : best)
+    )
     .event;
 
   return {
     ...mostComplete,
-    sourceEvents: buildSourceEvents(events)
+    sourceEvents: buildSourceEvents(events, events.indexOf(mostComplete))
   };
+}
+
+/** The quality metrics the merge-time score reads, as one report states them. */
+interface QualityEvidence {
+  stationCount: number | null;
+  azimuthalGap: number | null;
+  standardError: number | null;
+  magnitudeUncertainty: number | null;
+  evaluationStatus: string | null;
+  magnitudeType: string | null;
+  magnitude: number | null;
+}
+
+type QualityTerm = 'stations' | 'gap' | 'rms' | 'magnitudeUncertainty' | 'magnitudeType' | 'status';
+const QUALITY_TERMS: ReadonlyArray<QualityTerm> = ['stations', 'gap', 'rms', 'magnitudeUncertainty', 'magnitudeType', 'status'];
+/**
+ * The terms that are evidence of how well a SOLUTION is constrained or reviewed. A
+ * magnitude-type label on its own is not: it says which scale was measured.
+ */
+const SOLUTION_EVIDENCE_TERMS: ReadonlyArray<QualityTerm> = ['stations', 'gap', 'rms', 'magnitudeUncertainty', 'status'];
+
+/**
+ * Resolve every metric from the parsed QuakeML when it is present, and otherwise from the
+ * FLAT MergedEvent columns that lib/quakeml-to-db.ts extracts.
+ */
+function qualityEvidence(event: EventData): QualityEvidence {
+  const origin = preferredQuakemlOrigin(event);
+  // Preferred magnitude, when parsed QuakeML is attached to the event.
+  const mag = event.quakeml?.magnitudes?.find(m =>
+    m.publicID === event.quakeml?.preferredMagnitudeID
+  ) || event.quakeml?.magnitudes?.[0];
+  const finite = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null);
+  return {
+    stationCount: finite(origin?.quality?.usedStationCount ?? event.used_station_count),
+    azimuthalGap: finite(origin?.quality?.azimuthalGap ?? event.azimuthal_gap),
+    standardError: finite(origin?.quality?.standardError ?? event.standard_error),
+    magnitudeUncertainty: finite(mag?.mag?.uncertainty ?? event.magnitude_uncertainty),
+    evaluationStatus: text(
+      origin?.evaluationStatus ?? mag?.evaluationStatus ?? event.evaluation_status ?? event.magnitude_evaluation_status
+    ),
+    magnitudeType: text(mag?.type ?? event.magnitude_type),
+    magnitude: finite(mag?.mag?.value ?? event.magnitude),
+  };
+}
+
+/** Whether a report states the metric a term scores. */
+function reportsTerm(evidence: QualityEvidence, term: QualityTerm): boolean {
+  switch (term) {
+    case 'stations': return evidence.stationCount != null && evidence.stationCount > 0;
+    case 'gap': return evidence.azimuthalGap != null && evidence.azimuthalGap >= 0;
+    case 'rms': return evidence.standardError != null && evidence.standardError >= 0;
+    case 'magnitudeUncertainty': return evidence.magnitudeUncertainty != null && evidence.magnitudeUncertainty >= 0;
+    case 'magnitudeType': return getMagnitudeTypeCategory(evidence.magnitudeType ?? undefined) != null;
+    case 'status': return evidence.evaluationStatus != null;
+  }
+}
+
+/** Points for a magnitude type's rank (getMagnitudePriority): Mw 15 ... Md 3, unknown 0. */
+function magnitudeTypePoints(priority: number): number {
+  if (priority <= 1) return 15;
+  if (priority <= 1.5) return 13;
+  if (priority <= 2) return 12;
+  if (priority <= 2.5) return 10;
+  if (priority <= 3) return 9;
+  if (priority <= 4) return 6;
+  if (priority <= 5) return 3;
+  return 0;
+}
+
+/**
+ * Points one term earns (0 when the metric is absent). The magnitude-type preference is
+ * judged at `referenceMagnitude`, the size of the earthquake (see getMagnitudePriority).
+ */
+function qualityTermPoints(evidence: QualityEvidence, term: QualityTerm, referenceMagnitude: number | null): number {
+  switch (term) {
+    case 'stations': {
+      // Station count (0-25 points, logarithmic scale)
+      // 6 stations = 50%, 15 stations = 80%, 30+ stations = 100%
+      // Using logarithmic scale because quality improvement diminishes with more stations
+      const stationCount = evidence.stationCount ?? 0;
+      // log2(6) ≈ 2.58, log2(30) ≈ 4.9
+      return stationCount > 0 ? Math.min(25, 25 * (Math.log2(stationCount + 1) / Math.log2(32))) : 0;
+    }
+    case 'gap': {
+      // Azimuthal gap (0-20 points, lower is better)
+      // Gap < 120° = excellent (full score), gap > 270° = poor
+      // ISC-GEM considers < 180° as acceptable
+      const gap = evidence.azimuthalGap;
+      if (gap == null) return 0;
+      if (gap <= 120) return 20;
+      if (gap <= 180) return 15;
+      if (gap <= 270) return 10 * (1 - (gap - 180) / 90);
+      return 0; // > 270° = 0 points
+    }
+    case 'rms': {
+      // Standard error / RMS residual (0-15 points, lower is better)
+      // RMS < 0.3s = excellent, RMS > 1.0s = poor (based on ISC standards)
+      const rms = evidence.standardError;
+      if (rms == null) return 0;
+      if (rms <= 0.3) return 15;
+      if (rms <= 0.5) return 12;
+      if (rms <= 1.0) return 8;
+      if (rms <= 2.0) return 4;
+      return 0; // > 2.0s = 0 points
+    }
+    case 'magnitudeUncertainty': {
+      // Magnitude uncertainty (0-15 points, lower is better)
+      // Uncertainty < 0.1 = excellent, > 0.3 = poor
+      const unc = evidence.magnitudeUncertainty;
+      if (unc == null) return 0;
+      if (unc <= 0.1) return 15;
+      if (unc <= 0.2) return 12;
+      if (unc <= 0.3) return 8;
+      if (unc <= 0.5) return 4;
+      return 0; // > 0.5 = 0 points
+    }
+    case 'magnitudeType':
+      // Magnitude type preference (0-15 points): Mw first, then the scale that is best
+      // calibrated and unsaturated at this size — the same family classifier and order
+      // the magnitude selection uses (getMagnitudePriority), so GeoNet's bare 'M' is the
+      // ML family and a local event's ML is not out-scored by a raw teleseismic mb.
+      return evidence.magnitudeType
+        ? magnitudeTypePoints(getMagnitudePriority(evidence.magnitudeType, referenceMagnitude))
+        : 0;
+    case 'status': {
+      // Evaluation status (0-10 points)
+      // final/reviewed > confirmed > preliminary; rejected/unknown = 0 points
+      const status = evidence.evaluationStatus?.toLowerCase();
+      if (status === 'final' || status === 'reviewed') return 10;
+      if (status === 'confirmed') return 6;
+      if (status === 'preliminary') return 2;
+      return 0;
+    }
+  }
 }
 
 /**
  * Calculate quality score for an event based on available quality metrics
  */
 function calculateQualityScore(event: EventData): number {
-  let score = 0;
-
-  // Try to get preferred origin for quality metrics
-  const origin = event.quakeml?.origins?.find(o =>
-    o.publicID === event.quakeml?.preferredOriginID
-  ) || event.quakeml?.origins?.[0];
-
-  // Preferred magnitude, when parsed QuakeML is attached to the event.
-  const mag = event.quakeml?.magnitudes?.find(m =>
-    m.publicID === event.quakeml?.preferredMagnitudeID
-  ) || event.quakeml?.magnitudes?.[0];
-
-  // Resolve every metric from the parsed QuakeML when it is present, and otherwise from the
-  // FLAT MergedEvent columns that lib/quakeml-to-db.ts extracts.
-  const stationCount = origin?.quality?.usedStationCount ?? event.used_station_count ?? 0;
-  const azimuthalGap = origin?.quality?.azimuthalGap ?? event.azimuthal_gap ?? null;
-  const standardError = origin?.quality?.standardError ?? event.standard_error ?? null;
-  const magUncertainty = mag?.mag?.uncertainty ?? event.magnitude_uncertainty ?? null;
-  const magTypeRaw = mag?.type ?? event.magnitude_type ?? null;
-  const evaluationStatus =
-    origin?.evaluationStatus ??
-    mag?.evaluationStatus ??
-    event.evaluation_status ??
-    event.magnitude_evaluation_status ??
-    null;
-
-  // Station count (0-25 points, logarithmic scale)
-  // 6 stations = 50%, 15 stations = 80%, 30+ stations = 100%
-  // Using logarithmic scale because quality improvement diminishes with more stations
-  if (stationCount > 0) {
-    // log2(6) ≈ 2.58, log2(30) ≈ 4.9
-    score += Math.min(25, 25 * (Math.log2(stationCount + 1) / Math.log2(32)));
-  }
-
-  // Azimuthal gap (0-20 points, lower is better)
-  // Gap < 120° = excellent (full score), gap > 270° = poor
-  // ISC-GEM considers < 180° as acceptable
-  if (azimuthalGap != null) {
-    if (azimuthalGap <= 120) {
-      score += 20;
-    } else if (azimuthalGap <= 180) {
-      score += 15;
-    } else if (azimuthalGap <= 270) {
-      score += 10 * (1 - (azimuthalGap - 180) / 90);
-    }
-    // > 270° = 0 points
-  }
-
-  // Standard error / RMS residual (0-15 points, lower is better)
-  // RMS < 0.3s = excellent, RMS > 1.0s = poor (based on ISC standards)
-  if (standardError != null) {
-    if (standardError <= 0.3) {
-      score += 15;
-    } else if (standardError <= 0.5) {
-      score += 12;
-    } else if (standardError <= 1.0) {
-      score += 8;
-    } else if (standardError <= 2.0) {
-      score += 4;
-    }
-    // > 2.0s = 0 points
-  }
-
-  // Magnitude uncertainty (0-15 points, lower is better)
-  // Uncertainty < 0.1 = excellent, > 0.3 = poor
-  if (magUncertainty != null) {
-    if (magUncertainty <= 0.1) {
-      score += 15;
-    } else if (magUncertainty <= 0.2) {
-      score += 12;
-    } else if (magUncertainty <= 0.3) {
-      score += 8;
-    } else if (magUncertainty <= 0.5) {
-      score += 4;
-    }
-    // > 0.5 = 0 points
-  }
-
-  // Magnitude type preference (0-15 points)
-  // Based on ISC-GEM hierarchy: Mw > Ms > mb > ML > Md
-  // Mw (moment magnitude) is most reliable and physically meaningful
-  if (magTypeRaw) {
-    // Same prefix classifier getMagnitudePriority uses, so the Quality strategy
-    // ranks a solution by the same magnitude family the rest of the merge does.
-    // The exact-match whitelist this replaced scored GeoNet's "MLv"/"mB"/"Mw(mB)"
-    // variants as unknown (0) while getMagnitudePriority already recognised them.
-    switch (getMagnitudeTypeCategory(magTypeRaw)) {
-      case 'Mw': score += 15; break; // Moment magnitude
-      case 'Ms': score += 12; break; // Surface wave magnitude
-      case 'mb':
-      case 'mB':
-      case 'mbLg': score += 9; break;  // Body wave family
-      case 'ML': score += 6; break;  // Local magnitude
-      case 'Md': score += 3; break;  // Duration/coda magnitude
-      default: break;                // Unknown types = 0 points
-    }
-  }
-
-  // Evaluation status (0-10 points)
-  // final/reviewed > confirmed > preliminary
-  if (evaluationStatus) {
-    const status = evaluationStatus.toLowerCase();
-    if (status === 'final' || status === 'reviewed') {
-      score += 10;
-    } else if (status === 'confirmed') {
-      score += 6;
-    } else if (status === 'preliminary') {
-      score += 2;
-    }
-    // rejected/unknown = 0 points
-  }
-
+  const evidence = qualityEvidence(event);
   // Every event is scored on the same fixed 100-point budget (25+20+15+15+15+10), never
   // against only the metrics it happens to report. A record with NO quality metadata used
   // to take a separate 25-point "basic completeness" branch, which outranked a documented
   // event scoring below 25 on the real scale - so stripping metadata raised a source's rank.
   // Now an event that reports nothing scores 0: absence of evidence earns no points, and
   // having a depth, magnitude and time is the admission ticket, not a quality signal.
-  return score;
+  // Comparing two reports, though, is rankByQuality's job: it only compares the metrics
+  // both report.
+  return QUALITY_TERMS.reduce((score, term) => score + qualityTermPoints(evidence, term, evidence.magnitude), 0);
+}
+
+/**
+ * Reports ranked best-constrained first — the 'quality' strategy (finding gi#0).
+ *
+ * Reports are compared only on the quality metrics that EVERY report in the group states.
+ * Scoring a missing metric as 0 made the winner depend on how the data arrived: GeoNet's
+ * FDSN importer stores no station count, gap, RMS or status for M<5 events, so its
+ * solution scored 0 and lost to any report with a recognised magnitude label, while the
+ * same solution uploaded from a quakesearch CSV won. When some report states no quality
+ * evidence at all, nothing about the solutions can be compared, and network authority
+ * (getNetworkPriority, regional overrides included) decides instead. Remaining ties go to
+ * authority, then to the report with more of the core record populated, then to a fixed
+ * record order — never to input order.
+ */
+function rankByQuality(events: EventData[]): EventData[] {
+  const evidence = events.map(qualityEvidence);
+  const comparable = evidence.every(ev => SOLUTION_EVIDENCE_TERMS.some(term => reportsTerm(ev, term)));
+  const common = comparable ? QUALITY_TERMS.filter(term => evidence.every(ev => reportsTerm(ev, term))) : [];
+  const sizes = evidence
+    .map((ev, i) => mwForOrdering(events[i]) ?? ev.magnitude)
+    .filter((m): m is number => m != null && Number.isFinite(m));
+  const reference = sizes.length > 0 ? median(sizes) : null;
+  const scores = evidence.map(ev => common.reduce((sum, term) => sum + qualityTermPoints(ev, term, reference), 0));
+  const authority = events.map(e => getNetworkPriority(e.source, e));
+  const populated = events.map(e => [e.depth, e.magnitude, e.magnitude_type].filter(v => v != null).length);
+
+  return events
+    .map((event, index) => index)
+    .sort((a, b) =>
+      scores[b] - scores[a] ||
+      authority[a] - authority[b] ||
+      populated[b] - populated[a] ||
+      compareRecordOrder(events[a], events[b])
+    )
+    .map(index => events[index]);
 }
 
 /**
  * Merge by selecting event with best quality metrics
  */
 function mergeByQuality(events: EventData[]): MergedEventData {
-  // Pre-score all events once to avoid O(n²) recalculation of the accumulator
-  // on every iteration of a plain reduce.
-  // Equal scores (two metadata-free records) are broken by how much of the core
-  // record is populated, then by time, never by input order: the twin that reports a
-  // depth must win over the one that does not, whichever arrived first.
-  const populated = (e: EventData) => [e.depth, e.magnitude, e.magnitude_type].filter((v) => v != null).length;
-  const bestEvent = events
-    .map(e => ({ event: e, score: calculateQualityScore(e) }))
-    .reduce((best, curr) => {
-      if (curr.score !== best.score) return curr.score > best.score ? curr : best;
-      const p = populated(curr.event) - populated(best.event);
-      if (p !== 0) return p > 0 ? curr : best;
-      return new Date(curr.event.time).getTime() < new Date(best.event.time).getTime() ? curr : best;
-    })
-    .event;
+  const bestEvent = rankByQuality(events)[0];
 
   return {
     ...bestEvent,
-    sourceEvents: buildSourceEvents(events)
+    sourceEvents: buildSourceEvents(events, events.indexOf(bestEvent))
   };
+}
+
+/**
+ * Custom Order (contract C10): the report from the highest-ranked catalogue in
+ * `priorityOrder` (catalogue IDs, highest priority first) is kept. Reports from catalogues
+ * the ranking does not list come after every listed one; remaining ties are broken by
+ * quality (rankByQuality).
+ */
+function selectByPriorityOrder(events: EventData[], priorityOrder?: string[]): EventData {
+  const order = Array.isArray(priorityOrder) ? priorityOrder.map(String) : [];
+  const rankOf = (e: EventData) => {
+    const position = order.indexOf(String(e.catalogueId ?? ''));
+    return position >= 0 ? position : order.length;
+  };
+  const best = Math.min(...events.map(rankOf));
+  const tied = events.filter(e => rankOf(e) === best);
+  return tied.length === 1 ? tied[0] : rankByQuality(tied)[0];
+}
+
+/**
+ * "<Agency> > Others" (the 'geonet' and 'gns' options, or any agency name): keep the report
+ * that agency produced. The agency is recognised by its agency code or the catalogue's own
+ * metadata (resolveAgency) and otherwise by whole words of the catalogue name — never by a
+ * substring, which made 'Merged NZ Catalogue' and 'USGS ComCat NZ region' GeoNet. A
+ * priority that names no known agency matches catalogue names word for word. Among several
+ * such reports the best quality wins; with none, network authority decides, then quality.
+ */
+function selectByAgencyPreference(events: EventData[], priority: string): EventData {
+  const agency = agencyFromName(priority) ?? agencyFromCode(priority);
+  let preferred: EventData[];
+  if (agency) {
+    preferred = events.filter(e => resolveAgency(e) === agency);
+  } else {
+    const wanted = nameTokens(priority);
+    preferred = wanted.length === 0 ? [] : events.filter(e => {
+      const words = new Set(nameTokens(String(e.source ?? '')));
+      return wanted.every(word => words.has(word));
+    });
+  }
+  if (preferred.length === 1) return preferred[0];
+  if (preferred.length > 1) return rankByQuality(preferred)[0];
+  return selectByNetworkAuthority(events);
 }
 
 /**
  * Merge by priority (based on source)
  */
-function mergeByPriority(events: EventData[], priority: string): MergedEventData {
-  let selectedEvent: EventData | undefined;
+function mergeByPriority(events: EventData[], priority: string, priorityOrder?: string[]): MergedEventData {
+  let selectedEvent: EventData;
 
   if (priority === 'newest') {
-    selectedEvent = events.reduce((newest, e) => {
-      const eTime = (e as any)._timestamp ?? new Date(e.time).getTime();
-      const newestTime = (newest as any)._timestamp ?? new Date(newest.time).getTime();
-      return eTime > newestTime ? e : newest;
-    });
+    selectedEvent = rankByNewest(events)[0];
   } else if (priority === 'quality') {
     // Use quality-based selection
-    return mergeByQuality(events);
+    selectedEvent = rankByQuality(events)[0];
   } else if (priority === 'authority') {
     // Use network authority hierarchy with regional awareness
     selectedEvent = selectByNetworkAuthority(events);
+  } else if (priority === 'custom') {
+    selectedEvent = selectByPriorityOrder(events, priorityOrder);
   } else {
-    // Try to find event from specified network
-    const lowerPriority = priority.toLowerCase();
-    selectedEvent = events.find(e => e.source.toLowerCase().includes(lowerPriority));
-
-    // If not found, use network authority hierarchy
-    if (!selectedEvent) {
-      console.log(`[Merge] Priority source '${priority}' not found, using network authority hierarchy`);
-      selectedEvent = selectByNetworkAuthority(events);
-    }
+    selectedEvent = selectByAgencyPreference(events, String(priority ?? ''));
   }
 
   return {
     ...selectedEvent,
-    sourceEvents: buildSourceEvents(events)
+    sourceEvents: buildSourceEvents(events, events.indexOf(selectedEvent))
   };
 }
 
@@ -3337,6 +4291,8 @@ export async function previewMerge(
     const catalogue = sourceCatalogues[i];
     const catalogueIdStr = String(catalogue.id);
     const eventsArray = await loadCompleteCatalogueEvents(catalogueIdStr);
+    // The same agency identity the persist path uses, so preview and merge select alike.
+    const catalogueAgency = catalogueAgencyOf(catalogue, await loadSourceCatalogueDocument(catalogueIdStr));
 
     // Assign color to catalogue
     catalogueColors[catalogueIdStr] = colors[i % colors.length];
@@ -3350,6 +4306,7 @@ export async function previewMerge(
         source: previewSource,
         catalogueId: catalogueIdStr,
         catalogueName: catalogue.name,
+        _catalogueAgency: catalogueAgency,
       } as EventData);
     }
   }
@@ -3435,8 +4392,19 @@ function performMergeWithGroups(
       );
     }
 
+    // Contested association (see MatchGroup.ambiguous): the closest pairing was kept, but a
+    // reviewer should confirm it — dense sequences are where fixed windows mislead.
+    if (matchGroup.ambiguous) {
+      validationWarnings.push(
+        'Ambiguous association: a report in this group was nearly as close, in time and distance, to ' +
+        'another event that could not join it (a second report from a catalogue already in the group, ' +
+        'or one too far from the rest); the closest match was kept.'
+      );
+    }
+
     const isSuspicious =
       matchGroup.regrouped ||
+      matchGroup.ambiguous ||
       (matchingEvents.length > 1 && !validateEventGroup(matchingEvents));
 
     if (matchingEvents.length > 1) {
@@ -3470,32 +4438,16 @@ function performMergeWithGroups(
       }
     }
 
-    // Determine which event would be selected.
-    // For 'average' the merged location is interpolated and won't match any source event
-    // exactly — identify the contributing event by time alone (mergeByAverage uses the
-    // earliest event's timestamp). For all other strategies a single source event is
-    // selected wholesale, so all three fields must agree.
+    // The report whose solution the merge publishes is the one it marks `selected` in the
+    // provenance (C2); source events are in group order. An averaged epicentre publishes
+    // no single report's solution, so no member is selected (-1).
     const mergedEvent = mergeEventGroup(matchingEvents, config);
-    // The selected source keeps its id on the merged record, so match on that
-    // first; comparing time/coordinates picked the wrong twin when two sources
-    // reported identical origins with different quality.
-    let selectedEventIndex = matchingEvents.findIndex(e => e.id === mergedEvent.id);
-    if (selectedEventIndex < 0) {
-      if (config.mergeStrategy === 'average') {
-        selectedEventIndex = matchingEvents.findIndex(e => e.time === mergedEvent.time);
-      } else {
-        selectedEventIndex = matchingEvents.findIndex(e =>
-          e.time === mergedEvent.time &&
-          e.latitude === mergedEvent.latitude &&
-          e.longitude === mergedEvent.longitude
-        );
-      }
-    }
+    const selectedEventIndex = mergedEvent.sourceEvents.findIndex(entry => entry.selected === true);
 
     return {
       id: `group-${i}`,
       events: matchingEvents,
-      selectedEventIndex: selectedEventIndex >= 0 ? selectedEventIndex : 0,
+      selectedEventIndex,
       isSuspicious,
       validationWarnings,
     };
@@ -3525,10 +4477,29 @@ export async function getMergedEvents(catalogueId: string) {
 
 // Export internal functions for testing
 export {
+  loadCompleteCatalogueEvents,
   unionMergeFields,
   UNION_SCALAR_FIELDS,
   UNION_BLOB_FIELDS,
+  ORIGIN_META_FIELDS,
+  LOCATION_META_FIELDS,
   regroupFailedEvents,
+  pairSeparation,
+  sourceKey,
+  rankByQuality,
+  rankByNewest,
+  determinationTime,
+  selectByPriorityOrder,
+  locationAverage,
+  selectBestDepthCandidate,
+  unionFocalMechanisms,
+  isMwProxy,
+  // Agency identity
+  agencyFromName,
+  agencyFromCode,
+  resolveAgency,
+  catalogueAgencyOf,
+  inRegionBounds,
   buildMergedEventFields,
   groupMatchingEvents,
   performMergeWithGroups,

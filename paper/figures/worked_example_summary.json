@@ -1,0 +1,854 @@
+{
+ "seed": 42,
+ "inputs": {
+  "stations_geonet_like": 166,
+  "stations_agency_b": 67,
+  "true_events": 1843518,
+  "true_background_m23_per_year": 3173.7,
+  "true_aftershocks": 843518,
+  "planted_b_background": 1.0,
+  "planted_b_aftershocks": 1.3,
+  "cluster_fraction_m2": 0.23,
+  "baseline_windows": [
+   60,
+   50
+  ],
+  "min_quality": 70
+ },
+ "catalogues": [
+  {
+   "name": "Synthetic GeoNet-like catalogue",
+   "events": 113427,
+   "median_q": 69,
+   "grades": {
+    "A+": 2105,
+    "A": 13473,
+    "B+": 21892,
+    "B": 35329,
+    "C": 32565,
+    "D": 6283,
+    "F": 1780
+   },
+   "gap_over_180_pct": 25.4,
+   "mc_maxc": 1.8,
+   "mc_gft": 1.9,
+   "gft_source": "GFT",
+   "gft_level": 95,
+   "median_q_by_gap": {
+    "0-90": 87.0,
+    "90-180": 70.0,
+    "180-270": 53.0,
+    "270-360": 35.0
+   }
+  },
+  {
+   "name": "Synthetic Agency B catalogue",
+   "events": 101806,
+   "median_q": 69,
+   "grades": {
+    "A+": 2203,
+    "A": 11069,
+    "B+": 20800,
+    "B": 32653,
+    "C": 26073,
+    "D": 7127,
+    "F": 1881
+   },
+   "gap_over_180_pct": 29.4,
+   "mc_maxc": 1.4,
+   "mc_gft": 1.9,
+   "gft_source": "GFT",
+   "gft_level": 95,
+   "median_q_by_gap": {
+    "0-90": 87.0,
+    "90-180": 70.0,
+    "180-270": 55.0,
+    "270-360": 36.0
+   }
+  }
+ ],
+ "merge": {
+  "ingested": 215233,
+  "merged": 170377,
+  "duplicate_groups": 44856,
+  "removed": 44856,
+  "resolved_to": {
+   "synthetic-geonet-like": 14389,
+   "synthetic-agency-b": 30467
+  },
+  "first_only": 68571,
+  "second_only": 56950,
+  "injected_pairs": 47109,
+  "true_pairs_found": 43936,
+  "false_associations": 920,
+  "false_associations_with_aftershock": 915,
+  "missed_pairs": 3173,
+  "missed_by_reason": {
+   "gate:depth_range": 691,
+   "gate:magnitude_range": 2315,
+   "paired with a closer report": 26,
+   "outside matching window": 141
+  }
+ },
+ "merge_pct": {
+  "recall": 93.3,
+  "precision": 97.9,
+  "resolved_to_agency_b": 67.9
+ },
+ "quality": {
+  "retained": 86468,
+  "removed": 83909,
+  "retained_pct": 50.8,
+  "merged_median_q": 70,
+  "gap_over_180_merged": 39160,
+  "gap_over_180_removed_pct": 94.5,
+  "removed_with_gap_over_180_pct": 44.1,
+  "removed_share_by_provenance_pct": {
+   "first-only": 44.9,
+   "second-only": 42.9,
+   "duplicate-second": 6.6,
+   "duplicate-first": 5.5
+  },
+  "retention_by_magnitude_pct": [
+   {
+    "lo": 1,
+    "hi": 1.5,
+    "events": 57344,
+    "retained_pct": 41.8
+   },
+   {
+    "lo": 1.5,
+    "hi": 2,
+    "events": 52382,
+    "retained_pct": 58.0
+   },
+   {
+    "lo": 2,
+    "hi": 2.5,
+    "events": 25994,
+    "retained_pct": 62.9
+   },
+   {
+    "lo": 2.5,
+    "hi": 3,
+    "events": 9511,
+    "retained_pct": 69.0
+   },
+   {
+    "lo": 3,
+    "hi": 3.5,
+    "events": 2931,
+    "retained_pct": 78.6
+   },
+   {
+    "lo": 3.5,
+    "hi": 4,
+    "events": 816,
+    "retained_pct": 83.2
+   },
+   {
+    "lo": 4,
+    "hi": 10,
+    "events": 365,
+    "retained_pct": 87.7
+   }
+  ]
+ },
+ "completeness": {
+  "retained_maxc": {
+   "mc": 1.7,
+   "b": 0.8107300615091606,
+   "sigma_b": 0.003894815985180421,
+   "n": 43329,
+   "mc_source": "MAXC",
+   "gft_level": null
+  },
+  "retained_gft": {
+   "mc": 1.9,
+   "b": 0.864595192992676,
+   "sigma_b": 0.004879037566062367,
+   "n": 31402,
+   "mc_source": "GFT",
+   "gft_level": 95
+  },
+  "merged_maxc": {
+   "mc": 1.6,
+   "b": 0.8366062641390213,
+   "sigma_b": 0.002964304201214264,
+   "n": 79652,
+   "mc_source": "MAXC",
+   "gft_level": null
+  },
+  "merged_gft": {
+   "mc": 1.9,
+   "b": 0.9263440527174568,
+   "sigma_b": 0.004231690660147097,
+   "n": 47920,
+   "mc_source": "GFT",
+   "gft_level": 95
+  },
+  "concatenated_maxc": {
+   "mc": 1.6,
+   "b": 0.7975208220384346,
+   "sigma_b": 0.0023994624434284877,
+   "n": 110473,
+   "mc_source": "MAXC",
+   "gft_level": null
+  },
+  "merged_stability_cutoff": 2.7
+ },
+ "analysis": {
+  "cutoff": 2.7,
+  "cutoff_source": "b-value stability",
+  "retained_above": 6465,
+  "below_cutoff_removed": 80003,
+  "concatenated_above": 13312,
+  "injected_aftershock_share": 0.14756380510440836,
+  "declustered": 3927,
+  "removed_by_gk": 2538,
+  "gk_recall_of_injected": 0.9654088050314465,
+  "gk_background_removed": 1617,
+  "gk_background_removed_b": 1.1922762824563962,
+  "gk_background_removed_mean_magnitude": 3.045672783549788,
+  "retained_mean_magnitude": 3.1200177149265356,
+  "symmetric_removed": 3508,
+  "gr_retained": {
+   "b": 0.9984919025344081,
+   "sigma_b": 0.01241824668163991,
+   "a": 6.506496666059315,
+   "n": 6465
+  },
+  "gr_merged": {
+   "b": 1.060637404137053,
+   "sigma_b": 0.011466517832914707,
+   "a": 6.795991767069534,
+   "n": 8556
+  },
+  "gr_concatenated": {
+   "b": 1.0156463277030352,
+   "sigma_b": 0.008802800269879797,
+   "a": 6.866488393744843,
+   "n": 13312
+  },
+  "gr_retained_background": {
+   "b": 0.9552020300790642,
+   "sigma_b": 0.01286708089230093,
+   "a": 6.320275892238945,
+   "n": 5511
+  },
+  "gr_merged_background": {
+   "b": 1.0107275199639612,
+   "sigma_b": 0.011905751942672595,
+   "a": 6.586718825962137,
+   "n": 7207
+  },
+  "gr_retained_aftershocks": {
+   "b": 1.352607324108453,
+   "sigma_b": 0.043792279040914345,
+   "a": 6.631588149796919,
+   "n": 954
+  },
+  "gr_declustered": {
+   "b": 0.8832757920724792,
+   "sigma_b": 0.01409502586836981,
+   "a": 5.978905539866112,
+   "n": 3927
+  },
+  "gr_symmetric": {
+   "b": 0.8234394031669462,
+   "sigma_b": 0.015142792898369638,
+   "a": 5.694137713076873,
+   "n": 2957
+  }
+ },
+ "b_vs_cutoff": [
+  {
+   "cutoff": 1.5,
+   "merged": [
+    0.8,
+    0.003,
+    91999
+   ],
+   "retained": [
+    0.74,
+    0.003,
+    56562
+   ],
+   "retained_declustered": [
+    0.602,
+    0.004,
+    21818
+   ],
+   "merged_background": [
+    0.746,
+    0.003,
+    65521
+   ],
+   "retained_background": [
+    0.681,
+    0.003,
+    40244
+   ]
+  },
+  {
+   "cutoff": 1.6,
+   "merged": [
+    0.837,
+    0.003,
+    79652
+   ],
+   "retained": [
+    0.778,
+    0.003,
+    49930
+   ],
+   "retained_declustered": [
+    0.636,
+    0.004,
+    19993
+   ],
+   "merged_background": [
+    0.782,
+    0.003,
+    57644
+   ],
+   "retained_background": [
+    0.719,
+    0.004,
+    36134
+   ]
+  },
+  {
+   "cutoff": 1.7,
+   "merged": [
+    0.868,
+    0.003,
+    67876
+   ],
+   "retained": [
+    0.811,
+    0.004,
+    43329
+   ],
+   "retained_declustered": [
+    0.666,
+    0.005,
+    18032
+   ],
+   "merged_background": [
+    0.813,
+    0.004,
+    49871
+   ],
+   "retained_background": [
+    0.752,
+    0.004,
+    31909
+   ]
+  },
+  {
+   "cutoff": 1.8,
+   "merged": [
+    0.898,
+    0.004,
+    57287
+   ],
+   "retained": [
+    0.838,
+    0.004,
+    37041
+   ],
+   "retained_declustered": [
+    0.696,
+    0.005,
+    16099
+   ],
+   "merged_background": [
+    0.844,
+    0.004,
+    42761
+   ],
+   "retained_background": [
+    0.781,
+    0.005,
+    27797
+   ]
+  },
+  {
+   "cutoff": 1.9,
+   "merged": [
+    0.926,
+    0.004,
+    47920
+   ],
+   "retained": [
+    0.865,
+    0.005,
+    31402
+   ],
+   "retained_declustered": [
+    0.722,
+    0.006,
+    14190
+   ],
+   "merged_background": [
+    0.873,
+    0.005,
+    36271
+   ],
+   "retained_background": [
+    0.809,
+    0.005,
+    23954
+   ]
+  },
+  {
+   "cutoff": 2,
+   "merged": [
+    0.951,
+    0.005,
+    39617
+   ],
+   "retained": [
+    0.882,
+    0.005,
+    26203
+   ],
+   "retained_declustered": [
+    0.746,
+    0.007,
+    12386
+   ],
+   "merged_background": [
+    0.898,
+    0.005,
+    30444
+   ],
+   "retained_background": [
+    0.831,
+    0.006,
+    20377
+   ]
+  },
+  {
+   "cutoff": 2.1,
+   "merged": [
+    0.976,
+    0.005,
+    32570
+   ],
+   "retained": [
+    0.902,
+    0.006,
+    21815
+   ],
+   "retained_declustered": [
+    0.77,
+    0.007,
+    10744
+   ],
+   "merged_background": [
+    0.926,
+    0.006,
+    25441
+   ],
+   "retained_background": [
+    0.854,
+    0.007,
+    17251
+   ]
+  },
+  {
+   "cutoff": 2.2,
+   "merged": [
+    0.998,
+    0.006,
+    26528
+   ],
+   "retained": [
+    0.92,
+    0.007,
+    18023
+   ],
+   "retained_declustered": [
+    0.79,
+    0.008,
+    9203
+   ],
+   "merged_background": [
+    0.949,
+    0.007,
+    21009
+   ],
+   "retained_background": [
+    0.873,
+    0.007,
+    14454
+   ]
+  },
+  {
+   "cutoff": 2.3,
+   "merged": [
+    1.019,
+    0.007,
+    21468
+   ],
+   "retained": [
+    0.939,
+    0.008,
+    14854
+   ],
+   "retained_declustered": [
+    0.809,
+    0.009,
+    7845
+   ],
+   "merged_background": [
+    0.968,
+    0.007,
+    17178
+   ],
+   "retained_background": [
+    0.893,
+    0.008,
+    12048
+   ]
+  },
+  {
+   "cutoff": 2.4,
+   "merged": [
+    1.031,
+    0.008,
+    17141
+   ],
+   "retained": [
+    0.953,
+    0.009,
+    12119
+   ],
+   "retained_declustered": [
+    0.825,
+    0.01,
+    6621
+   ],
+   "merged_background": [
+    0.98,
+    0.008,
+    13892
+   ],
+   "retained_background": [
+    0.905,
+    0.009,
+    9932
+   ]
+  },
+  {
+   "cutoff": 2.5,
+   "merged": [
+    1.041,
+    0.009,
+    13623
+   ],
+   "retained": [
+    0.968,
+    0.01,
+    9861
+   ],
+   "retained_declustered": [
+    0.845,
+    0.011,
+    5594
+   ],
+   "merged_background": [
+    0.987,
+    0.009,
+    11151
+   ],
+   "retained_background": [
+    0.92,
+    0.01,
+    8173
+   ]
+  },
+  {
+   "cutoff": 2.6,
+   "merged": [
+    1.048,
+    0.01,
+    10779
+   ],
+   "retained": [
+    0.983,
+    0.011,
+    7995
+   ],
+   "retained_declustered": [
+    0.864,
+    0.013,
+    4702
+   ],
+   "merged_background": [
+    0.995,
+    0.011,
+    8945
+   ],
+   "retained_background": [
+    0.935,
+    0.011,
+    6713
+   ]
+  },
+  {
+   "cutoff": 2.7,
+   "merged": [
+    1.061,
+    0.011,
+    8556
+   ],
+   "retained": [
+    0.998,
+    0.012,
+    6465
+   ],
+   "retained_declustered": [
+    0.883,
+    0.014,
+    3927
+   ],
+   "merged_background": [
+    1.011,
+    0.012,
+    7207
+   ],
+   "retained_background": [
+    0.955,
+    0.013,
+    5511
+   ]
+  },
+  {
+   "cutoff": 2.8,
+   "merged": [
+    1.067,
+    0.013,
+    6736
+   ],
+   "retained": [
+    1.008,
+    0.014,
+    5178
+   ],
+   "retained_declustered": [
+    0.893,
+    0.016,
+    3236
+   ],
+   "merged_background": [
+    1.023,
+    0.013,
+    5771
+   ],
+   "retained_background": [
+    0.967,
+    0.014,
+    4471
+   ]
+  },
+  {
+   "cutoff": 2.9,
+   "merged": [
+    1.064,
+    0.015,
+    5252
+   ],
+   "retained": [
+    1.015,
+    0.016,
+    4131
+   ],
+   "retained_declustered": [
+    0.905,
+    0.018,
+    2665
+   ],
+   "merged_background": [
+    1.02,
+    0.015,
+    4545
+   ],
+   "retained_background": [
+    0.975,
+    0.016,
+    3603
+   ]
+  },
+  {
+   "cutoff": 3,
+   "merged": [
+    1.065,
+    0.017,
+    4112
+   ],
+   "retained": [
+    1.027,
+    0.018,
+    3302
+   ],
+   "retained_declustered": [
+    0.912,
+    0.02,
+    2179
+   ],
+   "merged_background": [
+    1.02,
+    0.017,
+    3592
+   ],
+   "retained_background": [
+    0.985,
+    0.018,
+    2903
+   ]
+  },
+  {
+   "cutoff": 3.1,
+   "merged": [
+    1.069,
+    0.019,
+    3227
+   ],
+   "retained": [
+    1.026,
+    0.02,
+    2603
+   ],
+   "retained_declustered": [
+    0.92,
+    0.022,
+    1779
+   ],
+   "merged_background": [
+    1.026,
+    0.019,
+    2853
+   ],
+   "retained_background": [
+    0.986,
+    0.02,
+    2315
+   ]
+  },
+  {
+   "cutoff": 3.2,
+   "merged": [
+    1.04,
+    0.021,
+    2460
+   ],
+   "retained": [
+    1.013,
+    0.022,
+    2032
+   ],
+   "retained_declustered": [
+    0.909,
+    0.024,
+    1423
+   ],
+   "merged_background": [
+    1.0,
+    0.021,
+    2200
+   ],
+   "retained_background": [
+    0.974,
+    0.023,
+    1824
+   ]
+  },
+  {
+   "cutoff": 3.3,
+   "merged": [
+    1.016,
+    0.023,
+    1894
+   ],
+   "retained": [
+    0.993,
+    0.025,
+    1578
+   ],
+   "retained_declustered": [
+    0.892,
+    0.026,
+    1133
+   ],
+   "merged_background": [
+    0.984,
+    0.024,
+    1721
+   ],
+   "retained_background": [
+    0.959,
+    0.025,
+    1435
+   ]
+  },
+  {
+   "cutoff": 3.4,
+   "merged": [
+    1.028,
+    0.026,
+    1514
+   ],
+   "retained": [
+    1.0,
+    0.028,
+    1263
+   ],
+   "retained_declustered": [
+    0.911,
+    0.03,
+    940
+   ],
+   "merged_background": [
+    0.995,
+    0.027,
+    1385
+   ],
+   "retained_background": [
+    0.968,
+    0.028,
+    1161
+   ]
+  },
+  {
+   "cutoff": 3.5,
+   "merged": [
+    1.016,
+    0.03,
+    1181
+   ],
+   "retained": [
+    0.996,
+    0.032,
+    999
+   ],
+   "retained_declustered": [
+    0.924,
+    0.033,
+    772
+   ],
+   "merged_background": [
+    0.989,
+    0.03,
+    1094
+   ],
+   "retained_background": [
+    0.969,
+    0.032,
+    928
+   ]
+  }
+ ]
+}

@@ -315,23 +315,26 @@ describe('catalogue admissibility does not hinge on optional instrument metadata
     expect(meetsMinimumQuality(result)).toBe(false);
   });
 
-  it('admits a mediocre-but-honest catalogue: the integrity mean cannot fall below 60 without a hard error', () => {
+  it('admits a mediocre-but-honest catalogue: the integrity mean cannot fall below 60 without a hard error or heavy duplication', () => {
     // The accuracy term is proportional and its only
     // penalty is capped at 30, so accuracy >= 70 for any catalogue. Completeness below 50
     // is an ERROR-severity check. Therefore, with no hard error, the three-term mean is
     // bounded below by (50 + consistency + 70) / 3, and consistency would have to be
-    // under 60 for the mean to dip below 60 - which the consistency checks do not produce
-    // for a structurally sound catalogue. The former version of this test refused such a
+    // under 60 for the mean to dip below 60 - which the consistency checks produce only
+    // when over a third of the records are duplicate-timestamp copies, not for a
+    // structurally sound catalogue. The former version of this test refused such a
     // catalogue only because ONE reported 40 km value was "a majority of the reported
     // ones" and triggered a flat -30: the exact defect that was removed.
     //
     //   completeness = 50 (50/100 carry a magnitude; ERROR branch is `< 50`)
-    //   consistency  = 100 - 10 (duplicated timestamps) - 5 (a shallow M8.5) = 85
+    //   consistency  = 100 - 1 (one duplicated timestamp: 1 extra copy in 100) - 5 (a shallow M8.5) = 94
     //   accuracy     = 100 - round(30 * 1.00) = 70 (every event reports a poor 40 km)
-    //   integrity    = (50 + 85 + 70) / 3 = 68.3 -> admitted, correctly: honest and mediocre
+    //   integrity    = (50 + 94 + 70) / 3 = 71.3 -> admitted, correctly: honest and mediocre
+    // (All 100 events used to share one timestamp here, which the flat -10 duplicate penalty
+    // scored like a single coincident pair.)
     const events = Array.from({ length: 100 }, (_, i) => {
       const event: any = {
-        time: '2024-01-01T00:00:00.000Z',
+        time: new Date(Date.UTC(2024, 0, 1, 0, Math.max(0, i - 1))).toISOString(),
         latitude: -41.2,
         longitude: 174.8,
         depth: 12,
@@ -344,7 +347,7 @@ describe('catalogue admissibility does not hinge on optional instrument metadata
 
     const result = performQualityCheck(events);
     expect(result.report.completeness).toBe(50);
-    expect(result.report.consistency).toBe(85);
+    expect(result.report.consistency).toBe(94);
     expect(result.report.accuracy).toBe(70);
     expect(result.report.checks.some(c => c.severity === 'error')).toBe(false);
     expect(result.passed).toBe(true);

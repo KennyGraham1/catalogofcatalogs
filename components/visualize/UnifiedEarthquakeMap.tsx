@@ -10,6 +10,11 @@ import { EarthquakeMarkerLayer } from '@/components/map/EarthquakeMarkerLayer';
 import { useEventMapPopup } from '@/hooks/use-event-map-popup';
 import { MapContainer, Popup, GeoJSON } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
+import {
+  DepthLegendItems, MagnitudeLegendItems, QualityLegendItems, AzimuthalGapLegendItems,
+  SourceCatalogueLegendItems, resolveSourceCatalogue, buildCatalogueColorScale,
+} from '@/components/map/MapLegend';
+import { formatOriginTime } from '@/components/map/OptimizedEventPopup';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -20,11 +25,20 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
 import { useMapColors } from '@/hooks/use-map-theme';
-import { calculateQualityScore, getQualityColor, metricsFromEvent } from '@/lib/quality-scoring';
+import { getQualityColor } from '@/lib/quality-scoring';
+import { resolveEventQuality } from '@/components/events/event-quality';
 import { getMagnitudeColor, getEarthquakeColor } from '@/lib/earthquake-utils';
 import { useNearbyFaults } from '@/hooks/use-nearby-faults';
 import { loadFaultData, FaultCollection } from '@/lib/fault-data';
 import type { PathOptions } from 'leaflet';
+import { UncertaintyEllipse } from '@/components/advanced-viz/UncertaintyEllipse';
+import { BeachBallMarker } from '@/components/advanced-viz/BeachBallMarker';
+import { calculateUncertaintyEllipse, getAzimuthalGapColor, type UncertaintyData } from '@/lib/uncertainty-utils';
+import { parseFocalMechanism, selectPlane } from '@/lib/focal-mechanism-utils';
+
+/** Non-null result shapes, named once so the overlay memos below don't repeat them. */
+type MapUncertaintyEllipse = NonNullable<ReturnType<typeof calculateUncertaintyEllipse>>;
+type MapFocalMechanism = NonNullable<ReturnType<typeof parseFocalMechanism>>;
 
 interface Earthquake {
   id: number | string;
@@ -47,11 +61,23 @@ interface Earthquake {
   evaluation_mode?: string | null;
   evaluation_status?: string | null;
   focal_mechanisms?: string | null;
+  /** QuakeML preferredFocalMechanismID: which of focal_mechanisms is authoritative. */
+  preferred_focal_mechanism_id?: string | null;
   picks?: string | null;
   arrivals?: string | null;
 
   // Extended QuakeML 1.2 fields (GeoNet/ISC)
   horizontal_uncertainty?: number | null;
+  // QuakeML OriginUncertainty error ellipse: semi-minor/semi-major axes (km) and the
+  // azimuth of the semi-major axis (degrees clockwise from north) — see lib/uncertainty-utils.
+  latitude_uncertainty?: number | null;
+  longitude_uncertainty?: number | null;
+  depth_uncertainty?: number | null;
+  min_horizontal_uncertainty?: number | null;
+  max_horizontal_uncertainty?: number | null;
+  azimuth_max_horizontal_uncertainty?: number | null;
+  /** C16: OriginUncertainty.confidenceLevel (percent, 0-100) of the preferred origin. */
+  confidence_level?: number | null;
   depth_type?: string | null;
   earth_model_id?: string | null;
   method_id?: string | null;
@@ -65,16 +91,45 @@ interface Earthquake {
   magnitude_method_id?: string | null;
   magnitude_evaluation_mode?: string | null;
   magnitude_evaluation_status?: string | null;
+
+  // C1: stored quality score/grade, preferred over the on-the-fly computation when present.
+  quality_score?: number | null;
+  quality_grade?: string | null;
+
+  // C2: merged-event provenance, used by the source-catalogue colour mode.
+  source_catalogue_ids?: string[] | null;
+  source_events?: string | null;
 }
 
 interface UnifiedEarthquakeMapProps {
   earthquakes: Earthquake[];
-  colorBy?: 'magnitude' | 'depth' | 'quality';
+  colorBy?: 'magnitude' | 'depth' | 'quality' | 'azimuthal-gap' | 'source-catalogue';
+  /** Enables the on-demand focal-mechanism beach-ball overlay toggle (paper sec:viz). */
   showFocalMechanisms?: boolean;
+  /**
+   * Accepted but not yet implementable: a per-event station-coverage overlay (markers for
+   * the stations that recorded each event) needs each station's own coordinates, and the
+   * schema only stores aggregate counts/gap per event (used_station_count, azimuthal_gap),
+   * never which stations or where they are. Faking station positions would be worse than
+   * omitting the overlay, so this prop is accepted for interface stability but intentionally
+   * has no effect; the per-event azimuthal-gap colour mode below is the real, data-backed
+   * substitute for "station coverage" on this map (paper's station-coverage panel).
+   */
   showStations?: boolean;
   showFaultLines?: boolean;
   showActiveFaults?: boolean;
+  /**
+   * Optional catalogue id -> display name lookup for the source-catalogue colour mode.
+   * Without it, a merged row's contributing catalogues are labelled by their raw id.
+   */
+  catalogueNames?: Record<string, string>;
 }
+
+/** Overlays are drawn only for the plotted (sampled, in-view) events, and further capped
+ *  here: an uncertainty ellipse is a 64-point polygon and a beach ball is a rasterised
+ *  icon, so drawing one per sampled event (up to a few thousand) would stall the browser.
+ *  The largest-magnitude events are kept first (see overlayCandidates below). */
+const MAX_MAP_OVERLAYS = 150;
 
 
 
@@ -84,18 +139,23 @@ export default function UnifiedEarthquakeMap({
   showFocalMechanisms = false,
   showStations = false,
   showFaultLines = true,
-  showActiveFaults = true
+  showActiveFaults = true,
+  catalogueNames,
 }: UnifiedEarthquakeMapProps) {
   const [showFaults, setShowFaults] = useState(showFaultLines);
-  const [colorMode, setColorMode] = useState<'magnitude' | 'depth' | 'quality'>(colorBy);
+  const [colorMode, setColorMode] = useState<'magnitude' | 'depth' | 'quality' | 'azimuthal-gap' | 'source-catalogue'>(colorBy);
   const [faultData, setFaultData] = useState<FaultCollection | null>(null);
   const [sampleSize, setSampleSize] = useState<MapDetail>('auto');
+  // On-demand overlays (paper sec:viz "two additional overlays are available on demand").
+  // Both default off: they are opt-in extras, not part of the base map.
+  const [showUncertainty, setShowUncertainty] = useState(false);
+  const [showBeachBalls, setShowBeachBalls] = useState(false);
 
   // Dark mode support for marker colors
   const mapColors = useMapColors();
 
   // Sample earthquakes for performance
-  const { sampled: sampledEarthquakes, displayCount, visibleCount, isSampled, onViewportChange } = useMapEventSelection(earthquakes, sampleSize);
+  const { sampled: sampledEarthquakes, displayCount, visibleCount, isSampled, onViewportChange, getPosition } = useMapEventSelection(earthquakes, sampleSize);
 
   const { activePopup, onEventClick } = useEventMapPopup(earthquakes);
 
@@ -121,27 +181,92 @@ export default function UnifiedEarthquakeMap({
     });
   }, []);
 
-  // Calculate quality scores (use sampled earthquakes)
+  // Calculate quality scores (use sampled earthquakes). Per C1, the stored quality_score/
+  // quality_grade is preferred and only legacy rows without it are scored on the fly —
+  // resolveEventQuality is the same resolver EventTable uses, so the map and the table
+  // never disagree about an event's grade.
   const qualityScores = useMemo(() => {
     if (colorMode !== 'quality') return [];
     return sampledEarthquakes.map(event => ({
       eventId: event.id,
-      score: calculateQualityScore(metricsFromEvent(event))
+      quality: resolveEventQuality(event)
     }));
   }, [sampledEarthquakes, colorMode]);
 
-  const qualityScoreMap = useMemo(() => new Map(qualityScores.map(q => [q.eventId, q.score])), [qualityScores]);
+  const qualityScoreMap = useMemo(() => new Map(qualityScores.map(q => [q.eventId, q.quality])), [qualityScores]);
+
+  // Resolve the source-catalogue category per sampled event (contract C2) and the
+  // categorical colour scale/legend it implies. Both are no-ops outside this colour mode.
+  const sourceCatalogueInfos = useMemo(() => {
+    if (colorMode !== 'source-catalogue') return [];
+    return sampledEarthquakes.map(event => ({
+      eventId: event.id,
+      info: resolveSourceCatalogue(event, catalogueNames),
+    }));
+  }, [sampledEarthquakes, colorMode, catalogueNames]);
+
+  const sourceCatalogueInfoMap = useMemo(
+    () => new Map(sourceCatalogueInfos.map(x => [x.eventId, x.info])),
+    [sourceCatalogueInfos]
+  );
+
+  const sourceCatalogueScale = useMemo(
+    () => buildCatalogueColorScale(sourceCatalogueInfos.map(x => x.info)),
+    [sourceCatalogueInfos]
+  );
 
   // Get event color based on selected mode
   const getEventColor = useCallback((event: Earthquake) => {
     if (colorMode === 'quality') {
       const quality = qualityScoreMap.get(event.id);
-      return quality ? getQualityColor(quality.overall) : getEarthquakeColor(event.depth, mapColors.isDark);
+      return quality ? getQualityColor(quality.score) : getEarthquakeColor(event.depth, mapColors.isDark);
     } else if (colorMode === 'depth') {
       return getEarthquakeColor(event.depth, mapColors.isDark);
+    } else if (colorMode === 'azimuthal-gap') {
+      return getAzimuthalGapColor(event.azimuthal_gap);
+    } else if (colorMode === 'source-catalogue') {
+      const info = sourceCatalogueInfoMap.get(event.id);
+      return sourceCatalogueScale.colorFor(info?.key ?? '__unknown__');
     }
     return getMagnitudeColor(event.magnitude);
-  }, [colorMode, qualityScoreMap, mapColors.isDark]);
+  }, [colorMode, qualityScoreMap, mapColors.isDark, sourceCatalogueInfoMap, sourceCatalogueScale]);
+
+  // Overlay candidates: largest-magnitude events first, so the MAX_MAP_OVERLAYS cap keeps
+  // the most significant events deterministically rather than depending on the spatial
+  // sampling order (selectMapEvents's cell-representative order is not magnitude-ordered).
+  const overlayCandidates = useMemo(
+    () => [...sampledEarthquakes].sort((a, b) => b.magnitude - a.magnitude),
+    [sampledEarthquakes]
+  );
+
+  // Uncertainty ellipses (on demand): reported error ellipse first, then circular
+  // horizontal uncertainty, then lat/lon marginals — see calculateUncertaintyEllipse.
+  const uncertaintyEllipses = useMemo((): { items: Array<{ eventId: Earthquake['id']; ellipse: MapUncertaintyEllipse }>; total: number } => {
+    if (!showUncertainty) return { items: [], total: 0 };
+    const withEllipse = overlayCandidates
+      .map(event => ({ event, ellipse: calculateUncertaintyEllipse(event as UncertaintyData) }))
+      .filter(x => x.ellipse !== null);
+    const items = withEllipse.slice(0, MAX_MAP_OVERLAYS).map(({ event, ellipse }) => ({
+      eventId: event.id,
+      ellipse: { ...(ellipse as MapUncertaintyEllipse), center: getPosition(event) },
+    }));
+    return { items, total: withEllipse.length };
+  }, [overlayCandidates, showUncertainty, getPosition]);
+
+  // Focal-mechanism beach balls (on demand, gated by the showFocalMechanisms prop): parsed
+  // from the stored focal_mechanisms JSON, preferring preferred_focal_mechanism_id.
+  const focalMechanismOverlays = useMemo((): { items: Array<{ eventId: Earthquake['id']; position: [number, number]; mechanism: MapFocalMechanism }>; total: number } => {
+    if (!showFocalMechanisms || !showBeachBalls) return { items: [], total: 0 };
+    const withMechanism = overlayCandidates
+      .map(event => ({ event, mechanism: parseFocalMechanism(event.focal_mechanisms, event.preferred_focal_mechanism_id) }))
+      .filter(x => x.mechanism !== null && selectPlane(x.mechanism) !== null);
+    const items = withMechanism.slice(0, MAX_MAP_OVERLAYS).map(({ event, mechanism }) => ({
+      eventId: event.id,
+      position: getPosition(event),
+      mechanism: mechanism as MapFocalMechanism,
+    }));
+    return { items, total: withMechanism.length };
+  }, [overlayCandidates, showFocalMechanisms, showBeachBalls, getPosition]);
 
   return (
     <div className="relative">
@@ -215,7 +340,72 @@ export default function UnifiedEarthquakeMap({
                   <TechnicalTermTooltip term="qualityScore" />
                 </div>
               </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  id="color-azimuthal-gap"
+                  name="colorMode"
+                  checked={colorMode === 'azimuthal-gap'}
+                  onChange={() => setColorMode('azimuthal-gap')}
+                  className="cursor-pointer"
+                />
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="color-azimuthal-gap" className="text-xs cursor-pointer">Azimuthal Gap</Label>
+                  <TechnicalTermTooltip term="azimuthalGap" />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  id="color-source-catalogue"
+                  name="colorMode"
+                  checked={colorMode === 'source-catalogue'}
+                  onChange={() => setColorMode('source-catalogue')}
+                  className="cursor-pointer"
+                />
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="color-source-catalogue" className="text-xs cursor-pointer">Source Catalogue</Label>
+                  <InfoTooltip content="For a merged event, the catalogue whose solution (time and location) this row publishes; for a pooled multi-catalogue view, the catalogue the event came from." />
+                </div>
+              </div>
             </div>
+          </div>
+
+          {/* On-demand overlays (paper sec:viz): off by default, drawn only for the
+              plotted events and capped (see the note below the map when truncated). */}
+          <div className="pt-2 border-t">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Label className="text-xs font-medium">Overlays</Label>
+              <InfoTooltip content="Extra detail drawn on demand for the currently plotted events." />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="uncertainty-overlay" className="text-xs cursor-pointer">
+                  Uncertainty Ellipses
+                </Label>
+                <TechnicalTermTooltip term="uncertainty" />
+              </div>
+              <Switch
+                id="uncertainty-overlay"
+                checked={showUncertainty}
+                onCheckedChange={setShowUncertainty}
+              />
+            </div>
+            {showFocalMechanisms && (
+              <div className="flex items-center justify-between gap-3 mt-2">
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="beachball-overlay" className="text-xs cursor-pointer">
+                    Focal Mechanisms
+                  </Label>
+                  <TechnicalTermTooltip term="focalMechanism" />
+                </div>
+                <Switch
+                  id="beachball-overlay"
+                  checked={showBeachBalls}
+                  onCheckedChange={setShowBeachBalls}
+                />
+              </div>
+            )}
           </div>
 
           <div className="pt-2 border-t">
@@ -224,18 +414,42 @@ export default function UnifiedEarthquakeMap({
         </div>
       </Card>
 
-      {/* Sampling Info Badge */}
-      {isSampled && (
-        <Card className="absolute top-4 left-4 z-[1000] p-3 bg-background/95 backdrop-blur-sm shadow-lg">
-          <div className="flex items-center gap-2 text-sm">
-            <Info className="h-4 w-4 text-blue-500" />
-            <span>
-              Displaying <strong>{displayCount.toLocaleString()}</strong> of{' '}
-              <strong>{visibleCount.toLocaleString()}</strong> visible events. Zoom in for more.
-            </span>
-          </div>
-        </Card>
-      )}
+      {/* Sampling / overlay info badges, stacked so neither is ever covered by the other */}
+      <div className="absolute top-4 left-4 z-[1000] flex flex-col gap-2 max-w-[320px]">
+        {isSampled && (
+          <Card className="p-3 bg-background/95 backdrop-blur-sm shadow-lg">
+            <div className="flex items-center gap-2 text-sm">
+              <Info className="h-4 w-4 text-blue-500" />
+              <span>
+                Displaying <strong>{displayCount.toLocaleString()}</strong> of{' '}
+                <strong>{visibleCount.toLocaleString()}</strong> visible events. Zoom in for more.
+              </span>
+            </div>
+          </Card>
+        )}
+        {showUncertainty && uncertaintyEllipses.total > MAX_MAP_OVERLAYS && (
+          <Card className="p-3 bg-background/95 backdrop-blur-sm shadow-lg">
+            <div className="flex items-center gap-2 text-sm">
+              <Info className="h-4 w-4 text-blue-500" />
+              <span>
+                Showing uncertainty ellipses for the <strong>{MAX_MAP_OVERLAYS}</strong> largest of{' '}
+                <strong>{uncertaintyEllipses.total.toLocaleString()}</strong> plotted events with location uncertainty.
+              </span>
+            </div>
+          </Card>
+        )}
+        {showFocalMechanisms && showBeachBalls && focalMechanismOverlays.total > MAX_MAP_OVERLAYS && (
+          <Card className="p-3 bg-background/95 backdrop-blur-sm shadow-lg">
+            <div className="flex items-center gap-2 text-sm">
+              <Info className="h-4 w-4 text-blue-500" />
+              <span>
+                Showing beach balls for the <strong>{MAX_MAP_OVERLAYS}</strong> largest of{' '}
+                <strong>{focalMechanismOverlays.total.toLocaleString()}</strong> plotted events with a focal mechanism.
+              </span>
+            </div>
+          </Card>
+        )}
+      </div>
 
       {/* Map */}
       <div className="h-[600px] w-full rounded-lg overflow-hidden border shadow-sm">
@@ -267,6 +481,24 @@ export default function UnifiedEarthquakeMap({
 
         <EarthquakeMarkerLayer events={sampledEarthquakes} getColor={getEventColor} opacity={mapColors.markerOpacity} onEventClick={onEventClick} />
 
+          {/* Uncertainty ellipses (on demand): the horizontal location error, scaled and
+              drawn per lib/uncertainty-utils; "N% confidence ellipse" tooltip when the
+              event carries confidence_level (C16). */}
+          {showUncertainty && uncertaintyEllipses.items.map(({ eventId, ellipse }) => (
+            <UncertaintyEllipse key={`uncertainty-${eventId}`} ellipse={ellipse} eventId={eventId} />
+          ))}
+
+          {/* Focal-mechanism beach balls (on demand, gated by showFocalMechanisms) */}
+          {showFocalMechanisms && showBeachBalls && focalMechanismOverlays.items.map(({ eventId, position, mechanism }) => (
+            <BeachBallMarker
+              key={`focal-${eventId}`}
+              position={position}
+              mechanism={mechanism}
+              eventId={eventId}
+              size={28}
+            />
+          ))}
+
           {/* One popup, rendered only for the clicked event. Keeping the popup (and
               its nearby-faults fetch in EventPopup) out of the per-marker loop avoids
               mounting one fetch-firing popup per plotted earthquake. Keyed by a click
@@ -285,18 +517,18 @@ export default function UnifiedEarthquakeMap({
       {/* Legend */}
       <LegendPanel
         colorMode={colorMode}
+        isDark={mapColors.isDark}
         showFaults={showFaults}
         faultCount={faultData?.features.length}
+        catalogueLegend={sourceCatalogueScale.legend}
       />
     </div>
   );
 }
 
 // Event popup component
-function EventPopup({ event, qualityScores }: { event: Earthquake; qualityScores: any[] }) {
-  const quality = useMemo(() => qualityScores.find(q => q.eventId === event.id) ?? {
-    eventId: event.id, score: calculateQualityScore(metricsFromEvent(event)),
-  }, [event, qualityScores]);
+function EventPopup({ event, qualityScores }: { event: Earthquake; qualityScores: Array<{ eventId: Earthquake['id']; quality: ReturnType<typeof resolveEventQuality> }> }) {
+  const quality = useMemo(() => qualityScores.find(q => q.eventId === event.id)?.quality ?? resolveEventQuality(event), [event, qualityScores]);
 
   // Fetch nearby faults for this event
   const { faults, loading: faultsLoading, count: faultCount } = useNearbyFaults({
@@ -312,8 +544,8 @@ function EventPopup({ event, qualityScores }: { event: Earthquake; qualityScores
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-bold text-base">{event.region || 'Event'}</h3>
         {quality && (
-          <Badge variant="outline" style={{ backgroundColor: getQualityColor(quality.score.overall), color: 'white' }}>
-            {quality.score.grade}
+          <Badge variant="outline" style={{ backgroundColor: getQualityColor(quality.score), color: 'white' }}>
+            {quality.grade}
           </Badge>
         )}
       </div>
@@ -341,16 +573,9 @@ function EventPopup({ event, qualityScores }: { event: Earthquake; qualityScores
           <Calendar className="h-4 w-4 text-primary" />
           <div className="flex items-center gap-1.5">
             <span className="font-medium">Time:</span>
-            <InfoTooltip content="Event origin time in local timezone." />
+            <InfoTooltip content="Event origin time in UTC, the reference frame catalogues report origin times in." />
           </div>
-          <span className="text-xs">{new Date(event.time).toLocaleString('en-GB', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-          })}</span>
+          <span className="text-xs">{formatOriginTime(event.time)}</span>
         </div>
 
         <div className="flex items-center gap-2 text-sm">
@@ -428,88 +653,43 @@ function EventPopup({ event, qualityScores }: { event: Earthquake; qualityScores
   );
 }
 
-// Legend panel component
-function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string; showFaults: boolean; faultCount?: number }) {
+// Legend panel component (swatches come from the same functions that draw the markers)
+function LegendPanel({ colorMode, isDark, showFaults, faultCount, catalogueLegend }: {
+  colorMode: string; isDark: boolean; showFaults: boolean; faultCount?: number;
+  catalogueLegend: Array<{ key: string; label: string; color: string }>;
+}) {
+  const title = colorMode === 'quality' ? 'Quality Score'
+    : colorMode === 'depth' ? 'Depth Scale'
+    : colorMode === 'azimuthal-gap' ? 'Azimuthal Gap'
+    : colorMode === 'source-catalogue' ? 'Source Catalogue'
+    : 'Magnitude Scale';
   return (
     <Card className="absolute bottom-4 right-4 z-[1000] max-w-[240px] border-border/60 bg-background/90 px-3 py-2.5 text-[11px] leading-tight backdrop-blur-sm shadow-lg">
       <div className="flex items-center justify-between gap-2">
-        <h4 className="text-[11px] font-semibold">
-          {colorMode === 'quality' ? 'Quality Score' : colorMode === 'depth' ? 'Depth Scale' : 'Magnitude Scale'}
-        </h4>
+        <h4 className="text-[11px] font-semibold">{title}</h4>
         {colorMode === 'quality' ? (
           <TechnicalTermTooltip term="qualityScore" />
         ) : colorMode === 'depth' ? (
           <TechnicalTermTooltip term="depth" />
+        ) : colorMode === 'azimuthal-gap' ? (
+          <TechnicalTermTooltip term="azimuthalGap" />
+        ) : colorMode === 'source-catalogue' ? (
+          <InfoTooltip content="Which catalogue each plotted event's solution (or, for a pooled view, source) came from." />
         ) : (
           <TechnicalTermTooltip term="magnitude" />
         )}
       </div>
 
       {colorMode === 'quality' ? (
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#22c55e' }}></div>
-            <span>A+ / A (90-100)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#84cc16' }}></div>
-            <span>B (80-89)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#eab308' }}></div>
-            <span>C (70-79)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#f97316' }}></div>
-            <span>D (60-69)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#ef4444' }}></div>
-            <span>F (&lt; 60)</span>
-          </div>
-        </div>
+        <QualityLegendItems />
       ) : colorMode === 'depth' ? (
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#00CED1' }}></div>
-            <span>&lt; 15 km (Shallow)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#20B2AA' }}></div>
-            <span>15 - 40 km</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#008B8B' }}></div>
-            <span>40 - 100 km</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#006666' }}></div>
-            <span>100 - 200 km (Deep)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#004D4D' }}></div>
-            <span>≥ 200 km (V. Deep)</span>
-          </div>
-        </div>
+        <DepthLegendItems isDark={isDark} />
+      ) : colorMode === 'azimuthal-gap' ? (
+        <AzimuthalGapLegendItems />
+      ) : colorMode === 'source-catalogue' ? (
+        <SourceCatalogueLegendItems legend={catalogueLegend} />
       ) : (
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-          <div className="flex items-center gap-1.5">
-            <div className="h-2 w-2 rounded-full bg-blue-500 flex-shrink-0"></div>
-            <span>M2</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-3 w-3 rounded-full bg-blue-500 flex-shrink-0"></div>
-            <span>M4</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-4 w-4 rounded-full bg-blue-500 flex-shrink-0"></div>
-            <span>M6</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-5 w-5 rounded-full bg-blue-500 flex-shrink-0"></div>
-            <span>M7+</span>
-          </div>
-        </div>
+        <MagnitudeLegendItems getColor={getMagnitudeColor} />
       )}
 
       {showFaults && (

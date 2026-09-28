@@ -5,6 +5,10 @@
 \usepackage{graphicx}
 \usepackage{caption}
 \usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{longtable}
+\usepackage{url}
 \usepackage[hidelinks]{hyperref}
 
 \renewcommand{\thefigure}{S\arabic{figure}}
@@ -21,74 +25,183 @@ Catalogue Management, Merging, and Statistical Analysis}
 \vspace{-2.2\baselineskip}
 
 \noindent
-This supplement collects additional screen captures of the \emph{Catalogue of
-Catalogues} (CofC) platform that support, but are not essential to, the argument
-of the main paper.  All captures are from release \texttt{v0.1.0} running in a
-browser against a local instance.
+This supplement lists the parameters of the synthetic catalogues used in the
+worked example of the main paper (Table~\ref{tab:s_generator}) and collects
+additional screen captures of the \emph{Catalogue of Catalogues} (CofC) platform
+that support, but are not essential to, the argument of the main paper.  All
+captures are from the release described in the main paper, running in a browser
+against a local instance.
 
 \medskip
 \noindent
-\textbf{Data.}  Every capture uses a reduced-scale synthetic catalogue pair (a
-$5{,}200$-event ``GeoNet-like'' catalogue and a $4{,}300$-event ``Agency~B''
-catalogue, sharing a 50\,\% duplicate overlap): the same construction as the
-worked example of the main paper, at roughly one twenty-third of its scale so
-that it loads and analyses interactively in the browser.  The seeded
-reproductions distributed with the source repository --- the figure script and
-the two unit tests listed under Data and Resources in the main paper --- build
-catalogues of other sizes, so they reproduce the workflow but not the specific
-event counts and estimates shown in these captures.  No real event data are
-shown anywhere in this supplement.
+\textbf{Data.}  Every capture uses a reduced-scale version of the worked
+example's synthetic pair, built by the same seeded generator
+(\path{paper/figures/synthetic_catalogues.py}, seed~42) with each true
+earthquake kept with probability $1/23$: a $4{,}922$-event ``GeoNet-like''
+catalogue and a $4{,}411$-event ``Agency~B'' catalogue, each uploaded as a
+QuakeML~1.2 file written by
+\texttt{python}~\path{paper/figures/generate_figures.py}
+\texttt{-{}-screenshot-catalogues}.
+The values quoted in the captions are those of this reduced pair, computed by
+the platform's own code (\path{paper/figures/screenshot_expectations.ts}, which
+parses the files with the upload parser and drives the Analysis page's analysis
+worker); the worked example of the main paper uses the full-scale pair.  No real
+event data are shown anywhere in this supplement.
+
+\section*{Synthetic catalogue construction}
+
+{\footnotesize
+\begin{longtable}{@{}p{2.9cm}p{13.2cm}@{}}
+\caption{Inputs of the synthetic worked example.  Everything else the main paper
+reports about it (catalogue sizes, overlap, quality scores, duplicates, $M_c$,
+$b$-values and declustering counts) is computed from the resulting catalogues by
+the platform.}
+\label{tab:s_generator} \\
+\toprule
+\textbf{Component} & \textbf{Specification} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Component} & \textbf{Specification} \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+Period and domain & 2020-01-01 to 2024-12-31 (1\,827 days); true epicentres in
+  $166^{\circ}$--$179^{\circ}$E, $47.5^{\circ}$--$34.5^{\circ}$S. \\
+Background & $10^{6}$ independent events, uniform in time, magnitudes from a
+  Gutenberg-Richter law with $b = 1.00$ (continuous, $M$0.5--7.5), about
+  3\,200 events of $M \geq 2.3$ per year. \\
+Source zones & Share of the background, centre, and Gaussian spread along /
+  across strike (strike azimuth): Hikurangi margin 19\%, ($177.3^{\circ}$E,
+  $40.0^{\circ}$S), 170/45~km ($35^{\circ}$), depth 8--30~km; central North
+  Island crust 22\%, ($176.0^{\circ}$E, $39.0^{\circ}$S), 150/60~km
+  ($40^{\circ}$), 2--15~km; North Island slab 16\%, ($175.8^{\circ}$E,
+  $39.6^{\circ}$S), 190/60~km ($40^{\circ}$), 40~km plus an exponential tail of
+  scale 30~km (at most 250~km); Marlborough--Canterbury 16\%,
+  ($173.2^{\circ}$E, $42.4^{\circ}$S), 130/60~km ($50^{\circ}$), 3--20~km;
+  Alpine Fault 14\%, ($170.5^{\circ}$E, $43.6^{\circ}$S), 180/50~km
+  ($55^{\circ}$), 2--15~km; Fiordland--Puysegur 8\%, ($166.9^{\circ}$E,
+  $45.6^{\circ}$S), 110/45~km ($25^{\circ}$), 5~km plus an exponential tail of
+  scale 25~km (at most 150~km); distributed offshore 5\%, uniform over the
+  domain, 5--30~km. \\
+Aftershocks & Sequences on every background event of $M \geq 4.5$, sized so that
+  23\% of the true events of $M \geq 2.0$ are aftershocks and shared between
+  sequences in proportion to $10^{0.8(M - 4.5)}$ (Utsu, 1970); times from the
+  modified Omori law ($p = 1.1$, $c = 0.05$~d, up to 365~d;
+  Omori, 1894; Utsu, 1961); epicentres uniform in a disc of radius twice the
+  rupture length $\log_{10} L = 0.59M - 2.44$ (Wells and Coppersmith, 1994); depth of the
+  mainshock $\pm 3$~km; magnitudes from a law with $b = 1.30$ truncated 1.2 units
+  below the mainshock (B{\aa}th, 1965). \\
+Station networks & Jittered grids on New Zealand land (Natural Earth 1:10m):
+  GeoNet-like, $0.36^{\circ} \times 0.47^{\circ}$ ($\sim$40~km), 166 stations over
+  the whole country; Agency~B, $0.27^{\circ} \times 0.35^{\circ}$ ($\sim$30~km),
+  67 stations in $175.5^{\circ}$--$178.6^{\circ}$E, $41.4^{\circ}$--$37.6^{\circ}$S. \\
+Recording & A station records an earthquake if its hypocentral distance is below
+  $R(M) = 10^{1.11 + 0.38M}$~km times a log-normal station factor
+  ($\sigma_{\ln} = 0.25$); an agency catalogues every earthquake that at least
+  four of its stations record.  Each recording station adds a P phase, and an S
+  phase with probability 0.6. \\
+Reported metadata & From the recording stations: used-station and phase counts,
+  azimuthal gap (largest gap between their azimuths), nearest-station distance
+  $\Delta_{\min}$.  Horizontal uncertainty
+  $\sigma_h = 0.9\sqrt{6/n}\,e^{\max(0,\,\mathrm{gap}-150^{\circ})/70^{\circ}}
+  (1 + \Delta_{\min}/80\,\mathrm{km})\,\epsilon$~km; depth uncertainty
+  $\sigma_z = 1.6\,\sigma_h\,(1 + \Delta_{\min}/(z + 5\,\mathrm{km}))\,\epsilon$,
+  with the depth fixed (operator assigned: 12~km GeoNet-like, 10~km Agency~B) and
+  no depth uncertainty reported where $\sigma_z > 20$~km; origin-time uncertainty
+  $0.05 + \epsilon\,\sigma_h/7$~s; RMS residual with median 0.20~s (GeoNet-like)
+  or 0.14~s (Agency~B), times $(1 + \Delta_{\min}/200\,\mathrm{km})$; magnitude
+  stations $n_{\mathrm{amp}} \approx 0.6$--$0.95\,n$ and magnitude uncertainty
+  $0.05 + 0.30/\sqrt{n_{\mathrm{amp}}}$.  Each $\epsilon$ is an independent
+  log-normal factor ($\sigma_{\ln} = 0.25$; 0.2 for the time uncertainty), and
+  the RMS residual varies log-normally about its median with
+  $\sigma_{\ln} = 0.3$. \\
+Reported values & True epicentre, depth, origin time and magnitude plus errors of
+  exactly the reported size; $M_L$, evaluation mode manual and status reviewed for
+  both agencies; magnitudes to full precision (GeoNet-like) or to 0.1
+  (Agency~B). \\
+\end{longtable}
+}
 
 \section*{Statistical analysis in the browser}
 
-\begin{figure}[ht]
+\begin{figure}[H]
   \centering
   \includegraphics[width=\linewidth]{figures/app_analytics_gr_c.png}
-  \caption{Gutenberg-Richter analysis of the synthetic GeoNet-like catalogue,
-  computed client-side.  The platform reports $\hat{b}$ with its
-  counting-statistics uncertainty, the $a$-value, the goodness of fit, and the
-  Maximum Curvature estimate of $M_c$; the frequency-magnitude plot marks the
-  incomplete range below $M_c$ and overlays the fitted relation.  The recovered
-  $\hat{b} = 0.963 \pm 0.021$ is fitted above the platform's own Maximum
-  Curvature cut-off of $M_c = M2.4$ (Figure~\ref{fig:s_mc}), on the 41.8\,\% of
-  the catalogue above that cut-off, and lies $1.8$ counting-statistics standard
-  errors below the $b = 1.0$ used to generate the synthetic catalogue.  It is a
-  check on the estimator rather than a measurement of New Zealand seismicity.}
+  \caption{Gutenberg-Richter analysis of the reduced GeoNet-like catalogue,
+  computed client-side with the default $M_c$ settings (maximum curvature plus
+  $0.2$).  The platform reports $\hat{b}$ with its counting-statistics
+  uncertainty, the $a$-value, the goodness of fit and $M_c$; the
+  frequency-magnitude plot marks the range below $M_c$ and overlays the fitted
+  relation.  Above $M_c = M1.8 \pm 0.1$ the fit gives
+  $\hat{b} = 0.882 \pm 0.019$ ($N = 2{,}151$; $a = 4.92$, $R^2 = 0.963$).  As in
+  the worked example of the main paper, this lies below the $b = 1.00$ planted in
+  the synthetic background, because the synthetic networks are not complete at
+  $M1.8$ offshore and at depth: a single global $M_c$ is set by the best-covered
+  part of the catalogue.  The magnitudes are reported to full precision, so no
+  binning correction is applied.  The capture is a check of the platform's
+  behaviour on a controlled input, not a measurement of New Zealand seismicity.}
   \label{fig:s_gr}
 \end{figure}
 
-\begin{figure}[ht]
+\begin{figure}[H]
   \centering
   \includegraphics[width=\linewidth]{figures/app_analytics_mc.png}
-  \caption{Magnitude-of-completeness panel for the same catalogue.  $M_c$ is
-  estimated by Maximum Curvature with the $+0.2$ correction discussed in the
-  main paper: here the modal bin is $M2.2$, so the reported cut-off is
-  $M_c = M2.4$, above the $M2.0$ at which this synthetic catalogue was
-  constructed complete, and 41.8\,\% of the events lie above it.  The estimate
-  is exposed as an explicit, user-adjustable cut-off rather than
-  applied silently, so that the completeness assumption behind any subsequent
-  $b$-value is visible at the point of use.}
+  \caption{Magnitude-of-completeness panel for the same catalogue, with the
+  default settings (maximum curvature, correction $+0.2$; the goodness-of-fit
+  test is the alternative method, and the correction can be set from 0 to 0.5).
+  The fullest bin of the non-cumulative distribution is $M1.6$, so
+  $M_c = M1.8 \pm 0.1$ (one bin width, a lower bound on its uncertainty), and
+  $43.7\,\%$ of the events ($2{,}151$ of $4{,}922$) lie at or above it.  That
+  share is not a completeness score: for a perfectly complete catalogue with
+  $b = 1$ the $+0.2$ correction alone would limit it to about $63\,\%$.  The
+  estimate is shown with its method and correction, so that the completeness
+  assumption behind any subsequent $b$-value is visible at the point of use.}
   \label{fig:s_mc}
 \end{figure}
 
 \section*{Event-level quality index}
 
-\begin{figure}[ht]
+\begin{figure}[H]
   \centering
   \includegraphics[width=\linewidth]{figures/app_analytics_quality_c.png}
-  \caption{Catalogue-level quality summary for the synthetic GeoNet-like
-  catalogue.  The grade distribution and mean score are the five-dimension
-  per-event index of equation~1 of the main paper, which scores location,
-  network geometry, solution, magnitude, and evaluation status; every event is
-  scored on import and mapped to an A\textsuperscript{+}--F grade.  The
-  field-completeness bars are a separate catalogue-level metric that reports
-  the fraction of events populating each optional field; they are not inputs to
-  equation~1, and the absence of focal mechanisms in this synthetic catalogue
-  therefore lowers the completeness bars without affecting any event's score.
-  No event reaches grade~A\textsuperscript{+} because the synthetic events
-  carry no station, phase, or uncertainty metadata, and equation~1 treats a
-  missing field as its worst reportable value.}
+  \caption{Catalogue-level quality summary for the same catalogue.  The grade
+  distribution and the mean score ($67.9$) are the five-dimension per-event index
+  of equation~1 of the main paper, which scores location, network geometry,
+  solution, magnitude, and evaluation status; every event is scored when it is
+  stored and mapped to an A\textsuperscript{+}--F grade.  The synthetic reports
+  carry the fields equation~1 reads (horizontal, depth and origin-time
+  uncertainties, azimuthal gap, station and phase counts, RMS residual,
+  magnitude uncertainty and station count, and an analyst-reviewed evaluation
+  status), so the grades reflect the recording geometry: 86 events ($1.7\,\%$)
+  reach A\textsuperscript{+}, most events are graded B ($32.4\,\%$) or C
+  ($28.9\,\%$), and the lowest grades go to offshore and small events recorded
+  by few stations.  The field-completeness bars are a separate catalogue-level
+  metric: $90.6\,\%$ of the events have a location uncertainty in the sense of
+  the ``With Uncertainty Data'' card (a latitude, longitude or depth
+  uncertainty), the others having a fixed depth and only a horizontal
+  uncertainty, and none has a focal mechanism, which equation~1 does not use.}
   \label{fig:s_quality}
 \end{figure}
+
+\section*{References}
+{\small\setlength{\parindent}{0pt}\setlength{\parskip}{3pt}
+\newcommand{\bibitemx}[1]{\hangindent=1.5em\hangafter=1 #1\par}
+\bibitemx{B{\aa}th, M. (1965). Lateral inhomogeneities of the upper mantle,
+  \emph{Tectonophysics} \textbf{2}, no.~6, 483--514.}
+\bibitemx{Omori, F. (1894). On the after-shocks of earthquakes, \emph{Journal of
+  the College of Science, Imperial University of Tokyo} \textbf{7}, 111--200.}
+\bibitemx{Utsu, T. (1961). A statistical study on the occurrence of aftershocks,
+  \emph{Geophysical Magazine} \textbf{30}, 521--605.}
+\bibitemx{Utsu, T. (1970). Aftershocks and earthquake statistics (1): Some
+  parameters which characterize an aftershock sequence and their
+  interrelations, \emph{Journal of the Faculty of Science, Hokkaido University,
+  Series VII (Geophysics)} \textbf{3}, no.~3, 129--195.}
+\bibitemx{Wells, D.~L., and K.~J. Coppersmith (1994). New empirical relationships
+  among magnitude, rupture length, rupture width, rupture area, and surface
+  displacement, \emph{Bulletin of the Seismological Society of America}
+  \textbf{84}, no.~4, 974--1002.}
+}
 
 \end{document}

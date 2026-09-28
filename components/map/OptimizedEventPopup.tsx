@@ -57,8 +57,11 @@ const UTC_SECOND_FORMAT = new Intl.DateTimeFormat('en-GB', {
   timeZoneName: 'short',
 });
 
-/** Render an ISO origin time in UTC; unparseable values are shown verbatim. */
-function formatOriginTime(time: string): string {
+/**
+ * Render an ISO origin time in UTC; unparseable values are shown verbatim. Shared by the
+ * other map popups so every map shows the same UTC string.
+ */
+export function formatOriginTime(time: string): string {
   const date = new Date(time);
   if (Number.isNaN(date.getTime())) return time;
   return UTC_SECOND_FORMAT.format(date);

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { mergeCatalogues as dbMergeCatalogues } from '@/lib/merge';
 import { validateMergeRequest, formatZodErrors } from '@/lib/validation';
-import { apiCache } from '@/lib/cache';
 import { requireEditor } from '@/lib/auth/middleware';
+import { writeAuditLog } from '@/lib/audit';
+import { AppError } from '@/lib/errors';
 
 export async function POST(request: NextRequest) {
   try {
@@ -53,11 +54,33 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await dbMergeCatalogues(name, sourceCatalogues, config, metadata, exportOnly);
+    // The creator recorded on the merged catalogue is the session user, never client input.
+    const result = await dbMergeCatalogues(name, sourceCatalogues, config, metadata, exportOnly, {
+      createdBy: authResult.user.id,
+    });
 
-    // Clear cache since a new catalogue was created (unless export-only mode)
-    if (!exportOnly) {
-      apiCache.clearAll();
+    // A saved merge creates a catalogue (contract C13). lib/db.ts invalidates its caches on
+    // every catalogue and event write, so nothing needs clearing here. An export-only merge
+    // writes nothing and is not audited as a creation.
+    if (!exportOnly && result.catalogueId) {
+      await writeAuditLog({
+        action: 'merge.create',
+        actor_id: authResult.user.id,
+        actor_email: authResult.user.email,
+        target_id: result.catalogueId,
+        target_type: 'catalogue',
+        metadata: {
+          name,
+          sourceCatalogueIds: sourceCatalogues.map((catalogue) => String(catalogue.id)),
+          mergeStrategy: config.mergeStrategy,
+          priority: config.priority,
+          ...(config.priorityOrder ? { priorityOrder: config.priorityOrder } : {}),
+          timeThreshold: config.timeThreshold,
+          distanceThreshold: config.distanceThreshold,
+          eventCount: result.eventCount,
+          originalEventCount: result.originalEventCount,
+        },
+      }, request);
     }
 
     return NextResponse.json(result);
@@ -65,6 +88,15 @@ export async function POST(request: NextRequest) {
     // Log the real error server-side, but return a generic client-facing message so internal
     // exception detail (DB driver errors, query internals, etc.) is not disclosed.
     console.error('Merge error:', error);
+
+    // Errors the data layer raises deliberately carry their own status (e.g. 409 when a
+    // catalogue cannot be written) and a message written for the client.
+    if (error instanceof AppError && error.statusCode < 500) {
+      return NextResponse.json(
+        { error: error.message, code: error.code ?? 'MERGE_FAILED' },
+        { status: error.statusCode }
+      );
+    }
 
     const isNotFound = error instanceof Error && error.message.includes('not found');
 

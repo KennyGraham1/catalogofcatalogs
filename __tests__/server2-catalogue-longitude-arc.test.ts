@@ -30,6 +30,8 @@ jest.mock('@/lib/db', () => ({
   },
 }));
 
+// Catalogue creation is audited (C13); the audit store is not under test here.
+jest.mock('@/lib/audit', () => ({ writeAuditLog: jest.fn(async () => undefined) }));
 jest.mock('@/lib/rate-limiter', () => ({
   applyRateLimit: jest.fn(() => ({ success: true, headers: {} })),
   readRateLimiter: {},

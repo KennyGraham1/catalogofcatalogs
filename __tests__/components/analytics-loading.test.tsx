@@ -10,11 +10,13 @@ jest.mock('next/dynamic', () => () => function MockMap({ earthquakes }: any) {
 });
 jest.mock('@/hooks/use-seismological-worker', () => ({ useSeismologicalAnalyses: () => ({
   grAnalysis: { data: null, error: mockAnalysisError }, completeness: { data: null, error: mockAnalysisError },
-  temporalAnalysis: { data: null, error: mockAnalysisError }, momentAnalysis: { data: null, error: mockAnalysisError }, anyLoading: false,
+  temporalAnalysis: { data: null, error: mockAnalysisError }, timeSeriesAnalysis: { data: null, error: mockAnalysisError },
+  momentAnalysis: { data: null, error: mockAnalysisError }, anyLoading: false,
 }) }));
 jest.mock('@/components/charts', () => Object.fromEntries([
   'MagnitudeDistributionChart', 'DepthDistributionChart', 'RegionDistributionChart', 'CatalogueDistributionChart',
   'MagnitudeDepthScatter', 'EventTimelineChart', 'GutenbergRichterChart', 'CompletenessChart', 'TemporalSeriesChart', 'MomentReleaseChart', 'MFDComparisonChart',
+  'MagnitudeTimeScatter', 'CumulativeReleaseChart', 'GoodnessOfFitChart',
 ].map(name => [name, () => null])));
 
 it('keeps the preview map usable while loading and unlocks analyses after completion', async () => {

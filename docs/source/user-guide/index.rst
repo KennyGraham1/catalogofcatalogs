@@ -30,7 +30,7 @@ Key Capabilities
        with configurable filters and duplicate detection
    * - **Catalogue Merging**
      - Combine multiple catalogues with automated duplicate detection and
-       four different conflict resolution strategies
+       five different conflict resolution strategies
    * - **Quality Assessment**
      - Automatic quality scoring (A+ to F grades) based on location uncertainty,
        network geometry, and solution parameters
@@ -98,7 +98,7 @@ The platform supports the following earthquake data formats:
      - Extensions
      - Description
    * - CSV/TXT
-     - ``.csv``, ``.txt``
+     - ``.csv``, ``.txt``, ``.dat``
      - Delimited text files with automatic delimiter detection (comma, tab,
        semicolon, pipe, space). Supports multiple date formats including
        ISO 8601, US (MM/DD/YYYY), and international (DD/MM/YYYY).
@@ -111,7 +111,7 @@ The platform supports the following earthquake data formats:
      - FeatureCollection with Point geometries. Coordinates follow GeoJSON
        convention [longitude, latitude, depth]. Properties contain event metadata.
    * - QuakeML
-     - ``.xml``, ``.qml``
+     - ``.xml``, ``.qml``, ``.quakeml``
      - QuakeML 1.2 BED (Basic Event Description) format. Full support for origins,
        magnitudes, picks, arrivals, and focal mechanisms.
 
@@ -123,7 +123,7 @@ All earthquake events must include these minimum fields:
 * **time** - Origin time (ISO 8601 or parseable date/time)
 * **latitude** - Decimal degrees (-90 to 90)
 * **longitude** - Decimal degrees (-180 to 180)
-* **magnitude** - Event magnitude (-2 to 10)
+* **magnitude** - Event magnitude (-3 to 10)
 
 Optional fields like depth, magnitude type, uncertainties, and quality metrics
 enhance the usefulness of your data.

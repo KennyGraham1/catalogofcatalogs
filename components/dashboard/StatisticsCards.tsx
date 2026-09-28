@@ -5,9 +5,32 @@ import { Database, FileJson, Layers, RefreshCw } from 'lucide-react';
 import { useCatalogues } from '@/contexts/CatalogueContext';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import { getCatalogueSourceType } from '@/lib/catalogue-source-type';
+
+/** A refresh interval in the largest whole unit: 21600000 ms is "6 h". */
+function formatInterval(ms: number): string {
+  if (ms % 3_600_000 === 0) return `${ms / 3_600_000} h`;
+  if (ms % 60_000 === 0) return `${ms / 60_000} min`;
+  return `${Math.round(ms / 1000)} s`;
+}
 
 export function StatisticsCards() {
-  const { stats, loading, refreshCatalogues, lastUpdated } = useCatalogues();
+  const { catalogues, stats, loading, refreshCatalogues, lastUpdated, autoRefreshInterval } = useCatalogues();
+
+  // Classified with the shared rule (lib/catalogue-source-type.ts, contract C6) that the
+  // provider's stats use too, here so the merged copies can be counted separately: a
+  // merged catalogue holds copies of its sources' events, which are not added again.
+  let mergedCount = 0;
+  let sourceRecords = 0;
+  let mergedRecords = 0;
+  for (const catalogue of catalogues) {
+    if (getCatalogueSourceType(catalogue) === 'merged') {
+      mergedCount++;
+      mergedRecords += catalogue.event_count || 0;
+    } else {
+      sourceRecords += catalogue.event_count || 0;
+    }
+  }
 
   const statsConfig = [
     {
@@ -15,23 +38,28 @@ export function StatisticsCards() {
       value: stats.totalCatalogues.toLocaleString(),
       icon: Database,
       description: 'Across all sources',
-      trend: stats.recentlyAdded > 0 ? `+${stats.recentlyAdded} this month` : 'No new catalogues',
+      // The provider counts catalogues created in a rolling 30-day window.
+      trend: stats.recentlyAdded > 0 ? `+${stats.recentlyAdded} in the last 30 days` : 'None in the last 30 days',
       trendUp: stats.recentlyAdded > 0
     },
     {
-      title: 'Events',
-      value: stats.totalEvents.toLocaleString(),
+      // Records, not earthquakes: overlapping source catalogues (GeoNet and ISC, say)
+      // still hold the same earthquake once each.
+      title: 'Event records',
+      value: sourceRecords.toLocaleString(),
       icon: FileJson,
-      description: 'Total earthquake events',
-      trend: 'Across all catalogues',
+      description: 'In source catalogues; not distinct earthquakes',
+      trend: mergedRecords > 0
+        ? `${mergedRecords.toLocaleString()} more in merged catalogues (copies)`
+        : 'No merged copies',
       trendUp: true
     },
     {
       title: 'Merged Catalogues',
-      value: stats.mergedCatalogues.toLocaleString(),
+      value: mergedCount.toLocaleString(),
       icon: Layers,
       description: 'Unified datasets',
-      trend: `${Math.round((stats.mergedCatalogues / Math.max(stats.totalCatalogues, 1)) * 100)}% of total`,
+      trend: `${Math.round((mergedCount / Math.max(catalogues.length, 1)) * 100)}% of total`,
       trendUp: true
     },
     {
@@ -43,7 +71,12 @@ export function StatisticsCards() {
         month: '2-digit',
         year: 'numeric',
       }) : 'Never',
-      trend: 'Auto-refresh: 30s',
+      // The provider's own interval (CatalogueProvider autoRefreshInterval, 6 h by default).
+      trend: typeof autoRefreshInterval !== 'number'
+        ? 'Use the refresh icon for the latest data'
+        : autoRefreshInterval > 0
+          ? `Auto-refresh every ${formatInterval(autoRefreshInterval)}; the icon refreshes now`
+          : 'Auto-refresh off; use the refresh icon',
       trendUp: true
     }
   ];

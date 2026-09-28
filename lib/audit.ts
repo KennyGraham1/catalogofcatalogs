@@ -4,7 +4,9 @@
  * Best-effort: failures are logged to stderr but never throw.
  */
 
+import { randomUUID } from 'crypto';
 import { getCollection, COLLECTIONS } from './mongodb';
+import { resolveClientIp } from './rate-limiter';
 
 export type AuditAction =
   | 'user.login'
@@ -15,6 +17,8 @@ export type AuditAction =
   | 'user.role_change'
   | 'user.deactivate'
   | 'user.activate'
+  | 'user.delete'
+  | 'role_request.reject'
   | 'catalogue.create'
   | 'catalogue.delete'
   | 'catalogue.update'
@@ -23,6 +27,8 @@ export type AuditAction =
   | 'cache.clear';
 
 export interface AuditEntry {
+  /** Unique per entry: scripts/init-database.ts gives audit_logs a unique index on id. */
+  id: string;
   action: AuditAction;
   actor_id?: string;
   actor_email?: string;
@@ -33,10 +39,26 @@ export interface AuditEntry {
   created_at: Date;
 }
 
-export async function writeAuditLog(entry: Omit<AuditEntry, 'created_at'>): Promise<void> {
+/**
+ * Record an audit entry.
+ *
+ * Pass the incoming request (or anything with its headers) as `request` to record the
+ * client address, resolved the same way as the rate limiters (lib/rate-limiter.ts). An
+ * `ip` set on the entry itself takes precedence.
+ */
+export async function writeAuditLog(
+  entry: Omit<AuditEntry, 'id' | 'created_at'>,
+  request?: Pick<Request, 'headers'>
+): Promise<void> {
   try {
+    const ip = entry.ip ?? (request ? resolveClientIp(request) ?? undefined : undefined);
     const collection = await getCollection(COLLECTIONS.AUDIT_LOGS);
-    await collection.insertOne({ ...entry, created_at: new Date() } as any);
+    await collection.insertOne({
+      ...entry,
+      ...(ip ? { ip } : {}),
+      id: randomUUID(),
+      created_at: new Date(),
+    } as any);
   } catch (err) {
     // Audit log failure must never break the calling request.
     console.error('[Audit] Failed to write audit log:', err instanceof Error ? err.message : err);

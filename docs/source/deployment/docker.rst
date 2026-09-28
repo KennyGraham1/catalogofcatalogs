@@ -103,6 +103,11 @@ Optional Variables
    # Email notifications (optional)
    EMAIL_WEBHOOK_URL=https://your-email-service/webhook
 
+   # Number of trusted reverse-proxy hops in front of the app (default: 1).
+   # Raise this if you add another load balancer in front of the bundled
+   # nginx reverse proxy; see "Option 3: With Nginx Reverse Proxy" below.
+   TRUSTED_PROXY_HOPS=1
+
 .. warning::
    Never commit ``.env.production`` to version control. Add it to ``.gitignore``.
 
@@ -159,12 +164,15 @@ Nginx Service (nginx)
 Optional reverse proxy (activated with ``--profile with-nginx``):
 
 * **Image**: ``nginx:alpine``
-* **Ports**: 80, 443
-* **Features**: SSL termination, caching, load balancing
+* **Ports**: 80 is active by default; 443 is published but the TLS server
+  block in ``nginx/nginx.conf`` is commented out until certificates are
+  added under ``nginx/ssl/`` (see "Option 3" below)
+* **Features**: accurate client-IP forwarding for the app's rate limiters,
+  caching, load balancing, and (once enabled) SSL termination
 
------------------
+------------------
 Deployment Options
------------------
+------------------
 
 Option 1: Full Stack (with MongoDB)
 ===================================
@@ -186,52 +194,70 @@ and remove or comment out the ``mongodb`` service and its ``depends_on`` referen
    # Update MONGODB_URI in .env.production to point to Atlas
    docker compose -f docker-compose.prod.yml up -d app
 
-Option 3: With Nginx Reverse Proxy
-==================================
+Option 3: With Nginx Reverse Proxy (Recommended for Production)
+===============================================================
 
-Deploy with the nginx reverse proxy for SSL termination:
+The repository ships a ready-to-use reverse proxy configuration at
+``nginx/nginx.conf``, wired up via the ``with-nginx`` Docker Compose
+profile. This is the recommended way to run in production: it lets the
+app enforce accurate per-client rate limits (login, registration, password
+reset) while keeping the app container off the host's public interface.
 
 .. code-block:: bash
 
-   # First, set up nginx configuration in ./nginx/nginx.conf
-   # and SSL certificates in ./nginx/ssl/
-   docker compose -f docker-compose.prod.yml --profile with-nginx up -d
+   # Bind the app to localhost only; nginx is then the only way in.
+   # nginx reaches the app over the compose network at app:3000.
+   APP_BIND_ADDRESS=127.0.0.1 \
+     docker compose -f docker-compose.prod.yml --profile with-nginx up -d
 
-Example nginx configuration (``nginx/nginx.conf``):
+.. note::
+   Without ``--profile with-nginx`` (or without setting
+   ``APP_BIND_ADDRESS``), the prod compose file still publishes the app
+   directly on ``0.0.0.0:3000`` by default — an operator must opt into the
+   proxy.
+
+**Why this combination matters:** the app's per-client rate limiters key off
+the ``X-Forwarded-For`` entry added by the last *trusted* proxy (the
+``TRUSTED_PROXY_HOPS`` environment variable, default ``1``). If a client
+could reach the app directly, it could set its own ``X-Forwarded-For`` and
+choose its own rate-limit bucket, so two things close that off:
+
+* ``nginx/nginx.conf`` **overwrites** ``X-Forwarded-For`` with the address
+  it sees, instead of appending to whatever the client sent:
+
+  .. code-block:: nginx
+
+     proxy_set_header X-Forwarded-For $remote_addr;
+
+  A proxy using ``$proxy_add_x_forwarded_for`` instead *appends* to the
+  client-supplied header rather than replacing it, which would let a
+  malicious client forge their own rate-limit bucket by sending a fake
+  ``X-Forwarded-For`` of their own.
+* ``APP_BIND_ADDRESS=127.0.0.1`` keeps the app reachable only through
+  nginx, so clients cannot bypass the proxy and talk to the app directly.
+
+Other defaults worth knowing:
+
+* nginx listens on port 80 only by default. A commented-out ``443 ssl``
+  server block is included in ``nginx/nginx.conf`` — add certificate and
+  key files under ``nginx/ssl/`` and uncomment it to enable TLS.
+* The upload API accepts request bodies up to 100 MB
+  (``client_max_body_size 100m;``).
+* GeoNet imports may run for up to ~300 seconds, so
+  ``proxy_read_timeout`` and ``proxy_send_timeout`` are both set to
+  ``310s``.
+
+If another load balancer or proxy sits in front of this nginx, raise
+``TRUSTED_PROXY_HOPS`` to match the number of trusted hops, and configure
+nginx's ``realip`` module so ``$remote_addr`` still resolves to the true
+client (the header comment in ``nginx/nginx.conf`` shows the exact
+directives):
 
 .. code-block:: nginx
 
-   events {
-       worker_connections 1024;
-   }
-
-   http {
-       upstream app {
-           server app:3000;
-       }
-
-       server {
-           listen 80;
-           server_name your-domain.com;
-           return 301 https://$server_name$request_uri;
-       }
-
-       server {
-           listen 443 ssl;
-           server_name your-domain.com;
-
-           ssl_certificate /etc/nginx/ssl/fullchain.pem;
-           ssl_certificate_key /etc/nginx/ssl/privkey.pem;
-
-           location / {
-               proxy_pass http://app;
-               proxy_set_header Host $host;
-               proxy_set_header X-Real-IP $remote_addr;
-               proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-               proxy_set_header X-Forwarded-Proto $scheme;
-           }
-       }
-   }
+   set_real_ip_from 10.0.0.0/8;   # the load balancer's address(es)
+   real_ip_header    X-Forwarded-For;
+   real_ip_recursive on;
 
 -------------
 Health Checks

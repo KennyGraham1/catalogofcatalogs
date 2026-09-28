@@ -5,16 +5,21 @@ jest.mock('@/lib/db', () => ({
   ...jest.requireActual('@/lib/db'),
   dbQueries: Object.fromEntries(['insertCatalogue', 'bulkInsertEvents', 'updateCatalogueStatus', 'updateCatalogueEventCount', 'updateCatalogueGeoBounds', 'getCatalogueById', 'deleteCatalogue', 'countEventsByCatalogue'].map(k => [k, jest.fn()])),
 }));
+// Catalogue creation is audited (C13); the audit store is not under test here.
+jest.mock('@/lib/audit', () => ({ writeAuditLog: jest.fn(async () => undefined) }));
 jest.mock('@/lib/rate-limiter', () => ({ applyRateLimit: () => ({ success: true, headers: {} }), readRateLimiter: {}, apiRateLimiter: {} }));
 jest.mock('@/lib/pending-uploads', () => ({ deletePendingUpload: jest.fn(async () => {}), getPendingUploadEvents: jest.fn(), iteratePendingUploadEventBatches: jest.fn() }));
 import { POST } from '@/app/api/catalogues/route';
 import { dbQueries } from '@/lib/db';
 import { getPendingUploadEvents, iteratePendingUploadEventBatches, deletePendingUpload } from '@/lib/pending-uploads';
+import { requireEditor } from '@/lib/auth/middleware';
 const db = dbQueries as unknown as Record<string, jest.Mock>;
 const event = (id: string) => ({ id, time: '2024-01-01T00:00:00.000Z', latitude: -41, longitude: 174, depth: 10, magnitude: 4 });
 const post = (body: unknown) => POST(new NextRequest('http://localhost/api/catalogues', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }));
 beforeEach(() => {
   jest.resetAllMocks();
+  // resetAllMocks also clears the auth stub; the route records the session user as creator.
+  (requireEditor as jest.Mock).mockResolvedValue({ user: { id: 'editor' } });
   (deletePendingUpload as jest.Mock).mockResolvedValue(undefined);
   db.getCatalogueById.mockResolvedValue({ id: 'cat', name: 'Audit' });
   const stored = new Set<string>();
@@ -66,13 +71,24 @@ it('rejects missing pending files before metadata can attach to the wrong row', 
   expect(db.insertCatalogue).not.toHaveBeenCalled();
   expect(db.bulkInsertEvents).not.toHaveBeenCalled();
 });
-it('rolls back streamed imports if a later pending file is missing', async () => {
+it('rejects streamed imports whose later pending file is missing before writing anything', async () => {
+  // The pending path validates every file in a dry run first, so a missing file is
+  // found before the catalogue or any event is written (previously: written, then rolled back).
   (iteratePendingUploadEventBatches as jest.Mock).mockImplementation(async function* (id) { if (id === 'present') yield [event('b')]; });
   const response = await post({ name: 'Audit', pendingUploadIds: ['present', 'expired'] });
   const body = await response.json();
   expect(response.status).toBe(404);
   expect(body.code).toBe('PENDING_UPLOAD_NOT_FOUND');
-  expect(db.bulkInsertEvents).toHaveBeenCalledTimes(1);
+  expect(db.insertCatalogue).not.toHaveBeenCalled();
+  expect(db.bulkInsertEvents).not.toHaveBeenCalled();
+  expect(deletePendingUpload).not.toHaveBeenCalled();
+});
+it('rolls back a streamed import whose insert fails part-way', async () => {
+  (iteratePendingUploadEventBatches as jest.Mock).mockImplementation(async function* (id) { yield [event(`${id}-1`)]; });
+  db.bulkInsertEvents.mockImplementationOnce(async rows => rows.length).mockImplementationOnce(async () => { throw new Error('permanent write failure'); });
+  const response = await post({ name: 'Audit', pendingUploadIds: ['first', 'second'] });
+  expect(response.status).toBe(500);
+  expect(db.bulkInsertEvents).toHaveBeenCalledTimes(2);
   expect(db.deleteCatalogue).toHaveBeenCalledTimes(1);
   expect(deletePendingUpload).not.toHaveBeenCalled();
 });

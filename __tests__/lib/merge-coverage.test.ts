@@ -138,11 +138,20 @@ describe('merge strategies', () => {
     expect((merged.magnitude_type || '').toLowerCase()).toBe('mw');
   });
 
-  it('mergeByNewest selects the latest event', () => {
-    const older = ev({ id: 'old', time: '2024-01-15T10:00:00.000Z' });
-    const newer = ev({ id: 'new', time: '2024-01-15T12:00:00.000Z' });
-    const merged = mergeByNewest([older, newer]);
-    expect(merged.time).toBe(newer.time);
+  it('mergeByNewest keeps the most recently DETERMINED solution, not the latest origin time', () => {
+    // Two reports of one earthquake: the reviewed solution was computed later but locates the
+    // origin 2 s EARLIER. "Newest" means the later analysis (publication/main.tex), so the
+    // reviewed report wins. (This test used to pin the latest origin time.)
+    const automatic = ev({
+      id: 'auto', source: 'A', time: '2024-01-15T10:30:47.000Z',
+      creation_info: JSON.stringify({ creationTime: '2024-01-15T10:31:30.000Z' }),
+    });
+    const reviewed = ev({
+      id: 'rev', source: 'B', time: '2024-01-15T10:30:45.000Z',
+      creation_info: JSON.stringify({ creationTime: '2024-01-22T09:00:00.000Z' }),
+    });
+    expect(mergeByNewest([automatic, reviewed]).id).toBe('rev');
+    expect(mergeByNewest([reviewed, automatic]).id).toBe('rev');
   });
 
   it('mergeByPriority "authority" prefers the more authoritative network', () => {
@@ -165,7 +174,9 @@ describe('selectBestMagnitude — includes top-level magnitudes (regression)', (
 
 describe('getMagnitudePriority — category fallback (regression)', () => {
   it('classifies composite/unlisted labels by prefix instead of "unknown"', () => {
-    expect(getMagnitudePriority('Mw(mB)')).toBe(1);
+    // An agency's Mw proxy (derived from mB) is on the Mw scale but ranks below a
+    // moment-tensor Mw and above every other scale.
+    expect(getMagnitudePriority('Mw(mB)')).toBe(1.5);
     expect(getMagnitudePriority('MLc')).toBe(4);
     expect(getMagnitudePriority('mbLg')).toBe(3);
     expect(getMagnitudePriority('totally-bogus')).toBe(100);
@@ -203,8 +214,9 @@ describe('magnitude conversions — out-of-range handling (regression)', () => {
 });
 
 describe('focal-mechanism selection (regression)', () => {
-  it('classifies "GeoNet CMT" as regional (2), not Global CMT (1)', () => {
-    expect(getFocalMechanismPriority('GeoNet CMT')).toBe(2);
+  it('classifies "GeoNet CMT" as GeoNet (4 in the white-paper order), not Global CMT (1)', () => {
+    // merge_strategies.tex §Focal mechanism: GCMT > USGS/NEIC > GEOFON > GeoNet CMT > INGV.
+    expect(getFocalMechanismPriority('GeoNet CMT')).toBe(4);
     expect(getFocalMechanismPriority('GCMT')).toBe(1);
   });
 
@@ -274,9 +286,16 @@ describe('preview ↔ persist parity (regression)', () => {
 
 describe('unionMergeFields — magnitude metadata atomicity (regression, via mergeEventGroup)', () => {
   it('does not stamp a different source\'s magnitude_type onto the merged magnitude value', () => {
-    // Base (priority=newest) is the ML event with no magnitude_type; another source reports Mw.
-    const mlBase = ev({ id: 'ml', time: '2024-01-15T12:00:00.000Z', magnitude: 5.2, magnitude_type: null, longitude: 0, source: 'A' });
-    const mwOther = ev({ id: 'mw', time: '2024-01-15T10:00:00.000Z', magnitude: 6.1, magnitude_type: 'Mw', longitude: 0.02, source: 'B' });
+    // Base (priority=newest: the most recently determined solution) is the ML event with no
+    // magnitude_type; another source reports Mw.
+    const mlBase = ev({
+      id: 'ml', time: '2024-01-15T12:00:00.000Z', magnitude: 5.2, magnitude_type: null, longitude: 0, source: 'A',
+      creation_info: JSON.stringify({ creationTime: '2024-02-01T00:00:00.000Z' }),
+    });
+    const mwOther = ev({
+      id: 'mw', time: '2024-01-15T10:00:00.000Z', magnitude: 6.1, magnitude_type: 'Mw', longitude: 0.02, source: 'B',
+      creation_info: JSON.stringify({ creationTime: '2024-01-16T00:00:00.000Z' }),
+    });
     const merged = mergeEventGroup([mlBase, mwOther], { ...config, mergeStrategy: 'priority', priority: 'newest' } as any);
     // Newest (mlBase) supplies the value 5.2; its type must NOT be grafted to 'Mw' from mwOther.
     expect(merged.magnitude).toBe(5.2);
@@ -288,9 +307,11 @@ describe('unionMergeFields — magnitude metadata atomicity (regression, via mer
     // alone would graft 'Mw' onto the base's untyped 5.0 — it must not.
     const untypedBase = ev({
       id: 'base', time: '2024-01-15T12:00:00.000Z', magnitude: 5.0, magnitude_type: null, longitude: 0, source: 'A',
+      creation_info: JSON.stringify({ creationTime: '2024-02-01T00:00:00.000Z' }),
     });
     const mwSameValue = ev({
       id: 'mw', time: '2024-01-15T10:00:00.000Z', magnitude: 5.0, magnitude_type: 'Mw', longitude: 0.02, source: 'B',
+      creation_info: JSON.stringify({ creationTime: '2024-01-16T00:00:00.000Z' }),
       // higher quality so it ranks first in unionMergeFields
       quakeml: { preferredOriginID: 'o', origins: [{ publicID: 'o', evaluationStatus: 'reviewed', quality: { usedStationCount: 40, azimuthalGap: 80, standardError: 0.15 } }] },
     });

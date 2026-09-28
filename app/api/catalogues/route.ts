@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { dbQueries, EVENT_OPTIONAL_RANGES, optionalFieldInRange } from '@/lib/db';
-import { AppError, Logger, DatabaseError, formatErrorResponse } from '@/lib/errors';
-import { apiCache, generateCacheKey, catalogueCache, invalidateCacheByPrefix } from '@/lib/cache';
+import { z } from 'zod';
+import { dbQueries, EVENT_OPTIONAL_RANGES, normalizeDepthType, optionalFieldInRange } from '@/lib/db';
+import { AppError, Logger, formatErrorResponse } from '@/lib/errors';
+import {
+  CATALOGUE_LIST_CACHE_PREFIX,
+  CATALOGUE_LIST_SCOPE,
+  catalogueCache,
+  generateCacheKey,
+  getCacheGeneration,
+} from '@/lib/cache';
 import { applyRateLimit, readRateLimiter, apiRateLimiter } from '@/lib/rate-limiter';
 import { requireEditor } from '@/lib/auth/middleware';
+import { writeAuditLog } from '@/lib/audit';
 import { createId } from '@/lib/id';
 import {
   deletePendingUpload,
@@ -12,7 +20,8 @@ import {
 } from '@/lib/pending-uploads';
 import { quakemlEventToDbFields } from '@/lib/quakeml-to-db';
 import { parsedEventToDbFields } from '@/lib/parsed-event-to-db';
-import { normalizeTimestamp } from '@/lib/earthquake-utils';
+import { normalizeMappedField, normalizeTimestamp, type ParseFileDecisions } from '@/lib/earthquake-utils';
+import { isMappableTargetField, REQUIRED_EVENT_FIELDS } from '@/lib/field-definitions';
 import {
   ALLOWED_DEPTH_TYPE,
   ALLOWED_EVALUATION_MODE,
@@ -46,10 +55,16 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const cacheKey = generateCacheKey('catalogues', { all: true });
+    // The list is cached under the shared cache generation, taken BEFORE the read, so an
+    // entry written by any instance is never served after a catalogue changes. Without a
+    // generation (the shared counter is unreadable) the cache is neither read nor written.
+    const generation = await getCacheGeneration(CATALOGUE_LIST_SCOPE);
+    const cacheKey = generation === null
+      ? null
+      : generateCacheKey(CATALOGUE_LIST_CACHE_PREFIX, { all: true, generation });
 
     // Try to get from cache
-    const cached = catalogueCache.get(cacheKey);
+    const cached = cacheKey ? catalogueCache.get(cacheKey) : undefined;
     if (cached) {
       return NextResponse.json(cached);
     }
@@ -65,7 +80,7 @@ export async function GET(request: NextRequest) {
     const catalogues = await dbQueries.getCatalogues();
 
     // Store in cache
-    catalogueCache.set(cacheKey, catalogues);
+    if (cacheKey) catalogueCache.set(cacheKey, catalogues);
 
     return NextResponse.json(catalogues);
   } catch (error) {
@@ -87,16 +102,6 @@ const EVENT_INSERT_MAX_PARALLEL_BATCHES = 2;
 const BATCH_INSERT_MAX_RETRIES = 4;
 const BATCH_INSERT_BASE_DELAY_MS = 250;
 
-const NUMERIC_MAPPING_FIELDS = new Set([
-  'latitude', 'longitude', 'depth', 'magnitude',
-  'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty',
-  'depth_uncertainty', 'horizontal_uncertainty', 'magnitude_uncertainty',
-  'min_horizontal_uncertainty', 'max_horizontal_uncertainty', 'azimuth_max_horizontal_uncertainty',
-  'azimuthal_gap', 'used_phase_count', 'used_station_count', 'standard_error',
-  'minimum_distance', 'maximum_distance', 'associated_phase_count',
-  'associated_station_count', 'depth_phase_count', 'magnitude_station_count',
-]);
-
 type InsertRow = Partial<import('@/lib/db').MergedEvent> & {
   id: string;
   catalogue_id: string;
@@ -106,6 +111,11 @@ type InsertRow = Partial<import('@/lib/db').MergedEvent> & {
   magnitude: number;
   source_events: string;
 };
+
+/** lib/db refuses events for a catalogue that no longer exists or is being deleted. */
+function isCatalogueNotWritable(error: unknown): boolean {
+  return error instanceof AppError && error.code === 'CATALOGUE_NOT_WRITABLE';
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -118,6 +128,8 @@ function getErrorMessage(error: unknown): string {
 
 function isRetryableBatchInsertError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
+  // The catalogue is gone or being deleted: retrying cannot succeed.
+  if (isCatalogueNotWritable(error)) return false;
 
   const err = error as {
     code?: number;
@@ -279,6 +291,15 @@ function dropInvalidOptionalEnumFields(row: InsertRow): void {
     const value = (row as any)[field];
     if (value == null) continue;
 
+    // Depth types keep their QuakeML spelling ('... broad-band P waveforms'); the BED
+    // enumeration is case-sensitive, so lower-casing it would store an invalid value.
+    if (field === 'depth_type') {
+      const canonical = normalizeDepthType(value);
+      if (canonical) (row as any)[field] = canonical;
+      else delete (row as any)[field];
+      continue;
+    }
+
     const normalized = String(value).toLowerCase().trim();
     if (allowed.has(normalized)) {
       (row as any)[field] = normalized;
@@ -288,41 +309,176 @@ function dropInvalidOptionalEnumFields(row: InsertRow): void {
   }
 }
 
-function applyFieldMappingsToPendingEvent(
+// ── Explicit column mapping (contract C14) ──────────────────────────────────
+//
+// Every stored row starts from the parser's own event: aliases resolved, the file's
+// date format applied, 0-360 longitudes wrapped and depths converted with the file's
+// unit decision. The schema step only sends what the user changed, per file:
+//   set:   target <- source column, re-read from the raw cell through
+//          normalizeMappedField with that file's decisions (exactly as the parser would)
+//   unset: targets the user chose not to map, removed from the row
+// Copying raw cells over the parser's values is what used to store 800 m as 800 km,
+// reject every 0-360 longitude and flip every ambiguous US date.
+
+/**
+ * Raw keys parsedEventToDbFields reads as fallbacks for a canonical field. Removing or
+ * re-sourcing the field must take them too, or the fallback silently brings the old
+ * value back.
+ */
+const FIELD_FALLBACK_KEYS: Record<string, string[]> = {
+  id: ['eventId'],
+  event_public_id: ['publicID'],
+  event_type: ['eventType'],
+  magnitude_type: ['magnitudeType'],
+  azimuthal_gap: ['azimuthalGap'],
+  used_phase_count: ['usedPhaseCount'],
+  used_station_count: ['usedStationCount'],
+  confidence_level: ['confidenceLevel'],
+};
+
+const mappingTargetSchema = z.string().min(1).max(64).refine(isMappableTargetField, {
+  message: 'is not a field a column can be mapped to',
+});
+
+const fileMappingSchema = z.object({
+  set: z.record(mappingTargetSchema, z.string().min(1).max(256)).default({}),
+  unset: z.array(mappingTargetSchema).max(100).default([]),
+}).superRefine((mapping, ctx) => {
+  for (const target of mapping.unset) {
+    if (REQUIRED_EVENT_FIELDS.includes(target) && !(target in mapping.set)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${target} is required and cannot be left unmapped` });
+    }
+  }
+});
+
+// Only the two decisions normalizeMappedField reads are kept; the rest of the parser's
+// decision record is informational.
+const fileDecisionsSchema = z.object({
+  dateFormat: z.enum(['US', 'International', 'ISO']).optional(),
+  depthUnit: z.enum(['km', 'm']).optional(),
+});
+
+/** One uploaded file, in upload order: its pending token and the rows it must hold. */
+const pendingUploadEntrySchema = z.object({
+  id: z.string().trim().min(1).max(128),
+  expectedCount: z.number().int().min(1).max(50_000_000),
+  fileName: z.string().max(512).optional(),
+  format: z.string().max(32).optional(),
+  mapping: fileMappingSchema.optional(),
+  fileDecisions: fileDecisionsSchema.optional(),
+});
+
+const pendingUploadManifestSchema = z.array(pendingUploadEntrySchema).min(1).max(50);
+
+type FileMapping = z.infer<typeof fileMappingSchema>;
+
+interface PendingUploadEntry {
+  id: string;
+  /** Rows the upload response reported for this file; absent only for legacy id lists. */
+  expectedCount?: number;
+  fileName?: string;
+  format?: string;
+  mapping?: FileMapping;
+  fileDecisions?: ParseFileDecisions;
+}
+
+function numberOrNull(value: unknown): number | null {
+  const num = safeParseNumber(value);
+  return num !== null && Number.isFinite(num) ? num : null;
+}
+
+function sameMagnitude(
+  a: { value: number | null; type?: unknown },
+  b: { value: number | null; type?: unknown },
+): boolean {
+  return a.value !== null && b.value !== null && Math.abs(a.value - b.value) < 1e-9 &&
+    String(a.type ?? '').toLowerCase() === String(b.type ?? '').toLowerCase();
+}
+
+/**
+ * After an explicit change of the event magnitude, keep every value the file reported:
+ * the parser's selection becomes an alternative in `magnitudes`, and an alternative
+ * equal to the new selection is removed.
+ */
+function reconcileMagnitudeAlternatives(
+  event: Record<string, unknown>,
+  previous: { value: number | null; type?: unknown },
+): void {
+  const selected = { value: numberOrNull(event.magnitude), type: event.magnitude_type };
+  let alternatives: Array<{ type?: unknown; mag?: { value?: unknown } }> = [];
+  const stored = event.magnitudes;
+  try {
+    const parsed = typeof stored === 'string' ? JSON.parse(stored) : stored;
+    if (Array.isArray(parsed)) alternatives = parsed;
+  } catch {
+    alternatives = [];
+  }
+
+  const asMagnitude = (entry: { type?: unknown; mag?: { value?: unknown } }) =>
+    ({ value: numberOrNull(entry?.mag?.value), type: entry?.type });
+  alternatives = alternatives.filter(entry => !sameMagnitude(asMagnitude(entry), selected));
+  if (previous.value !== null && !sameMagnitude(previous, selected) &&
+      !alternatives.some(entry => sameMagnitude(asMagnitude(entry), previous))) {
+    alternatives.push({
+      ...(typeof previous.type === 'string' && previous.type ? { type: previous.type } : {}),
+      mag: { value: previous.value },
+    });
+  }
+
+  if (alternatives.length > 0) event.magnitudes = JSON.stringify(alternatives);
+  else delete event.magnitudes;
+}
+
+/**
+ * The parser's event with the user's explicit changes applied (see the block comment
+ * above). QuakeML rows carry the standard structure and are never re-mapped.
+ */
+function applyExplicitMapping(
   pendingEvent: ParsedEvent,
-  fieldMappings: unknown,
+  mapping: FileMapping | undefined,
+  decisions: ParseFileDecisions | undefined,
 ): Record<string, unknown> {
   const event: Record<string, unknown> = { ...pendingEvent };
-  const mappings: Record<string, string> =
-    fieldMappings && typeof fieldMappings === 'object'
-      ? fieldMappings as Record<string, string>
-      : {};
+  if (!mapping || pendingEvent.quakeml) return event;
 
-  for (const [src, tgt] of Object.entries(mappings)) {
-    if (!tgt || pendingEvent[src] === undefined) continue;
+  const removeField = (target: string) => {
+    delete event[target];
+    for (const key of FIELD_FALLBACK_KEYS[target] ?? []) delete event[key];
+  };
 
-    if (tgt === 'time') {
-      const normalized = normalizeTimestamp(pendingEvent[src] as string | number);
-      if (normalized) {
-        event.time = normalized;
-      }
-      continue;
+  for (const target of mapping.unset) removeField(target);
+
+  const previousMagnitude = { value: numberOrNull(pendingEvent.magnitude), type: pendingEvent.magnitude_type };
+  let magnitudeTypeFromColumn: unknown;
+  for (const [target, sourceColumn] of Object.entries(mapping.set)) {
+    const { value, derived } = normalizeMappedField(target, pendingEvent[sourceColumn], decisions, sourceColumn);
+    removeField(target);
+    if (value !== null && value !== undefined) event[target] = value;
+    if (target === 'magnitude') magnitudeTypeFromColumn = derived.magnitude_type;
+  }
+
+  if ('magnitude' in mapping.set) {
+    // A scale-named column (mb, Ms, ML ...) states its own scale. Otherwise the type is
+    // whatever the user mapped to magnitude_type; the parser's type described the
+    // magnitude it had chosen, not this one, so it is not kept.
+    if (magnitudeTypeFromColumn) {
+      removeField('magnitude_type');
+      event.magnitude_type = magnitudeTypeFromColumn;
+    } else if (!('magnitude_type' in mapping.set)) {
+      removeField('magnitude_type');
     }
-
-    if (NUMERIC_MAPPING_FIELDS.has(tgt)) {
-      const parsed = safeParseNumber(pendingEvent[src]);
-      if (parsed !== null) {
-        event[tgt] = parsed;
-      }
-      continue;
-    }
-
-    event[tgt] = pendingEvent[src];
+    reconcileMagnitudeAlternatives(event, previousMagnitude);
   }
 
   return event;
 }
 
+/**
+ * Checks and normalises the fields every stored event needs. Mutates `event.time` to
+ * UTC ISO and `event.depth` to a number or nothing. Depth is optional: a value outside
+ * the accepted -5..1000 km is dropped, never reinterpreted — the unit of a column is
+ * decided once per file by the parser, not guessed per value here.
+ */
 function validateCatalogueEvent(event: any): string[] {
   const errors: string[] = [];
 
@@ -346,7 +502,6 @@ function validateCatalogueEvent(event: any): string[] {
   const latitude = safeParseNumber(event.latitude);
   const longitude = safeParseNumber(event.longitude);
   const magnitude = safeParseNumber(event.magnitude);
-  const depth = safeParseNumber(event.depth);
 
   if (latitude === null) {
     errors.push('latitude is required and must be a number');
@@ -366,13 +521,50 @@ function validateCatalogueEvent(event: any): string[] {
     errors.push(`magnitude ${magnitude} must be between -3 and 10`);
   }
 
+  if (event.depth !== undefined && event.depth !== null && event.depth !== '') {
+    const depth = safeParseNumber(event.depth);
+    event.depth = depth !== null && depth >= -5 && depth <= 1000 ? depth : undefined;
+  }
+
   return errors;
 }
 
-function buildInsertRow(event: any, pendingEvent: ParsedEvent | undefined, catalogueId: string): InsertRow {
+/**
+ * The lineage an imported event already carries (a re-imported export of this platform:
+ * the source_events JSON of a merged or uploaded catalogue), or null when there is none
+ * or it is not a list of source entries. Keeping it preserves where each event came from
+ * instead of replacing it with a bare 'upload' entry.
+ */
+function importedLineage(value: unknown): string | null {
+  let parsed: unknown = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return null;
+  if (!parsed.every(entry => entry !== null && typeof entry === 'object' && !Array.isArray(entry))) return null;
+  return JSON.stringify(parsed);
+}
+
+/**
+ * The stored row for one validated event. `quakeml` is the event's full QuakeML
+ * structure, when it came from a QuakeML file. `supplement` is the pending event an
+ * inline row was joined to: the row's own values win and the parser's extended fields
+ * fill the rest. Rows built from the pending store pass no supplement, so a field the
+ * user unmapped stays removed.
+ */
+function buildInsertRow(
+  event: any,
+  catalogueId: string,
+  options: { quakeml?: ParsedEvent['quakeml']; supplement?: ParsedEvent } = {},
+): InsertRow {
   const latitude = safeParseNumber(event.latitude)!;
   const longitude = safeParseNumber(event.longitude)!;
   const magnitude = safeParseNumber(event.magnitude)!;
+  const depth = safeParseNumber(event.depth);
 
   const row: InsertRow = {
     id: createId(),
@@ -381,21 +573,15 @@ function buildInsertRow(event: any, pendingEvent: ParsedEvent | undefined, catal
     latitude,
     longitude,
     magnitude,
-    source_events: JSON.stringify([{ source: 'upload', eventId: event.id || event.eventId }]),
-    depth: (() => {
-      const d = safeParseNumber(event.depth);
-      if (d === null || d < -5) return undefined;
-      if (d > 1000) { const km = d / 1000; return km <= 1000 ? km : undefined; }
-      return d;
-    })(),
+    source_events: importedLineage(event.source_events) ??
+      JSON.stringify([{ source: 'upload', eventId: event.id || event.eventId }]),
+    depth: depth !== null && depth >= -5 && depth <= 1000 ? depth : undefined,
   };
 
-  if (pendingEvent?.quakeml) {
-    Object.assign(row, quakemlEventToDbFields(pendingEvent.quakeml));
+  if (options.quakeml) {
+    Object.assign(row, quakemlEventToDbFields(options.quakeml));
   } else {
-    const source = pendingEvent
-      ? { ...pendingEvent, ...event }
-      : event;
+    const source = options.supplement ? { ...options.supplement, ...event } : event;
     Object.assign(row, parsedEventToDbFields(source as ParsedEvent));
   }
 
@@ -499,206 +685,580 @@ async function bulkInsertEventRows(
   return inserted;
 }
 
-async function createCatalogueFromPendingUploads(params: {
-  ids: string[];
-  trimmedName: string;
-  metadata: any;
-  fieldMappings: unknown;
-}) {
-  const { ids, trimmedName, metadata, fieldMappings } = params;
+// ── Import accounting ──────────────────────────────────────────────────────
 
-  if (!dbQueries) {
-    return NextResponse.json(
-      { error: 'Database not initialized', code: 'DB_NOT_INITIALIZED' },
-      { status: 500 }
-    );
+/**
+ * Running account of one import. Rows repeating a source_id within the upload are
+ * skipped here, first occurrence kept, exactly as bulkInsertEvents would drop them, so
+ * the counts are known BEFORE anything is written and the catalogue document can be
+ * created with the numbers that will actually be stored.
+ */
+class ImportTally {
+  totalSubmitted = 0;
+  validEvents = 0;
+  failedValidation = 0;
+  duplicatesSkipped = 0;
+  readonly invalidEvents: { index: number; reason: string; file?: string }[] = [];
+  minLat: number | undefined;
+  maxLat: number | undefined;
+  readonly longitudeArc = new LongitudeArcAccumulator();
+  private readonly seenSourceIds = new Set<string>();
+
+  /** Validates and builds the row for one event; null when it is rejected or a duplicate. */
+  accept(event: any, build: () => InsertRow, file?: string): InsertRow | null {
+    const index = this.totalSubmitted;
+    this.totalSubmitted += 1;
+
+    const errors = validateCatalogueEvent(event);
+    if (errors.length > 0) {
+      this.failedValidation += 1;
+      if (this.invalidEvents.length < 100) {
+        this.invalidEvents.push({ index, reason: errors.join('; '), ...(file ? { file } : {}) });
+      }
+      return null;
+    }
+
+    const row = build();
+    if (row.source_id) {
+      if (this.seenSourceIds.has(row.source_id)) {
+        this.duplicatesSkipped += 1;
+        return null;
+      }
+      this.seenSourceIds.add(row.source_id);
+    }
+
+    this.validEvents += 1;
+    if (this.minLat === undefined || row.latitude < this.minLat) this.minLat = row.latitude;
+    if (this.maxLat === undefined || row.latitude > this.maxLat) this.maxLat = row.latitude;
+    this.longitudeArc.add(row.longitude);
+    return row;
   }
 
-  const db = dbQueries;
-  const catalogueId = createId();
+  /** Rows that will be stored: validated and not repeating an earlier source_id. */
+  get expectedStored(): number {
+    return this.validEvents;
+  }
+
+  report(successfullyImported: number) {
+    const duplicatesSkipped = this.duplicatesSkipped + Math.max(0, this.validEvents - successfullyImported);
+    const partialImport = this.failedValidation > 0 || duplicatesSkipped > 0;
+    return {
+      totalSubmitted: this.totalSubmitted,
+      successfullyImported,
+      failedValidation: this.failedValidation,
+      duplicatesSkipped,
+      successRate: this.totalSubmitted > 0
+        ? Math.round((successfullyImported / this.totalSubmitted) * 10000) / 100
+        : 0,
+      partialImport,
+    };
+  }
+}
+
+type ImportReport = ReturnType<ImportTally['report']>;
+
+function importMessageFor(report: ImportReport): string {
+  if (!report.partialImport) {
+    return `Successfully imported all ${report.successfullyImported.toLocaleString()} events.`;
+  }
+  return [
+    `Imported ${report.successfullyImported.toLocaleString()} of ${report.totalSubmitted.toLocaleString()} events.`,
+    report.failedValidation > 0
+      ? `${report.failedValidation.toLocaleString()} event${report.failedValidation === 1 ? '' : 's'} failed validation.`
+      : '',
+    report.duplicatesSkipped > 0
+      ? `${report.duplicatesSkipped.toLocaleString()} duplicate event${report.duplicatesSkipped === 1 ? '' : 's'} skipped.`
+      : '',
+  ].filter(Boolean).join(' ');
+}
+
+// ── Catalogue metadata ─────────────────────────────────────────────────────
+
+/** Provenance is recorded by the server from the session, never taken from the body. */
+const SERVER_OWNED_METADATA_FIELDS = ['created_by', 'modified_by', 'modified_at'];
+
+function parseClientValidationSummary(value: unknown): Record<string, unknown> | null {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The stored validation summary. The browser's parse-stage summary (per file, per
+ * category) is kept as detail under `parse`; the headline counts are the server's own
+ * reconciled import numbers, so the summary can never claim more valid events than the
+ * catalogue holds.
+ */
+function buildStoredValidationSummary(clientSummary: Record<string, unknown> | null, report: ImportReport): string {
+  const parseCount = (key: string): number | undefined => {
+    const value = clientSummary?.[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  };
+  const parseInvalid = parseCount('invalidEvents') ?? 0;
+  return JSON.stringify({
+    ...(clientSummary ?? {}),
+    generatedAt: new Date().toISOString(),
+    totalEvents: parseCount('totalEvents') ?? report.totalSubmitted,
+    validEvents: report.successfullyImported,
+    invalidEvents: parseInvalid + report.failedValidation,
+    duplicatesSkipped: report.duplicatesSkipped,
+    parse: clientSummary
+      ? { totalEvents: parseCount('totalEvents'), validEvents: parseCount('validEvents'), invalidEvents: parseCount('invalidEvents') }
+      : null,
+    import: report,
+  });
+}
+
+/**
+ * The client's catalogue metadata without provenance (the creator is passed to
+ * insertCatalogue separately, from the session) and with the validation summary
+ * replaced by the reconciled one.
+ */
+function buildCatalogueMetadata(metadata: unknown, report: ImportReport): Record<string, unknown> {
+  const clientMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? { ...(metadata as Record<string, unknown>) }
+    : {};
+  for (const field of SERVER_OWNED_METADATA_FIELDS) delete clientMetadata[field];
+  const clientSummary = parseClientValidationSummary(clientMetadata.validation_summary);
+  return {
+    ...clientMetadata,
+    validation_summary: buildStoredValidationSummary(clientSummary, report),
+  };
+}
+
+/** Upload provenance kept in merge_config (no pending tokens: they are credentials). */
+function buildUploadMergeConfig(entries: PendingUploadEntry[], report: ImportReport): string {
+  return JSON.stringify({
+    uploadDate: new Date().toISOString(),
+    source: 'upload',
+    ...(entries.length > 0
+      ? {
+          files: entries.map(entry => ({
+            ...(entry.fileName ? { fileName: entry.fileName } : {}),
+            ...(entry.format ? { format: entry.format } : {}),
+            ...(entry.expectedCount !== undefined ? { eventCount: entry.expectedCount } : {}),
+            ...(entry.mapping && (Object.keys(entry.mapping.set).length > 0 || entry.mapping.unset.length > 0)
+              ? { fieldMapping: entry.mapping }
+              : {}),
+          })),
+        }
+      : {}),
+    partialImport: report.partialImport,
+    validationSummary: {
+      totalSubmitted: report.totalSubmitted,
+      successfullyImported: report.successfullyImported,
+      failedValidation: report.failedValidation,
+      duplicatesSkipped: report.duplicatesSkipped,
+      successRate: report.successRate,
+    },
+  });
+}
+
+// ── Pending uploads ────────────────────────────────────────────────────────
+
+/**
+ * The pending uploads a request names, in file order. The upload page sends a manifest
+ * (`pendingUploads`) giving each file's token and the number of rows its upload
+ * reported, and optionally the user's explicit mapping and the file's decisions. The
+ * older `pendingUploadIds` / `pendingUploadId` forms are still accepted, without counts.
+ */
+function resolvePendingUploadEntries(body: any): PendingUploadEntry[] {
+  const { pendingUploads, pendingUploadId, pendingUploadIds } = body;
+
+  if (pendingUploads !== undefined) {
+    if (pendingUploadIds !== undefined || pendingUploadId !== undefined) {
+      throw new AppError('Send either pendingUploads or pendingUploadIds, not both', 400, 'INVALID_PENDING_UPLOAD_IDS');
+    }
+    const parsed = pendingUploadManifestSchema.safeParse(pendingUploads);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      throw new AppError(
+        `Invalid pendingUploads${issue?.path.length ? ` at ${issue.path.join('.')}` : ''}: ${issue?.message ?? 'invalid'}`,
+        400,
+        'INVALID_PENDING_UPLOADS',
+      );
+    }
+    const entries: PendingUploadEntry[] = parsed.data;
+    if (new Set(entries.map(entry => entry.id)).size !== entries.length) {
+      throw new AppError('Pending upload IDs must be distinct', 400, 'INVALID_PENDING_UPLOAD_IDS');
+    }
+    return entries;
+  }
+
+  if (
+    (pendingUploadIds !== undefined && (!Array.isArray(pendingUploadIds) ||
+      pendingUploadIds.some((id: unknown) => typeof id !== 'string' || !id.trim()))) ||
+    (pendingUploadId !== undefined && (typeof pendingUploadId !== 'string' || !pendingUploadId.trim()))
+  ) {
+    throw new AppError('Pending upload IDs must be nonempty strings', 400, 'INVALID_PENDING_UPLOAD_IDS');
+  }
+  const ids: string[] = Array.isArray(pendingUploadIds)
+    ? pendingUploadIds
+    : typeof pendingUploadId === 'string'
+      ? [pendingUploadId]
+      : [];
+  if (new Set(ids).size !== ids.length) {
+    throw new AppError('Pending upload IDs must be distinct', 400, 'INVALID_PENDING_UPLOAD_IDS');
+  }
+  return ids.map(id => ({ id }));
+}
+
+const pendingNotFound = () =>
+  new AppError('Pending upload not found or expired. Please upload the files again.', 404, 'PENDING_UPLOAD_NOT_FOUND');
+
+const pendingMismatch = (detail: string) =>
+  new AppError(`${detail} Please upload the files again.`, 409, 'PENDING_UPLOAD_MISMATCH');
+
+/**
+ * Streams every pending event of every file, in file order, through the explicit
+ * mapping and the tally. With `onRows` it hands each batch of accepted rows over for
+ * insertion; without, it is a dry run that only counts. Each file must hold exactly the
+ * rows its upload reported; a token that is missing, expired or owned by another user
+ * reads as not found.
+ */
+async function streamPendingUploads(
+  entries: PendingUploadEntry[],
+  ownerId: string,
+  catalogueId: string,
+  onRows?: (rows: InsertRow[]) => Promise<void>,
+): Promise<ImportTally> {
+  const tally = new ImportTally();
+
+  for (const entry of entries) {
+    let seq = 0;
+    for await (const pendingBatch of iteratePendingUploadEventBatches(entry.id, 1000, ownerId)) {
+      const rows: InsertRow[] = [];
+      for (const pendingEvent of pendingBatch) {
+        seq += 1;
+        if (entry.expectedCount !== undefined && seq > entry.expectedCount) {
+          throw pendingMismatch(`${entry.fileName ?? 'A file'} holds more events than its upload reported.`);
+        }
+        const event = applyExplicitMapping(pendingEvent, entry.mapping, entry.fileDecisions);
+        const row = tally.accept(
+          event,
+          () => buildInsertRow(event, catalogueId, { quakeml: pendingEvent.quakeml }),
+          entry.fileName,
+        );
+        if (row) rows.push(row);
+      }
+      if (onRows && rows.length > 0) await onRows(rows);
+    }
+
+    if (seq === 0) throw pendingNotFound();
+    if (entry.expectedCount !== undefined && seq !== entry.expectedCount) {
+      throw pendingMismatch(
+        `${entry.fileName ?? 'A file'} holds ${seq.toLocaleString()} events but its upload reported ${entry.expectedCount.toLocaleString()}.`,
+      );
+    }
+  }
+
+  return tally;
+}
+
+function wrapLongitudeForComparison(longitude: number): number {
+  return ((((longitude + 180) % 360) + 360) % 360) - 180;
+}
+
+/**
+ * True when an inline row and the pending event it is joined to describe the same
+ * event (origin time to the millisecond, epicentre to 1e-6 degrees). A mismatch means
+ * the rows and the files are out of step, and joining them would attach one file's
+ * QuakeML identity and uncertainties to another file's rows.
+ */
+function isSameEvent(row: any, pendingEvent: ParsedEvent): boolean {
+  const rowTime = typeof row?.time === 'string' || typeof row?.time === 'number' ? normalizeTimestamp(row.time) : null;
+  const pendingTime = normalizeTimestamp(pendingEvent.time as string);
+  if (!rowTime || !pendingTime || Date.parse(rowTime) !== Date.parse(pendingTime)) return false;
+  const rowLat = safeParseNumber(row.latitude);
+  const rowLon = safeParseNumber(row.longitude);
+  const pendingLat = safeParseNumber(pendingEvent.latitude);
+  const pendingLon = safeParseNumber(pendingEvent.longitude);
+  if (rowLat === null || rowLon === null || pendingLat === null || pendingLon === null) return false;
+  return Math.abs(rowLat - pendingLat) < 1e-6 &&
+    Math.abs(wrapLongitudeForComparison(rowLon) - wrapLongitudeForComparison(pendingLon)) < 1e-6;
+}
+
+/**
+ * Joins inline rows to the pending events of the files they came from, by (file, row
+ * number within the file) — never by position in the concatenated request. Every file
+ * must hold exactly its share of the rows, and each joined pair must be the same event.
+ */
+async function joinInlineRowsToPendingUploads(
+  bodyEvents: any[],
+  entries: PendingUploadEntry[],
+  ownerId: string,
+): Promise<Array<{ row: any; pendingEvent: ParsedEvent; file?: string }>> {
+  const batches = await Promise.all(entries.map(entry => getPendingUploadEvents(entry.id, ownerId)));
+  if (batches.some(batch => !batch || batch.length === 0)) throw pendingNotFound();
+
+  const expected = entries.map((entry, i) => entry.expectedCount ?? batches[i]!.length);
+  entries.forEach((entry, i) => {
+    if (batches[i]!.length !== expected[i]) {
+      throw pendingMismatch(
+        `${entry.fileName ?? 'A file'} holds ${batches[i]!.length.toLocaleString()} events but ${expected[i].toLocaleString()} were declared.`,
+      );
+    }
+  });
+  if (expected.reduce((sum, n) => sum + n, 0) !== bodyEvents.length) {
+    throw pendingMismatch('Pending upload events do not match the submitted rows.');
+  }
+
+  const joined: Array<{ row: any; pendingEvent: ParsedEvent; file?: string }> = [];
+  let offset = 0;
+  entries.forEach((entry, fileIndex) => {
+    const pendingEvents = batches[fileIndex]!;
+    for (let seq = 0; seq < pendingEvents.length; seq++) {
+      const row = bodyEvents[offset + seq];
+      if (!isSameEvent(row, pendingEvents[seq])) {
+        throw pendingMismatch(
+          `Row ${seq + 1} of ${entry.fileName ?? `file ${fileIndex + 1}`} does not match its uploaded event.`,
+        );
+      }
+      joined.push({ row, pendingEvent: pendingEvents[seq], file: entry.fileName });
+    }
+    offset += pendingEvents.length;
+  });
+  return joined;
+}
+
+// ── Catalogue creation ─────────────────────────────────────────────────────
+
+interface CreateCatalogueParams {
+  request: NextRequest;
+  user: { id: string; email?: string };
+  trimmedName: string;
+  metadata: unknown;
+  entries: PendingUploadEntry[];
+}
+
+/** Deletes a catalogue whose import failed; marks it 'error' if even that fails. */
+async function cleanUpFailedImport(
+  db: NonNullable<typeof dbQueries>,
+  catalogueId: string,
+  insertedCount: number,
+  error: unknown,
+): Promise<void> {
+  logger.error('Catalogue import failed; cleaning up partially inserted data', {
+    catalogueId,
+    insertedCount,
+    error: getErrorMessage(error),
+  });
+
+  try {
+    await db.deleteCatalogue(catalogueId);
+  } catch (cleanupError) {
+    logger.error('Failed to clean up partially imported catalogue', {
+      catalogueId,
+      cleanupError: getErrorMessage(cleanupError),
+    });
+    await db.updateCatalogueStatus('error', catalogueId);
+    await db.updateCatalogueEventCount(catalogueId, insertedCount);
+  }
+}
+
+function allEventsInvalidResponse(tally: ImportTally) {
+  return NextResponse.json(
+    {
+      error: `All ${tally.failedValidation} event(s) failed validation. No events could be imported.`,
+      code: 'ALL_EVENTS_INVALID',
+      details: tally.invalidEvents,
+      totalInvalid: tally.failedValidation,
+      message: 'All events must have valid time, latitude (-90 to 90), longitude (-180 to 180), and magnitude (-3 to 10)',
+    },
+    { status: 400 }
+  );
+}
+
+/**
+ * Creates the catalogue document, runs `insertRows`, reconciles the stored count and
+ * answers with the server's own report. The document is written before any event so an
+ * import that dies part-way leaves a visible 'processing' catalogue, not orphan events.
+ */
+async function createCatalogue(
+  params: CreateCatalogueParams,
+  tally: ImportTally,
+  insertRows: (db: NonNullable<typeof dbQueries>, catalogueId: string) => Promise<number>,
+  catalogueId: string,
+): Promise<NextResponse> {
+  const { request, user, trimmedName, metadata, entries } = params;
+  const db = dbQueries!;
   const startedAt = performance.now();
+  const plannedReport = tally.report(tally.expectedStored);
+  const lonExtent = tally.longitudeArc.extent();
 
   await db.insertCatalogue(
     catalogueId,
     trimmedName,
-    JSON.stringify([{ source: 'upload', description: 'Uploaded catalogue' }]),
-    JSON.stringify({
-      uploadDate: new Date().toISOString(),
-      pendingUploadIds: ids,
-    }),
-    0,
+    JSON.stringify([{
+      source: 'upload',
+      description: plannedReport.partialImport ? 'Uploaded catalogue (partial import)' : 'Uploaded catalogue',
+    }]),
+    buildUploadMergeConfig(entries, plannedReport),
+    tally.expectedStored,
     'processing',
-    metadata,
+    {
+      ...buildCatalogueMetadata(metadata, plannedReport),
+      min_latitude: tally.minLat,
+      max_latitude: tally.maxLat,
+      min_longitude: lonExtent?.west,
+      max_longitude: lonExtent?.east,
+    } as any,
+    undefined,
+    { createdBy: user.id },
   );
 
-  let totalSubmitted = 0;
-  let validEventCount = 0;
-  let failedValidation = 0;
   let insertedCount = 0;
-  const invalidEvents: { index: number; reason: string }[] = [];
-  let minLat: number | undefined;
-  let maxLat: number | undefined;
-  // Longitude is accumulated into a covering arc rather than min/max-ed: a catalogue
-  // spanning 180° (Kermadec/Raoul) needs the smallest covering arc, which is
-  // minLongitude > maxLongitude under the RFC 7946 §5.2 convention that
-  // lib/geo-bounds-utils, db.updateCatalogueGeoBounds and the region search all use. A
-  // naive min/max would store the complement — a ~359°-wide box matching the whole
-  // planet. The accumulator keeps this streaming (see LongitudeArcAccumulator).
-  const longitudeArc = new LongitudeArcAccumulator();
-
   try {
-    for (const id of ids) {
-      let foundAny = false;
-
-      for await (const pendingBatch of iteratePendingUploadEventBatches(id, 1000)) {
-        foundAny = true;
-        const rows: InsertRow[] = [];
-
-        for (const pendingEvent of pendingBatch) {
-          const index = totalSubmitted;
-          totalSubmitted += 1;
-
-          const event = applyFieldMappingsToPendingEvent(pendingEvent, fieldMappings);
-          const errors = validateCatalogueEvent(event);
-          if (errors.length > 0) {
-            failedValidation += 1;
-            if (invalidEvents.length < 100) {
-              invalidEvents.push({ index, reason: errors.join('; ') });
-            }
-            continue;
-          }
-
-          const lat = safeParseNumber(event.latitude)!;
-          const lon = safeParseNumber(event.longitude)!;
-          if (minLat === undefined || lat < minLat) minLat = lat;
-          if (maxLat === undefined || lat > maxLat) maxLat = lat;
-          longitudeArc.add(lon);
-
-          rows.push(buildInsertRow(event, pendingEvent, catalogueId));
-          validEventCount += 1;
-        }
-
-        if (rows.length > 0) {
-          insertedCount += await bulkInsertEventRows(db, catalogueId, rows, validEventCount - rows.length);
-        }
-      }
-
-      if (!foundAny) {
-        throw new AppError('Pending upload not found or expired. Please upload the files again.', 404, 'PENDING_UPLOAD_NOT_FOUND');
-      }
-    }
-
-    if (totalSubmitted === 0) {
-      await db.deleteCatalogue(catalogueId);
-      return NextResponse.json(
-        { error: 'Pending upload not found or expired', code: 'PENDING_UPLOAD_NOT_FOUND' },
-        { status: 404 }
-      );
-    }
-
-    if (validEventCount === 0) {
-      await db.deleteCatalogue(catalogueId);
-      return NextResponse.json(
-        {
-          error: `All ${failedValidation} event(s) failed validation. No events could be imported.`,
-          code: 'ALL_EVENTS_INVALID',
-          details: invalidEvents,
-          totalInvalid: failedValidation,
-          message: 'All events must have valid time, latitude (-90 to 90), longitude (-180 to 180), and magnitude (-3 to 10)',
-        },
-        { status: 400 }
-      );
-    }
-
-    // A retry may have committed rows before throwing. Its final return count
-    // cannot account for those earlier writes; the stored count is authoritative.
+    insertedCount = await insertRows(db, catalogueId);
+    // A retry may have committed rows before throwing, so the stored count is
+    // authoritative, not what the insert calls returned.
     insertedCount = await db.countEventsByCatalogue(catalogueId);
     await db.updateCatalogueEventCount(catalogueId, insertedCount);
-    const lonExtent = longitudeArc.extent();
-    if (minLat !== undefined && maxLat !== undefined && lonExtent) {
-      await db.updateCatalogueGeoBounds(catalogueId, minLat, maxLat, lonExtent.west, lonExtent.east);
+    if (tally.minLat !== undefined && tally.maxLat !== undefined && lonExtent) {
+      await db.updateCatalogueGeoBounds(catalogueId, tally.minLat, tally.maxLat, lonExtent.west, lonExtent.east);
     }
     await db.updateCatalogueStatus('complete', catalogueId);
   } catch (error) {
-    logger.error('Catalogue import failed; cleaning up partially inserted data', {
-      catalogueId,
-      insertedCount,
-      error: getErrorMessage(error),
-    });
-
-    try {
-      await db.deleteCatalogue(catalogueId);
-    } catch (cleanupError) {
-      logger.error('Failed to clean up partially imported catalogue', {
-        catalogueId,
-        cleanupError: getErrorMessage(cleanupError),
-      });
-      await db.updateCatalogueStatus('error', catalogueId);
-      await db.updateCatalogueEventCount(catalogueId, insertedCount);
+    // A catalogue refused as deleted belongs to the request deleting it (which also
+    // removes rows that raced in); cleaning up here could only undo its 'deleting' state.
+    if (!isCatalogueNotWritable(error)) {
+      await cleanUpFailedImport(db, catalogueId, insertedCount, error);
     }
-
     throw error;
   }
 
-  for (const id of ids) {
-    deletePendingUpload(id).catch(() => {/* TTL will clean up */});
+  // Clean up pending uploads now that the catalogue is saved — best-effort,
+  // TTL will expire the documents automatically after 24 hours.
+  for (const entry of entries) {
+    deletePendingUpload(entry.id).catch(() => {/* TTL will clean up */});
   }
 
-  invalidateCacheByPrefix('catalogues');
+  const report = tally.report(insertedCount);
+  if (insertedCount !== tally.expectedStored) {
+    logger.warn('Stored event count differs from the planned import', {
+      catalogueId,
+      planned: tally.expectedStored,
+      stored: insertedCount,
+    });
+  }
 
-  const totalDurationMs = Math.round(performance.now() - startedAt);
-  // Report what is actually stored. Rows dropped as duplicates by bulkInsertEvents
-  // never reached the collection, so counting them as imported would overstate the
-  // catalogue by exactly the number of repeated source IDs.
-  const successfullyImported = insertedCount;
-  const duplicatesSkipped = validEventCount - insertedCount;
-  const successRate = totalSubmitted > 0
-    ? Math.round((successfullyImported / totalSubmitted) * 10000) / 100
-    : 0;
-  const isPartialImport = failedValidation > 0 || duplicatesSkipped > 0;
-
-  logger.info('Catalogue created successfully from pending uploads', {
+  logger.info('Catalogue created successfully', {
     catalogueId,
     name: trimmedName,
-    eventCount: successfullyImported,
-    totalSubmitted,
-    failedValidation,
-    duplicatesSkipped,
-    isPartialImport,
-    durationMs: totalDurationMs,
+    eventCount: insertedCount,
+    totalSubmitted: report.totalSubmitted,
+    failedValidation: report.failedValidation,
+    duplicatesSkipped: report.duplicatesSkipped,
+    isPartialImport: report.partialImport,
+    durationMs: Math.round(performance.now() - startedAt),
   });
 
-  const catalogue = await db.getCatalogueById(catalogueId);
-  const validationReport = {
-    totalSubmitted,
-    successfullyImported,
-    failedValidation,
-    duplicatesSkipped,
-    successRate,
-    invalidEvents,
-    hasMoreInvalidEvents: failedValidation > invalidEvents.length,
-  };
-  const importMessage = isPartialImport
-    ? [
-        `Imported ${successfullyImported.toLocaleString()} of ${totalSubmitted.toLocaleString()} events.`,
-        failedValidation > 0
-          ? `${failedValidation.toLocaleString()} event${failedValidation === 1 ? '' : 's'} failed validation.`
-          : '',
-        duplicatesSkipped > 0
-          ? `${duplicatesSkipped.toLocaleString()} duplicate event${duplicatesSkipped === 1 ? '' : 's'} skipped.`
-          : '',
-      ].filter(Boolean).join(' ')
-    : `Successfully imported all ${successfullyImported.toLocaleString()} events.`;
+  await writeAuditLog({
+    action: 'catalogue.create',
+    actor_id: user.id,
+    actor_email: user.email,
+    target_id: catalogueId,
+    target_type: 'catalogue',
+    metadata: {
+      name: trimmedName,
+      source: 'upload',
+      files: entries.map(entry => entry.fileName ?? null),
+      eventCount: insertedCount,
+      totalSubmitted: report.totalSubmitted,
+      failedValidation: report.failedValidation,
+      duplicatesSkipped: report.duplicatesSkipped,
+    },
+  }, request);
 
+  const catalogue = await db.getCatalogueById(catalogueId);
+  const { partialImport, ...counts } = report;
+  const validationReport = {
+    ...counts,
+    // Limit invalid events details to first 100 for performance
+    invalidEvents: tally.invalidEvents,
+    hasMoreInvalidEvents: tally.failedValidation > tally.invalidEvents.length,
+  };
+
+  // Return response with catalogue properties spread at top level for backward compatibility
   return NextResponse.json(
     {
       ...catalogue,
       validationReport,
-      importMessage,
-      partialImport: isPartialImport,
+      importMessage: importMessageFor(report),
+      partialImport,
     },
     { status: 201 }
   );
+}
+
+/** The upload page's path: every event comes from the pending store (contract C15). */
+async function createCatalogueFromPendingUploads(params: CreateCatalogueParams): Promise<NextResponse> {
+  const { entries, user } = params;
+  const catalogueId = createId();
+
+  // Dry run first: validates every file's count and every row before anything is
+  // written, and yields the exact numbers the catalogue document is created with.
+  const plan = await streamPendingUploads(entries, user.id, catalogueId);
+  if (plan.validEvents === 0) return allEventsInvalidResponse(plan);
+
+  return createCatalogue(params, plan, async (db, id) => {
+    let inserted = 0;
+    let submitted = 0;
+    const replay = await streamPendingUploads(entries, user.id, id, async rows => {
+      inserted += await bulkInsertEventRows(db, id, rows, submitted);
+      submitted += rows.length;
+    });
+    if (replay.validEvents !== plan.validEvents || replay.totalSubmitted !== plan.totalSubmitted) {
+      throw pendingMismatch('The pending upload changed while the catalogue was being created.');
+    }
+    return inserted;
+  }, catalogueId);
+}
+
+/**
+ * API clients that post rows directly (optionally joined to pending uploads for the
+ * extended QuakeML fields). The rows are all in memory, so they are validated and
+ * counted before the catalogue document is written.
+ */
+async function createCatalogueFromInlineEvents(
+  params: CreateCatalogueParams,
+  bodyEvents: any[],
+): Promise<NextResponse> {
+  const { entries, user } = params;
+  const catalogueId = createId();
+
+  // Inline rows are already mapped by their sender; a per-file mapping only applies when
+  // the catalogue is built from the pending uploads themselves.
+  if (entries.some(entry => entry.mapping)) {
+    throw new AppError(
+      'pendingUploads[].mapping applies only when no events are sent inline',
+      400,
+      'INVALID_PENDING_UPLOADS',
+    );
+  }
+
+  const joined = entries.length > 0
+    ? await joinInlineRowsToPendingUploads(bodyEvents, entries, user.id)
+    : bodyEvents.map(row => ({ row, pendingEvent: undefined as ParsedEvent | undefined, file: undefined }));
+
+  const tally = new ImportTally();
+  const rows: InsertRow[] = [];
+  for (const { row, pendingEvent, file } of joined) {
+    const event = row && typeof row === 'object' ? row : {};
+    const accepted = tally.accept(
+      event,
+      () => buildInsertRow(event, catalogueId, { quakeml: pendingEvent?.quakeml, supplement: pendingEvent }),
+      file,
+    );
+    if (accepted) rows.push(accepted);
+  }
+
+  if (tally.validEvents === 0) return allEventsInvalidResponse(tally);
+
+  return createCatalogue(params, tally, (db, id) => bulkInsertEventRows(db, id, rows), catalogueId);
 }
 
 export async function POST(request: NextRequest) {
@@ -761,14 +1321,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    const {
-      name,
-      events: bodyEvents,
-      metadata,
-      pendingUploadId,
-      pendingUploadIds: pendingUploadIdList,
-      fieldMappings,
-    } = body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Invalid JSON body', code: 'INVALID_JSON' }, { status: 400 });
+    }
+    const { name, events: bodyEvents, metadata } = body;
 
     // Validate required fields
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -786,166 +1342,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Helper to safely parse numeric values
-    const safeParseNumber = (value: any): number | null => {
-      if (value === undefined || value === null || value === '') return null;
-      const num = typeof value === 'number' ? value : parseFloat(String(value));
-      return isNaN(num) ? null : num;
-    };
-
-    // ── Pending upload retrieval ────────────────────────────────────────────
-    //
-    // The upload API stores the complete parsed events in MongoDB and returns
-    // one pendingUploadId per file.  For multi-file uploads the page sends an
-    // array (pendingUploadIds); single-file uploads may still send the legacy
-    // scalar pendingUploadId.  We normalise to an ordered array, fetch each
-    // token's events, and concatenate them so pendingEvents[i] aligns with
-    // events[i] in the request body (both are in file-then-event order).
-    let pendingEvents: ParsedEvent[] | null = null;
-    if (
-      (pendingUploadIdList !== undefined && (!Array.isArray(pendingUploadIdList) ||
-        pendingUploadIdList.some((id: unknown) => typeof id !== 'string' || !id.trim()))) ||
-      (pendingUploadId !== undefined && (typeof pendingUploadId !== 'string' || !pendingUploadId.trim()))
-    ) {
-      throw new AppError('Pending upload IDs must be nonempty strings', 400, 'INVALID_PENDING_UPLOAD_IDS');
-    }
-    const ids: string[] = Array.isArray(pendingUploadIdList)
-      ? pendingUploadIdList
-      : pendingUploadId && typeof pendingUploadId === 'string'
-        ? [pendingUploadId]
-        : [];
-    if (new Set(ids).size !== ids.length) {
-      throw new AppError('Pending upload IDs must be distinct', 400, 'INVALID_PENDING_UPLOAD_IDS');
-    }
-
-    if ((!bodyEvents || !Array.isArray(bodyEvents) || bodyEvents.length === 0) && ids.length > 0) {
-      return await createCatalogueFromPendingUploads({
-        ids,
-        trimmedName,
-        metadata,
-        fieldMappings,
-      });
-    }
-
-    if (ids.length > 0) {
-      const batches = await Promise.all(ids.map(id => getPendingUploadEvents(id)));
-      if (batches.some(batch => !batch || batch.length === 0)) {
-        throw new AppError('Pending upload not found or expired. Please upload the files again.', 404, 'PENDING_UPLOAD_NOT_FOUND');
-      }
-      pendingEvents = batches.flatMap(batch => batch!);
-      if (pendingEvents.length !== bodyEvents.length) {
-        throw new AppError('Pending upload events do not match the submitted rows. Please upload the files again.', 409, 'PENDING_UPLOAD_MISMATCH');
-      }
-    }
-
-    // ── Resolve events source ───────────────────────────────────────────────
-    //
-    // When the client sends pendingUploadIds but no events array, it means the
-    // payload was too large to include inline.  We derive the events array from
-    // pendingEvents (already fetched above) and apply any fieldMappings the
-    // user configured in the UI.  This is the normal path for files > ~3 MB.
-    //
-    // For small files the client may still send events inline; pendingEvents
-    // then supplements with extended fields (QuakeML, etc.).
-    let events: any[];
-
-    if (!bodyEvents || !Array.isArray(bodyEvents) || bodyEvents.length === 0) {
-      if (!pendingEvents || pendingEvents.length === 0) {
-        return NextResponse.json(
-          { error: 'Events array is required', code: 'INVALID_EVENTS' },
-          { status: 400 }
-        );
-      }
-      // Build a minimal events array from pendingEvents so the rest of the
-      // route (validation, bounds calculation, row construction) works
-      // identically regardless of how the client sent the data.
-      events = pendingEvents.map(pe => applyFieldMappingsToPendingEvent(pe, fieldMappings));
-    } else {
-      events = bodyEvents;
-    }
-
-    // Comprehensive validation of ALL events - check required fields and value ranges
-    // Partition events into valid and invalid arrays for partial import support
-    const invalidEvents: { index: number; reason: string }[] = [];
-    const validEvents: { event: typeof events[0]; index: number }[] = [];
-
-    for (let i = 0; i < events.length; i++) {
-      const event = events[i];
-      const errors: string[] = [];
-
-      // Check required field presence
-      if (!event.time || (typeof event.time === 'string' && event.time.trim() === '')) {
-        errors.push('time is required');
-      } else {
-        const normalizedTime = normalizeTimestamp(event.time);
-        if (!normalizedTime) {
-          errors.push('time is not a valid timestamp');
-        } else {
-          const instant = Date.parse(normalizedTime);
-          if (instant < Date.UTC(1000, 0, 1) || instant > Date.now()) {
-            errors.push(`time ${normalizedTime} is outside the accepted range (1000-01-01 to now)`);
-          }
-          event.time = normalizedTime;
-        }
-      }
-
-      const latitude = safeParseNumber(event.latitude);
-      const longitude = safeParseNumber(event.longitude);
-      const magnitude = safeParseNumber(event.magnitude);
-      let depth = safeParseNumber(event.depth);
-
-      if (latitude === null) {
-        errors.push('latitude is required and must be a number');
-      } else if (latitude < -90 || latitude > 90) {
-        errors.push(`latitude ${latitude} must be between -90 and 90`);
-      }
-
-      if (longitude === null) {
-        errors.push('longitude is required and must be a number');
-      } else if (longitude < -180 || longitude > 180) {
-        errors.push(`longitude ${longitude} must be between -180 and 180`);
-      }
-
-      if (magnitude === null) {
-        errors.push('magnitude is required and must be a number');
-      } else if (magnitude < -3 || magnitude > 10) {
-        errors.push(`magnitude ${magnitude} must be between -3 and 10`);
-      }
-
-      // Depth is optional. If out of the -5–1000 km range, try interpreting as
-      // metres (divide by 1000). If still invalid, null it out — never reject
-      // the whole event for a bad depth value.
-      if (depth !== null) {
-        if (depth < -5) {
-          depth = null;
-        } else if (depth > 1000) {
-          const depthKm = depth / 1000;
-          depth = depthKm <= 1000 ? depthKm : null;
-        }
-        event.depth = depth;
-      }
-
-      if (errors.length > 0) {
-        invalidEvents.push({ index: i, reason: errors.join('; ') });
-      } else {
-        // Event passed validation - add to valid events array
-        validEvents.push({ event, index: i });
-      }
-    }
-
-    // If ALL events are invalid, reject the entire request
-    if (validEvents.length === 0) {
+    // The old form copied raw source cells onto the parser's normalised fields (lost
+    // date formats, unwrapped 0-360 longitudes, metre depths). Explicit remaps now travel
+    // per file in pendingUploads[].mapping and are normalised by the parser's rules.
+    if (body.fieldMappings !== undefined) {
       return NextResponse.json(
         {
-          error: `All ${invalidEvents.length} event(s) failed validation. No events could be imported.`,
-          code: 'ALL_EVENTS_INVALID',
-          details: invalidEvents.slice(0, 100), // Return first 100 errors for debugging
-          totalInvalid: invalidEvents.length,
-          message: 'All events must have valid time, latitude (-90 to 90), longitude (-180 to 180), and magnitude (-3 to 10)',
+          error: 'fieldMappings is no longer supported; send each file\'s explicit mapping in pendingUploads[].mapping',
+          code: 'LEGACY_FIELD_MAPPINGS',
         },
         { status: 400 }
       );
     }
+
+    const entries = resolvePendingUploadEntries(body);
 
     if (!dbQueries) {
       return NextResponse.json(
@@ -954,186 +1364,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Generate catalogue ID
-    const catalogueId = createId();
-
-    // Calculate geographic bounds from VALID events only (more efficient for large datasets).
-    // Longitude uses the smallest covering arc rather than a plain min/max so a
-    // catalogue spanning 180° (Kermadec/Raoul) stores the RFC 7946 §5.2 crossing
-    // box (minLongitude > maxLongitude) that db.updateCatalogueGeoBounds and the
-    // region search expect, not its ~359°-wide complement.
-    let minLat: number | undefined;
-    let maxLat: number | undefined;
-    const longitudeArc = new LongitudeArcAccumulator();
-
-    for (const { event } of validEvents) {
-      const lat = safeParseNumber(event.latitude);
-      const lon = safeParseNumber(event.longitude);
-
-      if (lat !== null) {
-        if (minLat === undefined || lat < minLat) minLat = lat;
-        if (maxLat === undefined || lat > maxLat) maxLat = lat;
-      }
-      longitudeArc.add(lon);
-    }
-
-    const lonExtent = longitudeArc.extent();
-    const minLon = lonExtent?.west;
-    const maxLon = lonExtent?.east;
-
-    // Prepare ONLY VALID events for insertion.
-    //
-    // pendingEvents holds the complete server-side ParsedEvent objects for all
-    // formats (CSV, JSON, GeoJSON, QuakeML) when a pendingUploadId was supplied.
-    // Each valid event's `.index` is its original position in the events array,
-    // which is the same order as pendingEvents, so we join by position.
-    const eventsToInsert = validEvents.map(({ event, index }) => {
-      const pendingEvent = pendingEvents?.[index];
-      return buildInsertRow(event, pendingEvent, catalogueId);
-    });
-
-    // Calculate validation statistics for the response
-    const totalSubmitted = events.length;
-    const validEventCount = validEvents.length;
-    const failedValidation = invalidEvents.length;
-    const hasInvalidEvents = failedValidation > 0;
-
-    // Avoid long-running multi-document transactions during large imports.
-    // A single transaction spanning insertMany over many events can pin
-    // WiredTiger state and fail under load. Insert in small retryable batches
-    // and clean up the catalogue on failure to preserve all-or-nothing behavior.
-    const db = dbQueries!;
-    await db.insertCatalogue(
-      catalogueId,
+    const params: CreateCatalogueParams = {
+      request,
+      user: { id: authResult.user.id, email: authResult.user.email },
       trimmedName,
-      JSON.stringify([{ source: 'upload', description: hasInvalidEvents ? 'Uploaded catalogue (partial import)' : 'Uploaded catalogue' }]),
-      JSON.stringify({
-        uploadDate: new Date().toISOString(),
-        partialImport: hasInvalidEvents,
-        validationSummary: {
-          totalSubmitted,
-          successfullyImported: validEventCount,
-          failedValidation,
-          successRate: totalSubmitted > 0
-            ? Math.round((validEventCount / totalSubmitted) * 10000) / 100
-            : 0,
-        }
-      }),
-      validEventCount,
-      'processing',
-      {
-        ...metadata,
-        min_latitude: minLat,
-        max_latitude: maxLat,
-        min_longitude: minLon,
-        max_longitude: maxLon,
-      }
-    );
-
-    let insertedCount = 0;
-    try {
-      insertedCount = await bulkInsertEventRows(db, catalogueId, eventsToInsert as InsertRow[]);
-      insertedCount = await db.countEventsByCatalogue(catalogueId);
-      await db.updateCatalogueEventCount(catalogueId, insertedCount);
-      if (
-        minLat !== undefined &&
-        maxLat !== undefined &&
-        minLon !== undefined &&
-        maxLon !== undefined
-      ) {
-        await db.updateCatalogueGeoBounds(catalogueId, minLat, maxLat, minLon, maxLon);
-      }
-      await db.updateCatalogueStatus('complete', catalogueId);
-    } catch (error) {
-      logger.error('Catalogue import failed; cleaning up partially inserted data', {
-        catalogueId,
-        insertedCount,
-        error: getErrorMessage(error),
-      });
-
-      try {
-        await db.deleteCatalogue(catalogueId);
-      } catch (cleanupError) {
-        logger.error('Failed to clean up partially imported catalogue', {
-          catalogueId,
-          cleanupError: getErrorMessage(cleanupError),
-        });
-        await db.updateCatalogueStatus('error', catalogueId);
-        await db.updateCatalogueEventCount(catalogueId, insertedCount);
-      }
-
-      throw error;
-    }
-
-    // Clean up pending uploads now that the catalogue is saved — best-effort,
-    // TTL will expire the documents automatically after 24 hours.
-    for (const id of ids) {
-      deletePendingUpload(id).catch(() => {/* TTL will clean up */});
-    }
-
-    // Invalidate cache only after successful insertion
-    invalidateCacheByPrefix('catalogues');
-
-    // Report what is actually stored: bulkInsertEvents drops rows repeating a
-    // source_id, so the count of rows submitted overstates the catalogue.
-    const successfullyImported = insertedCount;
-    const duplicatesSkipped = validEventCount - insertedCount;
-    const successRate = totalSubmitted > 0
-      ? Math.round((successfullyImported / totalSubmitted) * 10000) / 100
-      : 0;
-    const isPartialImport = hasInvalidEvents || duplicatesSkipped > 0;
-
-    // Log with both success and failure counts
-    logger.info('Catalogue created successfully', {
-      catalogueId,
-      name,
-      eventCount: successfullyImported,
-      totalSubmitted,
-      failedValidation,
-      duplicatesSkipped,
-      isPartialImport,
-    });
-
-    // Fetch the created catalogue to return
-    const catalogue = await dbQueries.getCatalogueById(catalogueId);
-
-    // Build comprehensive validation report
-    const validationReport = {
-      totalSubmitted,
-      successfullyImported,
-      failedValidation,
-      duplicatesSkipped,
-      successRate,
-      // Limit invalid events details to first 100 for performance
-      invalidEvents: invalidEvents.slice(0, 100),
-      hasMoreInvalidEvents: invalidEvents.length > 100,
+      metadata,
+      entries,
     };
 
-    // Build response message
-    const importMessage = isPartialImport
-      ? [
-          `Imported ${successfullyImported.toLocaleString()} of ${totalSubmitted.toLocaleString()} events.`,
-          failedValidation > 0
-            ? `${failedValidation.toLocaleString()} event${failedValidation === 1 ? '' : 's'} failed validation.`
-            : '',
-          duplicatesSkipped > 0
-            ? `${duplicatesSkipped.toLocaleString()} duplicate event${duplicatesSkipped === 1 ? '' : 's'} skipped.`
-            : '',
-        ].filter(Boolean).join(' ')
-      : `Successfully imported all ${successfullyImported.toLocaleString()} events.`;
+    const hasInlineEvents = Array.isArray(bodyEvents) && bodyEvents.length > 0;
+    if (!hasInlineEvents) {
+      if (entries.length === 0) {
+        return NextResponse.json(
+          { error: 'Events array is required', code: 'INVALID_EVENTS' },
+          { status: 400 }
+        );
+      }
+      return await createCatalogueFromPendingUploads(params);
+    }
 
-    // Return response with catalogue properties spread at top level for backward compatibility
-    // Also include validationReport and partialImport metadata for clients that support it
-    return NextResponse.json(
-      {
-        ...catalogue,
-        validationReport,
-        importMessage,
-        partialImport: isPartialImport,
-      },
-      { status: 201 }
-    );
-
+    return await createCatalogueFromInlineEvents(params, bodyEvents);
   } catch (error) {
     logger.error('Failed to create catalogue', error);
     const errorResponse = formatErrorResponse(error);

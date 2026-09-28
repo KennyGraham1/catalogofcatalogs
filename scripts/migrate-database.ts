@@ -6,24 +6,35 @@
  * This script ensures the proper indexes exist for query performance.
  */
 
-import { MongoClient, IndexSpecification } from 'mongodb';
+import { IndexSpecification } from 'mongodb';
+import { COLLECTIONS } from '../lib/mongodb';
+import { resolveDbTarget } from './lib/db-target';
+import { confirmWrite } from './lib/confirm';
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
-const DATABASE_NAME = process.env.MONGODB_DATABASE || 'earthquake_catalogue';
+const ASSUME_YES = process.argv.includes('--yes');
 
 async function runMigration() {
   console.log('Starting database migration...');
-  console.log(`   URI: ${MONGODB_URI}`);
-  console.log(`   Database: ${DATABASE_NAME}\n`);
 
-  const client = new MongoClient(MONGODB_URI);
+  // See scripts/migrate-add-region.ts for why this goes through lib/mongodb.ts's
+  // getDb() instead of resolving MONGODB_URI/MONGODB_DATABASE itself (gs#3/gs#4).
+  const target = await resolveDbTarget();
+
+  const decision = await confirmWrite(
+    target,
+    `About to create indexes on merged_events in database "${target.db.databaseName}".`,
+    'yes',
+    ASSUME_YES,
+  );
+  if (!decision.ok) {
+    console.error(`❌ ${decision.reason}`);
+    await target.close();
+    process.exitCode = 1;
+    return;
+  }
 
   try {
-    await client.connect();
-    console.log('✓ Connected to MongoDB\n');
-
-    const db = client.db(DATABASE_NAME);
-    const eventsCollection = db.collection('merged_events');
+    const eventsCollection = target.db.collection(COLLECTIONS.EVENTS);
 
     // Create indexes for QuakeML 1.2 fields
     console.log('Creating indexes for QuakeML 1.2 fields...');
@@ -35,12 +46,10 @@ async function runMigration() {
       { key: { azimuthal_gap: 1 }, name: 'idx_azimuthal_gap' },
     ];
 
-    let indexCount = 0;
     for (const index of indexes) {
       try {
         await eventsCollection.createIndex(index.key, { name: index.name });
         console.log(`✓ Created index: ${index.name}`);
-        indexCount++;
       } catch (err: any) {
         if (err.code === 85 || err.code === 86) {
           console.log(`  Index already exists: ${index.name}`);
@@ -55,17 +64,21 @@ async function runMigration() {
 
   } catch (error) {
     console.error('\n❌ Migration failed:', error);
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
-    await client.close();
+    await target.close();
     console.log('\n✓ Disconnected from MongoDB');
   }
 }
 
 // Run migration
-runMigration()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error('Migration failed:', error);
-    process.exit(1);
-  });
+if (require.main === module) {
+  runMigration()
+    .then(() => process.exit(0))
+    .catch((error) => {
+      console.error('Migration failed:', error);
+      process.exit(1);
+    });
+}
+
+export { runMigration };

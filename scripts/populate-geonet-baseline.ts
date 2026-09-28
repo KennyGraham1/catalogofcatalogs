@@ -6,6 +6,7 @@
  */
 
 import { geonetImportService } from '../lib/geonet-import-service';
+import { NZ_NATIONAL_BOUNDS } from '../lib/geo-bounds-utils';
 
 async function populateGeoNetBaseline() {
   console.log('🌏 Populating GeoNet Baseline Catalogue');
@@ -18,12 +19,19 @@ async function populateGeoNetBaseline() {
     console.log('📥 Importing real earthquake data from GeoNet API...');
     console.log('   Time range: Last 30 days');
     console.log('   Minimum magnitude: 3.0');
-    console.log('   Region: New Zealand');
+    console.log('   Region: New Zealand, including the Kermadec and Chatham Islands');
     console.log('');
 
     const result = await geonetImportService.importEvents({
       hours: 30 * 24, // Last 30 days
       minMagnitude: 3.0,
+      // GeoNet's catalogue also holds distant events it locates (typed 'outside of
+      // network interest'), so a New Zealand baseline needs the national box. It
+      // crosses 180 degrees; the importer splits it into two FDSN queries.
+      minLatitude: NZ_NATIONAL_BOUNDS.minLatitude,
+      maxLatitude: NZ_NATIONAL_BOUNDS.maxLatitude,
+      minLongitude: NZ_NATIONAL_BOUNDS.minLongitude,
+      maxLongitude: NZ_NATIONAL_BOUNDS.maxLongitude,
       updateExisting: false,
       catalogueName: 'GeoNet - Real Data (Baseline)',
     });
@@ -44,7 +52,10 @@ async function populateGeoNetBaseline() {
     console.log(`   Total events fetched: ${result.totalFetched}`);
     console.log(`   New events added: ${result.newEvents}`);
     console.log(`   Events updated: ${result.updatedEvents}`);
-    console.log(`   Events skipped: ${result.skippedEvents}`);
+    console.log(`   Events skipped (already stored): ${result.skippedEvents}`);
+    console.log(`   Not imported: ${result.collidedEvents} repeated/already stored, ` +
+      `${result.invalidEvents} invalid, ${result.excludedEvents} excluded by GeoNet event type, ` +
+      `${result.failedEvents} failed writes`);
     console.log(`   Duration: ${(result.duration / 1000).toFixed(2)}s`);
     
     if (result.errors.length > 0) {

@@ -10,28 +10,46 @@ import {
   type EarthquakeEvent
 } from '../lib/seismological-analysis';
 
-// Generate synthetic test data
+/**
+ * Fixed-seed uniform generator (mulberry32). With unseeded Math.random() the 50-event
+ * fit below failed about once in 150 runs: when the fullest 0.1 bin fell near M3.8 the
+ * MAXC Mc of 4.0 left fewer than the 10 events the fit needs above it.
+ */
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Generate synthetic test data. Every call starts from the same seed, so each test sees
+// the same events whatever order the tests run in.
 function generateTestEvents(count: number): EarthquakeEvent[] {
+  const random = seededRandom(20230101);
   const events: EarthquakeEvent[] = [];
   const startDate = new Date('2023-01-01T00:00:00Z');
-  
+
   for (let i = 0; i < count; i++) {
     // Generate magnitudes following approximate G-R distribution
-    const rand = Math.random();
+    const rand = random();
     let magnitude: number;
-    if (rand < 0.6) magnitude = 2.0 + Math.random() * 1.0; // M2-3
-    else if (rand < 0.85) magnitude = 3.0 + Math.random() * 1.0; // M3-4
-    else if (rand < 0.95) magnitude = 4.0 + Math.random() * 1.0; // M4-5
-    else magnitude = 5.0 + Math.random() * 2.0; // M5-7
-    
+    if (rand < 0.6) magnitude = 2.0 + random() * 1.0; // M2-3
+    else if (rand < 0.85) magnitude = 3.0 + random() * 1.0; // M3-4
+    else if (rand < 0.95) magnitude = 4.0 + random() * 1.0; // M4-5
+    else magnitude = 5.0 + random() * 2.0; // M5-7
+
     const time = new Date(startDate.getTime() + i * 86400000); // 1 day apart
-    
+
     events.push({
       id: i + 1,
       time: time.toISOString(),
-      latitude: -41.0 + Math.random() * 2.0,
-      longitude: 174.0 + Math.random() * 2.0,
-      depth: 10 + Math.random() * 30,
+      latitude: -41.0 + random() * 2.0,
+      longitude: 174.0 + random() * 2.0,
+      depth: 10 + random() * 30,
       magnitude: Number(magnitude.toFixed(2))
     });
   }
@@ -278,14 +296,15 @@ describe('Edge Cases and Error Handling', () => {
   });
 
   test('handles wide magnitude range', () => {
+    // 60 events: without a cut-off the fit estimates Mc, which needs at least 50.
     const events: EarthquakeEvent[] = [
-      ...Array.from({ length: 30 }, (_, i) => ({
+      ...Array.from({ length: 60 }, (_, i) => ({
         id: i,
         time: '2023-01-01T00:00:00Z',
         latitude: -41.0,
         longitude: 174.0,
         depth: 10,
-        magnitude: 1.0 + i * 0.2
+        magnitude: 1.0 + (i % 30) * 0.2
       }))
     ];
     

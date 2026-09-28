@@ -19,9 +19,36 @@ export interface GeographicBounds {
   maxLongitude: number;
 }
 
+/**
+ * All of New Zealand: the main islands, the Chatham Islands (to ~176 W), the Kermadec
+ * Islands (29.2-31.4 S, to ~179 W), the offshore strip east of 179 E (Hikurangi margin,
+ * Bounty and Antipodes Islands) and the Auckland and Campbell Islands (to ~52.6 S).
+ * It crosses the antimeridian, so the west edge (165 E) is greater than the east edge
+ * (175 W). The box that stopped at 179 E and 34 S dropped every catalogue lying wholly
+ * in the Kermadecs, on the Chatham Rise or off East Cape from region searches.
+ */
+export const NZ_NATIONAL_BOUNDS: Readonly<GeographicBounds> = Object.freeze({
+  minLatitude: -53,
+  maxLatitude: -28,
+  minLongitude: 165,
+  maxLongitude: -175,
+});
+
 /** True when the box crosses the antimeridian (west edge east of the east edge). */
 export function crossesDateline(bounds: GeographicBounds): boolean {
   return bounds.minLongitude > bounds.maxLongitude;
+}
+
+/**
+ * The box's [west, east] longitudes in the continuous frame a map draws in: a box that
+ * crosses 180 gets an east edge past 180 (165..-175 becomes 165..185), so a rectangle
+ * or fitBounds spans the box itself rather than running the other way round the globe.
+ */
+export function unwrappedLongitudeRange(bounds: GeographicBounds): { west: number; east: number } {
+  return {
+    west: bounds.minLongitude,
+    east: crossesDateline(bounds) ? bounds.maxLongitude + 360 : bounds.maxLongitude,
+  };
 }
 
 /**

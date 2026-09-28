@@ -8,11 +8,11 @@ A web application for managing, analyzing, and visualizing earthquake catalogue 
 
 *   **Data Management**: Support for CSV, TXT, JSON, GeoJSON, and QuakeML 1.2 (BED).
 *   **Automated Import**: Real-time integration with GeoNet FDSN Event Web Service.
-*   **Merge Capabilities**: Tools to merge catalogues with configurable matching rules (time, distance, magnitude).
-*   **Advanced Visualization**: Interactive maps with clustering, uncertainty ellipses, focal mechanisms (beach balls), and station coverage.
+*   **Merge Capabilities**: Five conflict-resolution strategies (Quality-Based, Source Priority, Average Values, Most Recent Solution, Most Complete Record) with configurable time/distance matching windows; magnitude is not a matching parameter, only an internal consistency check.
+*   **Advanced Visualization**: Interactive maps with colour modes (depth, quality, azimuthal gap, source catalogue), on-demand uncertainty ellipses, focal mechanisms (beach balls), and station-coverage colouring — no marker clustering; every event is its own marker.
 *   **Seismological Analysis**: Gutenberg-Richter b-values, completeness magnitude (Mc), cluster detection, and energy release analysis.
-*   **Quality Assessment**: Automated grading (A+ to F) based on location uncertainty, station coverage, and solution quality.
-*   **Export**: Download data in CSV or QuakeML formats.
+*   **Quality Assessment**: Automated grading (A+ to F) based on location uncertainty, station coverage, and solution quality; the quality score is stored on import and filterable by a numeric minimum.
+*   **Export**: Download data in CSV, QuakeML, JSON, GeoJSON, or KML, with per-event provenance, a version stamp and a SHA-256 checksum.
 
 ## 🚀 Getting Started
 
@@ -44,10 +44,19 @@ A web application for managing, analyzing, and visualizing earthquake catalogue 
     duplicates or conflicting indexes prevent creation, setup fails: back up and repair
     those records/index definitions before retrying. Setup does not delete duplicate data.
 
-    Credential login uses shared MongoDB counters (10 attempts per account and 50 per
-    client in each 15-minute window). The application creates a TTL index on
-    `auth_rate_limits`; its database role must permit index creation. Configure
-    `TRUSTED_PROXY_HOPS` for your ingress and prevent clients bypassing that proxy.
+    Credential login uses shared MongoDB counters in 15-minute windows: 10 failed
+    attempts per account from one client, and 50 per client across accounts. Successful
+    sign-ins are not counted. Failures from other clients never lock an account: above
+    100 in a window they are logged, and only clients that have signed in to that
+    account before (or reset its password) may keep trying. The application creates a
+    TTL index on `auth_rate_limits` to expire old counters; if its database role cannot
+    create indexes this is logged and sign-in still works.
+
+    These limits identify clients by `X-Forwarded-For`, so run the app behind a reverse
+    proxy that overwrites that header with the peer address and that clients cannot
+    bypass: for Docker, `nginx/nginx.conf` via
+    `APP_BIND_ADDRESS=127.0.0.1 docker-compose -f docker-compose.prod.yml --profile with-nginx up -d`.
+    Set `TRUSTED_PROXY_HOPS` to the number of such proxies (default 1; see `.env.example`).
 
 4.  **Run Development Server**
     ```bash

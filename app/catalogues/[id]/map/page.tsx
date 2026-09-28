@@ -45,10 +45,30 @@ export default function CatalogueMapPage() {
     return catalogues.find((c: Catalogue) => c.id === catalogueId) || null;
   }, [catalogues, catalogueId]);
 
+  // Catalogue id -> name, for EarthquakeCircleMap's source-catalogue colour mode legend
+  // (a merged catalogue's events carry source_catalogue_ids, C2). Built from the catalogue
+  // list this page already loads for the header/lookup above - no extra fetch.
+  const catalogueNames = useMemo(
+    () => Object.fromEntries(availableCatalogues.map(c => [c.id, c.name])),
+    [availableCatalogues]
+  );
+
   const loading = cataloguesLoading || (eventsLoading && events.length === 0);
   const stats = useMemo(() => ({
     total: events.length,
-    withUncertainty: events.filter(e => e.latitude_uncertainty != null || e.longitude_uncertainty != null || e.depth_uncertainty != null).length,
+    // Any reported location uncertainty counts: lat/lon (rarely written), the circular
+    // horizontal column, the QuakeML OriginUncertainty error-ellipse axes, or depth. GeoNet
+    // and USGS (QuakeML/CSV) only ever populate horizontal_uncertainty/depth_uncertainty,
+    // never latitude_uncertainty/longitude_uncertainty (#57) - matches the definition
+    // lib/validation.ts already uses for the upload quality report.
+    withUncertainty: events.filter(e =>
+      e.latitude_uncertainty != null ||
+      e.longitude_uncertainty != null ||
+      e.horizontal_uncertainty != null ||
+      e.min_horizontal_uncertainty != null ||
+      e.max_horizontal_uncertainty != null ||
+      e.depth_uncertainty != null
+    ).length,
     withFocalMechanisms: events.filter(e => e.focal_mechanisms).length,
     withStationData: events.filter(e => (e.used_station_count ?? 0) > 0).length,
   }), [events]);
@@ -169,6 +189,7 @@ export default function CatalogueMapPage() {
               zoom={6}
               height="700px"
               mapKey={`catalogue-map-${catalogueId}`}
+              catalogueNames={catalogueNames}
             />
           )}
         </CardContent>

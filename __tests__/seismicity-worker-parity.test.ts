@@ -145,11 +145,11 @@ describe('worker and lib agree on the Gutenberg-Richter fit', () => {
   });
 
   it('withholds the fit in both copies when fewer than 10 events sit above Mc', () => {
-    // Same 14-event sequence as __tests__/seismicity-hard-floors.test.ts: MAXC
+    // Same 52-event catalogue as __tests__/seismicity-hard-floors.test.ts: MAXC
     // gives Mc = 1.2 and only 8 events are at or above it.
-    const events = eventsWithMagnitudes(
-      [1.0, 1.0, 1.0, 1.0, 1.0, 1.1, 1.2, 1.3, 1.5, 1.8, 2.2, 2.7, 3.4, 4.6]
-    );
+    const events = eventsWithMagnitudes([
+      ...new Array(42).fill(1.0), 1.1, 1.1, 1.2, 1.3, 1.5, 1.8, 2.2, 2.7, 3.4, 4.6,
+    ]);
 
     expect(() => calculateGutenbergRichter(events)).toThrow(
       /Insufficient data above the completeness magnitude/
@@ -161,8 +161,8 @@ describe('worker and lib agree on the Gutenberg-Richter fit', () => {
 
   it('withholds the fit in both copies when fewer than three bins are populated', () => {
     const events = eventsWithMagnitudes([
-      ...new Array(20).fill(1.0),
-      ...new Array(15).fill(4.0),
+      ...new Array(35).fill(1.0),
+      ...new Array(20).fill(4.0),
     ]);
 
     expect(() => calculateGutenbergRichter(events)).toThrow(/at least 3 populated bins/);
@@ -275,9 +275,10 @@ describe('worker and lib agree on temporal analysis', () => {
       });
     }
 
-    // One long sequence (40 events) so the per-cluster b-value path is exercised.
+    // One long sequence (60 events, above the 50-event floor for estimating its
+    // Mc) so the per-cluster b-value path is exercised.
     const tBig = base + 26 * 100 * DAY;
-    for (let k = 0; k < 40; k++) {
+    for (let k = 0; k < 60; k++) {
       events.push({
         id: id++,
         time: new Date(tBig + k * 3600_000).toISOString(),
@@ -321,6 +322,8 @@ describe('worker and lib agree on temporal analysis', () => {
       }));
 
     expect(summarise(actual.clusters)).toEqual(summarise(expected.clusters));
+    // The 60-event sequence clears the Mc floor, so a per-cluster b-value exists.
+    expect(expected.clusters.some(c => c.eventCount === 60 && c.bValue !== undefined)).toBe(true);
   });
 
   it('produces identical, parseable weekly time-series keys in both copies', () => {

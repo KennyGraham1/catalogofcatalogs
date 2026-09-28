@@ -5,11 +5,13 @@ import { MapViewportObserver } from '@/components/map/MapViewportObserver';
 import { MapDetailControl } from '@/components/map/MapDetailControl';
 import type { MapDetail } from '@/lib/map-event-selection';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useEventMapPopup } from '@/hooks/use-event-map-popup';
-import { dedupeById } from '@/lib/utils';
-import { MapContainer, Circle, Popup, Polyline } from 'react-leaflet';
+import { MapContainer, Popup, Polyline } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
+import { EarthquakeMarkerLayer } from '@/components/map/EarthquakeMarkerLayer';
+import { DepthLegendItems, MagnitudeLegendItems, QualityLegendItems } from '@/components/map/MapLegend';
+import { formatOriginTime } from '@/components/map/OptimizedEventPopup';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -26,7 +28,7 @@ import { calculateUncertaintyEllipse, UncertaintyData } from '@/lib/uncertainty-
 import { parseFocalMechanism } from '@/lib/focal-mechanism-utils';
 import { calculateDistance } from '@/lib/station-coverage-utils';
 import { calculateQualityScore, getQualityColor, metricsFromEvent } from '@/lib/quality-scoring';
-import { getMagnitudeColor, getMagnitudeRadius, getEarthquakeColor } from '@/lib/earthquake-utils';
+import { getEarthquakeColor } from '@/lib/earthquake-utils';
 
 interface EnhancedEvent {
   id: number | string;
@@ -78,6 +80,8 @@ interface EnhancedEvent {
 
   // Complex data
   focal_mechanisms?: string | null;
+  /** QuakeML preferredFocalMechanismID: which of focal_mechanisms is authoritative. */
+  preferred_focal_mechanism_id?: string | null;
   picks?: string | null;
   arrivals?: string | null;
 }
@@ -132,7 +136,7 @@ export function EnhancedMapView({
     return sampledEvents.map(event => ({
       eventId: event.id,
       position: getPosition(event),
-      mechanism: parseFocalMechanism(event.focal_mechanisms)
+      mechanism: parseFocalMechanism(event.focal_mechanisms, event.preferred_focal_mechanism_id)
     })).filter(item => item.mechanism !== null);
   }, [sampledEvents, getPosition]);
 
@@ -147,13 +151,19 @@ export function EnhancedMapView({
   const qualityScoreMap = useMemo(() => new Map(qualityScores.map(q => [q.eventId, q.score])), [qualityScores]);
 
   // Get event color based on quality or depth
-  const getEventColor = (event: EnhancedEvent) => {
+  const getEventColor = useCallback((event: EnhancedEvent) => {
     if (showQualityColors) {
       const quality = qualityScoreMap.get(event.id);
       return quality ? getQualityColor(quality.overall) : getEarthquakeColor(event.depth, mapColors.isDark);
     }
     return getEarthquakeColor(event.depth, mapColors.isDark);
-  };
+  }, [showQualityColors, qualityScoreMap, mapColors.isDark]);
+
+  // A click opens the popup and selects the event for the station distance lines
+  const handleEventClick = useCallback((event: EnhancedEvent, position: [number, number]) => {
+    setSelectedEvent(event);
+    onEventClick(event, position);
+  }, [onEventClick]);
 
   // Stations array - empty for now (would be fetched from database in production)
   const stations: any[] = [];
@@ -256,35 +266,9 @@ export function EnhancedMapView({
           <MapLayerControl position="topright" />
           <MapViewportObserver onChange={onViewportChange} />
 
-          {/* Earthquake markers - using intelligent sampling for performance */}
-          {/* Sort by magnitude (small to large) so larger events render on top */}
-          {dedupeById(sampledEvents).sort((a, b) => a.magnitude - b.magnitude).map((event) => {
-            const eventDate = new Date(event.time).toLocaleDateString('en-GB', {
-              day: '2-digit',
-              month: '2-digit',
-              year: 'numeric',
-            });
-            const ariaLabel = `Magnitude ${event.magnitude} earthquake at ${event.latitude.toFixed(2)}, ${event.longitude.toFixed(2)} on ${eventDate}`;
-
-            return (
-              <Circle
-                key={event.id}
-                center={getPosition(event)}
-                radius={getMagnitudeRadius(event.magnitude)}
-                pathOptions={{
-                  color: getEventColor(event),
-                  fillColor: getEventColor(event),
-                  fillOpacity: mapColors.markerOpacity,
-                  weight: 1,
-                  // Add title for accessibility (shows on hover)
-                  title: ariaLabel,
-                } as any}
-                eventHandlers={{
-                  click: () => { setSelectedEvent(event); onEventClick(event, getPosition(event)); },
-                }}
-              />
-            );
-          })}
+          {/* Earthquake markers - screen-pixel circles sized like the legend (larger
+              events drawn on top), using intelligent sampling for performance */}
+          <EarthquakeMarkerLayer events={sampledEvents} getColor={getEventColor} opacity={mapColors.markerOpacity} onEventClick={handleEventClick} />
 
           {activePopup && <Popup key={activePopup.seq} position={activePopup.position}>
             <EventPopup event={activePopup.event} qualityScores={qualityScores} />
@@ -375,53 +359,30 @@ export function EnhancedMapView({
 
       {/* Legend */}
       <Card className="absolute bottom-4 right-4 z-[1000] max-w-[240px] border-border/60 bg-background/90 px-3 py-2.5 text-[11px] leading-tight backdrop-blur-sm shadow-lg">
+        {/* Colour is quality or depth; size is always magnitude */}
         <div className="flex items-center justify-between gap-2">
           <h4 className="text-[11px] font-semibold">
-            {showQualityColors ? 'Quality Score' : 'Magnitude Scale'}
+            {showQualityColors ? 'Quality Score' : 'Depth (Color)'}
           </h4>
           {showQualityColors ? (
             <TechnicalTermTooltip term="qualityScore" />
           ) : (
-            <TechnicalTermTooltip term="magnitude" />
+            <TechnicalTermTooltip term="depth" />
           )}
         </div>
         {showQualityColors ? (
-          <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-            <div className="flex items-center gap-1.5">
-              <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#22c55e' }}></div>
-              <span>A+ / A (90-100)</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#84cc16' }}></div>
-              <span>B (80-89)</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#eab308' }}></div>
-              <span>C (70-79)</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#f97316' }}></div>
-              <span>D (60-69)</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#ef4444' }}></div>
-              <span>F (&lt; 60)</span>
-            </div>
-          </div>
+          <QualityLegendItems />
         ) : (
-          <div className="mt-2">
-            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <span>Circle size represents magnitude</span>
-              <TechnicalTermTooltip term="magnitude" />
-            </div>
-            <div className="mt-1 flex items-end gap-2">
-              <div className="h-2 w-2 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <div className="h-3 w-3 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <div className="h-4 w-4 rounded-full bg-blue-500 flex-shrink-0"></div>
-              <div className="h-5 w-5 rounded-full bg-blue-500 flex-shrink-0"></div>
-            </div>
-          </div>
+          <DepthLegendItems isDark={mapColors.isDark} />
         )}
+
+        <div className="mt-2 border-t border-border/60 pt-2">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-[11px] font-semibold">Magnitude (Size)</h4>
+            <TechnicalTermTooltip term="magnitude" />
+          </div>
+          <MagnitudeLegendItems />
+        </div>
       </Card>
     </div>
   );
@@ -465,16 +426,9 @@ function EventPopup({ event, qualityScores }: { event: EnhancedEvent; qualitySco
           <Calendar className="h-4 w-4 text-primary" />
           <div className="flex items-center gap-1.5">
             <span className="font-medium">Time:</span>
-            <InfoTooltip content="Event origin time in local timezone." />
+            <InfoTooltip content="Event origin time in UTC, the reference frame catalogues report origin times in." />
           </div>
-          <span className="text-xs">{new Date(event.time).toLocaleString('en-GB', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-          })}</span>
+          <span className="text-xs">{formatOriginTime(event.time)}</span>
         </div>
 
         <div className="flex items-center gap-2 text-sm">

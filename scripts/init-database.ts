@@ -1,223 +1,65 @@
-import { ensureEventIntegrityIndexes } from '../lib/event-indexes';
 /**
  * Initialize MongoDB Database
- * Creates all collections and indexes
+ * Creates all collections and indexes.
+ *
+ *   npx tsx scripts/init-database.ts
+ *
+ * The database is resolved exactly as the application resolves it (lib/mongodb.ts:
+ * MONGODB_DATABASE, else the database named in MONGODB_URI, else
+ * 'earthquake_catalogue'), so the indexes land in the database the app uses. The
+ * indexes come from the one shared list in lib/event-indexes.ts, which
+ * scripts/create-indexes.ts and scripts/ensure-indexes.ts apply too, so the three
+ * scripts can run in any order and any number of times.
  */
 
-import { config } from 'dotenv';
-import { MongoClient } from 'mongodb';
+// Loads .env before lib/mongodb reads the environment.
+import 'dotenv/config';
+import { COLLECTIONS, closeConnection, getDb } from '../lib/mongodb';
+import { ensureDatabaseIndexes } from '../lib/event-indexes';
 
-// Load environment variables from .env file
-config();
-
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
-const DATABASE_NAME = process.env.MONGODB_DATABASE || 'earthquake_catalogue';
-
-// Collection names
-const COLLECTIONS = {
-  CATALOGUES: 'merged_catalogues',
-  EVENTS: 'merged_events',
-  MAPPING_TEMPLATES: 'mapping_templates',
-  IMPORT_HISTORY: 'import_history',
-  SAVED_FILTERS: 'saved_filters',
-  USERS: 'users',
-  SESSIONS: 'sessions',
-  ROLE_REQUESTS: 'role_requests',
-  NOTIFICATIONS: 'notifications',
-  PASSWORD_RESET_TOKENS: 'password_reset_tokens',
-  API_KEYS: 'api_keys',
-  AUDIT_LOGS: 'audit_logs',
-};
-
-async function initializeDatabase() {
+async function initializeDatabase(): Promise<number> {
   console.log('🔧 Initializing MongoDB database...\n');
-  console.log(`   Database: ${DATABASE_NAME}\n`);
 
-  const client = new MongoClient(MONGODB_URI);
+  const db = await getDb();
+  console.log(`✓ Connected to MongoDB (database: ${db.databaseName})\n`);
 
-  try {
-    await client.connect();
-    console.log('✓ Connected to MongoDB\n');
-
-    const db = client.db(DATABASE_NAME);
-
-    // Create collections (MongoDB creates them automatically, but we can be explicit)
-    console.log('📦 Creating collections...');
-    for (const [name, collectionName] of Object.entries(COLLECTIONS)) {
-      try {
-        await db.createCollection(collectionName);
-        console.log(`✓ Created collection: ${collectionName}`);
-      } catch (err: any) {
-        if (err.code === 48) {
-          // Collection already exists
-          console.log(`  Collection already exists: ${collectionName}`);
-        } else {
-          console.error(`❌ Error creating collection ${collectionName}:`, err.message);
-        }
+  // Create collections (MongoDB creates them automatically, but we can be explicit)
+  console.log('📦 Creating collections...');
+  let collectionErrors = 0;
+  for (const collectionName of Object.values(COLLECTIONS)) {
+    try {
+      await db.createCollection(collectionName);
+      console.log(`✓ Created collection: ${collectionName}`);
+    } catch (err: any) {
+      if (err.code === 48) {
+        // Collection already exists
+        console.log(`  Collection already exists: ${collectionName}`);
+      } else {
+        collectionErrors++;
+        console.error(`❌ Error creating collection ${collectionName}:`, err.message);
       }
     }
-
-    // Create indexes
-    console.log('\n🔍 Creating indexes...');
-    let indexCount = 0;
-
-    // Events collection indexes
-    const eventsCollection = db.collection(COLLECTIONS.EVENTS);
-    await ensureEventIntegrityIndexes(eventsCollection);
-    const eventIndexes: Array<{ key: Record<string, 1 | -1>; name: string; unique?: boolean }> = [
-      { key: { id: 1 }, name: 'idx_id', unique: true },
-      { key: { catalogue_id: 1 }, name: 'idx_catalogue_id' },
-      { key: { source_id: 1 }, name: 'idx_source_id' },
-      { key: { time: -1 }, name: 'idx_time' },
-      { key: { magnitude: -1 }, name: 'idx_magnitude' },
-      { key: { depth: 1 }, name: 'idx_depth' },
-      { key: { latitude: 1, longitude: 1 }, name: 'idx_location' },
-      { key: { event_type: 1 }, name: 'idx_event_type' },
-      { key: { magnitude_type: 1 }, name: 'idx_magnitude_type' },
-      { key: { evaluation_status: 1 }, name: 'idx_evaluation_status' },
-      { key: { azimuthal_gap: 1 }, name: 'idx_azimuthal_gap' },
-      { key: { used_station_count: 1 }, name: 'idx_used_station_count' },
-      { key: { standard_error: 1 }, name: 'idx_standard_error' },
-      { key: { catalogue_id: 1, time: -1 }, name: 'idx_catalogue_time' },
-      { key: { catalogue_id: 1, time: -1, id: -1 }, name: 'catalogue_time_id_idx' },
-      { key: { catalogue_id: 1, magnitude: -1 }, name: 'idx_catalogue_magnitude' },
-    ];
-
-    for (const idx of eventIndexes) {
-      try {
-        await eventsCollection.createIndex(idx.key, { name: idx.name, unique: idx.unique ?? false });
-        console.log(`✓ Created index: ${COLLECTIONS.EVENTS}.${idx.name}`);
-        indexCount++;
-      } catch (err: any) {
-        if (err.code === 85 || err.code === 86) {
-          console.log(`  Index already exists: ${COLLECTIONS.EVENTS}.${idx.name}`);
-        } else {
-          console.error(`❌ Error creating index ${idx.name}:`, err.message);
-        }
-      }
-    }
-
-    // Catalogues collection indexes
-    const cataloguesCollection = db.collection(COLLECTIONS.CATALOGUES);
-    await cataloguesCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
-    console.log(`✓ Created index: ${COLLECTIONS.CATALOGUES}.idx_id`);
-    indexCount++;
-
-    // Mapping templates collection indexes
-    const templatesCollection = db.collection(COLLECTIONS.MAPPING_TEMPLATES);
-    await templatesCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
-    await templatesCollection.createIndex({ name: 1 }, { name: 'idx_name' });
-    console.log(`✓ Created index: ${COLLECTIONS.MAPPING_TEMPLATES}.idx_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.MAPPING_TEMPLATES}.idx_name`);
-    indexCount += 2;
-
-    // Import history collection indexes
-    const historyCollection = db.collection(COLLECTIONS.IMPORT_HISTORY);
-    await historyCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
-    await historyCollection.createIndex({ catalogue_id: 1 }, { name: 'idx_catalogue_id' });
-    await historyCollection.createIndex({ created_at: -1 }, { name: 'idx_created_at' });
-    console.log(`✓ Created index: ${COLLECTIONS.IMPORT_HISTORY}.idx_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.IMPORT_HISTORY}.idx_catalogue_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.IMPORT_HISTORY}.idx_created_at`);
-    indexCount += 3;
-
-    // Saved filters collection indexes
-    const filtersCollection = db.collection(COLLECTIONS.SAVED_FILTERS);
-    await filtersCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
-    await filtersCollection.createIndex({ catalogue_id: 1 }, { name: 'idx_catalogue_id' });
-    console.log(`✓ Created index: ${COLLECTIONS.SAVED_FILTERS}.idx_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.SAVED_FILTERS}.idx_catalogue_id`);
-    indexCount += 2;
-
-    // Users collection indexes
-    const usersCollection = db.collection(COLLECTIONS.USERS);
-    await usersCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
-    await usersCollection.createIndex({ email: 1 }, { name: 'idx_email', unique: true });
-    console.log(`✓ Created index: ${COLLECTIONS.USERS}.idx_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.USERS}.idx_email`);
-    indexCount += 2;
-
-    // Sessions collection indexes
-    const sessionsCollection = db.collection(COLLECTIONS.SESSIONS);
-    await sessionsCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
-    await sessionsCollection.createIndex({ user_id: 1 }, { name: 'idx_user_id' });
-    await sessionsCollection.createIndex({ token: 1 }, { name: 'idx_token' });
-    await sessionsCollection.createIndex({ expires_at: 1 }, { name: 'idx_expires_at', expireAfterSeconds: 0 });
-    console.log(`✓ Created index: ${COLLECTIONS.SESSIONS}.idx_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.SESSIONS}.idx_user_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.SESSIONS}.idx_token`);
-    console.log(`✓ Created index: ${COLLECTIONS.SESSIONS}.idx_expires_at (TTL)`);
-    indexCount += 4;
-
-    // Password reset tokens collection indexes
-    const resetTokensCollection = db.collection(COLLECTIONS.PASSWORD_RESET_TOKENS);
-    await resetTokensCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
-    await resetTokensCollection.createIndex({ user_id: 1 }, { name: 'idx_user_id' });
-    await resetTokensCollection.createIndex({ token_hash: 1 }, { name: 'idx_token_hash', unique: true });
-    await resetTokensCollection.createIndex({ expires_at: 1 }, { name: 'idx_expires_at', expireAfterSeconds: 0 });
-    console.log(`✓ Created index: ${COLLECTIONS.PASSWORD_RESET_TOKENS}.idx_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.PASSWORD_RESET_TOKENS}.idx_user_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.PASSWORD_RESET_TOKENS}.idx_token_hash`);
-    console.log(`✓ Created index: ${COLLECTIONS.PASSWORD_RESET_TOKENS}.idx_expires_at (TTL)`);
-    indexCount += 4;
-
-    // Role requests collection indexes
-    const roleRequestsCollection = db.collection(COLLECTIONS.ROLE_REQUESTS);
-    await roleRequestsCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
-    await roleRequestsCollection.createIndex({ user_id: 1 }, { name: 'idx_user_id' });
-    await roleRequestsCollection.createIndex({ status: 1 }, { name: 'idx_status' });
-    await roleRequestsCollection.createIndex({ created_at: -1 }, { name: 'idx_created_at' });
-    console.log(`✓ Created index: ${COLLECTIONS.ROLE_REQUESTS}.idx_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.ROLE_REQUESTS}.idx_user_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.ROLE_REQUESTS}.idx_status`);
-    console.log(`✓ Created index: ${COLLECTIONS.ROLE_REQUESTS}.idx_created_at`);
-    indexCount += 4;
-
-    // Notifications collection indexes
-    const notificationsCollection = db.collection(COLLECTIONS.NOTIFICATIONS);
-    await notificationsCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
-    await notificationsCollection.createIndex({ user_id: 1 }, { name: 'idx_user_id' });
-    await notificationsCollection.createIndex({ created_at: -1 }, { name: 'idx_created_at' });
-    await notificationsCollection.createIndex({ read_at: 1 }, { name: 'idx_read_at' });
-    console.log(`✓ Created index: ${COLLECTIONS.NOTIFICATIONS}.idx_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.NOTIFICATIONS}.idx_user_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.NOTIFICATIONS}.idx_created_at`);
-    console.log(`✓ Created index: ${COLLECTIONS.NOTIFICATIONS}.idx_read_at`);
-    indexCount += 4;
-
-    // API keys collection indexes
-    const apiKeysCollection = db.collection(COLLECTIONS.API_KEYS);
-    await apiKeysCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
-    await apiKeysCollection.createIndex({ user_id: 1 }, { name: 'idx_user_id' });
-    await apiKeysCollection.createIndex({ key_prefix: 1 }, { name: 'idx_key_prefix' });
-    console.log(`✓ Created index: ${COLLECTIONS.API_KEYS}.idx_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.API_KEYS}.idx_user_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.API_KEYS}.idx_key_prefix`);
-    indexCount += 3;
-
-    // Audit logs collection indexes
-    const auditLogsCollection = db.collection(COLLECTIONS.AUDIT_LOGS);
-    await auditLogsCollection.createIndex({ id: 1 }, { name: 'idx_id', unique: true });
-    await auditLogsCollection.createIndex({ user_id: 1 }, { name: 'idx_user_id' });
-    await auditLogsCollection.createIndex({ created_at: -1 }, { name: 'idx_created_at' });
-    console.log(`✓ Created index: ${COLLECTIONS.AUDIT_LOGS}.idx_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.AUDIT_LOGS}.idx_user_id`);
-    console.log(`✓ Created index: ${COLLECTIONS.AUDIT_LOGS}.idx_created_at`);
-    indexCount += 3;
-
-    console.log('\n✅ MongoDB database initialized successfully!');
-    console.log(`   Collections created: ${Object.keys(COLLECTIONS).length}`);
-    console.log(`   Indexes created: ${indexCount}\n`);
-
-  } catch (error) {
-    console.error('❌ Failed to initialize database:', error);
-    process.exit(1);
-  } finally {
-    await client.close();
-    console.log('✓ Disconnected from MongoDB');
-    process.exit(0);
   }
+
+  console.log('\n🔍 Creating indexes...');
+  const report = await ensureDatabaseIndexes(db);
+
+  console.log(`\n   Indexes created: ${report.created.length}, already present: ${report.existing.length}, failed: ${report.failed.length}`);
+  if (collectionErrors > 0 || report.failed.length > 0) {
+    console.error('\n❌ Database initialization incomplete. Fix the errors above and rerun.');
+    return 1;
+  }
+  console.log('\n✅ MongoDB database initialized successfully!');
+  return 0;
 }
 
-// Run initialization
-initializeDatabase();
+initializeDatabase()
+  .then(async (code) => {
+    await closeConnection();
+    process.exit(code);
+  })
+  .catch(async (error) => {
+    console.error('❌ Failed to initialize database:', error instanceof Error ? error.message : error);
+    await closeConnection().catch(() => undefined);
+    process.exit(1);
+  });

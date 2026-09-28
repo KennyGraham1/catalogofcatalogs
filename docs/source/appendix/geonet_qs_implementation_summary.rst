@@ -11,13 +11,27 @@ GeoNet Quality Score Implementation - Summary
 Executive Summary
 -----------------
 
+.. important::
+   The "QS0-QS6" system described in this document is an **in-house
+   location-quality heuristic inspired by** the research paper below. It is
+   **not a reproduction of that paper's method**, and its QS0-QS6 numbers
+   are **not comparable** to the GeoNet Quality Score the paper describes.
+   See *Comparison with Research Paper* below for the actual, verified
+   difference between the two methods.
 
-I have successfully analyzed the research paper "A quantitative assessment of GeoNet earthquake location quality in Aotearoa New Zealand" and implemented a **dual quality scoring system** that combines:
+This implementation was inspired by the research paper "A quantitative
+assessment of GeoNet earthquake location quality in Aotearoa New Zealand"
+(Warren-Smith et al., 2025) and adds a **dual quality scoring system** that
+combines:
 
 1. **Our existing 0-100 detailed scoring system** - Comprehensive quality analysis
-2. **GeoNet QS (QS0-QS6) standardized system** - Simple, standardized quality classification
+2. **An in-house QS0-QS6 heuristic** - A simple, seven-level quality
+   classification on the same QS0-QS6 numbering the paper uses, computed by
+   a different method from different inputs (see below)
 
-This approach provides the **best of both worlds**: detailed analysis for internal use and standardized scores for comparison with published research.
+This approach provides detailed analysis for internal use alongside a
+simple seven-level classification for quick triage -- not a standardized
+score for direct comparison with the published research.
 
 
 
@@ -29,7 +43,7 @@ What Was Delivered
 ^^^^^^^^^^^^^^^^^^^^
 
 
-1. **``docs/GEONET_QUALITY_SCORE_ANALYSIS.md``**
+1. :doc:`/appendix/geonet_quality_score_analysis`
    - Comprehensive analysis of the research paper
    - Comparison with our existing system
    - Detailed implementation strategy
@@ -41,7 +55,8 @@ What Was Delivered
 
 
 2. **``lib/geonet-quality-score.ts``** (247 lines)
-   - Complete GeoNet QS calculation (QS0-QS6)
+   - Complete in-house QS0-QS6 location-quality heuristic (not the published
+     GeoNet QS)
    - 6 quality criteria evaluation:
      - Azimuthal Gap
      - Station Count
@@ -80,7 +95,7 @@ What Was Delivered
 ^^^^^^^^^^^^^^^
 
 
-5. **``docs/GEONET_QS_IMPLEMENTATION_GUIDE.md``**
+5. :doc:`/appendix/geonet_qs_implementation_guide`
    - Complete implementation guide
    - Detailed threshold tables for all criteria
    - Usage examples with code
@@ -94,11 +109,12 @@ Key Features
 ------------
 
 
-GeoNet Quality Score System
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+In-house Location-Quality Heuristic (QS0-QS6)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
-**Scale**: QS0 (Unconstrained) → QS6 (Best Constrained)
+**Scale**: QS0 (Unconstrained) → QS6 (Best Constrained) -- an in-house
+scale, not the published GeoNet Quality Score (see the disclaimer above).
 
 **Scoring Logic**:
 - Each criterion scored independently (0-6)
@@ -164,7 +180,7 @@ Quality Score Comparison
 
    * - Aspect
      - Our 0-100 System
-     - GeoNet QS System
+     - In-house QS0-QS6 Heuristic
      - Integrated System
    * - **Granularity**
      - Very fine (101 levels)
@@ -176,7 +192,8 @@ Quality Score Comparison
      - Both
    * - **Standardization**
      - Custom
-     - Published research
+     - Custom -- inspired by, but not a reproduction of, published research
+       (not comparable to the published GeoNet QS)
      - Both
    * - **Communication**
      - Technical
@@ -184,7 +201,8 @@ Quality Score Comparison
      - Both
    * - **Use Case**
      - Internal analysis
-     - External comparison
+     - Internal triage only -- not for external comparison against GeoNet's
+       published QS (see disclaimer above)
      - All purposes
 
 
@@ -235,12 +253,15 @@ Benefits of This Implementation
 -------------------------------
 
 
-✅ Standardization
-^^^^^^^^^^^^^^^^^
+✅ A Simple Seven-Level Scale
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-- Aligns with published research (DOI: 10.1080/00288306.2024.2421309)
-- Enables comparison with GeoNet catalogue
-- Provides industry-standard quality classification
+- Inspired by published research (DOI: 10.1080/00288306.2024.2421309), but
+  is a different method over different inputs, not a reproduction of it
+- **Not** interchangeable with, or comparable to, GeoNet's own published QS
+  for the same events -- see the disclaimer at the top of this document
+- Provides a simple, in-house quality classification for this platform's
+  own catalogues, not an industry-standard one
 
 ✅ Simplicity
 ^^^^^^^^^^^^
@@ -321,11 +342,11 @@ Files Created/Modified
 New Files Created (5)
 ^^^^^^^^^^^^^^^^^^^^^
 
-1. ``lib/geonet-quality-score.ts`` - GeoNet QS calculation
+1. ``lib/geonet-quality-score.ts`` - In-house QS0-QS6 heuristic calculation
 2. ``lib/integrated-quality-assessment.ts`` - Integrated assessment
 3. ``__tests__/lib/geonet-quality-score.test.ts`` - Test suite
-4. ``docs/GEONET_QUALITY_SCORE_ANALYSIS.md`` - Analysis document
-5. ``docs/GEONET_QS_IMPLEMENTATION_GUIDE.md`` - Implementation guide
+4. ``docs/source/appendix/geonet_quality_score_analysis.rst`` - Analysis document
+5. ``docs/source/appendix/geonet_qs_implementation_guide.rst`` - Implementation guide
 
 Existing Files (No Changes Required)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -345,26 +366,46 @@ Comparison with Research Paper
 Paper's System
 ^^^^^^^^^^^^^^
 
+Per the provenance note in ``lib/geonet-quality-score.ts``, the published
+method (Warren-Smith et al., 2025):
+
 - **Scale**: QS0-QS6 (7 levels)
-- **Focus**: Earthquake location quality
+- **Method**: the **sum** of up to six independent **binary** criteria --
+  azimuthal gap <= 180°, >= 8 arrivals, >= 1 P pick, >= 1 S pick,
+  nearest-station distance <= hypocentral depth, and a fixed-depth flag (a
+  QS5 variant applies when depth-fixing is not used)
 - **Context**: GeoNet network in New Zealand
-- **Purpose**: Standardized quality classification
+- **Purpose**: A standardized quality classification for the GeoNet catalogue
 
 Our Implementation
 ^^^^^^^^^^^^^^^^^^
 
-- **Scale**: QS0-QS6 (matches paper)
-- **Criteria**: 6 standard seismological metrics
-- **Thresholds**: Based on industry best practices
+- **Scale**: QS0-QS6 (same numbering as the paper, but a different method --
+  see *Alignment* below)
+- **Method**: the **minimum** across six **graded** thresholds on inputs the
+  paper's binary criteria do not use at all (RMS residual, horizontal and
+  depth uncertainty), alongside graded azimuthal gap, station count and
+  nearest-station distance -- because this codebase has no phase-level
+  picks or a fixed-depth flag to compute the paper's actual criteria from
+- **Thresholds**: Project-chosen, not derived from the paper
 - **Integration**: Combined with existing detailed scoring
 
 Alignment
 ^^^^^^^^^
 
-✅ **Fully compatible** with paper's approach  
-✅ **Standardized** quality classification  
-✅ **Extensible** for future refinements  
-⚠️ **Note**: Exact thresholds may need adjustment once full paper is available
+⚠️ **Not compatible** with the paper's method: different arithmetic (sum of
+binaries vs. minimum of graded thresholds) over different inputs (phase
+picks and a fixed-depth flag vs. RMS and uncertainty)
+⚠️ **Not comparable**: a QS5 from this platform and a QS5 in the GeoNet
+catalogue are not the same measurement and must not be presented as such
+✅ **Inspired by** the paper's goal of a simple, discrete quality scale
+✅ **Extensible** for future refinements
+The six binary criteria above are already known from the code's own
+provenance note; reproducing the published method (rather than adjusting
+this heuristic's thresholds) would require adding phase-pick and
+fixed-depth-flag inputs and implementing the binary-sum method described
+in the authors' reference code
+(github.com/calum-chamberlain/EQ_catalog_location_quality).
 
 
 
@@ -377,15 +418,23 @@ Immediate Actions
 
 
 1. ✅ **Review this implementation** - Ensure it meets requirements
-2. ⏳ **Obtain full paper** - Validate thresholds against published values
-3. ⏳ **Get stakeholder approval** - Confirm dual system approach
+2. ⏳ **Decide whether to reproduce the paper's method** - The published
+   binary criteria are already known (see *Comparison with Research Paper*
+   above); reproducing them, rather than refining this heuristic's own
+   thresholds, would need phase-pick and fixed-depth-flag inputs this
+   codebase does not currently capture
+3. ⏳ **Get stakeholder approval** - Confirm dual system approach, and that
+   the in-house heuristic will not be presented as the GeoNet QS
 4. ⏳ **Plan Phase 2** - Schedule database integration work
 
 Future Enhancements
 ^^^^^^^^^^^^^^^^^^^
 
 
-1. **Validate with GeoNet data** - Compare our QS with GeoNet's published QS values
+1. **Compare against GeoNet's published QS values as an informal
+   correlation check only** - the two methods are not expected to produce
+   matching numbers by design (see the disclaimer above), so this is
+   exploratory, not validation
 2. **Adjust thresholds** - Fine-tune based on actual data distribution
 3. **Add visualization** - Create QS distribution charts and maps
 4. **Export QS** - Include QS in exported catalogues (CSV, QuakeML)
@@ -396,10 +445,12 @@ Conclusion
 ----------
 
 
-✅ **Phase 1 Complete**: Core GeoNet QS implementation is ready
+✅ **Phase 1 Complete**: the in-house QS0-QS6 location-quality heuristic is
+ready (not the published GeoNet QS -- see the disclaimer at the top of this
+document)
 
 **Deliverables**:
-- ✅ Complete GeoNet QS calculation system
+- ✅ Complete in-house QS0-QS6 calculation heuristic
 - ✅ Integrated quality assessment combining both systems
 - ✅ Comprehensive test suite (13 tests, 100% passing)
 - ✅ Detailed documentation and implementation guide
@@ -425,8 +476,8 @@ Quick Reference: Quality Score Levels
 -------------------------------------
 
 
-GeoNet QS Scale
-^^^^^^^^^^^^^^^
+In-house QS Scale
+^^^^^^^^^^^^^^^^^
 
 
 .. list-table::

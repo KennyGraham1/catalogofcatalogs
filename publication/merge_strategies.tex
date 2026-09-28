@@ -151,22 +151,20 @@ model errors, and (iii) any deliberate choices such as depth fixing.
 
 For digital networks with GPS-synchronised clocks, origin time errors are
 typically well below 1\,s \citep{Bondar2011}.  Location errors depend strongly
-on network geometry: the azimuthal gap (the largest angular gap between
-contributing stations) and the minimum station distance are the dominant
-predictors.  \citet{Bondar2004} showed empirically from the ISC bulletin that
-the 90th percentile of location error is approximately:
-
-\begin{equation}
-  \sigma_r \approx 0.51 + 0.038\,\text{GAP} + 0.0055\,\Delta_{\min}^{-1},
-  \label{eq:locerrBondar}
-\end{equation}
-
-where GAP is the azimuthal gap in degrees and $\Delta_{\min}$ is the closest
-station distance in degrees.  For a typical global network with
-GAP $\approx 120^\circ$ and $\Delta_{\min} \approx 3^\circ$, this yields
-$\sigma_r \approx 5$\,km.  For poorly-constrained events with
-GAP $\approx 270^\circ$, $\sigma_r$ can exceed 50\,km, justifying wider
-matching windows.
+on network geometry: the number of stations, the azimuthal gap (the largest
+angular gap between contributing stations), the secondary azimuthal gap, and
+the distance to the nearest station are the dominant predictors.
+\citet{Bondar2004} expressed this as network criteria under which an epicentre
+is accurate to a stated level, rather than as a formula for the error.  For
+local networks, an event recorded by at least ten stations within 250\,km, with
+an azimuthal gap below $110^\circ$, a secondary azimuthal gap below $160^\circ$
+and at least one station within 30\,km of the epicentre is located to within
+5\,km at 95\% confidence (GT5$_{95\%}$); regional and teleseismic network
+geometries support only coarser accuracy classes, of tens of kilometres.
+Events outside these criteria, and above all those outside the network with
+gaps above $180^\circ$, are routinely mislocated by tens of kilometres
+\citep{Engdahl1998, Bondar2004}, which is what justifies wider matching windows
+for them.
 
 Pre-digital era timing errors of several seconds per station translate to origin
 time uncertainties of 1--10\,s for well-recorded events and up to 30--60\,s for
@@ -238,8 +236,8 @@ candidates for events in the Pacific \citep{DeadSea2022}.
 \paragraph{Adaptive thresholds.}
 Fixed windows perform poorly across the full magnitude range because larger
 events are subject to greater timing and location uncertainty at distant
-networks.  The standard remedy, used in the ISC-GEM pipeline, is to scale the
-effective window by event magnitude and depth \citep{ISCGEM2018}:
+networks.  A common remedy is to scale the effective window with event magnitude
+and depth:
 
 \begin{equation}
   \Delta t_{\mathrm{eff}} = \Delta t_{\mathrm{config}} \cdot f_t(M),
@@ -248,8 +246,11 @@ effective window by event magnitude and depth \citep{ISCGEM2018}:
   \label{eq:adaptive}
 \end{equation}
 
-where representative multiplier functions consistent with ISC-GEM practice
-\citep{ISCGEM2018, Engdahl2020} are:
+where the multiplier functions below are the heuristic choice of the
+Catalogue of Catalogues prototype, set so that the windows grow with the
+location and timing scatter expected at each size and depth; they are not a
+published ISC-GEM table (ISC-GEM applies fixed windows with expert review,
+\cref{tab:windows}):
 
 \begin{align}
   f_t(M) &=
@@ -673,11 +674,14 @@ $\eta = \sigma_{M_\mathrm{w}}^2 / \sigma_{M_x}^2$
 \end{equation}
 
 where $\mathit{SXX}$, $\mathit{SYY}$, $\mathit{SXY}$ are the corrected sums of
-squares and cross-products.  When $\eta = 1$ (equal uncertainties), GOR reduces
-to the standard geometric mean (GM) regression; when $\eta \to 0$
-(predictor error-free), GOR approaches OLS; and when $\eta \to \infty$
-(response error-free), GOR approaches the reverse OLS regression of $M_x$ on
-$M_\mathrm{w}$ \citep{Fuller1987}.
+squares and cross-products.  When $\eta = 1$ (equal error variances), GOR
+reduces to orthogonal (major-axis) regression, and when $\eta$ equals the ratio
+of the total variances $\mathit{SYY}/\mathit{SXX}$ it reduces to the geometric
+mean (GM) regression.  When $\eta \to 0$ (the response $M_\mathrm{w}$ is
+error-free), the slope tends to $\mathit{SYY}/\mathit{SXY}$, the reverse
+regression of $M_x$ on $M_\mathrm{w}$; when $\eta \to \infty$ (the predictor
+$M_x$ is error-free), it tends to $\mathit{SXY}/\mathit{SXX}$, ordinary least
+squares \citep{Fuller1987}.
 
 The SHEEC (SHARE European Earthquake Catalogue) project \citep{Grunthal2016}
 provides published GOR coefficients for $M_\mathrm{L}$, $M_\mathrm{s}$, and
@@ -697,16 +701,19 @@ the CPTI15 Italian \catalog\ pipeline using the \citet{Gasperini2012} framework
 extrapolation risks of exponential models.
 
 \paragraph{The \citet{Scordilis2006} coefficients.}
-The widely used Scordilis (\citeyear{Scordilis2006}) linear relationships
-(e.g.\ $M_\mathrm{w} = 0.67\,M_\mathrm{L} + 1.17$,
-$M_\mathrm{w} = 0.85\,m_\mathrm{b} + 1.03$,
-$M_\mathrm{w} = 0.67\,M_\mathrm{s} + 2.07$ for $M_\mathrm{s} < 6.2$)
-are OLS regressions on a global dataset.  As such they carry the attenuation
-bias in \eqref{eq:olsbias} and are known to systematically underestimate
-$M_\mathrm{w}$ for large events near each scale's saturation boundary
-\citep{Grunthal2016}.  They are appropriate as a first approximation and for
-applications where the bias is small compared to other uncertainties, but should
-be replaced by GOR-derived relationships for research-grade \catalogs.
+The widely used Scordilis (\citeyear{Scordilis2006}) relations convert
+surface-wave and body-wave magnitudes, not local magnitudes:
+$M_\mathrm{w} = 0.67\,M_\mathrm{s} + 2.07$ for $3.0 \leq M_\mathrm{s} \leq 6.1$,
+$M_\mathrm{w} = 0.99\,M_\mathrm{s} + 0.08$ for $6.2 \leq M_\mathrm{s} \leq 8.2$,
+and $M_\mathrm{w} = 0.85\,m_\mathrm{b} + 1.03$ for
+$3.5 \leq m_\mathrm{b} \leq 6.2$.  They were derived from a global dataset by
+orthogonal regression, which allows for error in both magnitudes, so the OLS
+attenuation bias of \eqref{eq:olsbias} does not apply to them.  They are global
+averages: regional differences in magnitude calibration are not captured, and
+they should not be extrapolated outside their fitted ranges.  No comparable
+global relation exists for $M_\mathrm{L}$, whose calibration is network-specific;
+an $M_\mathrm{L} \to M_\mathrm{w}$ relation has to be derived regionally, for
+example from the overlap of a national \catalog\ with moment-tensor solutions.
 
 \subsubsection{Magnitude type priority hierarchy}
 \label{sec:maghierarchy}
@@ -752,20 +759,26 @@ $M_\mathrm{true}$:
 where $a_i$ and $b_i$ are network-specific intercept and slope (estimated from
 the overlap period), and $\sigma_i^2$ is the within-network reporting variance.
 A Gutenberg-Richter prior $p(M_\mathrm{true}) \propto 10^{-b M_\mathrm{true}}$
-is placed on the true magnitude.  The posterior mean is:
+is placed on the true magnitude.  The log-posterior,
+$-\tfrac{1}{2}\sum_i (M_{\mathrm{obs},i} - a_i - b_i M_\mathrm{true})^2/\sigma_i^2
+- b \ln(10)\, M_\mathrm{true}$, is quadratic in $M_\mathrm{true}$, so the
+posterior is Gaussian; completing the square gives the posterior mean
 
 \begin{equation}
   \hat{M}_\mathrm{true} = \frac{
     \sum_i b_i (M_{\mathrm{obs},i} - a_i)/\sigma_i^2
-    - b \ln(10) \cdot \sigma_\mathrm{post}^2
+    - b \ln(10)
   }{
     \sum_i b_i^2/\sigma_i^2
-  },
+  }
+  = \sigma_\mathrm{post}^2 \Big[ \sum_i \frac{b_i (M_{\mathrm{obs},i} - a_i)}{\sigma_i^2} \Big]
+    - b \ln(10)\, \sigma_\mathrm{post}^2,
   \label{eq:bayesposterior}
 \end{equation}
 
 where $\sigma_\mathrm{post}^2 = (\sum_i b_i^2/\sigma_i^2)^{-1}$ is the
-posterior variance.  When two authoritative solutions agree within
+posterior variance: the Gutenberg-Richter prior shifts the likelihood estimate
+down by $b \ln(10)\,\sigma_\mathrm{post}^2$.  When two authoritative solutions agree within
 $0.1\,M_\mathrm{w}$ units, the posterior is insensitive to the choice of $b$;
 when they disagree by $> 0.3\,M_\mathrm{w}$ units, a data quality flag should
 be raised regardless of which method is used \citep{Si2024}.
@@ -787,7 +800,7 @@ function, $\sigma_{M_x}^2$ is the individual measurement uncertainty of the
 predictor magnitude, and $\sigma_{\mathrm{model}}^2$ is the residual scatter
 of the regression (model uncertainty).  For the Scordilis
 $m_\mathrm{b} \to M_\mathrm{w}$ conversion with slope $\approx 0.85$, the
-conversion amplifies the input uncertainty by a factor $0.85^2 \approx 0.72$
+conversion scales the input magnitude variance by $0.85^2 \approx 0.72$
 (a reduction), but the model residual ($\sigma_{\mathrm{model}} \approx 0.3$)
 typically dominates \citep{Scordilis2006, Grunthal2016}.
 
@@ -947,10 +960,7 @@ completeness analyses for the two periods.
 \citet{Tan2021} constructed a homogeneous $M_\mathrm{w}$ \catalog\ for Turkey
 (1900--2018) from TURKNET, AFAD, ISC, GCMT, and several historical sources.
 The study used a 60\,s / 100\,km proximity window and applied GOR conversions
-with era-specific coefficients.  A key finding was that the Scordilis OLS
-coefficients produced a systematic overestimate of $M_\mathrm{w}$ for Turkish
-$M_\mathrm{L}$ values below 3.5, by approximately 0.2\,units — confirming the
-OLS attenuation bias described in \cref{sec:regression}.  The homogenised
+with era-specific coefficients.  The homogenised
 \catalog\ was then declustered using the \citet{Reasenberg1985} algorithm
 before use in seismic hazard calculations.
 
@@ -1243,34 +1253,51 @@ implementation status.
   \endhead
   \bottomrule
   \endfoot
-  Event association & Graph DSU \citep{Patton2016} & Greedy forward-sweep & Medium \\
-  Dense sequences & Nearest-neighbour $\eta$ \citep{Tanaka2022} & Adaptive windows & Low \\
-  Magnitude conversion & GOR / non-linear \citep{Grunthal2016, ISCGEM2018} & Linear OLS \citep{Scordilis2006} & \textbf{High} \\
-  Multi-estimate averaging & $\alpha$-trimmed median \citep{ISCGEM2018} or Bayesian \citep{Si2024} & Priority selection & Medium \\
-  Source provenance & All solutions retained (ISC model) & JSON in \texttt{source\_events} & Low \\
-  Depth selection & Uncertainty-weighted \citep{Engdahl2020} & Implemented & Done \\
-  Focal mechanism & GCMT $>$ regional CMT & Implemented & Done \\
+  Event association & Graph DSU \citep{Patton2016} & Union-find over candidate pairs from different \catalogs, joined closest first; one report per \catalog\ per group; groups of three or more need a common centre; failed groups split & Done \\
+  Dense sequences & Nearest-neighbour $\eta$ \citep{Tanaka2022} & Adaptive windows; closest-first pairing; preview flags ambiguous pairings & Low \\
+  Magnitude conversion & GOR / non-linear, regionally calibrated \citep{Grunthal2016, ISCGEM2018} & None for published magnitudes; global relations \citep{Scordilis2006} and $M_\mathrm{L} \approx M_\mathrm{w}$ only in the consistency gate & \textbf{High} \\
+  Multi-estimate averaging & $\alpha$-trimmed median \citep{ISCGEM2018} or Bayesian \citep{Si2024} & Magnitude selected by type; epicentre $1/\sigma^2$-weighted (equal weights when a $\sigma$ is missing) & Medium \\
+  Source provenance & All solutions retained (ISC model) & Every report kept per event, published one marked; exported per event & Done \\
+  Depth selection & Uncertainty-weighted \citep{Engdahl2020} & Best-constrained free depth; fixed depths only as a last resort & Low \\
+  Focal mechanism & GCMT $>$ regional CMT & All mechanisms united; GCMT $>$ USGS/NEIC $>$ GEOFON $>$ GeoNet $>$ INGV $>$ other MT $>$ first motion ($\geq 20$ polarities) $>$ automatic & Done \\
   QC flags & 13-flag model (\cref{tab:qcflags}) & 9 flags implemented & Low \\
-  $M_c$ audit & Rolling 5-yr bins \citep{Wiemer2000} & Not implemented & Medium \\
+  $M_c$ audit & Rolling 5-yr bins \citep{Wiemer2000} & Not implemented (rate above $M_c$ per bin for visual checks) & Medium \\
   Declustering order & Merge first, then decluster & N/A (user responsibility) & Info \\
-  Provenance & W3C PROV records \citep{PROVO} & Partial (JSON lineage) & Medium \\
+  Provenance & W3C PROV records \citep{PROVO} & Per-event lineage in every export; catalogue version and row checksum; no PROV records & Medium \\
 \end{longtable}
 
-The single highest-priority gap is the regression methodology.  Replacing
-linear OLS \citet{Scordilis2006} coefficients with GOR-derived relationships
-\citep{Grunthal2016} would reduce systematic bias in the converted
-frequency-magnitude distribution without requiring architectural changes.  For
-applications in the New Zealand region specifically, region-calibrated
-$M_\mathrm{L} \to M_\mathrm{w}$ GOR coefficients estimated from the GeoNet
-and ISC-GEM overlap period (1976--present) should be derived and used in
-preference to global coefficients \citep{GeoNetLocationInfo, NSHM2022BSSA}.
+The single highest-priority gap is magnitude homogenisation.  The current
+implementation publishes each merged event's magnitude unconverted; it uses the
+global relations of \citet{Scordilis2006} for $m_\mathrm{b}$ and $M_\mathrm{s}$,
+and $M_\mathrm{L} \approx M_\mathrm{w}$, only to judge whether the magnitudes in
+a duplicate group are consistent.  A homogenised $M_\mathrm{w}$ \catalog\ needs
+GOR-derived \citep{Grunthal2016} or non-linear relations and, for the New Zealand
+region specifically, region-calibrated $M_\mathrm{L} \to M_\mathrm{w}$
+coefficients estimated from the overlap of the GeoNet \catalog\ with moment-tensor
+solutions, in preference to global coefficients
+\citep{GeoNetLocationInfo, NSHM2022BSSA}.
 
-The second highest-priority gap is the adoption of a Union-Find graph
-association step (\cref{sec:graph}).  The current greedy forward-sweep misses
-transitive associations that arise when an intermediate-time event B links two
-events A and C that would not independently satisfy the proximity criterion.
-A Union-Find graph implementation resolves this in $O(n\,\alpha(n))$ time with
-no change to the downstream parameter-selection logic.
+When it selects a magnitude for an averaged event, the current implementation
+also departs from the static ISC-GEM order of \cref{sec:maghierarchy}, on
+saturation and calibration grounds: $M_\mathrm{w}$ always ranks first (with proxy
+$M_\mathrm{w}$ types below true ones), but below $M5.5$ the regionally calibrated
+$M_\mathrm{L}$ ranks ahead of $m_\mathrm{b}$, $M_\mathrm{s}$ and $M_\mathrm{d}$,
+because short-period $m_\mathrm{b}$ is poorly calibrated for small local events,
+while from $M5.5$, where $M_\mathrm{L}$ and $m_\mathrm{b}$ begin to saturate,
+$M_\mathrm{s}$ and $m_\mathrm{B}$ rank ahead of them.  Rejected magnitudes are
+never selected.  The ISC-GEM order ranks $M_\mathrm{w}$ \emph{proxies} for
+conversion, which the implementation does not perform; a regionally calibrated
+conversion would make the distinction moot.
+
+Event association has moved beyond the greedy forward sweep.  Candidate pairs
+from different \catalogs\ are joined with a union-find structure in increasing
+normalised space-time separation, so each report is claimed by its closest
+counterpart; unlike the plain connected-component approach of \cref{sec:graph},
+a group may not contain two reports from one \catalog, and a group of three or
+more must have a member within the matching window of every other, so reports
+linked only through a chain of intermediate reports are not fused.  Groups that
+fail the consistency checks are split into their largest self-consistent
+sub-groups, as recommended in the failed-group recovery above.
 
 \bibliographystyle{apalike}
 \bibliography{catalogBib}

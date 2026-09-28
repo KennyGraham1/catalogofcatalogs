@@ -3,6 +3,8 @@
  * Analyzes date patterns in uploaded files to detect US vs International format
  */
 
+import { normalizeTimestamp } from './earthquake-utils';
+
 export type DateFormat = 'US' | 'International' | 'ISO' | 'Unknown';
 
 export interface DateFormatDetectionResult {
@@ -36,15 +38,17 @@ export function detectDateFormat(dateStrings: string[], maxSamples: number = 50)
   let ambiguousCount = 0;
   let analyzedCount = 0;
 
-  // Regex patterns for different date formats
-  const slashDatePattern = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/;
+  // Regex patterns for different date formats. The slash form also carries two-digit
+  // years (05/03/24), which normalizeTimestamp reads with the same day/month order.
+  const slashDatePattern = /^(\d{1,2})\/(\d{1,2})\/(?:\d{4}|\d{2})(?!\d)/;
   const dashDatePattern = /^(\d{1,2})-(\d{1,2})-(\d{4})/;
-  const isoPattern = /^(\d{4})-(\d{1,2})-(\d{1,2})/;
+  const isoPattern = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/;
 
   for (const dateStr of samples) {
     const trimmed = dateStr.trim();
 
-    // Check for ISO format (YYYY-MM-DD or YYYY/MM/DD)
+    // Check for ISO format (YYYY-MM-DD or YYYY/MM/DD, YYYY.MM.DD): year first, so the
+    // month is always second.
     const isoMatch = trimmed.match(isoPattern);
     if (isoMatch) {
       isoFormatCount++;
@@ -155,53 +159,15 @@ export function detectDateFormat(dateStrings: string[], maxSamples: number = 50)
 }
 
 /**
- * Parse a date string with a specified format preference
+ * Parse a date string with a specified format preference.
+ *
+ * The result is the UTC instant: origin times are UTC, and building an offset-less ISO
+ * string for new Date() (as this used to) read it in the server's local time. The
+ * string is read by normalizeTimestamp, with `format` deciding an ambiguous day/month
+ * order (DD/MM for 'International', 'ISO' and 'Unknown').
  */
 export function parseDateWithFormat(dateStr: string, format: DateFormat): Date | null {
-  const trimmed = dateStr.trim();
-
-  // Try ISO format first (unambiguous)
-  const isoPattern = /^(\d{4})-(\d{1,2})-(\d{1,2})/;
-  const isoMatch = trimmed.match(isoPattern);
-  if (isoMatch) {
-    const date = new Date(trimmed);
-    if (!isNaN(date.getTime())) {
-      return date;
-    }
-  }
-
-  // Handle slash or dash separated dates
-  const slashPattern = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(.+))?$/;
-  const dashPattern = /^(\d{1,2})-(\d{1,2})-(\d{4})(?:\s+(.+))?$/;
-
-  const match = trimmed.match(slashPattern) || trimmed.match(dashPattern);
-
-  if (match) {
-    const [, first, second, year, timePart] = match;
-    let month: string;
-    let day: string;
-
-    if (format === 'US') {
-      month = first;
-      day = second;
-    } else {
-      // International or Unknown - default to DD/MM/YYYY
-      day = first;
-      month = second;
-    }
-
-    // Build ISO string
-    const timeStr = timePart || '00:00:00';
-    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${timeStr}`;
-
-    const date = new Date(isoString);
-    if (!isNaN(date.getTime())) {
-      return date;
-    }
-  }
-
-  // Fallback to standard Date parsing
-  const date = new Date(trimmed);
-  return !isNaN(date.getTime()) ? date : null;
+  const hint = format === 'US' ? 'US' : format === 'International' ? 'International' : undefined;
+  const iso = normalizeTimestamp(dateStr, hint);
+  return iso === null ? null : new Date(iso);
 }
-

@@ -162,7 +162,7 @@ Issue 1: "Failed to fetch" or Network Error
 
 1. **Check server is running:**
    ```bash
-   # Should see: ▲ Next.js 13.5.11 - Local: http://localhost:3001
+   # Should see: ▲ Next.js 15.5.x - Local: http://localhost:3001
    npm run dev
    ```
 

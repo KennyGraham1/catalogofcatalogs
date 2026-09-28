@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllCacheStats, apiCache, catalogueCache, eventCache, statisticsCache } from '@/lib/cache';
+import { getAllCacheStats, clearAllCaches } from '@/lib/cache';
+import { writeAuditLog } from '@/lib/audit';
 import { requireAdmin } from '@/lib/auth/middleware';
 
 /**
@@ -29,7 +30,9 @@ export async function GET(request: NextRequest) {
 
 /**
  * DELETE /api/cache/stats
- * Clears all caches - useful when data is out of sync
+ * Clears all caches of this server instance (admin only). Other instances keep theirs;
+ * catalogue writes already invalidate every instance through the shared cache
+ * generation, so this is for recovery, not routine use.
  */
 export async function DELETE(request: NextRequest) {
   try {
@@ -38,13 +41,17 @@ export async function DELETE(request: NextRequest) {
       return authResult;
     }
 
-    // Clear all caches
-    apiCache.clearAll();
-    catalogueCache.clearAll();
-    eventCache.clearAll();
-    statisticsCache.clearAll();
+    // Clear all caches, and retire every cache generation handed out so far so a
+    // request that read the database before this call cannot re-cache its result.
+    clearAllCaches();
 
     console.log('[Cache] All caches cleared via API');
+    await writeAuditLog({
+      action: 'cache.clear',
+      actor_id: authResult.user.id,
+      actor_email: authResult.user.email,
+      target_type: 'cache',
+    }, request);
 
     return NextResponse.json({
       success: true,

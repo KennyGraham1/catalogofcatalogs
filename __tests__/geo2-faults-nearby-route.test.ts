@@ -21,6 +21,12 @@
  */
 
 import { NextRequest } from 'next/server';
+
+// The route serves signed-in viewers only; these tests exercise what happens after that.
+jest.mock('@/lib/auth/middleware', () => ({
+  requireViewer: jest.fn(async () => ({ session: {}, user: { id: 'viewer', role: 'viewer' } })),
+}));
+
 import { GET } from '@/app/api/faults/nearby/route';
 
 type Bbox = { minLon: number; minLat: number; maxLon: number; maxLat: number };
@@ -39,9 +45,14 @@ const mockWfs = (features: unknown[]) => {
   })) as unknown as typeof fetch;
 };
 
+let client = 0;
+/** Every call comes from its own client so the per-client rate limit never interferes. */
 const call = async (query: string) => {
+  const ip = `192.0.2.${++client}`;
   const response = await GET(
-    new NextRequest(`http://localhost/api/faults/nearby?${query}`)
+    new NextRequest(`http://localhost/api/faults/nearby?${query}`, {
+      headers: { 'x-forwarded-for': ip, 'x-real-ip': ip },
+    })
   );
   return { status: response.status, body: await response.json() };
 };

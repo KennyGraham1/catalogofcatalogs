@@ -1,16 +1,9 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Command,
@@ -27,19 +20,13 @@ import {
   Loader2,
   Save,
   FolderOpen,
-  Eye,
-  Download,
   Trash2,
-  Plus,
   Check,
-  ChevronDown,
   ChevronsUpDown,
-  ChevronRight,
   Info,
-  Settings
+  Settings,
+  Sparkles,
 } from 'lucide-react';
-import { Separator } from '@/components/ui/separator';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -77,25 +64,24 @@ import { InfoTooltip } from '@/components/ui/info-tooltip';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 import {
-  FIELD_DEFINITIONS,
+  FIELD_ALIASES,
   FIELD_CATEGORIES,
+  DATE_TIME_COMPONENT_COLUMNS,
+  DO_NOT_MAP,
   getFieldById,
   getFieldsByCategory,
   detectAllFieldMappings,
-  detectFieldMappingWithCustom,
-  checkRequiredFieldsMapped,
-  type CustomFieldMapping
+  detectFieldMapping,
+  effectiveColumnMapping,
+  isMappableTargetField,
+  magnitudeScaleFromColumnName,
+  missingRequiredFields,
+  normalizeFieldName,
+  parserMagnitudeCandidates,
+  resolveParserFieldSources,
+  type CustomFieldMapping,
 } from '@/lib/field-definitions';
-import type { DefaultFieldMappingsConfig, FileFormat, FieldMappingEntry } from '@/components/settings/DefaultFieldMappings';
-
-// Named magnitude-type source columns — each encodes both a value and a scale.
-// The parser auto-resolves them (Mw preferred over ML); show an informational badge.
-const NAMED_MAG_COLUMNS: Record<string, string> = {
-  Mw: 'magnitude (Mw — preferred)', MW: 'magnitude (Mw — preferred)', mw: 'magnitude (Mw — preferred)',
-  ML: 'magnitude (ML — used if no Mw)', ml: 'magnitude (ML — used if no Mw)',
-  mb: 'magnitude (mb)', Mb: 'magnitude (mb)',
-  Ms: 'magnitude (Ms)', ms: 'magnitude (Ms)',
-};
+import type { DefaultFieldMappingsConfig, FileFormat } from '@/components/settings/DefaultFieldMappings';
 
 // Flat focal-mechanism columns that are auto-assembled into focal_mechanisms JSON
 // by the parser — they don't need individual schema mapping.
@@ -109,12 +95,28 @@ const FM_AUTO_COLUMNS = new Set([
   'DC', 'dc', 'VR', 'vr', 'Mo', 'mo',
 ]);
 
+// Targets a raw column can be mapped to that have no schema definition of their own.
+const OTHER_MAPPABLE_TARGETS = Object.keys(FIELD_ALIASES)
+  .filter(id => !getFieldById(id) && isMappableTargetField(id));
+
+const MAGNITUDE_CODE_VALUE = /^m[a-z0-9_]{0,5}$/i;
+
 interface EnhancedSchemaMapperProps {
   validationResults: any;
   isProcessing: boolean;
   onSchemaReady: (isReady: boolean) => void;
+  /**
+   * Explicit changes to the parser's column resolution, column -> target, with ''
+   * meaning "do not map". Columns not listed keep what the parser stored for them.
+   */
   onMappingsChange?: (mappings: Record<string, string>) => void;
-  fileFormat?: FileFormat; // Detected file format for format-specific mappings
+  /**
+   * The explicit mapping reported earlier (the tab is unmounted while another step is
+   * shown), so returning to this step keeps the user's changes.
+   */
+  initialMappings?: Record<string, string>;
+  /** Overrides the format read from each file's result when choosing Settings rules. */
+  fileFormat?: FileFormat;
   readOnly?: boolean;
 }
 
@@ -127,20 +129,78 @@ interface MappingTemplate {
   updated_at: string;
 }
 
+interface MapperFile {
+  fileName: string;
+  format: FileFormat;
+  isQuakeML: boolean;
+  fields: string[];
+  parserSources: Record<string, string>;
+  sampleValues: Record<string, string[]>;
+}
+
+/** Upload format label ('CSV', 'GEOJSON', 'QML' ...) -> Settings format tab. */
+function toFileFormat(format: unknown): FileFormat {
+  const value = String(format ?? '').toLowerCase();
+  if (value === 'json') return 'json';
+  if (value === 'geojson') return 'geojson';
+  if (value === 'xml' || value === 'qml' || value === 'quakeml') return 'quakeml';
+  return 'csv';
+}
+
+function sampleValuesFor(result: any, fields: string[]): Record<string, string[]> {
+  const events: any[] = Array.isArray(result?.previewEvents) ? result.previewEvents
+    : Array.isArray(result?.events) ? result.events : [];
+  const samples: Record<string, string[]> = {};
+  for (const field of fields) {
+    const values: string[] = [];
+    for (const event of events) {
+      const value = event?.[field];
+      if (value === undefined || value === null || value === '' || typeof value === 'object') continue;
+      const text = String(value);
+      if (!values.includes(text)) values.push(text);
+      if (values.length >= 3) break;
+    }
+    samples[field] = values;
+  }
+  return samples;
+}
+
+/** Settings rules that apply to one file's format (custom rules rank above format rules). */
+function settingsRulesFor(config: DefaultFieldMappingsConfig | null, format: FileFormat): CustomFieldMapping[] {
+  if (!config) return [];
+  const rules: CustomFieldMapping[] = [];
+  const custom = Array.isArray(config.customMappings) ? config.customMappings : [];
+  for (const mapping of custom) {
+    rules.push({ ...mapping, priority: (Number(mapping?.priority) || 0) + 100 });
+  }
+  const formatConfig = config.formats?.[format];
+  if (formatConfig?.enabled && Array.isArray(formatConfig.mappings)) {
+    for (const mapping of formatConfig.mappings) {
+      rules.push({ ...mapping, priority: Number(mapping?.priority) || 0 });
+    }
+  }
+  return rules;
+}
+
 export function EnhancedSchemaMapper({
   validationResults,
   isProcessing,
   onSchemaReady,
   onMappingsChange,
-  fileFormat = 'csv',
+  initialMappings,
+  fileFormat,
   readOnly = false
 }: EnhancedSchemaMapperProps) {
-  const [fieldMappings, setFieldMappings] = useState<Record<string, string>>({});
+  // Explicit edits made on this screen (column -> target, '' = do not map)
+  const [userMappings, setUserMappings] = useState<Record<string, string>>(() => ({ ...(initialMappings ?? {}) }));
+  // Explicit Settings rules and exact alias matches for columns the parser left unmapped
+  const [autoMappings, setAutoMappings] = useState<Record<string, string>>({});
+  const [autoMappingSources, setAutoMappingSources] = useState<Record<string, 'settings' | 'alias'>>({});
+  // Similarity guesses: shown to the user, never applied without a click
+  const [suggestions, setSuggestions] = useState<Record<string, { target: string; confidence: number }>>({});
   const [autoMapping, setAutoMapping] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [activeCategory, setActiveCategory] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
-  const [showPreview, setShowPreview] = useState(false);
   const [templates, setTemplates] = useState<MappingTemplate[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
@@ -166,7 +226,7 @@ export function EnhancedSchemaMapper({
       const response = await fetch('/api/settings/field-mappings');
       if (response.ok) {
         const config = await response.json();
-        setSavedMappingConfig(config);
+        if (config && typeof config === 'object') setSavedMappingConfig(config);
       }
     } catch (error) {
       console.error('Failed to load saved mapping config:', error);
@@ -175,161 +235,188 @@ export function EnhancedSchemaMapper({
     }
   };
 
-  // Convert saved config to CustomFieldMapping format for detection
-  const getCustomMappingsFromConfig = useCallback((): CustomFieldMapping[] => {
-    if (!savedMappingConfig) return [];
+  // Every uploaded file, with the parser's own column resolution. QuakeML files carry
+  // the standard QuakeML structure and have no columns to map.
+  const files: MapperFile[] = useMemo(() => {
+    if (!Array.isArray(validationResults)) return [];
+    return validationResults.map((result: any) => {
+      const fields: string[] = Array.isArray(result?.fields)
+        ? result.fields.filter((field: unknown): field is string => typeof field === 'string')
+        : [];
+      const format = fileFormat ?? toFileFormat(result?.format);
+      return {
+        fileName: String(result?.fileName ?? ''),
+        format,
+        isQuakeML: toFileFormat(result?.format) === 'quakeml',
+        fields,
+        parserSources: resolveParserFieldSources(fields, result?.resolvedFieldSources),
+        sampleValues: sampleValuesFor(result, fields),
+      };
+    });
+  }, [validationResults, fileFormat]);
 
-    const mappings: CustomFieldMapping[] = [];
+  const mappableFiles = useMemo(() => files.filter(file => !file.isQuakeML), [files]);
 
-    // Add custom mappings first (highest priority)
-    for (const mapping of savedMappingConfig.customMappings || []) {
-      mappings.push({
-        id: mapping.id,
-        sourcePattern: mapping.sourcePattern,
-        targetField: mapping.targetField,
-        isRegex: mapping.isRegex,
-        priority: mapping.priority + 50 // Boost custom mapping priority
-      });
+  // Columns of every mappable file, in first-seen order
+  const sourceFields: string[] = useMemo(() => {
+    const seen: string[] = [];
+    for (const file of mappableFiles) {
+      for (const field of file.fields) if (!seen.includes(field)) seen.push(field);
     }
+    return seen;
+  }, [mappableFiles]);
 
-    // Add format-specific mappings if enabled
-    const formatConfig = savedMappingConfig.formats?.[fileFormat];
-    if (formatConfig?.enabled) {
-      for (const mapping of formatConfig.mappings || []) {
-        mappings.push({
-          id: mapping.id,
-          sourcePattern: mapping.sourcePattern,
-          targetField: mapping.targetField,
-          isRegex: mapping.isRegex,
-          priority: mapping.priority
-        });
+  // What the parser did with each column (first file that resolves it)
+  const parserMapping: Record<string, string> = useMemo(() => {
+    const mapping: Record<string, string> = {};
+    for (const file of mappableFiles) {
+      const resolved = effectiveColumnMapping(file.fields, file.parserSources, {});
+      for (const [column, target] of Object.entries(resolved)) {
+        if (!(column in mapping)) mapping[column] = target;
       }
     }
+    return mapping;
+  }, [mappableFiles]);
 
-    return mappings;
-  }, [savedMappingConfig, fileFormat]);
-  
-  // Auto-detect field mappings using comprehensive field mapping utility
+  const strictValidation = savedMappingConfig?.strictValidation === true;
+  const autoDetectEnabled = savedMappingConfig?.autoDetectEnabled ?? true;
+  const threshold = Number.isFinite(savedMappingConfig?.fuzzyMatchThreshold)
+    ? Number(savedMappingConfig!.fuzzyMatchThreshold)
+    : 0.6;
+
+  // Explicit Settings rules, exact alias matches and suggestions for columns the parser
+  // did not use. Nothing here may take a target the parser already filled.
   useEffect(() => {
-    // Wait for config to load before detecting
     if (!configLoaded) return;
-
     const timer = setTimeout(() => {
-      if (validationResults && validationResults.length > 0 && autoMapping) {
-        const sampleFields = validationResults[0].fields || [];
+      const nextAuto: Record<string, string> = {};
+      const nextSources: Record<string, 'settings' | 'alias'> = {};
+      const nextSuggestions: Record<string, { target: string; confidence: number }> = {};
+      try {
+        if (autoMapping && autoDetectEnabled) {
+          const parserTargets = new Set(Object.values(parserMapping));
 
-        // Get fuzzy match threshold from saved config or use default
-        const threshold = savedMappingConfig?.fuzzyMatchThreshold ?? 0.6;
-
-        // Check if auto-detect is enabled in settings
-        const autoDetectEnabled = savedMappingConfig?.autoDetectEnabled ?? true;
-
-        if (autoDetectEnabled) {
-          // Get custom mappings from saved configuration
-          const customMappings = getCustomMappingsFromConfig();
-
-          // Use the comprehensive field mapping utility with custom mappings
-          // This handles all QuakeML 1.2 fields, GeoNet/ISC variations, and fuzzy matching
-          const detectedMappings = detectAllFieldMappings(sampleFields, threshold, {
-            customMappings,
-            useBuiltInAliases: true,
-            minConfidence: threshold
-          });
-
-          // Pre-populate auto-handled columns so they count as mapped.
-          // FM_AUTO columns all feed into focal_mechanisms; named-mag columns
-          // feed into magnitude (Mw preferred over ML when both present).
-          const hasMw = sampleFields.some((f: string) => f === 'Mw' || f === 'MW' || f === 'mw');
-          for (const f of sampleFields) {
-            if (FM_AUTO_COLUMNS.has(f) && !detectedMappings[f]) {
-              detectedMappings[f] = 'focal_mechanisms';
-            }
-            if (NAMED_MAG_COLUMNS[f] && !detectedMappings[f]) {
-              // If Mw is present, mark ML as secondary so it still shows as mapped
-              detectedMappings[f] = hasMw && (f === 'ML' || f === 'ml') ? '_magnitude_secondary' : 'magnitude';
+          for (const file of mappableFiles) {
+            const rules = settingsRulesFor(savedMappingConfig, file.format);
+            if (rules.length === 0) continue;
+            const ruled = detectAllFieldMappings(file.fields, threshold, {
+              customMappings: rules,
+              useBuiltInAliases: false,
+              minConfidence: threshold,
+            });
+            for (const [column, target] of Object.entries(ruled)) {
+              if (column in nextAuto || parserMapping[column] === target) continue;
+              // A rule never takes a field the parser filled from another column.
+              const takenByParser = Object.entries(parserMapping)
+                .some(([other, otherTarget]) => other !== column && otherTarget === target);
+              if (takenByParser || !isMappableTargetField(target)) continue;
+              nextAuto[column] = target;
+              nextSources[column] = 'settings';
             }
           }
 
-          setFieldMappings(detectedMappings);
+          const claimed = new Set([...Array.from(parserTargets), ...Object.values(nextAuto)]);
+          for (const column of sourceFields) {
+            if (column in parserMapping || column in nextAuto || FM_AUTO_COLUMNS.has(column)) continue;
+            const detected = detectFieldMapping(column);
+            if (!detected.targetField || !isMappableTargetField(detected.targetField) ||
+                claimed.has(detected.targetField)) {
+              continue;
+            }
+            if (detected.matchType === 'fuzzy') {
+              if (detected.confidence >= threshold) {
+                nextSuggestions[column] = { target: detected.targetField, confidence: detected.confidence };
+              }
+            } else {
+              nextAuto[column] = detected.targetField;
+              nextSources[column] = 'alias';
+              claimed.add(detected.targetField);
+            }
+          }
         }
+      } catch (error) {
+        // A malformed saved rule must not stall the schema step: the parser's
+        // resolution still stands on its own.
+        console.error('Field mapping detection failed; using the parser resolution only:', error);
+      } finally {
+        setAutoMappings(nextAuto);
+        setAutoMappingSources(nextSources);
+        setSuggestions(nextSuggestions);
+        setLoading(false);
       }
-
-      setLoading(false);
-      // Note: Required fields check is handled by the fieldMappings useEffect
-    }, 500);
+    }, 300);
 
     return () => clearTimeout(timer);
-  }, [validationResults, autoMapping, configLoaded, savedMappingConfig, fileFormat, getCustomMappingsFromConfig]);
+  }, [configLoaded, autoMapping, autoDetectEnabled, threshold, savedMappingConfig, mappableFiles, parserMapping, sourceFields]);
 
-  // Update field mapping
-  const updateMapping = (sourceField: string, targetField: string) => {
-    setFieldMappings(prev => {
-      const updated = { ...prev };
-      if (targetField === 'unmapped') {
-        delete updated[sourceField];
-      } else {
-        updated[sourceField] = targetField;
-      }
-      return updated;
-    });
-  };
+  // Explicit mapping: user edits win over automatic ones
+  const explicitMappings: Record<string, string> = useMemo(
+    () => ({ ...autoMappings, ...userMappings }),
+    [autoMappings, userMappings],
+  );
 
-  // Effect to propagate mapping changes and check required fields after state settles
+  // The mapping as displayed: explicit where given, else the parser's
+  const displayedMapping: Record<string, string> = useMemo(() => {
+    const mapping: Record<string, string> = { ...parserMapping };
+    for (const [column, target] of Object.entries(explicitMappings)) {
+      if (target === DO_NOT_MAP) delete mapping[column];
+      else mapping[column] = target;
+    }
+    return mapping;
+  }, [parserMapping, explicitMappings]);
+
+  // Required fields each file would lack after the explicit changes
+  const missingByFile = useMemo(() => mappableFiles
+    .map(file => ({
+      fileName: file.fileName,
+      missing: missingRequiredFields(file.fields, file.parserSources, explicitMappings, strictValidation),
+    }))
+    .filter(entry => entry.missing.length > 0),
+  [mappableFiles, explicitMappings, strictValidation]);
+
+  const missingEventId = useMemo(() => !strictValidation && mappableFiles.some(file =>
+    missingRequiredFields(file.fields, file.parserSources, explicitMappings, true).includes('id')),
+  [mappableFiles, explicitMappings, strictValidation]);
+
+  // Propagate readiness and the explicit mapping once detection has settled
   useEffect(() => {
-    // Skip during initial loading
     if (loading) return;
+    onSchemaReady(missingByFile.length === 0);
+    onMappingsChange?.(explicitMappings);
+  }, [loading, missingByFile, explicitMappings, onMappingsChange, onSchemaReady]);
 
-    // Helper to get source fields from validation results
-    const getSourceFieldsLocal = () => {
-      if (!validationResults || validationResults.length === 0) return [];
-      return validationResults[0].fields || [];
-    };
-
-    // Check required fields with current (settled) state
-    const { complete, missing } = checkRequiredFieldsMapped(fieldMappings);
-    if (complete) {
-      onSchemaReady(true);
-    } else {
-      const sourceFields = getSourceFieldsLocal();
-      const normalizedFields = new Set(sourceFields.map((field: string) => field.toLowerCase()));
-      const hasSplitTimestamp = normalizedFields.has('year') && normalizedFields.has('month') && normalizedFields.has('day');
-      const adjustedMissing = hasSplitTimestamp ? missing.filter((field: string) => field !== 'time') : missing;
-      onSchemaReady(adjustedMissing.length === 0);
-    }
-
-    // Notify parent of mapping changes — strip display-only sentinels before sending upstream
-    if (onMappingsChange) {
-      const uploadMappings = Object.fromEntries(
-        Object.entries(fieldMappings).filter(([, v]) => v && v !== 'unmapped' && v !== '_magnitude_secondary')
-      );
-      onMappingsChange(uploadMappings);
-    }
-  }, [fieldMappings, loading, onMappingsChange, onSchemaReady, validationResults]);
-  
-  // Get source fields from validation results
-  const getSourceFields = () => {
-    if (!validationResults || validationResults.length === 0) return [];
-    return validationResults[0].fields || [];
+  // Map a column explicitly. A target held by another column moves to this one only in
+  // files that have both columns; elsewhere that column keeps it.
+  const updateMapping = (sourceField: string, targetField: string) => {
+    setUserMappings(prev => ({
+      ...prev,
+      [sourceField]: targetField === 'unmapped' ? DO_NOT_MAP : targetField,
+    }));
   };
-  
-  // Check if a required field is unmapped
-  const isRequiredFieldUnmapped = (fieldId: string) => {
-    const field = getFieldById(fieldId);
-    if (!field?.required) return false;
-    return !Object.values(fieldMappings).includes(fieldId);
+
+  // Columns whose target another explicitly mapped column has taken over
+  const supersededBy = (column: string): string | undefined => {
+    if (column in explicitMappings) return undefined;
+    const target = parserMapping[column];
+    if (!target) return undefined;
+    return Object.entries(explicitMappings)
+      .find(([other, otherTarget]) => other !== column && otherTarget === target)?.[0];
   };
-  
+
   // Get mapped source field(s) for a target field.
-  // Returns a display string: single source name, or "N columns (auto-assembled)" for multi-source targets.
   const getMappedSourceField = (targetFieldId: string): string | undefined => {
-    const sources = Object.entries(fieldMappings)
-      .filter(([_, t]) => t === targetFieldId)
+    const sources = Object.entries(displayedMapping)
+      .filter(([source, t]) => t === targetFieldId && !supersededBy(source))
       .map(([src]) => src);
-    if (sources.length === 0) return undefined;
+    const parserSynthesized = mappableFiles.some(file => {
+      const source = file.parserSources[targetFieldId];
+      return source && !file.fields.includes(source);
+    });
+    if (sources.length === 0) return parserSynthesized ? 'assembled by the parser' : undefined;
     if (sources.length === 1) return sources[0];
-    return `${sources.length} columns (auto-assembled)`;
+    return `${sources.length} columns (per file)`;
   };
-  
+
   // Load templates from API
   const loadTemplates = async () => {
     setLoadingTemplates(true);
@@ -337,7 +424,7 @@ export function EnhancedSchemaMapper({
       const response = await fetch('/api/mapping-templates');
       if (response.ok) {
         const data = await response.json();
-        setTemplates(data);
+        setTemplates(Array.isArray(data) ? data : []);
       }
     } catch (error) {
       console.error('Failed to load templates:', error);
@@ -345,7 +432,7 @@ export function EnhancedSchemaMapper({
       setLoadingTemplates(false);
     }
   };
-  
+
   // Save current mapping as template
   const saveTemplate = async () => {
     if (readOnly) {
@@ -364,7 +451,7 @@ export function EnhancedSchemaMapper({
       });
       return;
     }
-    
+
     try {
       const response = await fetch('/api/mapping-templates', {
         method: 'POST',
@@ -372,13 +459,13 @@ export function EnhancedSchemaMapper({
         body: JSON.stringify({
           name: templateName,
           description: templateDescription,
-          mappings: Object.entries(fieldMappings).map(([sourceField, targetField]) => ({
+          mappings: Object.entries(displayedMapping).map(([sourceField, targetField]) => ({
             sourceField,
             targetField
           }))
         })
       });
-      
+
       if (response.ok) {
         toast({
           title: 'Template saved',
@@ -399,24 +486,26 @@ export function EnhancedSchemaMapper({
       });
     }
   };
-  
-  // Load a template
+
+  // Load a template: its mappings become explicit choices for the columns this upload has
   const loadTemplate = (template: MappingTemplate) => {
     const mappings: Record<string, string> = {};
     if (Array.isArray(template.mappings)) {
       template.mappings.forEach((m: any) => {
-        mappings[m.sourceField] = m.targetField;
+        if (typeof m?.sourceField !== 'string' || !sourceFields.includes(m.sourceField)) return;
+        if (m.targetField === DO_NOT_MAP || isMappableTargetField(m.targetField)) {
+          mappings[m.sourceField] = m.targetField;
+        }
       });
     }
-    setFieldMappings(mappings);
+    setUserMappings(prev => ({ ...prev, ...mappings }));
     setLoadDialogOpen(false);
     toast({
       title: 'Template loaded',
       description: `Loaded mapping template "${template.name}"`
     });
-    // Note: Required fields check is handled by the fieldMappings useEffect
   };
-  
+
   // Delete a template
   const confirmDeleteTemplate = async () => {
     if (!templateToDelete) return;
@@ -457,16 +546,7 @@ export function EnhancedSchemaMapper({
     setTemplateToDelete(id);
     setDeleteDialogOpen(true);
   };
-  
-  // Toggle category expansion
-  const toggleCategory = (categoryId: string) => {
-    setExpandedCategories(prev => 
-      prev.includes(categoryId) 
-        ? prev.filter(c => c !== categoryId)
-        : [...prev, categoryId]
-    );
-  };
-  
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-10">
@@ -475,30 +555,83 @@ export function EnhancedSchemaMapper({
       </div>
     );
   }
-  
-  const sourceFields = getSourceFields();
 
-  // Check if split timestamp columns exist (year/month/day)
-  const normalizedSourceFields = new Set(sourceFields.map((field: string) => field.toLowerCase()));
-  const hasSplitTimestamp = normalizedSourceFields.has('year') && normalizedSourceFields.has('month') && normalizedSourceFields.has('day');
-
-  // Filter unmapped required fields, excluding 'time' if split timestamp columns are present
-  const unmappedRequiredFields = FIELD_DEFINITIONS.filter(f => {
-    if (!f.required || !isRequiredFieldUnmapped(f.id)) return false;
-    // Don't show 'time' as unmapped if year/month/day columns exist (timestamp will be synthesized)
-    if (f.id === 'time' && hasSplitTimestamp) return false;
-    return true;
+  const quakemlFiles = files.filter(file => file.isQuakeML);
+  // Files whose origin time the parser assembles from split date/time columns
+  const timeAssembled = mappableFiles.some(file => {
+    const source = file.parserSources.time;
+    return Boolean(source) && !file.fields.includes(source) && source.includes('+');
   });
-  
-  // Count how many mappings came from saved config
-  const getConfigMappingCount = () => {
-    if (!savedMappingConfig) return 0;
-    const customCount = savedMappingConfig.customMappings?.length || 0;
-    const formatCount = savedMappingConfig.formats?.[fileFormat]?.enabled
-      ? savedMappingConfig.formats[fileFormat].mappings?.length || 0
-      : 0;
-    return customCount + formatCount;
+  const splitTimeColumns = timeAssembled
+    ? sourceFields.filter(field =>
+        DATE_TIME_COMPONENT_COLUMNS.has(normalizeFieldName(field)) && !(field in explicitMappings))
+    : [];
+  const magnitudeCandidates = new Set(mappableFiles.flatMap(file => parserMagnitudeCandidates(file.fields)));
+
+  // Settings rules consulted for this upload, per format
+  const formatsInUpload = Array.from(new Set(mappableFiles.map(file => file.format)));
+  const configMappingCount = savedMappingConfig
+    ? formatsInUpload.reduce((sum, format) => sum + settingsRulesFor(savedMappingConfig, format).length, 0)
+    : 0;
+
+  const describeTarget = (target: string | undefined) => {
+    if (!target) return undefined;
+    return getFieldById(target)?.name ?? target;
   };
+
+  const renderTargetOptions = (sourceField: string, targetField: string | undefined) => (
+    <>
+      {FIELD_CATEGORIES.map(category => {
+        const fields = getFieldsByCategory(category.id).filter(field => isMappableTargetField(field.id));
+        if (fields.length === 0) return null;
+        return (
+          <CommandGroup key={category.id} heading={category.name}>
+            {fields.map(field => (
+              <CommandItem
+                key={field.id}
+                value={`${field.name} ${field.id}`}
+                keywords={[field.name, field.id, field.description || '', field.unit || '']}
+                onSelect={() => {
+                  updateMapping(sourceField, field.id);
+                  setMappingDropdownOpen(null);
+                }}
+                className="flex items-center gap-2"
+              >
+                <Check className={`h-4 w-4 ${field.id === targetField ? 'opacity-100' : 'opacity-0'}`} />
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>{field.name}</span>
+                  {field.required && (
+                    <Badge variant="destructive" className="text-xs px-1">Required</Badge>
+                  )}
+                  {field.unit && (
+                    <span className="text-xs text-muted-foreground">({field.unit})</span>
+                  )}
+                </div>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        );
+      })}
+      {OTHER_MAPPABLE_TARGETS.length > 0 && (
+        <CommandGroup heading="Other stored fields">
+          {OTHER_MAPPABLE_TARGETS.map(id => (
+            <CommandItem
+              key={id}
+              value={id}
+              onSelect={() => {
+                updateMapping(sourceField, id);
+                setMappingDropdownOpen(null);
+              }}
+              className="flex items-center gap-2"
+            >
+              <Check className={`h-4 w-4 ${id === targetField ? 'opacity-100' : 'opacity-0'}`} />
+              <span>{id}</span>
+            </CommandItem>
+          ))}
+        </CommandGroup>
+      )}
+    </>
+  );
 
   return (
     <TooltipProvider>
@@ -508,7 +641,7 @@ export function EnhancedSchemaMapper({
         <div>
           <h3 className="text-lg font-semibold">Schema Mapping Configuration</h3>
           <p className="text-sm text-muted-foreground">
-            Map fields from your catalogue to the QuakeML 1.2 database schema
+            The parser has already mapped the columns it recognises. Change a mapping only where it is wrong.
           </p>
           {savedMappingConfig && (
             <div className="flex items-center gap-2 mt-1">
@@ -516,13 +649,16 @@ export function EnhancedSchemaMapper({
                 <TooltipTrigger asChild>
                   <div className="flex items-center gap-1 text-xs text-muted-foreground cursor-help">
                     <Settings className="h-3 w-3" />
-                    <span>Using {getConfigMappingCount()} saved mappings ({fileFormat.toUpperCase()})</span>
+                    <span>
+                      Using {configMappingCount} saved mappings ({formatsInUpload.map(format => format.toUpperCase()).join(', ') || 'none'})
+                    </span>
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Field mappings from Settings are being applied.</p>
+                  <p>Explicit mappings from Settings are applied to columns they match.</p>
                   <p className="text-xs text-muted-foreground">
-                    Fuzzy threshold: {((savedMappingConfig?.fuzzyMatchThreshold ?? 0.6) * 100).toFixed(0)}%
+                    Fuzzy suggestion threshold: {(threshold * 100).toFixed(0)}%
+                    {strictValidation ? ' · strict validation on' : ''}
                   </p>
                 </TooltipContent>
               </Tooltip>
@@ -596,7 +732,7 @@ export function EnhancedSchemaMapper({
               </div>
             </DialogContent>
           </Dialog>
-          
+
           <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" disabled={readOnly}>
@@ -644,44 +780,67 @@ export function EnhancedSchemaMapper({
           </Dialog>
         </div>
       </div>
-      
-      {/* Warning for unmapped required fields */}
-      {unmappedRequiredFields.length > 0 && (
+
+      {/* Required fields a file would be left without */}
+      {missingByFile.length > 0 && (
         <div className="flex items-start gap-2 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 p-3 rounded-md">
           <AlertTriangle className="h-5 w-5 text-amber-500 mt-0.5" />
           <div className="flex-1">
             <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
-              {unmappedRequiredFields.length} required field{unmappedRequiredFields.length > 1 ? 's' : ''} not mapped
+              Required fields not mapped
             </p>
-            <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
-              {unmappedRequiredFields.map(f => f.name).join(', ')}
+            {missingByFile.map(entry => (
+              <p key={entry.fileName} className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                {mappableFiles.length > 1 ? `${entry.fileName}: ` : ''}
+                {entry.missing.map(id => describeTarget(id)).join(', ')}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {missingEventId && (
+        <div className="flex items-start gap-2 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 p-3 rounded-md">
+          <Info className="h-5 w-5 text-blue-500 mt-0.5" />
+          <p className="text-xs text-blue-700 dark:text-blue-400">
+            No event ID column is mapped{mappableFiles.length > 1 ? ' in every file' : ''}. Events are stored without a
+            source ID, so repeated events cannot be recognised as duplicates.
+          </p>
+        </div>
+      )}
+
+      {quakemlFiles.length > 0 && (
+        <div className="flex items-start gap-2 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 p-3 rounded-md">
+          <Info className="h-5 w-5 text-blue-500 mt-0.5" />
+          <p className="text-xs text-blue-700 dark:text-blue-400">
+            {quakemlFiles.map(file => file.fileName).join(', ')}: QuakeML files are stored from their standard
+            QuakeML structure; no column mapping applies to them.
+          </p>
+        </div>
+      )}
+
+      {/* Info notice for split timestamp synthesis */}
+      {splitTimeColumns.length > 0 && (
+        <div className="flex items-start gap-2 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 p-3 rounded-md">
+          <Info className="h-5 w-5 text-blue-500 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
+              Origin time is assembled from date and time columns
+            </p>
+            <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">
+              {splitTimeColumns.join(', ')} are combined into one UTC timestamp by the parser; they are not mapped individually.
             </p>
           </div>
         </div>
       )}
 
-      {/* Info notice for split timestamp synthesis */}
-      {hasSplitTimestamp && (
-        <div className="flex items-start gap-2 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 p-3 rounded-md">
-          <Info className="h-5 w-5 text-blue-500 mt-0.5" />
-          <div className="flex-1">
-            <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
-              Origin time will be auto-synthesized
-            </p>
-            <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">
-              Detected year, month, day{normalizedSourceFields.has('hour') ? ', hour' : ''}{normalizedSourceFields.has('minute') ? ', minute' : ''}{normalizedSourceFields.has('second') ? ', second' : ''} columns - these will be combined into a single ISO 8601 timestamp.
-            </p>
-          </div>
-        </div>
-      )}
-      
       {/* Mapping interface */}
       <Tabs defaultValue="mapping" className="w-full">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="mapping">Field Mapping</TabsTrigger>
           <TabsTrigger value="preview">Preview & Validation</TabsTrigger>
         </TabsList>
-        
+
         <TabsContent value="mapping" className="space-y-4 mt-4">
           {/* Auto-mapping toggle and search */}
           <div className="flex items-center justify-between gap-4">
@@ -692,8 +851,8 @@ export function EnhancedSchemaMapper({
                 onCheckedChange={setAutoMapping}
               />
               <div className="flex items-center gap-1.5">
-                <Label htmlFor="auto-mapping">Auto-detect field mappings</Label>
-                <InfoTooltip content="Uses fuzzy matching and built-in aliases to map common fields automatically." />
+                <Label htmlFor="auto-mapping">Apply saved mappings and suggestions</Label>
+                <InfoTooltip content="Applies explicit Settings mappings and exact alias matches to columns the parser did not map, and suggests likely targets for the rest. The parser's own mappings always apply." />
               </div>
             </div>
             <Input
@@ -703,16 +862,16 @@ export function EnhancedSchemaMapper({
               className="max-w-xs"
             />
           </div>
-          
+
           {/* Source fields mapping */}
           <div className="border rounded-md overflow-hidden">
             <div className="bg-muted/50 px-4 py-2 text-sm font-medium flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <span>Source Fields → Target Schema</span>
-                <InfoTooltip content="Map columns from your file to the QuakeML 1.2 schema fields." />
+                <InfoTooltip content="Columns of every uploaded file. Values are stored as the parser read them unless you change the mapping here." />
               </div>
               <Badge variant="secondary">
-                {Object.values(fieldMappings).filter(v => v && v !== 'unmapped').length} / {sourceFields.length} mapped
+                {sourceFields.filter(field => displayedMapping[field] && !supersededBy(field)).length} / {sourceFields.length} mapped
               </Badge>
             </div>
             <div className="p-4 space-y-3 max-h-96 overflow-y-auto">
@@ -728,12 +887,27 @@ export function EnhancedSchemaMapper({
                   )
                   .map((sourceField: string) => {
                     const isFmAuto = FM_AUTO_COLUMNS.has(sourceField);
-                    const magLabel = NAMED_MAG_COLUMNS[sourceField];
-                    const targetField = fieldMappings[sourceField];
+                    const isTimeComponent = splitTimeColumns.includes(sourceField) && !parserMapping[sourceField];
+                    const targetField = displayedMapping[sourceField];
                     const targetDef = targetField ? getFieldById(targetField) : null;
-                    const isUnmapped = !targetField;
+                    const replacedBy = supersededBy(sourceField);
+                    const isUnmapped = !targetField || Boolean(replacedBy);
+                    const scale = magnitudeScaleFromColumnName(sourceField);
+                    const isMagnitudeAlternative = !targetField && !(sourceField in explicitMappings) &&
+                      magnitudeCandidates.has(sourceField);
+                    const samples = mappableFiles.flatMap(file => file.sampleValues[sourceField] ?? []).slice(0, 3);
+                    const scaleCodesInType = targetField === 'event_type' && samples.length > 0 &&
+                      samples.every(value => MAGNITUDE_CODE_VALUE.test(value.trim()));
+                    const origin = sourceField in userMappings
+                      ? 'your choice'
+                      : autoMappingSources[sourceField] === 'settings'
+                        ? 'Settings rule'
+                        : autoMappingSources[sourceField] === 'alias'
+                          ? 'alias match'
+                          : parserMapping[sourceField] ? 'mapped by the parser' : undefined;
+                    const suggestion = suggestions[sourceField];
 
-                    if (isFmAuto || magLabel) {
+                    if (isFmAuto || isTimeComponent) {
                       return (
                         <div key={sourceField} className="grid grid-cols-12 gap-3 items-center opacity-70">
                           <div className="col-span-5">
@@ -744,7 +918,7 @@ export function EnhancedSchemaMapper({
                           </div>
                           <div className="col-span-6">
                             <Badge variant="secondary" className="text-xs font-normal">
-                              {magLabel ?? 'focal_mechanisms (auto-assembled)'}
+                              {isFmAuto ? 'focal_mechanisms (auto-assembled)' : 'origin time (assembled from date/time columns)'}
                             </Badge>
                           </div>
                         </div>
@@ -755,7 +929,9 @@ export function EnhancedSchemaMapper({
                       <div key={sourceField} className="grid grid-cols-12 gap-3 items-start">
                         <div className="col-span-5">
                           <Label className="font-medium">{sourceField}</Label>
-                          <p className="text-xs text-muted-foreground">Source field</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {samples.length > 0 ? `e.g. ${samples.join(', ')}` : 'Source field'}
+                          </p>
                         </div>
                         <div className="col-span-1 flex items-center justify-center pt-2">
                           <ArrowRight className="h-4 w-4 text-muted-foreground" />
@@ -775,10 +951,18 @@ export function EnhancedSchemaMapper({
                                 variant="outline"
                                 role="combobox"
                                 aria-expanded={mappingDropdownOpen === sourceField}
+                                aria-label={`Mapping for ${sourceField}`}
                                 className="w-full justify-between"
+                                disabled={readOnly}
                               >
                                 <span className={isUnmapped ? 'truncate text-muted-foreground' : 'truncate'}>
-                                  {targetDef?.name || targetField || 'Do not map'}
+                                  {replacedBy
+                                    ? `Replaced by ${replacedBy}`
+                                    : isMagnitudeAlternative
+                                      ? `Alternative magnitude${scale ? ` (${scale})` : ''}`
+                                      : targetField
+                                        ? `${describeTarget(targetField)}${targetField === 'magnitude' && scale ? ` (${scale})` : ''}`
+                                        : 'Do not map'}
                                 </span>
                                 <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
                               </Button>
@@ -805,54 +989,45 @@ export function EnhancedSchemaMapper({
                                       <span className="text-muted-foreground">Do not map</span>
                                     </CommandItem>
                                   </CommandGroup>
-                                  {FIELD_CATEGORIES.map(category => (
-                                    <CommandGroup key={category.id} heading={category.name}>
-                                      {getFieldsByCategory(category.id).map(field => (
-                                        <CommandItem
-                                          key={field.id}
-                                          value={`${field.name} ${field.id}`}
-                                          keywords={[
-                                            field.name,
-                                            field.id,
-                                            field.description || '',
-                                            field.unit || ''
-                                          ]}
-                                          onSelect={() => {
-                                            updateMapping(sourceField, field.id);
-                                            setMappingDropdownOpen(null);
-                                          }}
-                                          className="flex items-center gap-2"
-                                        >
-                                          <Check
-                                            className={`h-4 w-4 ${field.id === targetField ? 'opacity-100' : 'opacity-0'}`}
-                                          />
-                                          <div className="flex flex-wrap items-center gap-2">
-                                            <span>{field.name}</span>
-                                            {field.required && (
-                                              <Badge variant="destructive" className="text-xs px-1">Required</Badge>
-                                            )}
-                                            {field.unit && (
-                                              <span className="text-xs text-muted-foreground">({field.unit})</span>
-                                            )}
-                                          </div>
-                                        </CommandItem>
-                                      ))}
-                                    </CommandGroup>
-                                  ))}
+                                  {renderTargetOptions(sourceField, replacedBy ? undefined : targetField)}
                                 </CommandList>
                               </Command>
                             </PopoverContent>
                           </Popover>
-                          {targetDef && (
-                            <div className="mt-1">
-                              {targetDef.required && (
-                                <Badge variant="destructive" className="text-xs mr-1">Required</Badge>
-                              )}
-                              <span className="text-xs text-muted-foreground">
-                                {targetDef.description}
-                              </span>
-                            </div>
-                          )}
+                          <div className="mt-1 space-y-1">
+                            {origin && !isUnmapped && (
+                              <span className="text-xs text-muted-foreground">{origin}</span>
+                            )}
+                            {targetDef?.required && !isUnmapped && (
+                              <Badge variant="destructive" className="text-xs ml-1">Required</Badge>
+                            )}
+                            {isMagnitudeAlternative && (
+                              <p className="text-xs text-muted-foreground">
+                                Kept with the event as an alternative magnitude; the parser chose another column as the preferred magnitude.
+                              </p>
+                            )}
+                            {targetField === 'magnitude' && scale && (sourceField in explicitMappings) && (
+                              <p className="text-xs text-muted-foreground">
+                                The magnitude type is stored as {scale}; the parser&apos;s choice is kept as an alternative.
+                              </p>
+                            )}
+                            {scaleCodesInType && (
+                              <p className="text-xs text-muted-foreground">
+                                These values are magnitude scale codes; they are stored as the magnitude type, not the event type.
+                              </p>
+                            )}
+                            {suggestion && !targetField && (
+                              <button
+                                type="button"
+                                className="flex items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50"
+                                disabled={readOnly}
+                                onClick={() => updateMapping(sourceField, suggestion.target)}
+                              >
+                                <Sparkles className="h-3 w-3" />
+                                Suggested: {describeTarget(suggestion.target)} ({Math.round(suggestion.confidence * 100)}%) — apply
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
@@ -861,24 +1036,22 @@ export function EnhancedSchemaMapper({
             </div>
           </div>
         </TabsContent>
-        
+
         <TabsContent value="preview" className="space-y-4 mt-4">
           <div className="border rounded-md">
             <div className="bg-muted/50 px-4 py-2 text-sm font-medium">
               Mapping Summary by Category
             </div>
             <div className="p-4">
-              <Accordion type="multiple" value={expandedCategories} className="w-full">
+              <Accordion type="multiple" value={expandedCategories} onValueChange={setExpandedCategories} className="w-full">
                 {FIELD_CATEGORIES.map(category => {
                   const categoryFields = getFieldsByCategory(category.id);
-                  const mappedCount = categoryFields.filter(f => 
-                    Object.values(fieldMappings).includes(f.id)
+                  const mappedCount = categoryFields.filter(f => getMappedSourceField(f.id)).length;
+                  const unmappedRequired = categoryFields.filter(f =>
+                    f.required && (strictValidation || ['time', 'latitude', 'longitude', 'magnitude'].includes(f.id)) &&
+                    !getMappedSourceField(f.id)
                   ).length;
-                  const requiredCount = categoryFields.filter(f => f.required).length;
-                  const unmappedRequired = categoryFields.filter(f => 
-                    f.required && !Object.values(fieldMappings).includes(f.id)
-                  ).length;
-                  
+
                   return (
                     <AccordionItem key={category.id} value={category.id}>
                       <AccordionTrigger className="hover:no-underline">
@@ -901,14 +1074,14 @@ export function EnhancedSchemaMapper({
                           {categoryFields.map(field => {
                             const sourceField = getMappedSourceField(field.id);
                             const isMapped = !!sourceField;
-                            
+
                             return (
-                              <div 
-                                key={field.id} 
+                              <div
+                                key={field.id}
                                 className={`p-3 rounded-md border ${
-                                  field.required && !isMapped 
-                                    ? 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950' 
-                                    : isMapped 
+                                  field.required && !isMapped
+                                    ? 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950'
+                                    : isMapped
                                     ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950'
                                     : 'border-border'
                                 }`}
@@ -961,7 +1134,7 @@ export function EnhancedSchemaMapper({
           </div>
         </TabsContent>
       </Tabs>
-      
+
       {isProcessing && (
         <div className="flex items-center justify-center mt-6">
           <Loader2 className="h-6 w-6 animate-spin text-primary mr-2" />

@@ -23,8 +23,10 @@ export function detectDelimiter(content: string, maxSampleRows: number = 10): De
   // (RFC 4180 2.6), and splitting on newline first made such rows look like
   // inconsistent column counts, so the wrong delimiter won and the file parsed to
   // zero events. The sample is bounded to the first physical lines so the
-  // per-delimiter tokenization stays cheap on large files.
-  const sampleText = content.split('\n').slice(0, Math.max(maxSampleRows * 20, 200)).join('\n');
+  // per-delimiter tokenization stays cheap on large files. A leading block of '#'
+  // comment lines is prose, not table: sampled, it made the space delimiter win.
+  const sampleText = splitLeadingCommentLines(content).body
+    .split('\n').slice(0, Math.max(maxSampleRows * 20, 200)).join('\n');
   const lines = sampleText.split('\n').filter(line => line.trim()).slice(0, maxSampleRows);
 
   if (lines.length === 0) {
@@ -60,7 +62,12 @@ export function detectDelimiter(content: string, maxSampleRows: number = 10): De
     const avgColumns = totalColumns / sampled;
     const variance = columnCounts.reduce((sum, count) => sum + Math.pow(count - avgColumns, 2), 0) / sampled;
     const stdDev = Math.sqrt(variance);
-    const consistency = avgColumns > 1 ? 1 - (stdDev / avgColumns) : 0;
+    // Splitting on spaces around a real separator ('  41.802 ,   23.108 ,', the padded
+    // ISC-GEM layout) leaves the separator as a token of its own; that file is not
+    // space-delimited, however consistent (and numerous) its space-split columns are.
+    const splitsAroundSeparator = delimiter === ' ' &&
+      records.some((columns) => columns.some((cell) => cell === ',' || cell === ';' || cell === '|'));
+    const consistency = avgColumns > 1 && !splitsAroundSeparator ? 1 - (stdDev / avgColumns) : 0;
 
     scores.set(delimiter, {
       count: totalColumns,
@@ -224,20 +231,84 @@ export function parseLine(line: string, delimiter: Delimiter, options?: Tokenize
 }
 
 /**
+ * A comment line: its first non-blank character is '#' or '%'. FDSN event text, ISC
+ * bulletins and this platform's CSV export with metadata=comments open with them.
+ */
+export function isCommentLine(line: string): boolean {
+  // \s also matches a leading byte-order mark (U+FEFF).
+  return /^\s*[#%]/.test(line);
+}
+
+const NUMERIC_CELL = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
+
+/**
+ * Whether a record reads as a column header rather than data: more than one populated
+ * cell and no cell that is a number. A catalogue data row always has numeric cells
+ * (coordinates, magnitude); a header has none.
+ */
+export function isHeaderLikeRecord(cells: string[]): boolean {
+  const populated = cells.map((cell) => cell.trim()).filter((cell) => cell !== '');
+  return populated.length > 1 && !populated.some((cell) => NUMERIC_CELL.test(cell));
+}
+
+/**
+ * Split the leading block of comment (and blank) lines from the rest of the content.
+ * `linesSkipped` counts the physical lines removed, for line numbers.
+ */
+export function splitLeadingCommentLines(content: string): { comments: string[]; body: string; linesSkipped: number } {
+  const comments: string[] = [];
+  const line = /([^\r\n]*)(\r\n|\n|\r|$)/y;
+  let offset = 0;
+  let linesSkipped = 0;
+  while (offset < content.length) {
+    line.lastIndex = offset;
+    const match = line.exec(content);
+    if (!match || match[0].length === 0) break;
+    const text = match[1];
+    if (text.trim() !== '' && !isCommentLine(text)) break;
+    if (text.trim() !== '') comments.push(text);
+    offset += match[0].length;
+    linesSkipped += 1;
+  }
+  return { comments, body: content.slice(offset), linesSkipped };
+}
+
+/**
  * Parse entire content with the specified delimiter (RFC 4180-aware).
+ *
+ * A leading block of comment lines is skipped. The block's LAST line is the column
+ * header when it reads as one and the first line after the block is data, which is the
+ * FDSN event-text layout ('# Query complete' then '#EventID|Time|...') and the ISC-GEM
+ * one; otherwise the first line after the block is the header. The first record used to
+ * be the header unconditionally, so a file opening with '# Catalogue: ...' (this
+ * platform's own CSV export with metadata=comments included) imported zero events.
+ * `dataStartLine` is the 1-based line of the first data row.
  */
 export function parseWithDelimiter(content: string, delimiter: Delimiter): {
   headers: string[];
   rows: string[][];
+  dataStartLine: number;
 } {
-  const all = tokenizeDelimited(content, delimiter);
-  if (all.length === 0) {
-    return { headers: [], rows: [] };
-  }
-  const headers = all[0].map((h, i) => (i === 0 ? stripHeaderCommentMarker(h) : h).trim().toLowerCase());
+  const { comments, body, linesSkipped } = splitLeadingCommentLines(content);
+  const all = tokenizeDelimited(body, delimiter);
+  const toHeaders = (cells: string[]) =>
+    cells.map((h, i) => (i === 0 ? stripHeaderCommentMarker(h) : h).trim().toLowerCase());
   // Undo our own CSV export's formula guard so exports re-import unchanged. Headers are
   // matched against known column names and are never guarded.
-  return { headers, rows: all.slice(1).map((row) => row.map(stripSpreadsheetFormulaGuard)) };
+  const unguard = (rows: string[][]) => rows.map((row) => row.map(stripSpreadsheetFormulaGuard));
+
+  if (comments.length > 0) {
+    const commentHeader = parseLine(stripHeaderCommentMarker(comments[comments.length - 1]), delimiter, { strictQuotes: false });
+    const first = all[0];
+    if (isHeaderLikeRecord(commentHeader) && (!first || !isHeaderLikeRecord(first))) {
+      return { headers: toHeaders(commentHeader), rows: unguard(all), dataStartLine: linesSkipped + 1 };
+    }
+  }
+
+  if (all.length === 0) {
+    return { headers: [], rows: [], dataStartLine: linesSkipped + 2 };
+  }
+  return { headers: toHeaders(all[0]), rows: unguard(all.slice(1)), dataStartLine: linesSkipped + 2 };
 }
 
 /**

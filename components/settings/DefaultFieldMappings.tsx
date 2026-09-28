@@ -77,8 +77,19 @@ import {
   FIELD_CATEGORIES,
   FIELD_ALIASES,
   getFieldsByCategory,
+  isMappableTargetField,
+  parseFieldMappingsConfig,
+  findConflictingMappingRules,
+  findBuiltInAliasOverrides,
   type FieldDefinition
 } from '@/lib/field-definitions';
+
+/** Priority only orders rules matching the same column; keep it inside 1-100. */
+function clampPriority(value: unknown): number {
+  const priority = Math.round(Number(value));
+  if (!Number.isFinite(priority)) return 75;
+  return Math.min(100, Math.max(1, priority));
+}
 
 // Types for field mappings
 export type FileFormat = 'csv' | 'json' | 'quakeml' | 'geojson';
@@ -305,13 +316,20 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
         body: JSON.stringify({ ...config, lastUpdated: new Date().toISOString() })
       });
 
-      if (!response.ok) throw new Error('Failed to save');
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(typeof body?.error === 'string' ? body.error : 'Failed to save settings');
+      }
 
       toast({ title: 'Settings saved', description: 'Field mapping configuration saved successfully' });
       setHasChanges(false);
       onSave?.(config);
     } catch (error) {
-      toast({ title: 'Error', description: 'Failed to save settings', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to save settings',
+        variant: 'destructive',
+      });
     } finally {
       setSaving(false);
     }
@@ -349,9 +367,18 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
       sourcePattern: newMapping.sourcePattern!,
       targetField: newMapping.targetField!,
       isRegex: newMapping.isRegex || false,
-      priority: newMapping.priority || 75,
+      priority: clampPriority(newMapping.priority ?? 75),
       description: newMapping.description || ''
     };
+
+    if (mapping.isRegex) {
+      try {
+        new RegExp(mapping.sourcePattern, 'i');
+      } catch {
+        toast({ title: 'Invalid pattern', description: `"${mapping.sourcePattern}" is not a valid regular expression`, variant: 'destructive' });
+        return;
+      }
+    }
 
     if (context === 'format' && format) {
       const existingMapping = config.formats[format].mappings.find(
@@ -446,10 +473,23 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
 
   const saveEditedMapping = () => {
     if (!editingMapping) return;
+    if (!editingMapping.sourcePattern?.trim()) {
+      toast({ title: 'Error', description: 'Source pattern is required', variant: 'destructive' });
+      return;
+    }
+    if (editingMapping.isRegex) {
+      try {
+        new RegExp(editingMapping.sourcePattern, 'i');
+      } catch {
+        toast({ title: 'Invalid pattern', description: `"${editingMapping.sourcePattern}" is not a valid regular expression`, variant: 'destructive' });
+        return;
+      }
+    }
+    const edited = { ...editingMapping, priority: clampPriority(editingMapping.priority) };
     if (mappingContext === 'format') {
-      updateMapping(editingMapping.id, editingMapping, 'format', activeFormat);
+      updateMapping(edited.id, edited, 'format', activeFormat);
     } else {
-      updateMapping(editingMapping.id, editingMapping, 'custom');
+      updateMapping(edited.id, edited, 'custom');
     }
     setEditMappingDialogOpen(false);
     setEditingMapping(null);
@@ -478,22 +518,16 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
     );
   }, [searchTerm]);
 
-  const getDuplicateTargets = useCallback(() => {
-    const targetCounts: Record<string, number> = {};
-    for (const format of Object.keys(config.formats) as FileFormat[]) {
-      if (config.formats[format].enabled) {
-        for (const mapping of config.formats[format].mappings) {
-          targetCounts[mapping.targetField] = (targetCounts[mapping.targetField] || 0) + 1;
-        }
-      }
-    }
-    for (const mapping of config.customMappings) {
-      targetCounts[mapping.targetField] = (targetCounts[mapping.targetField] || 0) + 1;
-    }
-    return Object.entries(targetCounts).filter(([_, count]) => count > 1).map(([target]) => target);
-  }, [config]);
-
-  const duplicateTargets = getDuplicateTargets();
+  // Genuine contradictions: one source pattern sent to different fields (several
+  // patterns feeding one field, such as lat/Lat/evla -> latitude, are normal).
+  const conflicts = findConflictingMappingRules(config);
+  const conflictingPatterns = new Set(conflicts.map(conflict => conflict.pattern.toLowerCase()));
+  const aliasOverrides = findBuiltInAliasOverrides([
+    ...config.customMappings,
+    ...(Object.keys(config.formats) as FileFormat[])
+      .filter(format => config.formats[format].enabled)
+      .flatMap(format => config.formats[format].mappings),
+  ]);
 
   const handleExport = () => {
     const exportData = JSON.stringify(config, null, 2);
@@ -521,23 +555,34 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
   };
 
   const handleImport = () => {
+    let imported: unknown;
     try {
-      const imported = JSON.parse(importData);
-      if (typeof imported.autoDetectEnabled !== 'boolean') {
-        throw new Error('Invalid configuration: missing autoDetectEnabled');
-      }
-      setConfig({
-        ...DEFAULT_CONFIG,
-        ...imported,
-        formats: { ...DEFAULT_CONFIG.formats, ...imported.formats }
-      });
-      setImportExportDialogOpen(false);
-      setImportData('');
-      setHasChanges(true);
-      toast({ title: 'Import successful', description: 'Configuration imported successfully' });
-    } catch (error) {
-      toast({ title: 'Import failed', description: 'Invalid configuration format', variant: 'destructive' });
+      imported = JSON.parse(importData);
+    } catch {
+      toast({ title: 'Import failed', description: 'The text is not valid JSON', variant: 'destructive' });
+      return;
     }
+    // The same validation the server applies on save: an imported rule must not be able
+    // to break the schema step of every upload.
+    const parsed = parseFieldMappingsConfig(imported);
+    if (!parsed.ok) {
+      toast({ title: 'Import failed', description: parsed.error, variant: 'destructive' });
+      return;
+    }
+    setConfig({
+      ...DEFAULT_CONFIG,
+      ...parsed.config,
+      formats: {
+        csv: parsed.config.formats.csv ?? DEFAULT_CONFIG.formats.csv,
+        json: parsed.config.formats.json ?? DEFAULT_CONFIG.formats.json,
+        quakeml: parsed.config.formats.quakeml ?? DEFAULT_CONFIG.formats.quakeml,
+        geojson: parsed.config.formats.geojson ?? DEFAULT_CONFIG.formats.geojson,
+      },
+    });
+    setImportExportDialogOpen(false);
+    setImportData('');
+    setHasChanges(true);
+    toast({ title: 'Import successful', description: 'Configuration imported successfully' });
   };
 
   const getMappingsForField = useCallback((fieldId: string) => {
@@ -659,12 +704,35 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
           </div>
         )}
 
-        {duplicateTargets.length > 0 && (
-          <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg">
-            <AlertTriangle className="h-4 w-4 text-red-600" />
-            <span className="text-sm text-red-700 dark:text-red-400">
-              Warning: Multiple mappings to same target: {duplicateTargets.join(', ')}
-            </span>
+        {conflicts.length > 0 && (
+          <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg">
+            <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5" />
+            <div className="text-sm text-red-700 dark:text-red-400">
+              <p>Conflicting mappings: the same source pattern is sent to different fields.</p>
+              <ul className="mt-1 text-xs list-disc pl-4">
+                {conflicts.map(conflict => (
+                  <li key={`${conflict.pattern}-${conflict.targets.join('|')}`}>
+                    <code>{conflict.pattern}</code> → {conflict.targets.join(', ')} ({conflict.scopes.join(', ')})
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {aliasOverrides.length > 0 && (
+          <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+            <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5" />
+            <div className="text-sm text-amber-700 dark:text-amber-400">
+              <p>These rules send a column to a different field than the parser&apos;s built-in alias does; the rule wins during upload.</p>
+              <ul className="mt-1 text-xs list-disc pl-4">
+                {aliasOverrides.map(override => (
+                  <li key={`${override.pattern}-${override.target}`}>
+                    <code>{override.pattern}</code> → {override.target} (built-in: {override.builtInTarget})
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         )}
 
@@ -691,7 +759,10 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
               <div className="flex items-center justify-between p-4 border rounded-lg">
                 <div className="space-y-0.5">
                   <Label htmlFor="strict-validation" className="text-base">Strict Schema Validation</Label>
-                  <p className="text-sm text-muted-foreground">Enforce strict validation for required fields</p>
+                  <p className="text-sm text-muted-foreground">
+                    Require every required schema field, including the event ID, to be mapped before an upload can continue.
+                    When off, only origin time, latitude, longitude and magnitude are required.
+                  </p>
                 </div>
                 <Switch
                   id="strict-validation"
@@ -715,7 +786,10 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
                 onChange={(e) => { setConfig(prev => ({ ...prev, fuzzyMatchThreshold: parseFloat(e.target.value) })); setHasChanges(true); }}
                 className="w-full"
               />
-              <p className="text-xs text-muted-foreground">Minimum similarity for fuzzy matching (higher = stricter)</p>
+              <p className="text-xs text-muted-foreground">
+                Minimum similarity for suggested (fuzzy) matches during upload (higher = stricter). Exact aliases and the rules
+                below always apply, whatever this threshold.
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -817,7 +891,7 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
                           ) : (
                             getFilteredMappings(config.formats[format].mappings).map(mapping => {
                               const targetField = FIELD_DEFINITIONS.find(f => f.id === mapping.targetField);
-                              const isDuplicate = duplicateTargets.includes(mapping.targetField);
+                              const isDuplicate = conflictingPatterns.has(mapping.sourcePattern.toLowerCase());
 
                               return (
                                 <div
@@ -1081,7 +1155,7 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
                     {FIELD_CATEGORIES.map(category => (
                       <SelectGroup key={category.id}>
                         <SelectLabel>{category.name}</SelectLabel>
-                        {getFieldsByCategory(category.id).map(field => (
+                        {getFieldsByCategory(category.id).filter(field => isMappableTargetField(field.id)).map(field => (
                           <SelectItem key={field.id} value={field.id}>
                             <div className="flex items-center gap-2">
                               <span>{field.name}</span>
@@ -1106,8 +1180,10 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
               </div>
               <div className="space-y-2">
                 <Label>Priority (1-100)</Label>
-                <Input type="number" min="1" max="100" value={newMapping.priority || 75} onChange={(e) => setNewMapping(prev => ({ ...prev, priority: parseInt(e.target.value) }))} />
-                <p className="text-xs text-muted-foreground">Higher priority mappings are checked first (100 = highest)</p>
+                <Input type="number" min="1" max="100" value={newMapping.priority ?? 75} onChange={(e) => setNewMapping(prev => ({ ...prev, priority: clampPriority(e.target.value) }))} />
+                <p className="text-xs text-muted-foreground">
+                  Only orders rules that match the same column (100 = checked first). Any matching rule applies; priority is not a confidence.
+                </p>
               </div>
             </div>
             <DialogFooter>
@@ -1138,7 +1214,7 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
                       {FIELD_CATEGORIES.map(category => (
                         <SelectGroup key={category.id}>
                           <SelectLabel>{category.name}</SelectLabel>
-                          {getFieldsByCategory(category.id).map(field => (
+                          {getFieldsByCategory(category.id).filter(field => isMappableTargetField(field.id)).map(field => (
                             <SelectItem key={field.id} value={field.id}>
                               <div className="flex items-center gap-2">
                                 <span>{field.name}</span>
@@ -1163,7 +1239,8 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
                 </div>
                 <div className="space-y-2">
                   <Label>Priority (1-100)</Label>
-                  <Input type="number" min="1" max="100" value={editingMapping.priority} onChange={(e) => setEditingMapping(prev => prev ? { ...prev, priority: parseInt(e.target.value) } : null)} />
+                  <Input type="number" min="1" max="100" value={editingMapping.priority} onChange={(e) => setEditingMapping(prev => prev ? { ...prev, priority: clampPriority(e.target.value) } : null)} />
+                  <p className="text-xs text-muted-foreground">Only orders rules that match the same column.</p>
                 </div>
               </div>
             )}

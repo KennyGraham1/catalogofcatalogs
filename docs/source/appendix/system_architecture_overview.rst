@@ -11,7 +11,7 @@
            Maps["Leaflet Map Visualizations"]
        end
 
-       subgraph NextJS["Next.js 13+ Application"]
+       subgraph NextJS["Next.js 15 Application"]
            subgraph FrontendGroup["Frontend (App Router)"]
                Pages["Pages &amp; Layouts"]
                Components["React Components"]

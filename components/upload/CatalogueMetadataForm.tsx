@@ -29,6 +29,32 @@ interface CatalogueMetadataFormProps {
   readOnly?: boolean;
 }
 
+/**
+ * datetime-local inputs return a zone-less "YYYY-MM-DDTHH:mm" (or, with a
+ * seconds step, "YYYY-MM-DDTHH:mm:ss") wall-clock string with no offset. The
+ * Time Period fields below are labelled UTC, so that string is completed
+ * into a full UTC ISO 8601 timestamp ('...Z') by plain concatenation only —
+ * never via `new Date(value)`, which would interpret it in the *browser's*
+ * local zone and silently shift it by the depositor's UTC offset (gc#6, C11).
+ */
+function datetimeLocalToUtcIso(value: string): string {
+  if (!value) return '';
+  const hasSeconds = value.length > 16; // "YYYY-MM-DDTHH:mm" is 16 chars.
+  return hasSeconds ? `${value}.000Z` : `${value}:00.000Z`;
+}
+
+/**
+ * Inverse of datetimeLocalToUtcIso, for display. Stored values are already
+ * UTC (either the 'Z'-suffixed form this component now writes, or a legacy
+ * zone-less value from before this fix), so no zone conversion is needed —
+ * just truncate to the "YYYY-MM-DDTHH:mm" shape the datetime-local input
+ * requires.
+ */
+function utcIsoToDatetimeLocal(value: string | null | undefined): string {
+  if (!value) return '';
+  return value.slice(0, 16);
+}
+
 export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = false, readOnly = false }: CatalogueMetadataFormProps) {
   const [newKeyword, setNewKeyword] = useState('');
   const [newReference, setNewReference] = useState('');
@@ -47,7 +73,7 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
     usage_terms: 2000,
     citation: 1000,
     doi: 255,
-    version: 50,
+    source_version: 50,
     notes: 2000,
     validation_summary: 2000,
     validation_report: 5000,
@@ -193,12 +219,15 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="version">Version</Label>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="source_version">Source dataset version</Label>
+                <InfoTooltip content="The depositor's own release label for the source data (e.g. a GeoNet export date or a source agency's own version string). This is independent of the catalogue's own version, which this platform manages automatically." />
+              </div>
               <Input
-                id="version"
-                placeholder="e.g., 1.0, 2024.1"
-                value={metadata.version || ''}
-                onChange={(e) => updateField('version', e.target.value)}
+                id="source_version"
+                placeholder="e.g., GeoNet 2024.1"
+                value={metadata.source_version || ''}
+                onChange={(e) => updateField('source_version', e.target.value)}
               />
             </div>
           </CardContent>
@@ -215,27 +244,27 @@ export function CatalogueMetadataForm({ metadata, onChange, showMergeFields = fa
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5">
-                  <Label htmlFor="time_period_start">Time Period Start</Label>
-                  <InfoTooltip content="Earliest event time covered by this catalogue." />
+                  <Label htmlFor="time_period_start">Time Period Start (UTC)</Label>
+                  <InfoTooltip content="Earliest event time covered by this catalogue, in UTC." />
                 </div>
                 <Input
                   id="time_period_start"
                   type="datetime-local"
-                  value={metadata.time_period_start || ''}
-                  onChange={(e) => updateField('time_period_start', e.target.value)}
+                  value={utcIsoToDatetimeLocal(metadata.time_period_start)}
+                  onChange={(e) => updateField('time_period_start', datetimeLocalToUtcIso(e.target.value))}
                 />
               </div>
 
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5">
-                  <Label htmlFor="time_period_end">Time Period End</Label>
-                  <InfoTooltip content="Latest event time covered by this catalogue." />
+                  <Label htmlFor="time_period_end">Time Period End (UTC)</Label>
+                  <InfoTooltip content="Latest event time covered by this catalogue, in UTC." />
                 </div>
                 <Input
                   id="time_period_end"
                   type="datetime-local"
-                  value={metadata.time_period_end || ''}
-                  onChange={(e) => updateField('time_period_end', e.target.value)}
+                  value={utcIsoToDatetimeLocal(metadata.time_period_end)}
+                  onChange={(e) => updateField('time_period_end', datetimeLocalToUtcIso(e.target.value))}
                 />
               </div>
             </div>

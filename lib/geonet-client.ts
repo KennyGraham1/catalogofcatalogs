@@ -11,6 +11,7 @@
 import { parseStringPromise } from 'xml2js';
 import { retryFetchText } from './retry-utils';
 import { CircuitBreaker } from './circuit-breaker';
+import { NZ_NATIONAL_BOUNDS } from './geo-bounds-utils';
 
 // GeoNet FDSN Event Service base URL
 const GEONET_FDSN_EVENT_URL = 'https://service.geonet.org.nz/fdsnws/event/1/query';
@@ -97,6 +98,21 @@ function isExplicitNoData(error: unknown, params: GeoNetQueryParams): boolean {
   return params.nodata === '404' && typeof error === 'object' && error !== null && (error as { status?: number }).status === 404;
 }
 
+/**
+ * Whether an error says something about GeoNet's HEALTH, and so should count towards
+ * opening the shared circuit breaker: a network, timeout or parse failure (no HTTP
+ * status), a 5xx, or 429 (GeoNet shedding load). Any other 4xx is a problem with the
+ * request itself; counting it let five rejected requests (e.g. a malformed window
+ * GeoNet answers with 400) cut every user off from a healthy GeoNet for a minute.
+ * 413 is also a 4xx: the time-window chunker answers it by subdividing
+ * (lib/geonet-chunking.ts), and a broad import provokes many of them on purpose.
+ */
+export function isGeoNetHealthFailure(error: unknown): boolean {
+  const status = typeof error === 'object' && error !== null ? (error as { status?: unknown }).status : undefined;
+  if (typeof status !== 'number') return true;
+  return status >= 500 || status === 429;
+}
+
 export class GeoNetClient {
   private baseUrl: string;
   private circuitBreaker: CircuitBreaker;
@@ -111,21 +127,7 @@ export class GeoNetClient {
       successThreshold: 2,
       timeout: 60000, // 1 minute
       windowSize: 60000, // 1 minute window
-      isFailure: (error: any) => {
-        // Don't count 404/204 (no data) as failures
-        if (error.status === 404 || error.status === 204) {
-          return false;
-        }
-        // 413 (result set too large) is an EXPECTED, self-correcting condition that
-        // the time-window chunking handles by subdividing — not a service-health signal,
-        // so it must not trip the breaker (a broad import intentionally provokes many
-        // 413s and would otherwise abort itself). See lib/geonet-chunking.ts.
-        if (error.status === 413) {
-          return false;
-        }
-        // Count 5xx errors and network errors as failures
-        return true;
-      },
+      isFailure: isGeoNetHealthFailure,
       onStateChange: (oldState, newState) => {
         console.log(`[GeoNetClient] Circuit breaker state changed: ${oldState} -> ${newState}`);
       },
@@ -352,56 +354,80 @@ export class GeoNetClient {
   }
 
   /**
+   * Fetch a QuakeML document as text: null when GeoNet reports no data, otherwise the
+   * body as served. Runs inside the caller's circuit-breaker execution.
+   */
+  private async requestQuakeMLText(params: GeoNetQueryParams): Promise<string | null> {
+    const queryParams = { ...params, format: 'xml' as const };
+    const url = this.buildQueryUrl(queryParams);
+
+    console.log('[GeoNetClient] Fetching events (QuakeML format):', url);
+
+    // Body read inside the retried attempt (see fetchEventsText) so the timeout
+    // covers the QuakeML download, which is far larger than the text format.
+    let fetched: { status: number; text: string };
+    try {
+      fetched = await retryFetchText(url, {
+        headers: {
+          'User-Agent': 'CatalogOfCatalogs/1.0 (https://github.com/KennyGraham1/catalogofcatalogs)',
+        },
+      }, {
+        maxAttempts: 3,
+        initialDelay: 1000,
+        maxDelay: 10000,
+        timeout: 30000,
+        onRetry: (error, attempt, delay) => {
+          console.log(`[GeoNetClient] Retry attempt ${attempt} for QuakeML fetch: ${error.message}. Waiting ${delay}ms...`);
+        },
+      });
+    } catch (error) {
+      if (isExplicitNoData(error, params)) {
+        console.log('[GeoNetClient] No data found (nodata=404)');
+        return null;
+      }
+      throw error;
+    }
+    const { status, text: xml } = fetched;
+
+    if (status === 204 || status === 404) {
+      console.log('[GeoNetClient] No data found');
+      return null;
+    }
+
+    // Check for error responses that may come with 200 status
+    const trimmedXml = xml.trim().toLowerCase();
+    if (trimmedXml.startsWith('an error') ||
+      trimmedXml.startsWith('error:') ||
+      (trimmedXml.startsWith('<!doctype') && !trimmedXml.includes('quakeml'))) {
+      const errorPreview = xml.substring(0, 200).replace(/\s+/g, ' ');
+      console.error('[GeoNetClient] GeoNet returned an error response:', errorPreview);
+      throw new Error(`GeoNet API returned an error: ${errorPreview}`);
+    }
+
+    return xml;
+  }
+
+  /**
+   * Fetch one event's QuakeML document as the XML text GeoNet served.
+   *
+   * The importer reads it with lib/quakeml-parser. The parsed object from
+   * fetchEventById cannot stand in for it: xml2js with mergeAttrs turns attributes
+   * (publicID, nodalPlanes/@preferredPlane) into child properties, so a document
+   * rebuilt from it carries them as child elements, which a QuakeML reader does not
+   * take for attributes - the preferred plane and every publicID were lost that way.
+   */
+  async fetchEventQuakeMLText(eventId: string): Promise<string | null> {
+    return this.circuitBreaker.execute(() => this.requestQuakeMLText({ eventid: eventId }));
+  }
+
+  /**
    * Fetch events in QuakeML format (complete metadata)
    * Includes circuit breaker protection and automatic retry with exponential backoff
    */
   async fetchEventsQuakeML(params: GeoNetQueryParams): Promise<any> {
     return this.circuitBreaker.execute(async () => {
-      const queryParams = { ...params, format: 'xml' as const };
-      const url = this.buildQueryUrl(queryParams);
-
-      console.log('[GeoNetClient] Fetching events (QuakeML format):', url);
-
-      // Body read inside the retried attempt (see fetchEventsText) so the timeout
-      // covers the QuakeML download, which is far larger than the text format.
-      let fetched: { status: number; text: string };
-      try {
-        fetched = await retryFetchText(url, {
-          headers: {
-            'User-Agent': 'CatalogOfCatalogs/1.0 (https://github.com/KennyGraham1/catalogofcatalogs)',
-          },
-        }, {
-          maxAttempts: 3,
-          initialDelay: 1000,
-          maxDelay: 10000,
-          timeout: 30000,
-          onRetry: (error, attempt, delay) => {
-            console.log(`[GeoNetClient] Retry attempt ${attempt} for QuakeML fetch: ${error.message}. Waiting ${delay}ms...`);
-          },
-        });
-      } catch (error) {
-        if (isExplicitNoData(error, params)) {
-          console.log('[GeoNetClient] No data found (nodata=404)');
-          return null;
-        }
-        throw error;
-      }
-      const { status, text: xml } = fetched;
-
-      if (status === 204 || status === 404) {
-        console.log('[GeoNetClient] No data found');
-        return null;
-      }
-
-      // Check for error responses that may come with 200 status
-      const trimmedXml = xml.trim().toLowerCase();
-      if (trimmedXml.startsWith('an error') ||
-        trimmedXml.startsWith('error:') ||
-        (trimmedXml.startsWith('<!doctype') && !trimmedXml.includes('quakeml'))) {
-        const errorPreview = xml.substring(0, 200).replace(/\s+/g, ' ');
-        console.error('[GeoNetClient] GeoNet returned an error response:', errorPreview);
-        throw new Error(`GeoNet API returned an error: ${errorPreview}`);
-      }
+      const xml = await this.requestQuakeMLText(params);
+      if (xml === null) return null;
 
       // Parse XML to JSON
       try {
@@ -471,24 +497,38 @@ export class GeoNetClient {
   }
 
   /**
-   * Fetch events in New Zealand region
-   * Approximate bounds: -47.5 to -34.0 lat, 165.0 to 179.0 lon
+   * Fetch events in the New Zealand region: NZ_NATIONAL_BOUNDS, which includes the
+   * Kermadec and Chatham Islands and so crosses 180 degrees. FDSN requires
+   * minlongitude <= maxlongitude, so the box is requested as its two halves and merged
+   * (the old 165-179 E, 34 S box dropped everything east of 179 E and the Kermadecs).
    */
   async fetchNZEvents(
     startDate: Date,
     endDate: Date,
     minMagnitude?: number
   ): Promise<GeoNetEventText[]> {
-    return this.fetchEventsText({
+    const { minLatitude, maxLatitude, minLongitude, maxLongitude } = NZ_NATIONAL_BOUNDS;
+    const query = (minlongitude: number, maxlongitude: number) => this.fetchEventsText({
       starttime: startDate.toISOString(),
       endtime: endDate.toISOString(),
-      minlatitude: -47.5,
-      maxlatitude: -34.0,
-      minlongitude: 165.0,
-      maxlongitude: 179.0,
+      minlatitude: minLatitude,
+      maxlatitude: maxLatitude,
+      minlongitude,
+      maxlongitude,
       minmagnitude: minMagnitude,
       orderby: 'time',
     });
+    if (minLongitude <= maxLongitude) return query(minLongitude, maxLongitude);
+
+    const west = await query(minLongitude, 180);
+    const east = await query(-180, maxLongitude);
+    // An event exactly on 180 degrees is in both halves; keep one copy, newest first
+    // like a single orderby=time query. The FDSN Time column is ISO 8601 in UTC, so
+    // comparing the strings orders the instants without a timezone-dependent parse.
+    const seen = new Set<string>();
+    return [...west, ...east]
+      .filter((event) => (seen.has(event.EventID) ? false : (seen.add(event.EventID), true)))
+      .sort((a, b) => (a.Time < b.Time ? 1 : a.Time > b.Time ? -1 : 0));
   }
 }
 

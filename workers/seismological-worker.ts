@@ -16,11 +16,17 @@ interface EarthquakeEvent {
   magnitude_type?: string;
 }
 
-// Message types
-type WorkerMessage = 
-  | { type: 'gutenberg-richter'; events: EarthquakeEvent[]; minMagnitude?: number; binWidth?: number }
-  | { type: 'completeness'; events: EarthquakeEvent[]; binWidth?: number }
+type McMethod = 'MAXC' | 'GFT';
+type RateInterval = 'day' | 'week' | 'month';
+type RateIntervalOption = RateInterval | 'auto';
+
+// Message types. `mcMethod` / `maxcCorrection` choose how Mc is estimated wherever it
+// is (lib/seismological-analysis.ts McEstimationOptions); `interval` bins the time series.
+type WorkerMessage =
+  | { type: 'gutenberg-richter'; events: EarthquakeEvent[]; minMagnitude?: number; binWidth?: number; mcMethod?: McMethod; maxcCorrection?: number }
+  | { type: 'completeness'; events: EarthquakeEvent[]; binWidth?: number; mcMethod?: McMethod; maxcCorrection?: number }
   | { type: 'temporal'; events: EarthquakeEvent[] }
+  | { type: 'time-series'; events: EarthquakeEvent[]; interval?: RateIntervalOption; minMagnitude?: number; binWidth?: number; mcMethod?: McMethod; maxcCorrection?: number }
   | { type: 'moment'; events: EarthquakeEvent[] }
   | { type: 'statistics'; events: EarthquakeEvent[] };
 
@@ -133,14 +139,219 @@ function binKey(edge: number): number {
   return Number(edge.toFixed(4));
 }
 
+/**
+ * Reporting-resolution helpers, identical to lib/seismological-analysis.ts: the Utsu
+ * binning correction follows the step the magnitudes were REPORTED at (0 for
+ * continuous magnitudes), not the histogram bin width.
+ */
+const REPORTING_GRIDS = [0.1, 0.05, 0.01, 0.001];
+const GRID_TOLERANCE = 1e-9;
+
+function isOnGrid(magnitude: number, step: number): boolean {
+  return Math.abs(magnitude - Math.round(magnitude / step) * step) < GRID_TOLERANCE;
+}
+
+function ceilToGrid(magnitude: number, step: number): number {
+  return Math.ceil(magnitude / step - GRID_TOLERANCE / step) * step;
+}
+
+/** Share of the sample reported at each step of REPORTING_GRIDS, chance hits unmixed. */
+function reportingShares(magnitudes: number[]): number[] {
+  const n = magnitudes.length;
+  const onGrid = REPORTING_GRIDS.map(step => {
+    let count = 0;
+    for (const m of magnitudes) if (isOnGrid(m, step)) count++;
+    return n > 0 ? count / n : 0;
+  });
+  return unmixReportingShares(onGrid);
+}
+
+/** The unmixing step of reportingShares, from the share lying on each grid. */
+function unmixReportingShares(onGrid: number[]): number[] {
+  const last = REPORTING_GRIDS.length - 1;
+  const shares = new Array<number>(REPORTING_GRIDS.length).fill(0);
+  let coarserOrEqual = onGrid[last];
+  for (let k = last; k > 0; k--) {
+    const coarser = REPORTING_GRIDS[k - 1];
+    let chance = 0;
+    for (let j = k + 1; j <= last; j++) chance += shares[j] * REPORTING_GRIDS[j] / coarser;
+    const share = (coarserOrEqual + chance - onGrid[k - 1]) / (1 - REPORTING_GRIDS[k] / coarser);
+    shares[k] = Math.min(Math.max(share, 0), coarserOrEqual);
+    coarserOrEqual -= shares[k];
+  }
+  shares[0] = coarserOrEqual;
+  return shares;
+}
+
+/** Continuous lower bound of the complete sample {M >= mc} for the Aki MLE. */
+function sampleLowerBound(mc: number, magsAboveMc: number[]): { lowerBound: number; resolution: number } {
+  return lowerBoundFromShares(mc, reportingShares(magsAboveMc));
+}
+
+/** sampleLowerBound given the sample's reporting shares. */
+function lowerBoundFromShares(mc: number, shares: number[]): { lowerBound: number; resolution: number } {
+  let continuousShare = 1;
+  let lowerBound = 0;
+  let resolution = 0;
+  let dominantShare = 0;
+  REPORTING_GRIDS.forEach((step, k) => {
+    continuousShare -= shares[k];
+    lowerBound += shares[k] * (ceilToGrid(mc, step) - step / 2);
+    if (shares[k] > dominantShare) { dominantShare = shares[k]; resolution = step; }
+  });
+  continuousShare = Math.max(continuousShare, 0);
+  lowerBound += continuousShare * mc;
+  if (continuousShare >= dominantShare) resolution = 0;
+  return { lowerBound, resolution };
+}
+
+/** Fewest events from which Mc may be estimated; matches lib/seismological-analysis.ts. */
+const MIN_EVENTS_FOR_MC = 50;
+
+/**
+ * Mc estimation options, floors and estimators, identical to lib/seismological-analysis.ts
+ * (resolveMcOptions, goodnessOfFitMc, estimateMcFromBins).
+ */
+const DEFAULT_MAXC_CORRECTION = 0.2;
+const MAXC_CORRECTION_RANGE = { min: 0, max: 0.5 } as const;
+const MIN_EVENTS_ABOVE_MC = 10;
+const MIN_POPULATED_BINS = 3;
+const GFT_LEVELS = [95, 90] as const;
+
+interface GoodnessOfFitOutcome {
+  mc: number | null;
+  level: 95 | 90 | null;
+  fit: number | null;
+  curve: { magnitude: number; fit: number }[];
+}
+
+interface McEstimate {
+  mc: number;
+  method: McMethod;
+  requestedMethod: McMethod;
+  maxcCorrection: number;
+  gft?: GoodnessOfFitOutcome;
+  fallbackReason?: string;
+}
+
+function resolveMcOptions(options: { method?: McMethod; maxcCorrection?: number } | undefined): { method: McMethod; maxcCorrection: number } {
+  const method = options?.method ?? 'MAXC';
+  if (method !== 'MAXC' && method !== 'GFT') {
+    throw new Error(`Unknown Mc method "${String(method)}" (expected MAXC or GFT)`);
+  }
+  const maxcCorrection = options?.maxcCorrection ?? DEFAULT_MAXC_CORRECTION;
+  if (!Number.isFinite(maxcCorrection) ||
+      maxcCorrection < MAXC_CORRECTION_RANGE.min || maxcCorrection > MAXC_CORRECTION_RANGE.max) {
+    throw new Error(
+      `Invalid MAXC correction ${maxcCorrection} (must be between ${MAXC_CORRECTION_RANGE.min} and ${MAXC_CORRECTION_RANGE.max})`
+    );
+  }
+  return { method, maxcCorrection };
+}
+
+/**
+ * Goodness-of-fit test for Mc (Wiemer & Wyss, 2000): the lowest bin edge Mi whose MLE
+ * Gutenberg-Richter law reproduces R >= 95% (else 90%) of the observed cumulative
+ * counts at and above it, R = 100 - 100 sum|B_j - S_j| / sum B_j.
+ */
+function goodnessOfFitMc(magnitudes: number[], sortedBins: Array<[number, number]>): GoodnessOfFitOutcome {
+  const sorted = [...magnitudes].sort((a, b) => a - b);
+  const n = sorted.length;
+  const suffixSum = new Float64Array(n + 1);
+  const suffixOnGrid = REPORTING_GRIDS.map(() => new Float64Array(n + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    suffixSum[i] = suffixSum[i + 1] + sorted[i];
+    for (let k = 0; k < REPORTING_GRIDS.length; k++) {
+      suffixOnGrid[k][i] = suffixOnGrid[k][i + 1] + (isOnGrid(sorted[i], REPORTING_GRIDS[k]) ? 1 : 0);
+    }
+  }
+  const nBins = sortedBins.length;
+  const cumulative = new Array<number>(nBins);
+  const populatedFrom = new Array<number>(nBins);
+  let running = 0;
+  let populated = 0;
+  for (let j = nBins - 1; j >= 0; j--) {
+    running += sortedBins[j][1];
+    if (sortedBins[j][1] > 0) populated++;
+    cumulative[j] = running;
+    populatedFrom[j] = populated;
+  }
+
+  const curve: { magnitude: number; fit: number }[] = [];
+  for (let i = 0; i < nBins; i++) {
+    const cutoff = sortedBins[i][0];
+    const start = firstIndexAtOrAfter(sorted, cutoff - GRID_TOLERANCE);
+    const count = n - start;
+    if (count < MIN_EVENTS_ABOVE_MC || populatedFrom[i] < MIN_POPULATED_BINS) break;
+    const shares = unmixReportingShares(suffixOnGrid.map(onGrid => onGrid[start] / count));
+    const { lowerBound } = lowerBoundFromShares(cutoff, shares);
+    const bValue = Math.LOG10E / (suffixSum[start] / count - lowerBound);
+    if (!Number.isFinite(bValue) || bValue <= 0) continue;
+    let misfit = 0;
+    let observed = 0;
+    for (let j = i; j < nBins; j++) {
+      misfit += Math.abs(cumulative[j] - count * Math.pow(10, -bValue * (sortedBins[j][0] - cutoff)));
+      observed += cumulative[j];
+    }
+    curve.push({ magnitude: cutoff, fit: 100 - (100 * misfit) / observed });
+  }
+  for (const level of GFT_LEVELS) {
+    const reached = curve.find(point => point.fit >= level);
+    if (reached) return { mc: reached.magnitude, level, fit: reached.fit, curve };
+  }
+  return { mc: null, level: null, fit: null, curve };
+}
+
+/** Mc from a sample's magnitudes and non-cumulative FMD: MAXC + correction, or the GFT. */
+function estimateMcFromBins(
+  magnitudes: number[],
+  sortedBins: Array<[number, number]>,
+  options: { method: McMethod; maxcCorrection: number }
+): McEstimate {
+  let peakMag = sortedBins[0][0];
+  let peakCount = -1;
+  for (const [mag, count] of sortedBins) {
+    if (count > peakCount) { peakCount = count; peakMag = mag; }
+  }
+  const { method, maxcCorrection } = options;
+  const maxcMc = Number((peakMag + maxcCorrection).toFixed(2));
+  if (method === 'MAXC') {
+    return { mc: maxcMc, method: 'MAXC', requestedMethod: 'MAXC', maxcCorrection };
+  }
+  const gft = goodnessOfFitMc(magnitudes, sortedBins);
+  if (gft.mc != null) {
+    return { mc: gft.mc, method: 'GFT', requestedMethod: 'GFT', maxcCorrection, gft };
+  }
+  return {
+    mc: maxcMc,
+    method: 'MAXC',
+    requestedMethod: 'GFT',
+    maxcCorrection,
+    gft,
+    fallbackReason: `No cut-off reached a 90% goodness of fit, so Mc is maximum curvature + ${Number(maxcCorrection.toFixed(2))}`,
+  };
+}
+
 // Gutenberg-Richter calculation
-function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: number, binWidth = 0.1) {
+function calculateGutenbergRichter(
+  events: EarthquakeEvent[],
+  minMagnitude?: number,
+  binWidth = 0.1,
+  mcOptions?: { method?: McMethod; maxcCorrection?: number }
+) {
+  const resolvedMcOptions = resolveMcOptions(mcOptions);
   const filteredEvents = minMagnitude != null
-    ? events.filter(e => e.magnitude >= minMagnitude)
+    ? events.filter(e => e.magnitude >= minMagnitude - GRID_TOLERANCE)
     : events;
 
   if (filteredEvents.length < 10) {
     return { error: 'Insufficient data (need at least 10 events)' };
+  }
+  // Estimating Mc (no explicit cut-off) is held to the Mc floor, as in the library.
+  if (minMagnitude == null && filteredEvents.length < MIN_EVENTS_FOR_MC) {
+    return {
+      error: `Insufficient data to estimate the completeness magnitude (need at least ${MIN_EVENTS_FOR_MC} events, or an explicit magnitude cut-off)`
+    };
   }
 
   const magnitudes = filteredEvents.map(e => e.magnitude);
@@ -174,43 +385,41 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
     }
   }
 
-  // Completeness magnitude Mc (MAXC; Wiemer & Wyss 2000, with the +0.2 correction
-  // of Woessner & Wiemer 2005) when no explicit cut-off is supplied. The Aki-Utsu
-  // MLE is only valid above Mc and the mean MUST be taken over events with M >= Mc;
-  // the previous code averaged the FULL (incomplete) magnitude array, biasing b.
-  // Uses the same +0.2 correction as lib/seismological-analysis.ts (was +0.05 here).
-  const MAXC_CORRECTION = 0.2;
+  // Completeness magnitude Mc when no explicit cut-off is supplied: MAXC (Wiemer &
+  // Wyss 2000) plus the correction (default +0.2; Woessner & Wiemer 2005), or the
+  // goodness-of-fit test, as in lib/seismological-analysis.ts. The Aki-Utsu MLE is
+  // only valid above Mc and the mean MUST be taken over events with M >= Mc; the
+  // previous code averaged the FULL (incomplete) magnitude array, biasing b.
   let mc: number;
+  let estimate: McEstimate | undefined;
   if (minMagnitude != null) {
     mc = minMagnitude;
   } else {
-    let peakMag = minMag;
-    let peakCount = -1;
-    for (const [mag, count] of sortedBins) {
-      if (count > peakCount) { peakCount = count; peakMag = mag; }
-    }
-    mc = Number((peakMag + MAXC_CORRECTION).toFixed(2));
+    estimate = estimateMcFromBins(magnitudes, sortedBins, resolvedMcOptions);
+    mc = estimate.mc;
   }
-  const magsAboveMc = magnitudes.filter(m => m >= mc);
+  const magsAboveMc = magnitudes.filter(m => m >= mc - GRID_TOLERANCE);
   // Hard floor: fewer than 10 events above Mc means the estimate is WITHHELD, not
   // reported. Falling back to the catalogue floor (the old behaviour) anchored the
   // MLE at a magnitude the catalogue is not complete above and reported that floor
   // as the completeness magnitude. Matches lib/seismological-analysis.ts.
-  if (magsAboveMc.length < 10) {
+  if (magsAboveMc.length < MIN_EVENTS_ABOVE_MC) {
     return {
-      error: `Insufficient data above the completeness magnitude (need at least 10 events above Mc=${mc})`
+      error: `Insufficient data above the completeness magnitude (need at least ${MIN_EVENTS_ABOVE_MC} events above Mc=${mc})`
     };
   }
 
   // Apply the bin safeguard to the same complete sample used by the MLE.
   const populatedBins = new Set(magsAboveMc.map(m => binKey(binLowerEdge(m, binWidth)))).size;
-  if (populatedBins < 3) {
-    return { error: 'Insufficient magnitude bins above Mc (need at least 3 populated bins)' };
+  if (populatedBins < MIN_POPULATED_BINS) {
+    return { error: `Insufficient magnitude bins above Mc (need at least ${MIN_POPULATED_BINS} populated bins)` };
   }
 
-  // Maximum-likelihood b-value (Aki, 1965) with the Utsu binning correction.
+  // Maximum-likelihood b-value (Aki, 1965); the lower bound carries the Utsu
+  // correction for the magnitudes' reporting resolution, not for binWidth.
   const meanMag = magsAboveMc.reduce((sum, m) => sum + m, 0) / magsAboveMc.length;
-  const bValue = Math.LOG10E / (meanMag - (mc - binWidth / 2));
+  const { lowerBound, resolution } = sampleLowerBound(mc, magsAboveMc);
+  const bValue = Math.LOG10E / (meanMag - lowerBound);
   const bUncertainty = bValue / Math.sqrt(magsAboveMc.length);
   const aValue = Math.log10(magsAboveMc.length) + bValue * mc;
 
@@ -235,8 +444,20 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
     bValue, // positive by construction (MLE)
     aValue,
     completeness,
+    mcSource: estimate ? estimate.method : 'cutoff',
+    ...(estimate && {
+      requestedMcMethod: estimate.requestedMethod,
+      maxcCorrection: estimate.maxcCorrection,
+      ...(estimate.gft && { gftLevel: estimate.gft.level }),
+      ...(estimate.fallbackReason && { fallbackReason: estimate.fallbackReason }),
+    }),
     rSquared,
     bUncertainty,
+    eventsAboveMc: magsAboveMc.length,
+    magnitudeResolution: resolution,
+    // Snap float noise to 0; a real negative value means an off-grid cut-off sits
+    // below the first grid value kept, i.e. the sample starts above the cut-off.
+    binningCorrection: Math.abs(mc - lowerBound) < GRID_TOLERANCE ? 0 : mc - lowerBound,
     dataPoints: cumulativeCounts,
     fittedLine
   };
@@ -246,9 +467,15 @@ function calculateGutenbergRichter(events: EarthquakeEvent[], minMagnitude?: num
 // `binWidth` mirrors lib/seismological-analysis.ts estimateCompletenessMagnitude,
 // which the caller can parameterise; it used to be hard-coded here, so the two
 // copies could only agree at the default 0.1.
-function estimateCompleteness(events: EarthquakeEvent[], binWidth = 0.1) {
-  if (events.length < 50) {
-    return { error: 'Insufficient data (need at least 50 events)' };
+function estimateCompleteness(
+  events: EarthquakeEvent[],
+  binWidth = 0.1,
+  correction: number = DEFAULT_MAXC_CORRECTION,
+  method?: McMethod
+) {
+  const mcOptions = resolveMcOptions({ method, maxcCorrection: correction });
+  if (events.length < MIN_EVENTS_FOR_MC) {
+    return { error: `Insufficient data (need at least ${MIN_EVENTS_FOR_MC} events)` };
   }
 
   const magnitudes = events.map(e => e.magnitude);
@@ -271,27 +498,34 @@ function estimateCompleteness(events: EarthquakeEvent[], binWidth = 0.1) {
     .sort((a, b) => a[0] - b[0])
     .map(([magnitude, count]) => ({ magnitude, count }));
 
-  // Find Mc using the maximum-curvature method (peak of the non-cumulative FMD).
-  let maxCount = 0;
-  let mc = minMag;
-  distribution.forEach(({ magnitude, count }) => {
-    if (count > maxCount) {
-      maxCount = count;
-      mc = magnitude;
-    }
-  });
+  // Mc by maximum curvature (peak of the non-cumulative FMD) plus the correction, or
+  // by the goodness-of-fit test; the estimator the G-R fit uses, as in the library.
+  const estimate = estimateMcFromBins(
+    magnitudes,
+    distribution.map(({ magnitude, count }): [number, number] => [magnitude, count]),
+    mcOptions
+  );
+  const mc = estimate.mc;
 
-  // Standard MAXC correction (Woessner & Wiemer 2005), matching
-  // lib/seismological-analysis.ts (was a +0.05 half-bin shift here).
-  mc = Number((mc + 0.2).toFixed(2));
-
+  // Share of events at or above Mc, which the fit keeps; not a completeness score
+  // (see CompletenessResult in lib/seismological-analysis.ts).
   const eventsAboveMc = events.filter(e => e.magnitude >= mc).length;
   const confidence = eventsAboveMc / events.length;
 
   return {
     mc,
-    method: 'MAXC' as const,
+    method: estimate.method,
+    requestedMethod: estimate.requestedMethod,
+    maxcCorrection: estimate.maxcCorrection,
+    ...(estimate.gft && {
+      gftLevel: estimate.gft.level,
+      gftFit: estimate.gft.fit,
+      gftCurve: estimate.gft.curve,
+    }),
+    ...(estimate.fallbackReason && { fallbackReason: estimate.fallbackReason }),
     confidence,
+    eventsAboveMc,
+    binWidth,
     magnitudeDistribution: distribution
   };
 }
@@ -365,47 +599,76 @@ interface SeismicCluster {
   bValue?: number;
 }
 
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+/** Great-circle kilometres per degree of latitude on haversineDistance's sphere. */
+const KM_PER_DEGREE_LATITUDE = 6371 * Math.PI / 180;
+
+/** Index of the first entry of the ascending `times` at or after `time`. */
+function firstIndexAtOrAfter(times: number[], time: number): number {
+  let lo = 0;
+  let hi = times.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (times[mid] < time) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 /**
  * Gardner-Knopoff Declustering Algorithm (Worker version)
  */
 function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): SeismicCluster[] {
   if (events.length < 3) return [];
 
-  // Sort by time
-  const sortedEvents = [...events].sort((a, b) =>
-    new Date(a.time).getTime() - new Date(b.time).getTime()
-  );
+  // Parse every origin time once and sort by it; each head's forward window is then
+  // a contiguous run found by binary search, as in lib/seismological-analysis.ts.
+  // The previous full rescan per head was O(N^2) and held the Temporal tab's time
+  // series back behind it.
+  const byTime = events
+    .map(event => ({ event, time: new Date(event.time).getTime() }))
+    .sort((a, b) => a.time - b.time);
 
   // Filter events with valid locations
-  const validEvents = sortedEvents.filter(e =>
+  const validEntries = byTime.filter(({ event: e }) =>
     e.latitude != null && e.longitude != null &&
     !isNaN(e.latitude) && !isNaN(e.longitude)
   );
 
-  if (validEvents.length < 3) return [];
+  if (validEntries.length < 3) return [];
+
+  // An unparseable origin time falls in no window; such an event stays independent.
+  const windowed = validEntries.filter(entry => Number.isFinite(entry.time));
+  const windowedTimes = windowed.map(entry => entry.time);
 
   const clusterAssignment = new Map<number | string, number | string>();
   const clusters = new Map<number | string, EarthquakeEvent[]>();
 
-  // Process by magnitude (largest first)
-  const byMagnitude = [...validEvents].sort((a, b) => b.magnitude - a.magnitude);
+  // Process by magnitude (largest first); equal magnitudes retain time order.
+  const byMagnitude = [...validEntries].sort((a, b) => b.event.magnitude - a.event.magnitude);
 
-  for (const mainshock of byMagnitude) {
+  for (const { event: mainshock, time: mainshockTime } of byMagnitude) {
     if (clusterAssignment.has(mainshock.id)) continue;
     // Reserve heads too, including independent events with no dependents.
     clusterAssignment.set(mainshock.id, mainshock.id);
+    if (!Number.isFinite(mainshockTime)) continue;
 
     const { timeWindowDays, distanceWindowKm } = getGardnerKnopoffWindow(mainshock.magnitude);
-    const mainshockTime = new Date(mainshock.time).getTime();
     const clusterEvents: EarthquakeEvent[] = [mainshock];
 
-    for (const event of validEvents) {
+    // Forward window only; must match lib/seismological-analysis.ts.
+    for (let i = firstIndexAtOrAfter(windowedTimes, mainshockTime); i < windowed.length; i++) {
+      const timeDiffDays = (windowedTimes[i] - mainshockTime) / MS_PER_DAY;
+      if (timeDiffDays > timeWindowDays) break;
+
+      const event = windowed[i].event;
       if (event.id === mainshock.id || clusterAssignment.has(event.id)) continue;
 
-      const eventTime = new Date(event.time).getTime();
-      // Forward window only; must match lib/seismological-analysis.ts.
-      const timeDiffDays = (eventTime - mainshockTime) / (1000 * 60 * 60 * 24);
-      if (timeDiffDays < 0 || timeDiffDays > timeWindowDays) continue;
+      // Exact lower bound on the great-circle distance; boundary cases go on to the haversine.
+      if (Math.abs(event.latitude - mainshock.latitude) * KM_PER_DEGREE_LATITUDE > distanceWindowKm + 1e-6) {
+        continue;
+      }
 
       const distance = haversineDistance(
         mainshock.latitude, mainshock.longitude,
@@ -463,9 +726,9 @@ function gardnerKnopoffDeclustering(events: EarthquakeEvent[]): SeismicCluster[]
     }
 
     // Per-sequence b-value, as lib/seismological-analysis.ts buildClusterInfo does;
-    // withheld (left undefined) whenever the fit does not meet the hard floors.
+    // withheld (left undefined) below the Mc floor or when the fit fails its floors.
     let bValue: number | undefined;
-    if (clusterEvents.length >= 10) {
+    if (clusterEvents.length >= MIN_EVENTS_FOR_MC) {
       const gr = calculateGutenbergRichter(clusterEvents) as { error?: string; bValue?: number };
       if (!gr.error) bValue = gr.bValue;
     }
@@ -511,9 +774,11 @@ function analyzeTemporalPattern(events: EarthquakeEvent[]) {
     return { error: 'No events to analyze' };
   }
 
-  const sortedEvents = [...events].sort((a, b) =>
-    new Date(a.time).getTime() - new Date(b.time).getTime()
-  );
+  // Parse each origin time once rather than per sort comparison.
+  const sortedEvents = events
+    .map(event => ({ event, time: new Date(event.time).getTime() }))
+    .sort((a, b) => a.time - b.time)
+    .map(entry => entry.event);
 
   const startTime = new Date(sortedEvents[0].time).getTime();
   const endTime = new Date(sortedEvents[sortedEvents.length - 1].time).getTime();
@@ -565,9 +830,12 @@ function analyzeTemporalPattern(events: EarthquakeEvent[]) {
  * It is defined for MOMENT magnitude only. ML/Mb/Ms saturate (mb hard above ~6), so
  * treating them as Mw misstates the moment of large events by orders of magnitude.
  *   'exact'    Mw family - used as-is.
- *   'assumed'  ML - used under the ML ~ Mw approximation this codebase already labels
- *              generic; counted so the result can say how much rests on it.
- *   'excluded' mb, Ms, Md, unknown - not summed; counted.
+ *   'assumed'  ML family, GeoNet's bare 'M', and untyped magnitudes - used under the
+ *              ML ~ Mw approximation this codebase already labels generic; counted so
+ *              the result can say how much rests on it.
+ *   'excluded' every other stated scale: mb/mB and Ms (which saturate), Md, and any
+ *              unrecognised type (Me, Mjma, Mc, ...) - no moment relation is applied
+ *              to them here; not summed; counted.
  */
 function momentEligibility(magType: string | null | undefined): 'exact' | 'assumed' | 'excluded' {
   // An UNTYPED magnitude (plain CSV, historical bulletins) is almost always a local
@@ -628,7 +896,7 @@ function calculateSeismicMoment(events: EarthquakeEvent[]) {
     .sort((a, b) => a.magnitude - b.magnitude);
 
   if (usedCount === 0) {
-    return { error: 'No Mw or ML magnitudes to compute seismic moment from (mb/Ms/Md are excluded because they saturate)' };
+    return { error: 'No Mw or ML magnitudes to compute seismic moment from (mb, Ms, Md and other stated scales have no moment relation here and are excluded)' };
   }
 
   return {
@@ -645,14 +913,192 @@ function calculateSeismicMoment(events: EarthquakeEvent[]) {
   };
 }
 
+/**
+ * Seismicity-rate and cumulative-release time series, identical to
+ * analyzeSeismicityTimeSeries in lib/seismological-analysis.ts: events at or above the
+ * cut-off (else the estimated Mc, else every event below the 50-event Mc floor) per UTC
+ * day, ISO week or month ('auto': daily up to a 365-day span, weekly beyond), and the
+ * moment and radiated energy (log10 E = 1.5 M + 4.8) of the moment-eligible events on
+ * the same bins.
+ */
+const RATE_INTERVAL_OPTIONS: readonly RateIntervalOption[] = ['auto', 'day', 'week', 'month'];
+
+function utcDayIndex(ms: number): number {
+  return Math.floor(ms / MS_PER_DAY);
+}
+
+function utcDayString(day: number): string {
+  return new Date(day * MS_PER_DAY).toISOString().split('T')[0];
+}
+
+function utcMonthIndex(day: number): number {
+  const date = new Date(day * MS_PER_DAY);
+  return date.getUTCFullYear() * 12 + date.getUTCMonth();
+}
+
+function monthStartDay(monthIndex: number): number {
+  const date = new Date(0);
+  date.setUTCFullYear(Math.floor(monthIndex / 12), ((monthIndex % 12) + 12) % 12, 1);
+  return Math.round(date.getTime() / MS_PER_DAY);
+}
+
+function calendarBins(interval: RateInterval, firstDay: number, lastDay: number): {
+  starts: number[];
+  lengths: number[];
+  binOf: (day: number) => number;
+} {
+  const starts: number[] = [];
+  const lengths: number[] = [];
+  if (interval === 'day') {
+    for (let day = firstDay; day <= lastDay; day++) { starts.push(day); lengths.push(1); }
+    return { starts, lengths, binOf: day => day - firstDay };
+  }
+  if (interval === 'week') {
+    // Day 0 (1970-01-01) was a Thursday, so (day + 3) mod 7 counts days since Monday.
+    const firstMonday = firstDay - (((firstDay + 3) % 7) + 7) % 7;
+    for (let start = firstMonday; start <= lastDay; start += 7) { starts.push(start); lengths.push(7); }
+    return { starts, lengths, binOf: day => Math.floor((day - firstMonday) / 7) };
+  }
+  const firstMonth = utcMonthIndex(firstDay);
+  const lastMonth = utcMonthIndex(lastDay);
+  for (let month = firstMonth; month <= lastMonth; month++) {
+    const start = monthStartDay(month);
+    starts.push(start);
+    lengths.push(monthStartDay(month + 1) - start);
+  }
+  return { starts, lengths, binOf: day => utcMonthIndex(day) - firstMonth };
+}
+
+function analyzeSeismicityTimeSeries(
+  events: EarthquakeEvent[],
+  options: { interval?: RateIntervalOption; minMagnitude?: number; mcMethod?: McMethod; maxcCorrection?: number; binWidth?: number } = {}
+) {
+  const requestedInterval = options.interval ?? 'auto';
+  if (!RATE_INTERVAL_OPTIONS.includes(requestedInterval)) {
+    return { error: `Unknown rate interval "${String(requestedInterval)}" (expected auto, day, week or month)` };
+  }
+  const mcOptions = resolveMcOptions({ method: options.mcMethod, maxcCorrection: options.maxcCorrection });
+  if (events.length === 0) {
+    return { error: 'No events provided for time-series analysis' };
+  }
+
+  const times = events.map(event => new Date(event.time).getTime());
+  let first = Infinity;
+  let last = -Infinity;
+  let untimedEvents = 0;
+  for (const time of times) {
+    if (!Number.isFinite(time)) { untimedEvents++; continue; }
+    if (time < first) first = time;
+    if (time > last) last = time;
+  }
+  if (untimedEvents === events.length) {
+    return { error: 'No events with a valid origin time for time-series analysis' };
+  }
+  const interval: RateInterval = requestedInterval !== 'auto' ? requestedInterval
+    : Math.max((last - first) / MS_PER_DAY, 1) > 365 ? 'week' : 'day';
+
+  let threshold: number | null = null;
+  let thresholdSource: 'cutoff' | 'mc' | 'none';
+  let mcDetails: Record<string, unknown> = {};
+  let note: string | undefined;
+  if (options.minMagnitude != null) {
+    threshold = options.minMagnitude;
+    thresholdSource = 'cutoff';
+  } else if (events.length >= MIN_EVENTS_FOR_MC) {
+    const completeness = estimateCompleteness(
+      events, options.binWidth ?? 0.1, mcOptions.maxcCorrection, mcOptions.method
+    ) as { mc: number; method: McMethod; requestedMethod: McMethod; maxcCorrection: number; gftLevel?: 95 | 90 | null };
+    threshold = completeness.mc;
+    thresholdSource = 'mc';
+    mcDetails = {
+      mcMethod: completeness.method,
+      requestedMcMethod: completeness.requestedMethod,
+      maxcCorrection: completeness.maxcCorrection,
+      ...(completeness.requestedMethod === 'GFT' && { gftLevel: completeness.gftLevel ?? null }),
+    };
+  } else {
+    thresholdSource = 'none';
+    note = `Mc needs at least ${MIN_EVENTS_FOR_MC} events to estimate and ${events.length} were analysed, so every event is counted`;
+  }
+
+  const firstDay = utcDayIndex(first);
+  const lastDay = utcDayIndex(last);
+  const { starts, lengths, binOf } = calendarBins(interval, firstDay, lastDay);
+  const nBins = starts.length;
+  const counts = new Array<number>(nBins).fill(0);
+  const moments = new Array<number>(nBins).fill(0);
+  const energies = new Array<number>(nBins).fill(0);
+  let eventCount = 0;
+  let usedCount = 0;
+  let assumedMwCount = 0;
+  let excludedCount = 0;
+  events.forEach((event, i) => {
+    if (!Number.isFinite(times[i])) return;
+    const bin = binOf(utcDayIndex(times[i]));
+    if (threshold == null || event.magnitude >= threshold - GRID_TOLERANCE) {
+      counts[bin]++;
+      eventCount++;
+    }
+    const eligibility = momentEligibility(event.magnitude_type);
+    if (eligibility === 'excluded') { excludedCount++; return; }
+    if (eligibility === 'assumed') assumedMwCount++;
+    usedCount++;
+    moments[bin] += Math.pow(10, 1.5 * event.magnitude + 9.1);
+    energies[bin] += Math.pow(10, 1.5 * event.magnitude + 4.8);
+  });
+
+  const rateBins: { date: string; count: number; days: number; coveredDays?: number }[] = [];
+  const releaseBins: { date: string; moment: number; energy: number; cumulativeMoment: number; cumulativeEnergy: number }[] = [];
+  let cumulativeMoment = 0;
+  let cumulativeEnergy = 0;
+  for (let b = 0; b < nBins; b++) {
+    const date = utcDayString(starts[b]);
+    const covered = Math.min(starts[b] + lengths[b] - 1, lastDay) - Math.max(starts[b], firstDay) + 1;
+    rateBins.push({
+      date,
+      count: counts[b],
+      days: lengths[b],
+      ...(covered < lengths[b] && { coveredDays: covered }),
+    });
+    cumulativeMoment += moments[b];
+    cumulativeEnergy += energies[b];
+    releaseBins.push({ date, moment: moments[b], energy: energies[b], cumulativeMoment, cumulativeEnergy });
+  }
+
+  return {
+    interval,
+    requestedInterval,
+    startDate: utcDayString(firstDay),
+    endDate: utcDayString(lastDay),
+    untimedEvents,
+    rate: {
+      threshold,
+      thresholdSource,
+      ...mcDetails,
+      ...(note && { note }),
+      eventCount,
+      bins: rateBins,
+    },
+    release: {
+      bins: releaseBins,
+      totalMoment: cumulativeMoment,
+      totalEnergy: cumulativeEnergy,
+      usedCount,
+      assumedMwCount,
+      excludedCount,
+    },
+  };
+}
+
 // Handle messages from main thread
 self.onmessage = (e: MessageEvent<WorkerMessage>) => {
   const { type, events } = e.data as { type: string; events: EarthquakeEvent[] };
-  const { minMagnitude, binWidth, declusterMethod } = e.data as {
+  const { minMagnitude, binWidth, declusterMethod, mcMethod, maxcCorrection, interval } = e.data as {
     minMagnitude?: number; binWidth?: number; declusterMethod?: string;
+    mcMethod?: McMethod; maxcCorrection?: number; interval?: RateIntervalOption;
   };
 
-  const cacheKey = getCacheKey(type, events, { minMagnitude, binWidth, declusterMethod });
+  const cacheKey = getCacheKey(type, events, { minMagnitude, binWidth, declusterMethod, mcMethod, maxcCorrection, interval });
   const cached = getFromCache(cacheKey);
 
   if (cached) {
@@ -665,17 +1111,16 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
   try {
     switch (type) {
       case 'gutenberg-richter':
-        result = calculateGutenbergRichter(
-          events,
-          (e.data as any).minMagnitude,
-          (e.data as any).binWidth
-        );
+        result = calculateGutenbergRichter(events, minMagnitude, binWidth, { method: mcMethod, maxcCorrection });
         break;
       case 'completeness':
-        result = estimateCompleteness(events, (e.data as any).binWidth);
+        result = estimateCompleteness(events, binWidth, maxcCorrection, mcMethod);
         break;
       case 'temporal':
         result = analyzeTemporalPattern(events);
+        break;
+      case 'time-series':
+        result = analyzeSeismicityTimeSeries(events, { interval, minMagnitude, mcMethod, maxcCorrection, binWidth });
         break;
       case 'moment':
         result = calculateSeismicMoment(events);

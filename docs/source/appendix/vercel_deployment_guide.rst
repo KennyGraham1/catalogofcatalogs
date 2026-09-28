@@ -356,7 +356,7 @@ Vercel auto-detects Next.js. Verify these settings:
    * - **Install Command**
      - ``npm install`` (auto-detected)
    * - **Node.js Version**
-     - 18.x or 20.x
+     - 22.x or 24.x
 
 
 Step 3: Add Environment Variables

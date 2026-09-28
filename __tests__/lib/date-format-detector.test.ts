@@ -93,56 +93,59 @@ describe('date-format-detector', () => {
     });
   });
 
+  // parseDateWithFormat returns the UTC instant (origin times are UTC), so the
+  // calendar fields are read with the UTC getters: the local getters made these
+  // assertions depend on the machine's time zone.
   describe('parseDateWithFormat', () => {
     it('should parse US format correctly', () => {
       const date = parseDateWithFormat('12/11/2024 10:30:00', 'US');
       
       expect(date).not.toBeNull();
-      expect(date?.getMonth()).toBe(11); // December (0-indexed)
-      expect(date?.getDate()).toBe(11);
-      expect(date?.getFullYear()).toBe(2024);
+      expect(date?.getUTCMonth()).toBe(11); // December (0-indexed)
+      expect(date?.getUTCDate()).toBe(11);
+      expect(date?.getUTCFullYear()).toBe(2024);
     });
 
     it('should parse International format correctly', () => {
       const date = parseDateWithFormat('12/11/2024 10:30:00', 'International');
       
       expect(date).not.toBeNull();
-      expect(date?.getMonth()).toBe(10); // November (0-indexed)
-      expect(date?.getDate()).toBe(12);
-      expect(date?.getFullYear()).toBe(2024);
+      expect(date?.getUTCMonth()).toBe(10); // November (0-indexed)
+      expect(date?.getUTCDate()).toBe(12);
+      expect(date?.getUTCFullYear()).toBe(2024);
     });
 
     it('should parse ISO format regardless of specified format', () => {
       const date = parseDateWithFormat('2024-12-11T10:30:00Z', 'US');
       
       expect(date).not.toBeNull();
-      expect(date?.getMonth()).toBe(11); // December (0-indexed)
-      expect(date?.getDate()).toBe(11);
-      expect(date?.getFullYear()).toBe(2024);
+      expect(date?.getUTCMonth()).toBe(11); // December (0-indexed)
+      expect(date?.getUTCDate()).toBe(11);
+      expect(date?.getUTCFullYear()).toBe(2024);
     });
 
     it('should handle dash-separated dates with US format', () => {
       const date = parseDateWithFormat('12-11-2024 10:30:00', 'US');
       
       expect(date).not.toBeNull();
-      expect(date?.getMonth()).toBe(11); // December (0-indexed)
-      expect(date?.getDate()).toBe(11);
+      expect(date?.getUTCMonth()).toBe(11); // December (0-indexed)
+      expect(date?.getUTCDate()).toBe(11);
     });
 
     it('should handle dash-separated dates with International format', () => {
       const date = parseDateWithFormat('12-11-2024 10:30:00', 'International');
       
       expect(date).not.toBeNull();
-      expect(date?.getMonth()).toBe(10); // November (0-indexed)
-      expect(date?.getDate()).toBe(12);
+      expect(date?.getUTCMonth()).toBe(10); // November (0-indexed)
+      expect(date?.getUTCDate()).toBe(12);
     });
 
     it('should handle date-only strings (no time)', () => {
       const date = parseDateWithFormat('12/11/2024', 'US');
       
       expect(date).not.toBeNull();
-      expect(date?.getMonth()).toBe(11); // December
-      expect(date?.getDate()).toBe(11);
+      expect(date?.getUTCMonth()).toBe(11); // December
+      expect(date?.getUTCDate()).toBe(11);
     });
 
     it('should return null for invalid dates', () => {

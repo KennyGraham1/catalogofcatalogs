@@ -12,6 +12,8 @@ import { useEventMapPopup } from '@/hooks/use-event-map-popup';
 import L from 'leaflet';
 import { MapContainer, GeoJSON, FeatureGroup, Popup, useMap } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
+import { DepthLegendItems, MagnitudeLegendItems, QualityLegendItems } from '@/components/map/MapLegend';
+import { formatOriginTime } from '@/components/map/OptimizedEventPopup';
 import { EditControl } from 'react-leaflet-draw';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -282,6 +284,7 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
       {/* Legend */}
       <LegendPanel
         colorMode={colorMode}
+        isDark={mapColors.isDark}
         showFaults={showActiveFaults}
         faultCount={faultData?.features.length}
       />
@@ -289,8 +292,8 @@ export const MapView = memo(function MapView({ catalogueId, events: propEvents, 
   );
 });
 
-// Legend panel component (memoized)
-const LegendPanel = memo(function LegendPanel({ colorMode, showFaults, faultCount }: { colorMode: string; showFaults: boolean; faultCount?: number }) {
+// Legend panel component (memoized; swatches come from the functions that draw the markers)
+const LegendPanel = memo(function LegendPanel({ colorMode, isDark, showFaults, faultCount }: { colorMode: string; isDark: boolean; showFaults: boolean; faultCount?: number }) {
   return (
     <Card className="absolute bottom-4 right-4 z-[1000] max-w-[240px] border-border/60 bg-background/90 px-3 py-2.5 text-[11px] leading-tight backdrop-blur-sm shadow-lg">
       <div className="flex items-center justify-between gap-2">
@@ -307,70 +310,11 @@ const LegendPanel = memo(function LegendPanel({ colorMode, showFaults, faultCoun
       </div>
 
       {colorMode === 'quality' ? (
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#22c55e' }}></div>
-            <span>A+ / A (90-100)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#84cc16' }}></div>
-            <span>B (80-89)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#eab308' }}></div>
-            <span>C (70-79)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#f97316' }}></div>
-            <span>D (60-69)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#ef4444' }}></div>
-            <span>F (&lt; 60)</span>
-          </div>
-        </div>
+        <QualityLegendItems />
       ) : colorMode === 'depth' ? (
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#00CED1' }}></div>
-            <span>&lt; 15 km (Shallow)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#20B2AA' }}></div>
-            <span>15 - 40 km</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#008B8B' }}></div>
-            <span>40 - 100 km</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#006666' }}></div>
-            <span>100 - 200 km (Deep)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10 dark:ring-white/10" style={{ backgroundColor: '#004D4D' }}></div>
-            <span>≥ 200 km (V. Deep)</span>
-          </div>
-        </div>
+        <DepthLegendItems isDark={isDark} />
       ) : (
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-          <div className="flex items-center gap-1.5">
-            <div className="h-2 w-2 rounded-full bg-blue-500 flex-shrink-0"></div>
-            <span>M2</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-3 w-3 rounded-full bg-blue-500 flex-shrink-0"></div>
-            <span>M4</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-4 w-4 rounded-full bg-blue-500 flex-shrink-0"></div>
-            <span>M6</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-5 w-5 rounded-full bg-blue-500 flex-shrink-0"></div>
-            <span>M7+</span>
-          </div>
-        </div>
+        <MagnitudeLegendItems getColor={getMagnitudeColor} />
       )}
 
       {showFaults && (
@@ -407,18 +351,6 @@ const EventPopupWithFaults = memo(function EventPopupWithFaults({ event, quality
     enabled: true,
   });
 
-
-  // Table 2 thresholds (see lib/quality-scoring.ts scoreToGrade)
-  const getQualityGrade = (score: number): string => {
-    if (score >= 95) return 'A+';
-    if (score >= 85) return 'A';
-    if (score >= 75) return 'B+';
-    if (score >= 65) return 'B';
-    if (score >= 45) return 'C';
-    if (score >= 35) return 'D';
-    return 'F';
-  };
-
   return (
     <div className="p-3 min-w-[280px] max-w-[320px]">
       <div className="flex items-center justify-between mb-3">
@@ -446,15 +378,8 @@ const EventPopupWithFaults = memo(function EventPopupWithFaults({ event, quality
         <div className="flex items-center gap-2 text-sm">
           <Calendar className="h-4 w-4 text-primary" />
           <div className="flex items-center gap-1.5">
-            <span className="text-xs">{new Date(event.time).toLocaleString('en-GB', {
-              day: '2-digit',
-              month: '2-digit',
-              year: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-            })}</span>
-            <InfoTooltip content="Event origin time in local timezone." />
+            <span className="text-xs">{formatOriginTime(event.time)}</span>
+            <InfoTooltip content="Event origin time in UTC, the reference frame catalogues report origin times in." />
           </div>
         </div>
         <div className="flex items-center gap-2 text-sm">
@@ -480,7 +405,7 @@ const EventPopupWithFaults = memo(function EventPopupWithFaults({ event, quality
                   borderColor: getQualityColor(quality.score.overall)
                 }}
               >
-                {getQualityGrade(quality.score.overall)} ({quality.score.overall.toFixed(0)})
+                {quality.score.grade} ({quality.score.overall.toFixed(0)})
               </Badge>
             </div>
           </div>

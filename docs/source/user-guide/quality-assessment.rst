@@ -73,9 +73,9 @@ Grade Definitions
      - 0-34
      - Very poor quality, unreliable parameters
 
------------------
+------------------
 Quality Components
------------------
+------------------
 
 The overall quality score is calculated from four weighted components:
 
@@ -225,9 +225,9 @@ Apply custom thresholds:
    Min Phase Count: 15
    Max RMS: 0.5 s
 
------------------
+---------------------
 Quality Visualization
------------------
+---------------------
 
 Quality Score Distribution
 ==========================
@@ -243,10 +243,11 @@ Quality on Map
 
 Events color-coded by quality:
 
-* Green: A+, A (excellent/very good)
-* Yellow: B+, B (good)
-* Orange: C (fair)
-* Red: D, F (poor/very poor)
+* Green (``#22c55e``): A+, A (score >= 85) - excellent/very good
+* Lime (``#84cc16``): B+ (score 75-84) - good
+* Yellow (``#eab308``): B (score 65-74) - good
+* Orange (``#f97316``): C (score 45-64) - fair
+* Red (``#ef4444``): D, F (score < 45) - poor/very poor
 
 Quality Trends
 ==============
@@ -293,9 +294,9 @@ Use quality-aware merging:
 2. Use "Most Complete" strategy
 3. Filter low-quality events before merging
 
------------------
+-------------------------
 Quality Metrics Reference
------------------
+-------------------------
 
 Azimuthal Gap
 =============

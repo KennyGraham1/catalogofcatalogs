@@ -27,19 +27,50 @@ export interface QualityMetrics {
 }
 
 /**
+ * Accepted [min, max, integer] range of every optional numeric column Q reads. This
+ * mirrors EVENT_OPTIONAL_RANGES in lib/db.ts, which is not imported because that module
+ * brings the MongoDB driver into the client bundles that score events; a test keeps the
+ * two tables in step.
+ */
+export const QUALITY_INPUT_RANGES = {
+  time_uncertainty: [0, 86400, false],
+  latitude_uncertainty: [0, 10, false],
+  longitude_uncertainty: [0, 10, false],
+  depth_uncertainty: [0, 100, false],
+  horizontal_uncertainty: [0, 100, false],
+  max_horizontal_uncertainty: [0, 100, false],
+  magnitude_uncertainty: [0, 5, false],
+  magnitude_station_count: [0, 5000, true],
+  azimuthal_gap: [0, 360, false],
+  used_station_count: [0, 5000, true],
+  used_phase_count: [0, 10000, true],
+  standard_error: [0, 100, false],
+} as const;
+
+/**
  * Build QualityMetrics (camelCase) from a raw snake_case DB event row.
+ *
+ * A value outside its QUALITY_INPUT_RANGES range is scored as absent. Such a value is
+ * usually a -999 / -1 missing-value sentinel kept by the CSV parser. Catalogue creation
+ * drops the same values before storage, so the upload preview and the stored event get
+ * the same Q. Scoring the sentinel instead turned a negative uncertainty into bonus
+ * points (an 'A+ 334/100' preview).
  */
 export function metricsFromEvent(event: unknown): QualityMetrics {
   if (!event || typeof event !== 'object') return {};
   const ev = event as Record<string, unknown>;
   const num = (v: unknown): number | null =>
     typeof v === 'number' && Number.isFinite(v) ? v : null;
-  const latUnc = num(ev.latitude_uncertainty);
-  const lonUnc = num(ev.longitude_uncertainty);
+  const field = (name: keyof typeof QUALITY_INPUT_RANGES): number | null => {
+    const v = num(ev[name]);
+    const [min, max, integer] = QUALITY_INPUT_RANGES[name];
+    return v !== null && v >= min && v <= max && (!integer || Number.isInteger(v)) ? v : null;
+  };
+  const latUnc = field('latitude_uncertainty');
+  const lonUnc = field('longitude_uncertainty');
   // km, in the same order as the uncertainty card: the error-ellipse semi-major axis,
   // else the circular column, else the marginals.
-  const majorAxis = num(ev.max_horizontal_uncertainty);
-  let horizontalUncertainty = (majorAxis !== null && majorAxis >= 0 ? majorAxis : null) ?? num(ev.horizontal_uncertainty);
+  let horizontalUncertainty = field('max_horizontal_uncertainty') ?? field('horizontal_uncertainty');
   if (horizontalUncertainty == null && latUnc != null && lonUnc != null) {
     const lat = num(ev.latitude) ?? 0;
     const latKm = latUnc * 111;
@@ -48,17 +79,31 @@ export function metricsFromEvent(event: unknown): QualityMetrics {
   }
   return {
     horizontalUncertainty,
-    depthUncertainty: num(ev.depth_uncertainty),
-    timeUncertainty: num(ev.time_uncertainty),
-    azimuthalGap: num(ev.azimuthal_gap),
-    usedStationCount: num(ev.used_station_count),
-    usedPhaseCount: num(ev.used_phase_count),
-    standardError: num(ev.standard_error),
-    magnitudeUncertainty: num(ev.magnitude_uncertainty),
-    magnitudeStationCount: num(ev.magnitude_station_count),
+    depthUncertainty: field('depth_uncertainty'),
+    timeUncertainty: field('time_uncertainty'),
+    azimuthalGap: field('azimuthal_gap'),
+    usedStationCount: field('used_station_count'),
+    usedPhaseCount: field('used_phase_count'),
+    standardError: field('standard_error'),
+    magnitudeUncertainty: field('magnitude_uncertainty'),
+    magnitudeStationCount: field('magnitude_station_count'),
     evaluationMode: (ev.evaluation_mode as string) ?? null,
     evaluationStatus: (ev.evaluation_status as string) ?? null,
   };
+}
+
+/**
+ * A reported value a term can score: finite and not negative. QuakeML uncertainties,
+ * counts, gaps and RMS are all non-negative, so anything else takes the term's no-data
+ * branch rather than subtracting a negative penalty (which added points).
+ */
+function isReported(value: number | null | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+/** Every dimension score, and Q itself, lies in [0, 100] (paper Eq. 1). */
+function clampScore(score: number): number {
+  return Math.max(0, Math.min(100, score));
 }
 
 export type QualityGrade = 'A+' | 'A' | 'B+' | 'B' | 'C' | 'D' | 'F';
@@ -133,7 +178,7 @@ export function scoreQualityMetrics(
   ];
   let weighted = 0, total = 0;
   for (const [score, weight] of parts) { weighted += score * weight; total += weight; }
-  const overall = Math.round(weighted / total);
+  const overall = Math.round(clampScore(weighted / total));
   return { overall, grade: scoreToGrade(overall) };
 }
 
@@ -165,7 +210,8 @@ export function calculateQualityScore(
   // The reported score is the rounded value, so the grade must be read from the
   // SAME number: 84.74 used to come back as 85 with grade B+, while every consumer
   // maps 85 to A.
-  const reported = Math.round(overall);
+  // Clamped as well, so a custom weighting cannot take Q outside [0, 100].
+  const reported = Math.round(clampScore(overall));
   const grade = scoreToGrade(reported);
 
   // Generate details
@@ -194,7 +240,7 @@ function calculateLocationScore(metrics: QualityMetrics): { score: number; weigh
   
   // Horizontal uncertainty (max -40 points)
   const horizUncertainty = metrics.horizontalUncertainty;
-  if (typeof horizUncertainty === 'number' && Number.isFinite(horizUncertainty) && horizUncertainty >= 0) {
+  if (isReported(horizUncertainty)) {
     // Input is in km (QualityMetrics.horizontalUncertainty; resolved by metricsFromEvent
     // from the horizontal_uncertainty km column, else from the lat/lon degree pair).
     // Excellent: < 1 km, Poor: >= 10 km. Linear penalty reaching the -40 cap at 10 km
@@ -206,7 +252,7 @@ function calculateLocationScore(metrics: QualityMetrics): { score: number; weigh
   }
   
   // Depth uncertainty (max -30 points)
-  if (metrics.depthUncertainty !== null && metrics.depthUncertainty !== undefined) {
+  if (isReported(metrics.depthUncertainty)) {
     // Input is in km (DB convention, lib/db.ts:104). Excellent: < 1km, Poor: >= 10km.
     score -= Math.min(30, metrics.depthUncertainty * 3);
   } else {
@@ -214,14 +260,14 @@ function calculateLocationScore(metrics: QualityMetrics): { score: number; weigh
   }
   
   // Time uncertainty (max -30 points)
-  if (metrics.timeUncertainty !== null && metrics.timeUncertainty !== undefined) {
+  if (isReported(metrics.timeUncertainty)) {
     // Input is in seconds (QuakeML BED time.uncertainty). Excellent: < 0.1s, Poor: >= 1s.
     score -= Math.min(30, metrics.timeUncertainty * 30);
   } else {
     score -= 30; // No data penalty = the >= 1 s cap
   }
   
-  return { score: Math.max(0, score), weight };
+  return { score: clampScore(score), weight };
 }
 
 /**
@@ -232,7 +278,7 @@ function calculateNetworkScore(metrics: QualityMetrics): { score: number; weight
   const weight = 0.25; // 25% of total score
   
   // Azimuthal gap (max -50 points)
-  if (metrics.azimuthalGap !== null && metrics.azimuthalGap !== undefined) {
+  if (isReported(metrics.azimuthalGap)) {
     // Excellent: < 90°, Good: < 180°, Poor: > 270°
     if (metrics.azimuthalGap < 90) {
       score -= 0; // Excellent
@@ -246,7 +292,7 @@ function calculateNetworkScore(metrics: QualityMetrics): { score: number; weight
   }
   
   // Station count (max -30 points)
-  if (metrics.usedStationCount !== null && metrics.usedStationCount !== undefined) {
+  if (isReported(metrics.usedStationCount)) {
     // Excellent: >= 20, Good: >= 10, Poor: < 5
     if (metrics.usedStationCount >= 20) {
       score -= 0;
@@ -262,7 +308,7 @@ function calculateNetworkScore(metrics: QualityMetrics): { score: number; weight
   }
   
   // Phase count (max -20 points)
-  if (metrics.usedPhaseCount !== null && metrics.usedPhaseCount !== undefined) {
+  if (isReported(metrics.usedPhaseCount)) {
     // Excellent: >= 30, Good: >= 15, Poor: < 8
     if (metrics.usedPhaseCount >= 30) {
       score -= 0;
@@ -277,7 +323,7 @@ function calculateNetworkScore(metrics: QualityMetrics): { score: number; weight
     score -= 20; // No data penalty = the <= 1-phase floor
   }
   
-  return { score: Math.max(0, score), weight };
+  return { score: clampScore(score), weight };
 }
 
 /**
@@ -288,7 +334,7 @@ function calculateSolutionScore(metrics: QualityMetrics): { score: number; weigh
   const weight = 0.15; // 15% of total score
   
   // Standard error / RMS (max -100 points)
-  if (metrics.standardError !== null && metrics.standardError !== undefined) {
+  if (isReported(metrics.standardError)) {
     // Excellent: < 0.3s, Good: < 0.5s, Poor: > 1.0s
     if (metrics.standardError < 0.3) {
       score -= 0;
@@ -303,7 +349,7 @@ function calculateSolutionScore(metrics: QualityMetrics): { score: number; weigh
     score -= 100; // No data penalty = the >= 2 s cap (RMS is the only term in this dimension)
   }
   
-  return { score: Math.max(0, score), weight };
+  return { score: clampScore(score), weight };
 }
 
 /**
@@ -314,7 +360,7 @@ function calculateMagnitudeScore(metrics: QualityMetrics): { score: number; weig
   const weight = 0.15; // 15% of total score
   
   // Magnitude uncertainty (max -60 points)
-  if (metrics.magnitudeUncertainty !== null && metrics.magnitudeUncertainty !== undefined) {
+  if (isReported(metrics.magnitudeUncertainty)) {
     // Excellent: < 0.1, Good: < 0.2, Poor: >= 0.5 (magnitude units)
     score -= Math.min(60, metrics.magnitudeUncertainty * 120);
   } else {
@@ -322,7 +368,7 @@ function calculateMagnitudeScore(metrics: QualityMetrics): { score: number; weig
   }
   
   // Magnitude station count (max -40 points)
-  if (metrics.magnitudeStationCount !== null && metrics.magnitudeStationCount !== undefined) {
+  if (isReported(metrics.magnitudeStationCount)) {
     // Excellent: >= 10, Good: >= 5, Poor: < 3
     if (metrics.magnitudeStationCount >= 10) {
       score -= 0;
@@ -339,7 +385,7 @@ function calculateMagnitudeScore(metrics: QualityMetrics): { score: number; weig
     score -= 40; // No data penalty = the 0-station floor
   }
   
-  return { score: Math.max(0, score), weight };
+  return { score: clampScore(score), weight };
 }
 
 /**
@@ -384,7 +430,7 @@ function calculateEvaluationScore(metrics: QualityMetrics): { score: number; wei
     score -= 30; // No data penalty = the worst graded status ('preliminary')
   }
   
-  return { score: Math.max(0, Math.min(100, score)), weight };
+  return { score: clampScore(score), weight };
 }
 
 /**

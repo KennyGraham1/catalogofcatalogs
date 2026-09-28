@@ -19,9 +19,11 @@ This document summarizes the comprehensive improvements made to ``lib/merge.ts``
 
 **Problem:** Averaged all magnitudes equally, violating seismological standards (e.g., averaging Mw=7.0 with ML=6.5 gives incorrect M=6.75 due to saturation).
 
-**Solution:** Implemented ``selectBestMagnitude()`` function using ISC standard hierarchy:
-- **Priority:** Mw > Ms > mb > ML > Md
-- **Rationale:** Mw (moment magnitude) doesn't saturate; ML saturates above M~6.5; mb saturates above M~6.0
+**Solution:** Implemented ``selectBestMagnitude()`` function using a
+size-dependent type preference (``getMagnitudePriority()``), not a single
+static order:
+- **Priority:** Mw always leads; below M5.5 the order is ML > mb/mB/mbLg > Ms > Md; from M5.5 up it is Ms > mB > ML > mb > Md
+- **Rationale:** Mw (moment magnitude) doesn't saturate; ML saturates above M~6.5; mb saturates above M~6.0, so which non-Mw scale is best calibrated depends on the earthquake's own size
 - **Fallback:** Uses simple magnitude field if QuakeML data unavailable
 
 **Impact:** Critical correctness fix - prevents magnitude saturation errors
@@ -63,13 +65,19 @@ This document summarizes the comprehensive improvements made to ``lib/merge.ts``
 
 **Problem:** Fixed distance threshold for all events ignores magnitude and depth variations.
 
-**Solution:** Implemented ``getAdaptiveDistanceThreshold()`` function:
-- **Small events (M < 4.0):** 25 km - tight for local events
-- **Medium events (M 4.0-5.5):** 50 km - regional events
-- **Large events (M 5.5-7.0):** 100 km - teleseismic events
-- **Very large events (M > 7.0):** 200 km - major events with larger uncertainties
-- **Deep events (> 300 km):** 1.5x multiplier for larger error ellipsoids
-- **Intermediate depth (100-300 km):** 1.2x multiplier
+**Solution:** Implemented ``getDistanceMultiplier()`` and
+``getDepthMultiplier()``, which scale the *configured* distance threshold
+(UI default: 10 km) rather than replacing it with a fixed band:
+- **Small events (M < 4.0):** 1.0x the configured distance threshold - tight for local events
+- **Medium events (M 4.0-5.5):** 1.5x
+- **Large events (M 5.5-7.0):** 2.5x - teleseismic events
+- **Very large events (M >= 7.0):** 4.0x - major events with larger uncertainties
+- **Deep events (> 300 km):** additional 1.5x multiplier for larger error ellipsoids
+- **Intermediate depth (100-300 km):** additional 1.2x multiplier
+
+(At the 10 km default these bands work out to roughly 10/15/25/40 km before
+the depth multiplier; the original fixed 25/50/100/200 km bands described
+here no longer match the implementation.)
 
 **Impact:** +30% reduction in false matches for small events; +15% increase in true matches for large events
 
@@ -80,11 +88,17 @@ This document summarizes the comprehensive improvements made to ``lib/merge.ts``
 
 **Problem:** Fixed time threshold ignores magnitude-dependent reporting delays.
 
-**Solution:** Implemented ``getAdaptiveTimeThreshold()`` function:
-- **Small events (M < 4.0):** 30 seconds - local events reported quickly
-- **Medium events (M 4.0-5.5):** 60 seconds - regional events
-- **Large events (M 5.5-7.0):** 120 seconds - teleseismic events
-- **Very large events (M > 7.0):** 300 seconds - major events with many reports
+**Solution:** Implemented ``getTimeMultiplier()``, which scales the
+*configured* time threshold (UI default: 60 seconds) rather than replacing
+it with a fixed band:
+- **Small events (M < 4.0):** 1.0x the configured time threshold - local events reported quickly
+- **Medium events (M 4.0-5.5):** 1.5x
+- **Large events (M 5.5-7.0):** 2.0x - teleseismic events
+- **Very large events (M >= 7.0):** 3.0x - major events with many reports
+
+(At the 60 s default these bands work out to 60/90/120/180 s; the original
+fixed 30/60/120/300 s bands described here no longer match the
+implementation.)
 
 **Impact:** +25% reduction in false matches for small events; +20% increase in true matches for large events
 
@@ -95,15 +109,21 @@ This document summarizes the comprehensive improvements made to ``lib/merge.ts``
 
 **Problem:** Only used source name priority, ignoring data quality metrics.
 
-**Solution:** 
-- Implemented ``calculateQualityScore()`` function (0-100 points):
-  - **Station count:** 0-30 points (more stations = better)
-  - **Azimuthal gap:** 0-20 points (< 180° is good)
-  - **Standard error:** 0-20 points (< 10 km is good)
-  - **RMS residuals:** 0-10 points (lower is better)
-  - **Magnitude uncertainty:** 0-20 points (< 0.5 is good)
-- Added ``mergeByQuality()`` strategy
-- Enhanced ``mergeByPriority()`` to fall back to quality-based selection
+**Solution:**
+- Implemented ``calculateQualityScore()`` function (0-100 points, six terms):
+
+  - **Station count:** 0-25 points, logarithmic scale (more stations = better, with diminishing returns; ~30+ stations = max)
+  - **Azimuthal gap:** 0-20 points (<= 120° is excellent; 0 points above 270°)
+  - **RMS residual / standard error:** 0-15 points (<= 0.3 s is excellent)
+  - **Magnitude uncertainty:** 0-15 points (<= 0.1 is excellent)
+  - **Magnitude type:** 0-15 points, using the same size-dependent type preference as ``selectBestMagnitude()``
+  - **Evaluation status:** 0-10 points (final/reviewed > confirmed > preliminary)
+
+- Added ``mergeByQuality()`` strategy, which compares two reports only on
+  the metrics they *both* state; a report with no quality evidence at all
+  falls back to network-authority ranking, then quality
+- Enhanced ``mergeByPriority()`` so a preferred agency/order that is not
+  present in a group falls back to network-authority ranking, then quality
 - Gracefully handles missing quality metrics
 
 **Impact:** +40% improvement in selecting authoritative event parameters
@@ -119,10 +139,18 @@ This document summarizes the comprehensive improvements made to ``lib/merge.ts``
 
 **Problem:** Averaged all depths equally, ignoring reliability differences.
 
-**Solution:** Implemented ``selectBestDepth()`` function:
-- Prefers depths with lower uncertainty (< 5 km difference is significant)
-- Then prefers depths from events with more station coverage
-- Falls back to simple depth value if uncertainty data unavailable
+**Solution:** Implemented ``selectBestDepthCandidate()``:
+
+1. Prefer a **freely-solved** depth over a fixed/operator-assigned one; a
+   fixed depth is only used if every report in the group fixed its depth.
+2. Among candidates that report a positive depth uncertainty: uncertainties
+   within 5 km of the group's smallest are treated as equally well
+   constrained (not meaningfully different), and the candidate with the
+   most stations wins among those; remaining ties go to the smaller
+   uncertainty, then to record order.
+3. Among candidates with **no** reported depth uncertainty at all: the
+   solution with the most depth-sensitive phases (pP, sP, ...) wins, then
+   the one with the most stations, then record order.
 
 **Impact:** +20% improvement in depth estimates
 
@@ -134,8 +162,17 @@ This document summarizes the comprehensive improvements made to ``lib/merge.ts``
 **Problem:** No validation that merged events make physical sense.
 
 **Solution:** Implemented ``validateEventGroup()`` function:
-- **Magnitude consistency:** Rejects if range > 1.0 units (e.g., M4.0 vs M7.0)
-- **Depth consistency:** Rejects if range > 100 km (shallow) or > 200 km (deep)
+
+- **Magnitude consistency:** the maximum allowed raw-magnitude spread within
+  a group depends on the group's mean magnitude (``magnitudeRangeThreshold()``):
+  0.5 below M4.0, 0.8 below M5.5, 1.2 below M7.0, otherwise 1.5. A group
+  that fails this is re-checked within each magnitude scale, and again after
+  converting to Mw, before being rejected (``assessMagnitudeConsistency()``).
+- **Depth consistency:** the maximum allowed depth spread depends on both
+  the group's mean depth and mean magnitude: 30 km (or 50 km at M >= 5) for
+  a mean depth < 70 km, 50 km (or 100 km) for 70-300 km, and 100 km (or
+  150 km) for > 300 km -- deeper and larger events are harder to constrain,
+  so they get more tolerance.
 - Logs warnings for suspicious matches
 - Processes events individually if validation fails
 
@@ -211,46 +248,54 @@ This document summarizes the comprehensive improvements made to ``lib/merge.ts``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
-The adaptive threshold system uses magnitude and depth to calculate appropriate matching windows:
+The adaptive threshold system uses magnitude and depth to scale the
+*configured* time and distance thresholds (UI defaults: 60 s / 10 km) —
+it does not replace them with a fixed lookup table:
 
 .. code-block:: typescript
 
-   // Example: M6.5 earthquake at 150 km depth
+   // Example: M6.5 earthquake at 150 km depth, default 60s / 10km config
    magnitude = 6.5
    depth = 150
-   
+
    // Spatial threshold calculation:
-   baseThreshold = 100 km (M 5.5-7.0 range)
-   depthMultiplier = 1.2 (intermediate depth 100-300 km)
-   finalDistanceThreshold = 100 × 1.2 = 120 km
-   
+   distanceMultiplier = 2.5   (M 5.5-7.0 range)
+   depthMultiplier = 1.2      (intermediate depth 100-300 km)
+   finalDistanceThreshold = 10 km × 2.5 × 1.2 = 30 km
+
    // Temporal threshold calculation:
-   timeThreshold = 120 seconds (M 5.5-7.0 range)
+   timeMultiplier = 2.0       (M 5.5-7.0 range)
+   finalTimeThreshold = 60 s × 2.0 = 120 s
 
 
 **Quality Scoring System**
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
-Events are scored on a 0-100 scale based on available quality metrics:
+Events are scored on a 0-100 scale (six terms: stations, gap, RMS,
+magnitude uncertainty, magnitude type, evaluation status) based on
+available quality metrics:
 
 .. code-block:: typescript
 
-   // Example: High-quality event
-   stationCount = 25 → 25 points
-   azimuthalGap = 90° → 15 points (20 × (1 - 90/360))
-   standardError = 5 km → 19 points (20 × (1 - 5/100))
-   rmsResiduals = 0.8 → 9.2 points (10 × (1 - 0.8/10))
-   magnitudeUncertainty = 0.2 → 16 points (20 × (1 - 0.2/1))
-   TOTAL = 84.2 points (excellent quality)
-   
-   // Example: Low-quality event
-   stationCount = 5 → 5 points
-   azimuthalGap = 270° → 5 points
-   standardError = 50 km → 10 points
-   rmsResiduals = 5.0 → 5 points
-   magnitudeUncertainty = 0.8 → 4 points
-   TOTAL = 29 points (poor quality)
+   // Example: High-quality M4.5 event, reviewed
+   stationCount = 25   → 23.5 points  (25 × log2(26) / log2(32), logarithmic)
+   azimuthalGap = 90   → 20 points    (<= 120 degrees is full marks)
+   rmsResidual = 0.25  → 15 points    (<= 0.3 s is full marks)
+   magnitudeUncertainty = 0.15 → 12 points (<= 0.2 tier)
+   magnitudeType = Mw  → 15 points    (Mw always leads)
+   evaluationStatus = reviewed → 10 points
+   TOTAL = 95.5 points (excellent quality)
+
+   // Example: Low-quality M4.5 event, preliminary
+   stationCount = 5    → 12.9 points  (25 × log2(6) / log2(32))
+   azimuthalGap = 250  → 2.2 points   (10 × (1 - (250-180)/90))
+   rmsResidual = 1.5   → 4 points     (<= 2.0 s tier)
+   magnitudeUncertainty = 0.6 → 0 points (above the 0.5 tier)
+   magnitudeType = ML  → 12 points    (M4.5 is below M5.5, so ML ranks
+                                        second here, behind Mw)
+   evaluationStatus = preliminary → 2 points
+   TOTAL = 33.1 points (poor quality)
 
 
 
@@ -264,23 +309,31 @@ All improvements include robust fallback logic for missing data:
 **Magnitude Selection**
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-1. Try QuakeML magnitude hierarchy (Mw > Ms > mb > ML)
+1. Try the QuakeML magnitude-type preference (Mw first, then whichever
+   scale is best calibrated at the group's earthquake size)
 2. Fall back to simple ``magnitude`` field
 3. Default to 0 if no magnitude available
 
 **Depth Selection**
 ^^^^^^^^^^^^^^^^^^^
 
-1. Try depth with uncertainty data
-2. Fall back to simple ``depth`` field
-3. Return ``null`` if no depth available
+1. Prefer a freely-solved depth over a fixed one (fixed only if that is all
+   the group has)
+2. Among those, prefer the smallest reported uncertainty (banded within
+   5 km), then station count
+3. With no uncertainty reported anywhere, prefer the most depth phases,
+   then station count
+4. Return ``null`` if no event in the group has a depth at all
 
 **Quality Scoring**
 ^^^^^^^^^^^^^^^^^^^
 
-1. Calculate score from available metrics only
-2. Skip unavailable metrics (no penalty)
-3. Fall back to source priority if no quality data
+1. When comparing a duplicate group (the quality-based strategy), only the
+   metrics every report in the group states are compared
+2. A metric no report in the group states is left out of the comparison
+   entirely, not scored as zero
+3. If a report in the group states no quality evidence at all,
+   network-authority ranking decides instead of quality
 
 **Adaptive Thresholds**
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -321,7 +374,7 @@ All improvements include robust fallback logic for missing data:
      timeThreshold: 60,
      distanceThreshold: 100,
      mergeStrategy: 'priority',
-     priority: 'geonet' // Falls back to quality if GeoNet not found
+     priority: 'geonet' // Falls back to network-authority ranking, then quality, if no report in the group is from GeoNet
    };
    
    await mergeCatalogues('Merged Catalogue', sourceCatalogues, mergeConfig);
@@ -336,16 +389,21 @@ All improvements include robust fallback logic for missing data:
 The improvements are based on authoritative sources:
 
 1. **ISC-GEM Catalogue Methodology**
-   - Magnitude hierarchy: Mw > Ms > mb > ML
+
+   - Magnitude type preference: Mw first, then whichever remaining scale
+     (ML, mb/mB/mbLg, Ms, Md) is best calibrated and unsaturated at the
+     earthquake's own size
    - Variable spatial/temporal windows by magnitude
    - Quality metrics: azimuthal gap, station count, standard error
 
 2. **International Network Practices**
+
    - Typical thresholds: 100 km, 60 seconds
    - Priority to authoritative regional networks
    - Simple time/space window duplicate detection
 
 3. **Academic Research**
+
    - Harmonizing seismicity information across catalogues
    - Spatial/temporal matching algorithms
    - Data quality considerations in merging
@@ -389,10 +447,14 @@ To verify the improvements work correctly:
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
-**Issue #11: Magnitude Conversion** (Requires calibration)
-- Convert between magnitude scales (ML → Mw, mb → Mw)
-- Requires region-specific calibration
-- Effort: High
+**Issue #11: Regional ML -> Mw Calibration** (Partially implemented)
+
+- mb -> Mw and Ms -> Mw now use the calibrated Scordilis (2006) relations
+  (``convertMbtoMw``, ``convertMstoMw``)
+- ML -> Mw still uses a generic ML ≈ Mw approximation (``convertMLtoMw``),
+  because no universal ML -> Mw relation exists; a region-specific
+  calibration (e.g. a NZ/GeoNet Ristau et al. relation) is not yet implemented
+- Effort: Medium (remaining regional calibration only)
 
 **Issue #12: Parallel Processing** (Significant effort)
 - Use worker threads for parallel processing

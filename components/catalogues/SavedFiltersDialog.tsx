@@ -44,6 +44,26 @@ interface SavedFiltersDialogProps {
   readOnly?: boolean;
 }
 
+/**
+ * Turn a failed /api/saved-filters response into a message a user can act on. 404 (filter
+ * already gone - deleted elsewhere, or a stale link) and 401/403 (not logged in / not the
+ * owner) are common enough here that the generic "Failed to ..." toast was actively
+ * misleading: it read like a network error the user should retry, not "someone already
+ * deleted this" or "log in first".
+ */
+async function describeSavedFilterError(response: Response, fallback: string): Promise<string> {
+  if (response.status === 404) return 'That saved filter no longer exists. It may already have been deleted.';
+  if (response.status === 401) return 'Log in to manage saved filters.';
+  if (response.status === 403) return "You don't have permission to manage this saved filter.";
+  try {
+    const body = await response.json();
+    if (body?.error) return body.error;
+  } catch {
+    // Response wasn't JSON - fall through to the generic message.
+  }
+  return fallback;
+}
+
 export function SavedFiltersDialog({ currentFilters, onLoadFilter, readOnly = false }: SavedFiltersDialogProps) {
   const [open, setOpen] = useState(false);
   const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([]);
@@ -67,8 +87,10 @@ export function SavedFiltersDialog({ currentFilters, onLoadFilter, readOnly = fa
     setLoading(true);
     try {
       const response = await fetch('/api/saved-filters');
-      if (!response.ok) throw new Error('Failed to fetch saved filters');
-      
+      if (!response.ok) {
+        throw new Error(await describeSavedFilterError(response, 'Failed to fetch saved filters'));
+      }
+
       const data = await response.json();
       // Parse filter_config for each filter
       const parsedData = data.map((filter: SavedFilter) => ({
@@ -80,7 +102,7 @@ export function SavedFiltersDialog({ currentFilters, onLoadFilter, readOnly = fa
       console.error('Error fetching saved filters:', error);
       toast({
         title: 'Error',
-        description: 'Failed to load saved filters',
+        description: error instanceof Error ? error.message : 'Failed to load saved filters',
         variant: 'destructive',
       });
     } finally {
@@ -117,7 +139,9 @@ export function SavedFiltersDialog({ currentFilters, onLoadFilter, readOnly = fa
         }),
       });
 
-      if (!response.ok) throw new Error('Failed to save filter');
+      if (!response.ok) {
+        throw new Error(await describeSavedFilterError(response, 'Failed to save filter'));
+      }
 
       toast({
         title: 'Success',
@@ -132,7 +156,7 @@ export function SavedFiltersDialog({ currentFilters, onLoadFilter, readOnly = fa
       console.error('Error saving filter:', error);
       toast({
         title: 'Error',
-        description: 'Failed to save filter',
+        description: error instanceof Error ? error.message : 'Failed to save filter',
         variant: 'destructive',
       });
     }
@@ -154,7 +178,21 @@ export function SavedFiltersDialog({ currentFilters, onLoadFilter, readOnly = fa
         method: 'DELETE',
       });
 
-      if (!response.ok) throw new Error('Failed to delete filter');
+      if (!response.ok) {
+        const message = await describeSavedFilterError(response, 'Failed to delete filter');
+        // A 404 here means the filter is already gone (deleted in another tab, or a stale
+        // row from a list fetched before someone else removed it) - the user's intent
+        // ("this filter should not exist") is already satisfied, so refresh and move on
+        // instead of showing a "failure" for an outcome the user wanted.
+        if (response.status === 404) {
+          toast({ title: 'Already deleted', description: message });
+          setFilterToDelete(null);
+          setShowDeleteDialog(false);
+          fetchSavedFilters();
+          return;
+        }
+        throw new Error(message);
+      }
 
       toast({
         title: 'Success',
@@ -168,7 +206,7 @@ export function SavedFiltersDialog({ currentFilters, onLoadFilter, readOnly = fa
       console.error('Error deleting filter:', error);
       toast({
         title: 'Error',
-        description: 'Failed to delete filter',
+        description: error instanceof Error ? error.message : 'Failed to delete filter',
         variant: 'destructive',
       });
     }
@@ -267,6 +305,7 @@ export function SavedFiltersDialog({ currentFilters, onLoadFilter, readOnly = fa
                           <Button
                             size="sm"
                             variant="outline"
+                            aria-label={`Load filter: ${filter.name}`}
                             onClick={() => handleLoadFilter(filter)}
                           >
                             <Download className="h-4 w-4" />
@@ -274,6 +313,7 @@ export function SavedFiltersDialog({ currentFilters, onLoadFilter, readOnly = fa
                           <Button
                             size="sm"
                             variant="outline"
+                            aria-label={`Delete filter: ${filter.name}`}
                             onClick={() => {
                               setFilterToDelete(filter.id);
                               setShowDeleteDialog(true);

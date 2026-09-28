@@ -39,6 +39,7 @@ const event = {
 /** Every file in this cluster that renders an origin time. */
 const OWNED_UI_FILES = [
   'app/analytics/page.tsx',
+  'components/catalogues/CatalogueStatsPopover.tsx',
   'components/events/EventTable.tsx',
   'components/events/VirtualizedEventTable.tsx',
   'components/map/EarthquakeCircleMap.tsx',

@@ -13,9 +13,10 @@ import { join } from 'path';
 import { createId } from '../lib/id';
 import { getDb, COLLECTIONS } from '../lib/mongodb';
 import { finiteExtent, longitudeExtent } from '../lib/geo-bounds-utils';
+import { normalizeTimestamp } from '../lib/earthquake-utils';
 
 // Network metadata structure
-interface NetworkMetadata {
+export interface NetworkMetadata {
   fdsnCode: string;
   fullName: string;
   operationalPeriod: string;
@@ -37,7 +38,7 @@ interface NetworkMetadata {
 }
 
 // Parse the NETWORK_METADATA.md file
-function parseNetworkMetadata(filePath: string): Map<string, NetworkMetadata> {
+export function parseNetworkMetadata(filePath: string): Map<string, NetworkMetadata> {
   const content = readFileSync(filePath, 'utf-8');
   const networks = new Map<string, NetworkMetadata>();
 
@@ -142,8 +143,9 @@ function parseNetworkMetadata(filePath: string): Map<string, NetworkMetadata> {
 }
 
 // Parse earthquake catalog CSV file (pipe-delimited IRIS format)
-interface EarthquakeEvent {
+export interface EarthquakeEvent {
   eventId: string;
+  /** Origin time as explicit-UTC ISO 8601 (normalised when the line is parsed). */
   time: string;
   latitude: number;
   longitude: number;
@@ -158,8 +160,7 @@ interface EarthquakeEvent {
   locationName: string;
 }
 
-function parseCatalogFile(filePath: string): EarthquakeEvent[] {
-  const content = readFileSync(filePath, 'utf-8');
+export function parseCatalogText(content: string): EarthquakeEvent[] {
   const lines = content.split('\n').filter(line => line.trim() && !line.startsWith('#'));
 
   const events: EarthquakeEvent[] = [];
@@ -171,9 +172,20 @@ function parseCatalogFile(filePath: string): EarthquakeEvent[] {
       continue; // Skip malformed lines
     }
 
+    // The fdsnws-event text Time column is UTC with no designator
+    // ('2010-09-03T16:35:46'). ECMA-262 parses an offset-less date-time as LOCAL
+    // time, so new Date(raw) shifted every origin time, and the catalogue's time
+    // period, by the importing machine's UTC offset (12-13 h early in NZ).
+    // normalizeTimestamp pins it to UTC, as the GeoNet importer does.
+    const time = normalizeTimestamp(fields[1]);
+    if (time === null) {
+      console.warn(`Skipping event with an unparseable time: ${fields[0]} (${fields[1]})`);
+      continue;
+    }
+
     const event: EarthquakeEvent = {
       eventId: fields[0],
-      time: fields[1],
+      time,
       latitude: parseFloat(fields[2]),
       longitude: parseFloat(fields[3]),
       depth: parseFloat(fields[4]),
@@ -197,6 +209,168 @@ function parseCatalogFile(filePath: string): EarthquakeEvent[] {
   }
 
   return events;
+}
+
+function parseCatalogFile(filePath: string): EarthquakeEvent[] {
+  return parseCatalogText(readFileSync(filePath, 'utf-8'));
+}
+
+/**
+ * The catalogue document for one network, or null when its events have no usable
+ * coordinates, magnitudes or times.
+ */
+export function buildCatalogueDocument(
+  networkCode: string,
+  metadata: NetworkMetadata,
+  events: EarthquakeEvent[],
+  catalogueId: string,
+  now: string = new Date().toISOString()
+): Record<string, unknown> | null {
+  // Calculate geographic bounds.
+  //
+  // Math.min(...array) passes one argument per event, and throws RangeError
+  // ("Maximum call stack size exceeded") once a catalogue is larger than the
+  // engine's argument limit — around 131k events in V8 — so fold the series
+  // instead. Longitude additionally must not be a plain min/max: for a
+  // catalogue spanning the antimeridian (Kermadec/Raoul) that stores the
+  // near-global box 166..-176 rather than the arc the data occupies.
+  // longitudeExtent() returns west > east for a crossing box, the RFC 7946
+  // §5.2 convention app/api/catalogues/route.ts and lib/db.ts read back.
+  const latExtent = finiteExtent(events.map(e => e.latitude));
+  const lonExtent = longitudeExtent(events.map(e => e.longitude));
+  const magExtent = finiteExtent(events.map(e => e.magnitude));
+  // Event times are explicit UTC (see parseCatalogText), so this parse cannot
+  // depend on the machine's timezone.
+  const timeExtent = finiteExtent(events.map(e => Date.parse(e.time)));
+
+  if (!latExtent || !lonExtent || !magExtent || !timeExtent) {
+    return null;
+  }
+
+  const minLat = latExtent.min;
+  const maxLat = latExtent.max;
+  const minMag = magExtent.min;
+  const maxMag = magExtent.max;
+  const startTime = new Date(timeExtent.min);
+  const endTime = new Date(timeExtent.max);
+
+  const catalogueName = `${metadata.fullName} (${networkCode})`;
+
+  return {
+    id: catalogueId,
+    name: catalogueName,
+    created_at: now,
+    source_catalogues: JSON.stringify([{
+      source: 'IRIS FDSN',
+      network: networkCode,
+      doi: metadata.doi,
+      fdsnPage: metadata.fdsnPage
+    }]),
+    merge_config: JSON.stringify({
+      source: 'NZ Temporary Network Import',
+      importDate: now
+    }),
+    event_count: events.length,
+    status: 'complete',
+
+    // Geographic bounds (min_longitude > max_longitude marks a box that
+    // crosses the antimeridian — see longitudeExtent above)
+    min_latitude: minLat,
+    max_latitude: maxLat,
+    min_longitude: lonExtent.west,
+    max_longitude: lonExtent.east,
+
+    // Temporal coverage
+    time_period_start: startTime.toISOString(),
+    time_period_end: endTime.toISOString(),
+
+    // Metadata fields
+    description: `Earthquake catalogue from the ${metadata.fullName} temporary seismic network. ${metadata.scientificPurpose}`,
+    data_source: 'IRIS FDSN Event Web Service',
+    provider: metadata.operatingInstitution,
+    geographic_region: metadata.geographicRegion,
+
+    // Quality and completeness. No `completeness` entry: the smallest magnitude in
+    // the file is not the magnitude of completeness (Mc is estimated from the
+    // frequency-magnitude distribution and normally lies well above it), and the
+    // app's data_quality.completeness is a qualitative rating the metadata form
+    // sets. magnitudeRange reports the observed range as what it is.
+    data_quality: JSON.stringify({
+      magnitudeRange: `M ${minMag.toFixed(1)} - ${maxMag.toFixed(1)}`,
+      eventCount: events.length,
+      temporalCoverage: metadata.operationalPeriod,
+      spatialCoverage: `Lat: ${metadata.catalogLatRange}, Lon: ${metadata.catalogLonRange}`
+    }),
+    quality_notes: metadata.equipment ? `Equipment: ${metadata.equipment}` : undefined,
+
+    // Attribution and citation
+    contact_organization: metadata.operatingInstitution,
+    license: 'Open access via IRIS Data Services',
+    usage_terms: 'Please cite the network DOI and IRIS Data Services when using this data',
+    citation: metadata.doi ? `FDSN Network ${networkCode}. ${metadata.doi}` : undefined,
+    doi: metadata.doi,
+
+    // Catalogue version (MAJOR.MINOR.PATCH, starting at 1.0.0 like every new catalogue)
+    version: '1.0.0',
+    version_updated_at: now,
+    keywords: JSON.stringify([
+      'temporary network',
+      'New Zealand',
+      networkCode,
+      metadata.geographicRegion,
+      ...metadata.scientificPurpose.toLowerCase().includes('alpine fault') ? ['Alpine Fault'] : [],
+      ...metadata.scientificPurpose.toLowerCase().includes('subduction') ? ['Hikurangi subduction'] : [],
+    ]),
+    reference_links: JSON.stringify([
+      metadata.fdsnPage,
+      metadata.projectWebsite,
+      ...(metadata.keyPublications || [])
+    ].filter(Boolean)),
+    notes: [
+      metadata.totalStations ? `Total Stations: ${metadata.totalStations}` : null,
+      metadata.collaborators ? `Collaborators: ${metadata.collaborators.join(', ')}` : null,
+      `Downloaded from IRIS: ${metadata.dateRange}`,
+      `FDSN Code: ${networkCode}`
+    ].filter(Boolean).join('\n'),
+  };
+}
+
+/** The event documents for one network's catalogue. */
+export function buildEventDocuments(
+  events: EarthquakeEvent[],
+  catalogueId: string,
+  now: string = new Date().toISOString()
+): Array<Record<string, unknown>> {
+  return events.map(event => ({
+    id: createId(),
+    catalogue_id: catalogueId,
+    source_id: event.eventId,
+    // Already explicit UTC (parseCatalogText); re-parsing the raw column here is
+    // what shifted every stored time by the machine's UTC offset.
+    time: event.time,
+    latitude: event.latitude,
+    longitude: event.longitude,
+    depth: isNaN(event.depth) ? null : event.depth,
+    magnitude: event.magnitude,
+    magnitude_type: event.magType,
+    location_name: event.locationName,
+    author: event.author,
+    agency_id: event.contributor,
+    event_public_id: event.contributorId,
+    source_events: JSON.stringify([{
+      source: event.catalog,
+      eventId: event.eventId,
+      contributor: event.contributor,
+      author: event.author
+    }]),
+    creation_info: JSON.stringify({
+      agency: event.contributor,
+      author: event.author,
+      catalog: event.catalog,
+      magAuthor: event.magAuthor
+    }),
+    created_at: now,
+  }));
 }
 
 // Main import function
@@ -246,145 +420,21 @@ async function importTemporaryNetworks() {
       continue;
     }
 
-    // Calculate geographic bounds.
-    //
-    // Math.min(...array) passes one argument per event, and throws RangeError
-    // ("Maximum call stack size exceeded") once a catalogue is larger than the
-    // engine's argument limit — around 131k events in V8 — so fold the series
-    // instead. Longitude additionally must not be a plain min/max: for a
-    // catalogue spanning the antimeridian (Kermadec/Raoul) that stores the
-    // near-global box 166..-176 rather than the arc the data occupies.
-    // longitudeExtent() returns west > east for a crossing box, the RFC 7946
-    // §5.2 convention app/api/catalogues/route.ts and lib/db.ts read back.
-    const latExtent = finiteExtent(events.map(e => e.latitude));
-    const lonExtent = longitudeExtent(events.map(e => e.longitude));
-    const magExtent = finiteExtent(events.map(e => e.magnitude));
-    const timeExtent = finiteExtent(events.map(e => new Date(e.time).getTime()));
-
-    if (!latExtent || !lonExtent || !magExtent || !timeExtent) {
+    // Create catalogue document (bounds, time period and metadata)
+    const catalogueId = createId();
+    const catalogueDoc = buildCatalogueDocument(networkCode, metadata, events, catalogueId);
+    if (!catalogueDoc) {
       console.warn(`   ⏭️  Skipping ${networkCode}: no usable coordinates, magnitudes or times`);
       continue;
     }
 
-    const minLat = latExtent.min;
-    const maxLat = latExtent.max;
-    const minMag = magExtent.min;
-    const maxMag = magExtent.max;
-    const startTime = new Date(timeExtent.min);
-    const endTime = new Date(timeExtent.max);
-
-    // Create catalogue document
-    const catalogueId = createId();
-    const catalogueName = `${metadata.fullName} (${networkCode})`;
-
-    const catalogueDoc = {
-      id: catalogueId,
-      name: catalogueName,
-      created_at: new Date().toISOString(),
-      source_catalogues: JSON.stringify([{
-        source: 'IRIS FDSN',
-        network: networkCode,
-        doi: metadata.doi,
-        fdsnPage: metadata.fdsnPage
-      }]),
-      merge_config: JSON.stringify({
-        source: 'NZ Temporary Network Import',
-        importDate: new Date().toISOString()
-      }),
-      event_count: events.length,
-      status: 'complete',
-
-      // Geographic bounds (min_longitude > max_longitude marks a box that
-      // crosses the antimeridian — see longitudeExtent above)
-      min_latitude: minLat,
-      max_latitude: maxLat,
-      min_longitude: lonExtent.west,
-      max_longitude: lonExtent.east,
-
-      // Temporal coverage
-      time_period_start: startTime.toISOString(),
-      time_period_end: endTime.toISOString(),
-
-      // Metadata fields
-      description: `Earthquake catalogue from the ${metadata.fullName} temporary seismic network. ${metadata.scientificPurpose}`,
-      data_source: 'IRIS FDSN Event Web Service',
-      provider: metadata.operatingInstitution,
-      geographic_region: metadata.geographicRegion,
-
-      // Quality and completeness
-      data_quality: JSON.stringify({
-        completeness: `M${minMag.toFixed(1)}+ for ${metadata.dateRange}`,
-        magnitudeRange: `M ${minMag.toFixed(1)} - ${maxMag.toFixed(1)}`,
-        eventCount: events.length,
-        temporalCoverage: metadata.operationalPeriod,
-        spatialCoverage: `Lat: ${metadata.catalogLatRange}, Lon: ${metadata.catalogLonRange}`
-      }),
-      quality_notes: metadata.equipment ? `Equipment: ${metadata.equipment}` : undefined,
-
-      // Attribution and citation
-      contact_organization: metadata.operatingInstitution,
-      license: 'Open access via IRIS Data Services',
-      usage_terms: 'Please cite the network DOI and IRIS Data Services when using this data',
-      citation: metadata.doi ? `FDSN Network ${networkCode}. ${metadata.doi}` : undefined,
-      doi: metadata.doi,
-
-      // Additional metadata
-      version: '1.0',
-      keywords: JSON.stringify([
-        'temporary network',
-        'New Zealand',
-        networkCode,
-        metadata.geographicRegion,
-        ...metadata.scientificPurpose.toLowerCase().includes('alpine fault') ? ['Alpine Fault'] : [],
-        ...metadata.scientificPurpose.toLowerCase().includes('subduction') ? ['Hikurangi subduction'] : [],
-      ]),
-      reference_links: JSON.stringify([
-        metadata.fdsnPage,
-        metadata.projectWebsite,
-        ...(metadata.keyPublications || [])
-      ].filter(Boolean)),
-      notes: [
-        metadata.totalStations ? `Total Stations: ${metadata.totalStations}` : null,
-        metadata.collaborators ? `Collaborators: ${metadata.collaborators.join(', ')}` : null,
-        `Downloaded from IRIS: ${metadata.dateRange}`,
-        `FDSN Code: ${networkCode}`
-      ].filter(Boolean).join('\n'),
-    };
-
     // Insert catalogue
     await cataloguesCollection.insertOne(catalogueDoc);
-    console.log(`   ✅ Created catalogue: ${catalogueName}`);
+    console.log(`   ✅ Created catalogue: ${catalogueDoc.name}`);
     totalCatalogues++;
 
     // Prepare events for bulk insert
-    const eventDocs = events.map(event => ({
-      id: createId(),
-      catalogue_id: catalogueId,
-      source_id: event.eventId,
-      time: new Date(event.time).toISOString(),
-      latitude: event.latitude,
-      longitude: event.longitude,
-      depth: isNaN(event.depth) ? null : event.depth,
-      magnitude: event.magnitude,
-      magnitude_type: event.magType,
-      location_name: event.locationName,
-      author: event.author,
-      agency_id: event.contributor,
-      event_public_id: event.contributorId,
-      source_events: JSON.stringify([{
-        source: event.catalog,
-        eventId: event.eventId,
-        contributor: event.contributor,
-        author: event.author
-      }]),
-      creation_info: JSON.stringify({
-        agency: event.contributor,
-        author: event.author,
-        catalog: event.catalog,
-        magAuthor: event.magAuthor
-      }),
-      created_at: new Date().toISOString(),
-    }));
+    const eventDocs = buildEventDocuments(events, catalogueId);
 
     // Bulk insert events in batches of 1000
     const batchSize = 1000;
@@ -405,13 +455,16 @@ async function importTemporaryNetworks() {
   console.log('='.repeat(60) + '\n');
 }
 
-// Run the import
-importTemporaryNetworks()
-  .then(() => {
-    console.log('✨ All done!');
-    process.exit(0);
-  })
-  .catch((error) => {
-    console.error('❌ Import failed:', error);
-    process.exit(1);
-  });
+// Run the import when executed as a script (npx tsx scripts/import-temp-networks.ts),
+// not when the parsing and document builders above are imported by a test.
+if (require.main === module) {
+  importTemporaryNetworks()
+    .then(() => {
+      console.log('✨ All done!');
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error('❌ Import failed:', error);
+      process.exit(1);
+    });
+}

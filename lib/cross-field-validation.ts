@@ -12,13 +12,23 @@ export interface CrossFieldValidationResult {
 }
 
 /**
+ * True for a reported value: a finite number. The CSV/JSON parsers set a blank numeric
+ * cell to null, and JS relational operators read null as 0 (`10 > null` and
+ * `null < 0.001` are both true), so every rule compares its operands only after this
+ * check. Testing `!== undefined` let null through as a reported zero.
+ */
+function isNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/**
  * Validate magnitude-depth relationship
  * Very shallow events with large magnitudes are extremely rare
  */
 export function validateMagnitudeDepthRelationship(event: any): DataQualityCheck[] {
   const checks: DataQualityCheck[] = [];
 
-  if (event.depth === null || event.depth === undefined || event.magnitude === null || event.magnitude === undefined) {
+  if (!isNumber(event.depth) || !isNumber(event.magnitude)) {
     return checks;
   }
 
@@ -66,7 +76,7 @@ export function validateUncertaintyRelationships(event: any): DataQualityCheck[]
   const checks: DataQualityCheck[] = [];
 
   // Depth uncertainty should not exceed depth value significantly
-  if (event.depth !== null && event.depth !== undefined && event.depth_uncertainty !== undefined) {
+  if (isNumber(event.depth) && isNumber(event.depth_uncertainty)) {
     if (event.depth > 0 && event.depth_uncertainty > event.depth * 2) {
       checks.push({
         passed: false,
@@ -89,7 +99,7 @@ export function validateUncertaintyRelationships(event: any): DataQualityCheck[]
   }
 
   // Magnitude uncertainty should be reasonable
-  if (event.magnitude !== undefined && event.magnitude_uncertainty !== undefined) {
+  if (isNumber(event.magnitude) && isNumber(event.magnitude_uncertainty)) {
     if (event.magnitude_uncertainty > 1.0) {
       checks.push({
         passed: false,
@@ -116,7 +126,7 @@ export function validateUncertaintyRelationships(event: any): DataQualityCheck[]
   // raw degree values reported an isotropic 1.1 km x 1.1 km ellipse at 85 deg as 11:1
   // asymmetric while passing a genuinely 11:1 anisotropic one - the warning was inverted
   // at high latitude and unreliable everywhere outside the tropics.
-  if (event.latitude_uncertainty != null && event.longitude_uncertainty != null &&
+  if (isNumber(event.latitude_uncertainty) && isNumber(event.longitude_uncertainty) &&
       event.latitude_uncertainty > 0 && event.longitude_uncertainty > 0) {
     // Without a latitude the projection cannot be done; fall back to the raw degree
     // ratio (exact at the equator) rather than skipping the check altogether.
@@ -149,7 +159,7 @@ export function validateQualityMetricsConsistency(event: any): DataQualityCheck[
   const checks: DataQualityCheck[] = [];
 
   // Station count should be less than or equal to phase count
-  if (event.used_station_count !== undefined && event.used_phase_count !== undefined) {
+  if (isNumber(event.used_station_count) && isNumber(event.used_phase_count)) {
     if (event.used_station_count > event.used_phase_count) {
       checks.push({
         passed: false,
@@ -172,32 +182,25 @@ export function validateQualityMetricsConsistency(event: any): DataQualityCheck[
     }
   }
 
-  // Magnitude station count should be reasonable
-  if (event.magnitude_station_count !== undefined && event.used_station_count !== undefined) {
-    if (event.magnitude_station_count > event.used_station_count) {
-      checks.push({
-        passed: false,
-        severity: 'warning',
-        message: `Magnitude station count (${event.magnitude_station_count}) exceeds location station count (${event.used_station_count})`,
-        field: 'magnitude_station_count',
-        suggestion: 'This is unusual - verify the station counts'
-      });
-    }
-  }
+  // No rule compares the magnitude station count with the location station count. In
+  // QuakeML BED, Magnitude.stationCount and OriginQuality.usedStationCount are independent:
+  // an ML, mB or Mww routinely uses amplitudes or waveforms from stations the location did
+  // not use, so a magnitude count above the location count is ordinary. It used to be
+  // flagged as "unusual".
 
   // Azimuthal gap checks.
   // The gap is diagnostic on its own, so this must NOT be gated on a station count being
   // reported: an epicentre with more than half the compass unsampled is poorly constrained
   // whether or not the depositor supplied used_station_count, and the offshore NZ events that
   // carry the largest gaps are precisely the ones whose station counts are most often absent.
-  if (event.azimuthal_gap !== null && event.azimuthal_gap !== undefined) {
+  if (isNumber(event.azimuthal_gap)) {
     // Gap > 180 deg means the station network spans less than half the azimuth range around
     // the epicentre, the classic station-clustering / outside-the-network geometry that
     // degrades epicentre and depth control (Bondar et al., 2004, "Epicentre accuracy based on
     // seismic network criteria", Geophys. J. Int. 156(3), 483-496; the bondar2004 entry in
     // paper/references.bib, cited for the same criterion in paper/srl_paper.tex).
     if (event.azimuthal_gap > 180) {
-      const stationNote = event.used_station_count !== undefined
+      const stationNote = isNumber(event.used_station_count)
         ? (event.used_station_count >= 10
             ? ` despite ${event.used_station_count} stations`
             : ` with only ${event.used_station_count} stations`)
@@ -221,7 +224,7 @@ export function validateQualityMetricsConsistency(event: any): DataQualityCheck[
     // awards full network-geometry marks for gaps <= 90 deg.)
     // The 0.5 deg allowance absorbs gap values that agencies round to whole degrees.
     const n = event.used_station_count;
-    if (typeof n === 'number' && n > 0) {
+    if (isNumber(n) && n > 0) {
       const gapFloor = 360 / n;
       if (event.azimuthal_gap < gapFloor - 0.5) {
         checks.push({
@@ -236,7 +239,7 @@ export function validateQualityMetricsConsistency(event: any): DataQualityCheck[
   }
 
   // Standard error should be reasonable
-  if (event.standard_error !== undefined) {
+  if (isNumber(event.standard_error)) {
     if (event.standard_error > 5.0) {
       checks.push({
         passed: false,
@@ -310,7 +313,7 @@ export function validateTimeLocationConsistency(event: any): DataQualityCheck[] 
   }
 
   // Check if location is on land or sea (basic sanity check)
-  if (event.latitude !== undefined && event.longitude !== undefined) {
+  if (isNumber(event.latitude) && isNumber(event.longitude)) {
     // Check for null island (0,0)
     if (event.latitude === 0 && event.longitude === 0) {
       checks.push({

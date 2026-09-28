@@ -89,19 +89,61 @@ CSV Export
 
 **Included fields:**
 
-* All standard earthquake parameters
-* Quality metrics
-* Uncertainty values
-* Source information
-* Evaluation metadata
+Every CSV export has the same fixed header row, grouped below in emission order:
 
-**Example:**
+* **Core fields:** ``ID``, ``CatalogueID``, ``Time``, ``CreatedAt``, ``Latitude``,
+  ``Longitude``, ``Depth``, ``Magnitude``, ``MagnitudeType``, ``EventType``,
+  ``EventTypeCertainty``, ``Region``, ``LocationName``, ``Source``, ``SourceEventsJSON``,
+  ``SourceID``, ``PublicID``
+* **Location uncertainties:** ``TimeUncertainty``, ``LatitudeUncertainty``,
+  ``LongitudeUncertainty``, ``DepthUncertainty``, ``HorizontalUncertainty``,
+  ``MagnitudeUncertainty``
+* **Origin metadata:** ``DepthType``, ``EarthModelID``, ``MethodID``, ``AgencyID``,
+  ``Author``
+* **Magnitude details:** ``MagnitudeStationCount``, ``MagnitudeMethodID``,
+  ``MagnitudeEvaluationMode``, ``MagnitudeEvaluationStatus``
+* **Quality metrics:** ``AzimuthalGap``, ``UsedStationCount``, ``UsedPhaseCount``,
+  ``StandardError``, ``MinimumDistance``, ``MaximumDistance``, ``AssociatedPhaseCount``,
+  ``AssociatedStationCount``, ``DepthPhaseCount``
+* **Evaluation metadata:** ``EvaluationMode``, ``EvaluationStatus``, ``PreferredOriginID``,
+  ``PreferredMagnitudeID``
+* **Error ellipse:** ``MinHorizontalUncertainty``, ``MaxHorizontalUncertainty``,
+  ``AzimuthMaxHorizontalUncertainty``, ``ConfidenceLevel``, ``PreferredFocalMechanismID``
+* **Source event type:** ``SourceEventType`` — the event type exactly as the source agency
+  reported it, before any mapping onto the platform's own controlled vocabulary
+* **Lineage and provenance** (per event): ``SourceCatalogueIDs``, ``MergeStrategy``,
+  ``MergeParameters``, ``SelectedSource``, ``SelectedSourceCatalogueID``, ``QualityScore``,
+  ``QualityGrade``
+* **Catalogue version:** ``CatalogueVersion`` — the catalogue's MAJOR.MINOR.PATCH version
+  this row was exported from, carried on every row so it survives filtering and
+  concatenating several exports
+
+When the export was declustered (see *Declustering* below), two further columns are
+appended after ``CatalogueVersion``: ``ClusterID`` and ``IsMainshock``.
+
+.. note::
+   Column names and order are fixed. The lineage columns are empty for events stored
+   before per-event lineage tracking existed.
+
+**Source column:** for a plain (non-merged) event, ``Source`` is simply the event's own
+data source. For a merged event it is: the source (or agency) of the contributing member
+the merge selected to publish that event's solution, when one was selected; ``merged``
+when the row came from an Average-strategy merge with no single selected member; and
+otherwise the source whose agency label qualifies the row's ``SourceID`` (in the form
+``<source>:<id>``), falling back to whichever contributing member's own stored solution
+matches the row's published hypocentre.
+
+**Example** (a representative excerpt — not the full column set above):
 
 .. code-block:: text
 
-   time,latitude,longitude,depth,magnitude,magnitude_type,quality_grade
-   2024-01-15T10:30:45Z,-41.5,174.2,25.3,4.5,ML,A
-   2024-01-15T11:22:10Z,-42.1,173.8,15.7,3.2,ML,B+
+   Time,Latitude,Longitude,Depth,Magnitude,MagnitudeType,Source,QualityScore,QualityGrade,CatalogueVersion
+   2024-01-15T10:30:45Z,-41.5,174.2,25.3,4.5,ML,GeoNet,87,A,1.2.0
+   2024-01-15T11:22:10Z,-42.1,173.8,15.7,3.2,ML,merged,74,B+,1.2.0
+
+.. note::
+   ``QualityScore`` is always an integer from 0-100 (e.g. ``87``), never a decimal like
+   ``85.5``. ``QualityGrade`` is the corresponding letter grade (A+, A, B+, B, C, D or F).
 
 QuakeML Export
 ==============
@@ -145,6 +187,30 @@ QuakeML Export
      </eventParameters>
    </quakeml>
 
+.. rubric:: Event identity and lineage
+
+* Each event's ``publicID`` prefers the event's own stored public ID; failing that, a
+  GeoNet-sourced event gets ``smi:nz.org.geonet/<EventID>``; failing that, an identity
+  built from the source ID (``smi:local/source/<id>``); and only as a last resort the
+  row's own database ID.
+* For a merged event, the preferred origin's ``publicID`` is
+  ``smi:local/origin/<id>-merged`` when no single contributing member's own solution
+  matches the published hypocentre; otherwise the contributing agency's own origin ID is
+  kept.
+* Per-event lineage — contributing source catalogues, merge strategy, selected source,
+  quality score/grade and, when the export was declustered, the cluster tag — is recorded
+  as an XML comment on the event: a ``Lineage: {...}`` JSON blob. Any event-type
+  relabelling applied to fit the QuakeML BED vocabulary is recorded in a separate comment.
+* Arrivals and moment tensors stored without their own ID get a derived, deterministic ID
+  (an ``#arrival-N``-style fragment of their parent's ID, and similarly for moment
+  tensors), so re-exporting the same event produces the same IDs.
+* ``creationInfo/version`` on the exported document is the catalogue's own version string,
+  not a placeholder, and ``QualityGrade`` in the lineage comment is the event's real
+  computed grade.
+
+The export has been validated against the QuakeML-BED-1.2.xsd schema (with lxml) and
+round-tripped through ObsPy 1.5.0 offline.
+
 JSON Export
 ===========
 
@@ -178,6 +244,10 @@ JSON Export
        }
      ]
    }
+
+.. note::
+   This structure round-trips: a file produced by this export can be re-uploaded and
+   parsed correctly (see :doc:`uploading-data`).
 
 GeoJSON Export
 ==============
@@ -332,24 +402,97 @@ See :doc:`../api-reference/export` for complete API documentation.
 Filtered Exports
 -----------------
 
-Export subsets of catalogues:
+Exports accept the same filter query parameters as the catalogue's event-filter API, so
+any export format (``csv``, ``json``, ``geojson``, ``kml`` or ``quakeml``) can be scoped to
+a subset of events:
 
-**Step 1:** Apply filters on the Analytics or Catalogues page:
+* Magnitude range, depth range (km) and time range (UTC)
+* Geographic bounding box, including a box that crosses the antimeridian
+* Event type, magnitude type, evaluation status
+* Azimuthal gap, station count, phase count, standard error (origin RMS)
+* Per-field uncertainty maxima (horizontal, depth, time, magnitude)
+* A minimum quality score
 
-* Magnitude range
-* Depth range
-* Time range
-* Quality grade
-* Geographic bounds
+**Via the web interface:** on a catalogue's page, set filters with the event filter
+controls above the events table. Once a filter is active, an **Export filtered events
+(CSV)** button appears next to the filter controls (it is not shown when no filter is
+active). Only events matching the filters are exported.
 
-**Step 2:** Click **Export Filtered Data**
-
-**Step 3:** Choose format
-
-Only events matching the filters will be exported.
+**Via the API:** append the filter parameters directly to the export URL's query string,
+e.g. ``?format=csv&minMagnitude=4&startTime=2020-01-01T00:00:00Z``. A filtered export's
+metadata, and its ``X-Export-Filter`` response header, record exactly which filters were
+applied.
 
 .. tip::
    Use filtered exports to create specialized catalogues for specific analyses.
+
+--------------------
+Declustering
+--------------------
+
+Add ``decluster=gardner-knopoff`` to the export query string, on any format, to tag every
+exported event with its Gardner-Knopoff (1974) cluster:
+
+* ``ClusterID`` — the ID of the event's cluster (its mainshock's event ID), or empty for
+  an event assigned to no cluster
+* ``IsMainshock`` — ``true`` for a cluster's mainshock (and for an event in no cluster);
+  ``false`` for a dependent event that a full declustering pass would remove
+
+The export's metadata records the algorithm name, the time/distance windows it used, and
+cluster counts (mainshocks, dependents, cluster count). Without ``decluster``, the export
+metadata records declustering as ``none``, and the ``X-Export-Declustering`` response
+header reads ``none`` too.
+
+On the catalogue page, the **Export** dropdown menu has an **Include Gardner-Knopoff
+declustering tags** checkbox. When checked, it adds ``decluster=gardner-knopoff`` to
+whichever export format you then choose from that same menu (CSV, JSON, GeoJSON, KML or
+QuakeML), and it also applies when you use the **Export filtered events (CSV)** button —
+the two can be combined. Outside the web interface, request it directly as the
+``decluster`` query parameter on the export API.
+
+-------------------------------------
+Version, Timestamp and Checksum
+-------------------------------------
+
+Every export, in every format, records:
+
+* The catalogue's id and its **MAJOR.MINOR.PATCH version** (the platform-managed version
+  number — distinct from the depositor-supplied **Source dataset version** label set in
+  the catalogue's own metadata) and when that version was last updated
+* The export timestamp, in UTC
+* A SHA-256 checksum of the exported event rows
+
+The checksum is computed over the canonical CSV rendering of the selected rows (the plain
+``format=csv`` body: header record plus one record per event, LF-separated) — **not** each
+format's own serialization. This means a CSV, JSON, GeoJSON, KML and QuakeML export of the
+same selection (same filter and declustering option) all carry the *same* checksum value,
+so it can be used to confirm two exports in different formats cover identical data.
+
+These values are also sent as response headers on every export:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Header
+     - Meaning
+   * - ``X-Catalogue-Version``
+     - The catalogue's MAJOR.MINOR.PATCH version at export time
+   * - ``X-Export-Rows-SHA256``
+     - The SHA-256 checksum described above
+   * - ``X-Export-Filter``
+     - The filter query string that was applied, or ``none``
+   * - ``X-Export-Declustering``
+     - ``gardner-knopoff`` or ``none``
+
+The downloaded filename also carries the catalogue version and, for a filtered export, a
+``_filtered`` suffix — see *File Naming* below.
+
+.. important::
+   There is no snapshot store: retrieving a **past** version of a catalogue through the
+   platform is not possible. If you need to preserve a specific data state permanently,
+   make an archival deposit with a DOI, as recommended elsewhere in this guide — do not
+   rely on the catalogue version number as a way to roll back to, or re-fetch, older data.
 
 -----------------
 Best Practices
@@ -374,6 +517,8 @@ After export:
 2. Check for missing or null values
 3. Validate coordinate ranges
 4. Confirm magnitude and depth values
+5. Compare the ``X-Export-Rows-SHA256`` checksum if you need to confirm two exports (or
+   two formats of the same export) cover exactly the same rows
 
 Large Catalogues
 ================
@@ -395,21 +540,29 @@ Ensure exports include:
 * Uncertainty values
 * Evaluation metadata
 * Processing history
+* Lineage and provenance (source catalogues, merge strategy, quality score) for merged
+  catalogues
+* The catalogue version and rows checksum, if you need to verify data integrity later
 
 -----------------
 File Naming
 -----------------
 
-Exported files use descriptive names:
+Exported files use descriptive names that also carry the catalogue version and, for a
+filtered export, a ``_filtered`` suffix:
 
 .. code-block:: text
 
-   {catalogue_name}_{date}.{format}
-   
+   {catalogue_name}_v{version}_{date}[_filtered].{format}
+
    Examples:
-   GeoNet_New_Zealand_2024_20240115.csv
-   Canterbury_Aftershocks_20240115.xml
-   Merged_Regional_Data_20240115.geojson
+   GeoNet_New_Zealand_v1.2.0_20240115.csv
+   Canterbury_Aftershocks_v2.0.1_20240115_filtered.csv
+   Merged_Regional_Data_v1.0.0_20240115.geojson
+
+.. note::
+   A QuakeML export's filename additionally starts with a ``quakeml_`` prefix, e.g.
+   ``quakeml_Canterbury_Aftershocks_v2.0.1_20240115.xml``.
 
 -----------------
 Troubleshooting

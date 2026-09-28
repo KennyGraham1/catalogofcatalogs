@@ -9,12 +9,13 @@ import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Download, CheckCircle, XCircle } from 'lucide-react';
-import { IndeterminateProgress } from '@/components/ui/progress-indicator';
 import { ProgressOverlay } from '@/components/ui/ProgressOverlay';
 import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
 import { toast } from '@/hooks/use-toast';
+import { NZ_NATIONAL_BOUNDS } from '@/lib/geo-bounds-utils';
+import { invalidateCatalogueData } from '@/lib/client-cache';
 
-interface ImportResult {
+export interface ImportResult {
   success: boolean;
   catalogueId: string;
   catalogueName: string;
@@ -22,17 +23,61 @@ interface ImportResult {
   newEvents: number;
   updatedEvents: number;
   skippedEvents: number;
+  // Rows not imported, by reason (see lib/geonet-import-service.ts ImportResult).
+  collidedEvents?: number;
+  invalidEvents?: number;
+  excludedEvents?: number;
+  excludedEventTypes?: Record<string, number>;
+  failedEvents?: number;
   errors: string[];
   startTime: string;
   endTime: string;
   duration: number;
 }
 
-interface ImportFormProps {
-  readOnly?: boolean;
+/** A catalogue as GET /api/catalogues returns it (only the fields used here). */
+export interface ImportTargetCatalogue {
+  id: string;
+  name: string;
+  merge_config?: string | null;
+  event_count?: number;
 }
 
-export function ImportForm({ readOnly = false }: ImportFormProps) {
+interface ImportFormProps {
+  readOnly?: boolean;
+  /** Catalogues the page has loaded; the GeoNet import catalogues are offered as targets. */
+  catalogues?: ImportTargetCatalogue[];
+  /** Called when an import has run, so the page can refresh its catalogue list. */
+  onImportComplete?: (result: ImportResult) => void;
+}
+
+const NEW_CATALOGUE = '__new__';
+const DEFAULT_CATALOGUE_NAME = 'GeoNet - Automated Import';
+
+/**
+ * A catalogue the GeoNet importer created, recognised by the stamp it writes into
+ * merge_config. The server applies the same test (isGeoNetImportCatalogue in
+ * lib/geonet-import-service.ts) and refuses any other catalogue as a target.
+ */
+export function isGeoNetImportTarget(catalogue: Pick<ImportTargetCatalogue, 'merge_config'>): boolean {
+  if (!catalogue.merge_config) return false;
+  try {
+    const config = JSON.parse(catalogue.merge_config);
+    return !!config && typeof config === 'object' && config.source === 'GeoNet';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A datetime-local value ('2024-10-24T00:00', which the form labels UTC) as an explicit
+ * UTC ISO string. Sent bare, the server read it in ITS timezone and shifted the window.
+ */
+function datetimeLocalToUtc(value: string): string {
+  return /T\d{2}:\d{2}$/.test(value) ? `${value}:00Z` : `${value}Z`;
+}
+
+export function ImportForm({ readOnly = false, catalogues = [], onImportComplete }: ImportFormProps) {
   const [isImporting, setIsImporting] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,18 +90,31 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
   const [endDate, setEndDate] = useState('');
   const [minMagnitude, setMinMagnitude] = useState('');
   const [maxMagnitude, setMaxMagnitude] = useState('');
+  const [minDepth, setMinDepth] = useState('');
+  const [maxDepth, setMaxDepth] = useState('');
   const [minLatitude, setMinLatitude] = useState('');
   const [maxLatitude, setMaxLatitude] = useState('');
   const [minLongitude, setMinLongitude] = useState('');
   const [maxLongitude, setMaxLongitude] = useState('');
   const [updateExisting, setUpdateExisting] = useState(false);
-  const [catalogueName, setCatalogueName] = useState('GeoNet - Automated Import');
+  const [target, setTarget] = useState<string>(NEW_CATALOGUE);
+  const [catalogueName, setCatalogueName] = useState(DEFAULT_CATALOGUE_NAME);
+
+  const importTargets = catalogues.filter(isGeoNetImportTarget);
+  const addingToExisting = target !== NEW_CATALOGUE;
 
   // Helper to parse float safely, returning undefined for empty/invalid values
   const parseFloatSafe = (value: string): number | undefined => {
     if (!value || value.trim() === '') return undefined;
     const num = parseFloat(value);
     return isNaN(num) ? undefined : num;
+  };
+
+  const fillNzRegion = () => {
+    setMinLatitude(String(NZ_NATIONAL_BOUNDS.minLatitude));
+    setMaxLatitude(String(NZ_NATIONAL_BOUNDS.maxLatitude));
+    setMinLongitude(String(NZ_NATIONAL_BOUNDS.minLongitude));
+    setMaxLongitude(String(NZ_NATIONAL_BOUNDS.maxLongitude));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -76,9 +134,7 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
         setError('Please enter both start and end dates.');
         return;
       }
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      if (start > end) {
+      if (Date.parse(datetimeLocalToUtc(startDate)) > Date.parse(datetimeLocalToUtc(endDate))) {
         setError('Start date must be before end date.');
         return;
       }
@@ -89,6 +145,18 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
     const maxMag = parseFloatSafe(maxMagnitude);
     if (minMag !== undefined && maxMag !== undefined && minMag > maxMag) {
       setError('Minimum magnitude cannot be greater than maximum magnitude.');
+      return;
+    }
+
+    // Parse and validate depth range (km; the server accepts down to -5 km)
+    const minDep = parseFloatSafe(minDepth);
+    const maxDep = parseFloatSafe(maxDepth);
+    if ((minDep !== undefined && minDep < -5) || (maxDep !== undefined && maxDep < -5)) {
+      setError('Depths must be -5 km or deeper.');
+      return;
+    }
+    if (minDep !== undefined && maxDep !== undefined && minDep > maxDep) {
+      setError('Minimum depth cannot be greater than maximum depth.');
       return;
     }
 
@@ -108,7 +176,10 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
       return;
     }
 
-    // Parse and validate longitude range
+    // Parse and validate longitude range. A western edge east of the eastern edge is
+    // not an error: it is a box across 180 degrees (RFC 7946 section 5.2), which the
+    // server splits into two queries; it is how the Kermadec and Chatham Islands
+    // are reached.
     const minLon = parseFloatSafe(minLongitude);
     const maxLon = parseFloatSafe(maxLongitude);
     if (minLon !== undefined && (minLon < -180 || minLon > 180)) {
@@ -119,8 +190,9 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
       setError('Maximum longitude must be between -180 and 180.');
       return;
     }
-    if (minLon !== undefined && maxLon !== undefined && minLon > maxLon) {
-      setError('Minimum longitude cannot be greater than maximum longitude.');
+
+    if (!addingToExisting && catalogueName.trim() === '') {
+      setError('Please enter a name for the new catalogue.');
       return;
     }
 
@@ -130,17 +202,22 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
     setImportPhase('Connecting to GeoNet API...');
 
     try {
-      const body: any = {
-        updateExisting,
-        catalogueName,
+      const body: Record<string, unknown> = {
+        // Only an existing catalogue has events to update.
+        updateExisting: addingToExisting && updateExisting,
       };
+      if (addingToExisting) {
+        body.catalogueId = target;
+      } else {
+        body.catalogueName = catalogueName.trim();
+      }
 
       // Add time range
       if (timeRange === 'hours') {
         body.hours = parseInt(hours, 10);
       } else {
-        body.startDate = startDate;
-        body.endDate = endDate;
+        body.startDate = datetimeLocalToUtc(startDate);
+        body.endDate = datetimeLocalToUtc(endDate);
       }
 
       // Add magnitude filters (using pre-validated values)
@@ -149,6 +226,14 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
       }
       if (maxMag !== undefined) {
         body.maxMagnitude = maxMag;
+      }
+
+      // Add depth filters
+      if (minDep !== undefined) {
+        body.minDepth = minDep;
+      }
+      if (maxDep !== undefined) {
+        body.maxDepth = maxDep;
       }
 
       // Add geographic filters (using pre-validated values)
@@ -223,6 +308,12 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
       }
 
       setResult(data);
+      // The import may have created a catalogue or changed one (a partial run too), so
+      // every cached catalogue list and event page is stale now.
+      if (data.catalogueId) {
+        invalidateCatalogueData();
+      }
+      onImportComplete?.(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -230,6 +321,27 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
       setImportPhase('');
     }
   };
+
+  const crossesAntimeridian = (() => {
+    const west = parseFloatSafe(minLongitude);
+    const east = parseFloatSafe(maxLongitude);
+    return west !== undefined && east !== undefined && west > east;
+  })();
+
+  const notImported = result
+    ? [
+        { label: 'Already stored / repeated IDs', value: result.collidedEvents ?? 0 },
+        { label: 'Invalid or unusable rows', value: result.invalidEvents ?? 0 },
+        {
+          label: 'Excluded (GeoNet flags them as not real events)',
+          value: result.excludedEvents ?? 0,
+          detail: Object.entries(result.excludedEventTypes ?? {})
+            .map(([type, count]) => `${type}: ${count}`)
+            .join(', '),
+        },
+        { label: 'Not written (database error)', value: result.failedEvents ?? 0 },
+      ].filter((row) => row.value > 0)
+    : [];
 
   return (
     <div className="space-y-6">
@@ -252,6 +364,62 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Target Catalogue */}
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="targetCatalogue">Target Catalogue</Label>
+                  <InfoTooltip content="Create a new catalogue, or add to a catalogue an earlier GeoNet import created. Events are matched to stored ones by GeoNet event ID." />
+                </div>
+                <Select value={target} onValueChange={setTarget}>
+                  <SelectTrigger id="targetCatalogue" aria-label="Target catalogue">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NEW_CATALOGUE}>Create a new catalogue</SelectItem>
+                    {importTargets.map((catalogue) => (
+                      <SelectItem key={catalogue.id} value={catalogue.id}>
+                        {catalogue.name}
+                        {typeof catalogue.event_count === 'number' ? ` (${catalogue.event_count} events)` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {!addingToExisting && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="catalogueName">Catalogue Name</Label>
+                    <InfoTooltip content="Name of the new catalogue that will receive the imported events." />
+                  </div>
+                  <Input
+                    id="catalogueName"
+                    type="text"
+                    value={catalogueName}
+                    onChange={(e) => setCatalogueName(e.target.value)}
+                    placeholder={DEFAULT_CATALOGUE_NAME}
+                  />
+                </div>
+              )}
+
+              {/* Update Existing */}
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="updateExisting"
+                  checked={addingToExisting && updateExisting}
+                  onCheckedChange={setUpdateExisting}
+                  disabled={!addingToExisting}
+                />
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="updateExisting" className="cursor-pointer">
+                    Update existing events if data has changed
+                  </Label>
+                  <InfoTooltip content="When adding to an existing catalogue: events already stored are compared with GeoNet's current solution, and only those GeoNet has revised are rewritten. A new catalogue has nothing to update." />
+                </div>
+              </div>
+            </div>
+
             {/* Time Range */}
             <div className="space-y-4">
               <div className="flex items-center gap-1.5">
@@ -293,8 +461,8 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <div className="flex items-center gap-1.5">
-                      <Label htmlFor="startDate">Start Date</Label>
-                      <InfoTooltip content="Earliest event time to include (UTC)." />
+                      <Label htmlFor="startDate">Start Date (UTC)</Label>
+                      <InfoTooltip content="Earliest event time to include, in UTC." />
                     </div>
                     <Input
                       id="startDate"
@@ -306,8 +474,8 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
                   </div>
                   <div className="space-y-2">
                     <div className="flex items-center gap-1.5">
-                      <Label htmlFor="endDate">End Date</Label>
-                      <InfoTooltip content="Latest event time to include (UTC)." />
+                      <Label htmlFor="endDate">End Date (UTC)</Label>
+                      <InfoTooltip content="Latest event time to include, in UTC." />
                     </div>
                     <Input
                       id="endDate"
@@ -359,11 +527,48 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
               </div>
             </div>
 
-            {/* Geographic Filters */}
+            {/* Depth Filters */}
             <div className="space-y-4">
               <div className="flex items-center gap-1.5">
-                <Label>Geographic Bounds (Optional)</Label>
-                <InfoTooltip content="Limit imports to a bounding box in decimal degrees." />
+                <Label>Depth Filters (Optional)</Label>
+                <InfoTooltip content="Limit imports by hypocentre depth, in km below sea level." />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="minDepth">Minimum Depth (km)</Label>
+                  <Input
+                    id="minDepth"
+                    type="number"
+                    step="0.1"
+                    placeholder="e.g., 0"
+                    value={minDepth}
+                    onChange={(e) => setMinDepth(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="maxDepth">Maximum Depth (km)</Label>
+                  <Input
+                    id="maxDepth"
+                    type="number"
+                    step="0.1"
+                    placeholder="e.g., 40"
+                    value={maxDepth}
+                    onChange={(e) => setMaxDepth(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Geographic Filters */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <Label>Geographic Bounds (Optional)</Label>
+                  <InfoTooltip content="Limit imports to a bounding box in decimal degrees. Leave blank for GeoNet's whole catalogue." />
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={fillNzRegion}>
+                  Use New Zealand region
+                </Button>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -375,7 +580,7 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
                     id="minLatitude"
                     type="number"
                     step="0.1"
-                    placeholder="e.g., -47.5 (South)"
+                    placeholder={`e.g., ${NZ_NATIONAL_BOUNDS.minLatitude.toFixed(1)} (South)`}
                     value={minLatitude}
                     onChange={(e) => setMinLatitude(e.target.value)}
                   />
@@ -383,13 +588,13 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
                     <Label htmlFor="maxLatitude">Maximum Latitude</Label>
-                    <InfoTooltip content="Northern boundary (-90 to 90)." />
+                    <InfoTooltip content="Northern boundary (-90 to 90). New Zealand's Kermadec Islands reach 29 S." />
                   </div>
                   <Input
                     id="maxLatitude"
                     type="number"
                     step="0.1"
-                    placeholder="e.g., -34.0 (North)"
+                    placeholder={`e.g., ${NZ_NATIONAL_BOUNDS.maxLatitude.toFixed(1)} (North)`}
                     value={maxLatitude}
                     onChange={(e) => setMaxLatitude(e.target.value)}
                   />
@@ -397,13 +602,13 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
                     <Label htmlFor="minLongitude">Minimum Longitude</Label>
-                    <InfoTooltip content="Western boundary (-180 to 180)." />
+                    <InfoTooltip content="Western boundary (-180 to 180). For a box across the 180 degree meridian, enter a western edge greater than the eastern edge, e.g. 165 to -175 for New Zealand including the Kermadec and Chatham Islands." />
                   </div>
                   <Input
                     id="minLongitude"
                     type="number"
                     step="0.1"
-                    placeholder="e.g., 165.0 (West)"
+                    placeholder={`e.g., ${NZ_NATIONAL_BOUNDS.minLongitude.toFixed(1)} (West)`}
                     value={minLongitude}
                     onChange={(e) => setMinLongitude(e.target.value)}
                   />
@@ -411,48 +616,23 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
                     <Label htmlFor="maxLongitude">Maximum Longitude</Label>
-                    <InfoTooltip content="Eastern boundary (-180 to 180)." />
+                    <InfoTooltip content="Eastern boundary (-180 to 180). East of 180 degrees is negative: the Chatham Islands are near -176.5 and the Kermadec Islands near -178." />
                   </div>
                   <Input
                     id="maxLongitude"
                     type="number"
                     step="0.1"
-                    placeholder="e.g., 179.0 (East)"
+                    placeholder={`e.g., ${NZ_NATIONAL_BOUNDS.maxLongitude.toFixed(1)} (East, across 180°)`}
                     value={maxLongitude}
                     onChange={(e) => setMaxLongitude(e.target.value)}
                   />
                 </div>
               </div>
-            </div>
-
-            {/* Catalogue Name */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-1.5">
-                <Label htmlFor="catalogueName">Catalogue Name</Label>
-                <InfoTooltip content="Name of the catalogue that will receive the imported events." />
-              </div>
-              <Input
-                id="catalogueName"
-                type="text"
-                value={catalogueName}
-                onChange={(e) => setCatalogueName(e.target.value)}
-                placeholder="GeoNet - Automated Import"
-              />
-            </div>
-
-            {/* Update Existing */}
-            <div className="flex items-center space-x-2">
-              <Switch
-                id="updateExisting"
-                checked={updateExisting}
-                onCheckedChange={setUpdateExisting}
-              />
-              <div className="flex items-center gap-1.5">
-                <Label htmlFor="updateExisting" className="cursor-pointer">
-                  Update existing events if data has changed
-                </Label>
-                <InfoTooltip content="Re-imports events that already exist when GeoNet has updated them." />
-              </div>
+              {crossesAntimeridian && (
+                <p className="text-xs text-muted-foreground">
+                  This box crosses the 180° meridian: it runs east from the minimum longitude to the maximum longitude.
+                </p>
+              )}
             </div>
 
             {/* Submit Button */}
@@ -490,6 +670,9 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
                 </>
               )}
             </CardTitle>
+            {result.catalogueName && (
+              <CardDescription>Catalogue: {result.catalogueName}</CardDescription>
+            )}
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -506,10 +689,24 @@ export function ImportForm({ readOnly = false }: ImportFormProps) {
                 <p className="text-2xl font-bold text-blue-600">{result.updatedEvents}</p>
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Skipped Events</p>
+                <p className="text-sm text-muted-foreground">Skipped (already stored, unchanged)</p>
                 <p className="text-2xl font-bold text-gray-600">{result.skippedEvents}</p>
               </div>
             </div>
+
+            {notImported.length > 0 && (
+              <div>
+                <p className="text-sm font-medium mb-1">Not imported</p>
+                <ul className="text-sm text-muted-foreground space-y-1">
+                  {notImported.map((row) => (
+                    <li key={row.label}>
+                      {row.label}: <span className="font-semibold text-foreground">{row.value}</span>
+                      {row.detail ? ` (${row.detail})` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <div>
               <p className="text-sm text-muted-foreground">Duration</p>

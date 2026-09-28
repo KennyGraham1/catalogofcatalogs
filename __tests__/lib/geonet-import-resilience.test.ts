@@ -8,7 +8,7 @@ jest.mock('p-limit', () => ({
 
 jest.mock('@/lib/geonet-client', () => ({
   __esModule: true,
-  geonetClient: { fetchEventsText: jest.fn(), fetchEventById: jest.fn() },
+  geonetClient: { fetchEventsText: jest.fn(), fetchEventById: jest.fn(), fetchEventQuakeMLText: jest.fn() },
 }));
 
 jest.mock('@/lib/db', () => {
@@ -20,6 +20,7 @@ jest.mock('@/lib/db', () => {
       getCatalogueById: jest.fn(),
       insertCatalogue: jest.fn(),
       getEventsBySourceIds: jest.fn(),
+      getEventBySourceId: jest.fn(),
       getEventCoordinatesByIds: jest.fn(),
       bulkInsertEvents: jest.fn(),
       insertEvent: jest.fn(),
@@ -49,7 +50,9 @@ const row = (id: string, depthKm: number, mag = 3.0) => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
-  db.getCatalogueById.mockResolvedValue({ id: 'cat-1', name: 'GeoNet', status: 'complete' });
+  db.getCatalogueById.mockResolvedValue({
+    id: 'cat-1', name: 'GeoNet', status: 'complete', merge_config: JSON.stringify({ source: 'GeoNet' }),
+  });
   db.getEventsBySourceIds.mockResolvedValue(new Map());
   db.getEventCoordinatesByIds.mockResolvedValue([]);
   db.bulkInsertEvents.mockImplementation(async (rows: unknown[]) => rows.length);
@@ -86,11 +89,11 @@ describe('GeoNet import resilience', () => {
 
   it('does not erase a stored focal mechanism when the detail re-fetch fails', async () => {
     const existing = '[{"nodalPlane1":{"strike":10,"dip":20,"rake":30}}]';
-    db.getEventsBySourceIds.mockResolvedValue(
-      new Map([['e', { id: 'db-e', source_id: 'e', magnitude: 5.1, focal_mechanisms: existing }]])
-    );
+    db.getEventsBySourceIds.mockResolvedValue(new Map([['e', 'db-e']]));
+    // The stored row is from an older solution (M4.9), so the update has work to do.
+    db.getEventBySourceId.mockResolvedValue({ id: 'db-e', source_id: 'e', magnitude: 4.9, focal_mechanisms: existing });
     client.fetchEventsText.mockResolvedValue([row('e', 10, 5.1)]);
-    client.fetchEventById.mockRejectedValue(new Error('synthetic GeoNet detail timeout'));
+    client.fetchEventQuakeMLText.mockRejectedValue(new Error('synthetic GeoNet detail timeout'));
 
     await new GeoNetImportService().importEvents({ hours: 1, catalogueId: 'cat-1', updateExisting: true });
 
@@ -98,15 +101,17 @@ describe('GeoNet import resilience', () => {
     const patch = db.updateEvent.mock.calls[0][1] as Record<string, unknown>;
     // A failed lookup must leave the field untouched, not write null over stored data.
     expect('focal_mechanisms' in patch).toBe(false);
-    expect(client.fetchEventById).toHaveBeenCalledTimes(1);
+    expect(patch.magnitude).toBe(5.1);
+    expect(client.fetchEventQuakeMLText).toHaveBeenCalledTimes(1);
   });
 
   it('does not fetch enrichment twice when the response contains no focal mechanism', async () => {
     db.getEventsBySourceIds.mockResolvedValue(new Map([['e', 'db-e']]));
+    db.getEventBySourceId.mockResolvedValue({ id: 'db-e', source_id: 'e', magnitude: 4.9 });
     client.fetchEventsText.mockResolvedValue([row('e', 10, 5.1)]);
-    client.fetchEventById.mockResolvedValue(null);
+    client.fetchEventQuakeMLText.mockResolvedValue(null);
     await new GeoNetImportService().importEvents({ hours: 1, catalogueId: 'cat-1', updateExisting: true });
-    expect(client.fetchEventById).toHaveBeenCalledTimes(1);
+    expect(client.fetchEventQuakeMLText).toHaveBeenCalledTimes(1);
     expect(db.updateEvent).toHaveBeenCalledWith('db-e', expect.not.objectContaining({ focal_mechanisms: expect.anything() }));
     expect(db.updateEvent.mock.calls[0][1]).not.toHaveProperty('focal_mechanisms');
   });
@@ -159,7 +164,8 @@ describe('GeoNet import resilience', () => {
     expect(result.success).toBe(true);
     expect(result.newEvents).toBe(1);
     expect(db.getEventCoordinatesByIds).toHaveBeenCalledTimes(1);
-    expect(db.updateCatalogueGeoBounds).toHaveBeenCalledWith('cat-1', -41, -41, 174, 174);
+    // Extended atomically in the database (merge), not read-merge-written here.
+    expect(db.updateCatalogueGeoBounds).toHaveBeenCalledWith('cat-1', -41, -41, 174, 174, undefined, { merge: true });
   });
 
   it('does not extend bounds or query coordinates when all insertions collide', async () => {
@@ -191,7 +197,8 @@ describe('GeoNet import resilience', () => {
     expect(result.newEvents).toBe(1001);
     expect(result.errors).toEqual(['Bulk insert failed: document validation failed after partial write']);
     expect(db.insertImportHistory.mock.calls[0][5]).toBe(1001);
-    expect(db.updateCatalogueGeoBounds).toHaveBeenCalledWith('cat-1', -41, -40, 174, 174);
-    expect(db.updateCatalogueStatus).toHaveBeenLastCalledWith('error', 'cat-1');
+    expect(db.updateCatalogueGeoBounds).toHaveBeenCalledWith('cat-1', -41, -40, 174, 174, undefined, { merge: true });
+    // Set under this run's token, so a concurrent run cannot overwrite it.
+    expect(db.updateCatalogueStatus).toHaveBeenLastCalledWith('error', 'cat-1', undefined, { runId: expect.any(String) });
   });
 });

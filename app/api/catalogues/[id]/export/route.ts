@@ -1,24 +1,46 @@
 /**
  * Unified export API endpoint supporting multiple formats
  * Supports: CSV, JSON, GeoJSON, KML, QuakeML
+ *
+ * Query parameters:
+ *   format      csv (default) | json | geojson | kml | quakeml
+ *   metadata    `comments` opts the CSV into its `#` metadata prologue
+ *   decluster   none (default) | gardner-knopoff: tag every exported event with its cluster
+ *   <filters>   the event filters of lib/event-filter-params.ts (contract C4), e.g.
+ *               minMagnitude=3&startTime=2020-01-01; the export then holds only matching events
+ *
+ * Every format records the catalogue id and version (C3), the export timestamp (UTC), the
+ * SHA-256 of the canonical exported rows, the filter and the declustering applied (C12). The
+ * same values are sent as X-* response headers, so a plain CSV (which has no place for file
+ * metadata) can still be tied to them; each CSV row also carries its CatalogueVersion.
  */
 
+import { createHash } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { dbQueries } from '@/lib/db';
+import { dbQueries, normalizeCatalogueVersion } from '@/lib/db';
+import type { EventFilters } from '@/lib/db';
 import {
+  computeEventRowsChecksum,
   eventsToCSVChunks,
   eventsToGeoJSONChunks,
   eventsToJSONChunks,
   eventsToKMLChunks,
 } from '@/lib/exporters';
+import type { DeclusterTag, ExportDeclustering, ExportMetadata, ExportableEvent } from '@/lib/exporters';
 import { eventsToQuakeMLDocument } from '@/lib/quakeml-exporter';
 import { generateExportFilename, createDownloadHeaders } from '@/lib/export-utils';
+import { eventFiltersToSearchParams, hasEventFilters, parseEventFilterParams } from '@/lib/event-filter-params';
+import { gardnerKnopoffDeclustering, getGardnerKnopoffWindow } from '@/lib/seismological-analysis';
+import type { EarthquakeEvent } from '@/lib/seismological-analysis';
 import { requireViewer } from '@/lib/auth/middleware';
 
 // Force dynamic rendering for this API route
 export const dynamic = 'force-dynamic';
 
 type ExportFormat = 'csv' | 'json' | 'geojson' | 'kml' | 'quakeml';
+
+const DECLUSTER_OPTIONS = ['none', 'gardner-knopoff'] as const;
+type DeclusterOption = typeof DECLUSTER_OPTIONS[number];
 
 export async function GET(
   request: NextRequest,
@@ -50,10 +72,28 @@ export async function GET(
     // The default is a plain RFC 4180 file, because RFC 4180 has no comment convention: with a
     // prologue, line 1 becomes the header record for pandas.read_csv, R's read.csv, ZMAP and
     // this platform's own parseCSV, and none of them can read the file back. The metadata is
-    // served instead from GET /api/catalogues/{id} (see the Link header on the response) and
-    // is embedded in the JSON and GeoJSON exports.
+    // served instead from GET /api/catalogues/{id} (see the Link header on the response), is
+    // embedded in the JSON and GeoJSON exports, and its citation-critical part (version,
+    // timestamp, checksum, filter, declustering) is sent in X-* headers; every CSV row also
+    // carries its CatalogueVersion.
     const metadataMode = (searchParams.get('metadata') || '').toLowerCase();
     const metadataComments = metadataMode === 'comments' || metadataMode === 'true' || metadataMode === '1';
+
+    const declusterOption = (searchParams.get('decluster') || 'none').trim().toLowerCase() as DeclusterOption;
+    if (!DECLUSTER_OPTIONS.includes(declusterOption)) {
+      return NextResponse.json(
+        { error: `Invalid decluster: "${searchParams.get('decluster')}". Supported: ${DECLUSTER_OPTIONS.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    // Filtered exports (C4): the same strict parser as the filtered-events route, so a bad
+    // value is a 400 naming the parameter rather than a silently different file.
+    const parsedFilters = parseEventFilterParams(searchParams);
+    if (!parsedFilters.ok) {
+      return NextResponse.json({ error: parsedFilters.error }, { status: 400 });
+    }
+    const filters = hasEventFilters(parsedFilters.filters) ? parsedFilters.filters : null;
 
     if (!dbQueries) {
       return NextResponse.json(
@@ -71,7 +111,9 @@ export async function GET(
       );
     }
 
-    const events = await getAllEventsForExport(catalogueId, catalogue.event_count);
+    const events: ExportableEvent[] = filters
+      ? await getAllFilteredEventsForExport(catalogueId, filters)
+      : await getAllEventsForExport(catalogueId, catalogue.event_count);
 
     // An empty catalogue is valid — export an empty file rather than a 404
 
@@ -133,8 +175,8 @@ export async function GET(
     }
 
     // Parse merge_config so the exported file records which merge strategy and thresholds
-    // produced this catalogue. This is catalogue-level provenance only: MergedEvent stores no
-    // per-event merge strategy or quality score, so neither can appear in the export.
+    // produced this catalogue. The per-event strategy, parameters and quality score (C1/C2)
+    // travel with each event as well (see eventLineage in lib/exporters.ts).
     let mergeConfig: unknown;
     if (catalogue.merge_config) {
       try {
@@ -145,13 +187,22 @@ export async function GET(
     }
 
     // Preserve declared catalogue coverage when present; otherwise derive the
-    // covered event range from the exported rows.
+    // covered event range from the exported rows. The exporters render both as UTC ISO.
     const timePeriodStart = catalogue.time_period_start || minTime;
     const timePeriodEnd = catalogue.time_period_end || maxTime;
 
+    // One timestamp for the whole export: file metadata, filename and headers agree.
+    const exportedAt = new Date();
+    // The platform version (C3); a catalogue stored before versioning reads as 1.0.0.
+    const catalogueVersion = normalizeCatalogueVersion(catalogue.version);
+    const declustering = declusterOption === 'gardner-knopoff'
+      ? declusterGardnerKnopoffForExport(events)
+      : { algorithm: 'none' as const };
+
     // Prepare comprehensive metadata — covers all MergedCatalogue scalar fields
-    const metadata = {
+    const metadata: ExportMetadata = {
       catalogueName: catalogue.name,
+      catalogueId,
       description: catalogue.description || undefined,
       source: catalogue.data_source || undefined,
       provider: catalogue.provider || undefined,
@@ -169,6 +220,7 @@ export async function GET(
       license: catalogue.license || undefined,
       citation: catalogue.citation || undefined,
       eventCount: events.length,
+      generatedAt: exportedAt.toISOString(),
       // Contact information
       contactName: catalogue.contact_name || undefined,
       contactEmail: catalogue.contact_email || undefined,
@@ -178,7 +230,9 @@ export async function GET(
       qualityNotes: catalogue.quality_notes || undefined,
       // Additional metadata
       doi: catalogue.doi || undefined,
-      version: catalogue.version || undefined,
+      version: catalogueVersion,
+      versionUpdatedAt: catalogue.version_updated_at || catalogue.created_at || undefined,
+      sourceVersion: catalogue.source_version || undefined,
       keywords,
       referenceLinks,
       usageTerms: catalogue.usage_terms || undefined,
@@ -193,7 +247,13 @@ export async function GET(
       createdBy: catalogue.created_by || undefined,
       modifiedAt: catalogue.modified_at || undefined,
       sourceCatalogues,
+      // Export provenance (C12)
+      filter: filters ? { ...filters } : null,
+      declustering,
     };
+    // Computed once here, with node:crypto, over the same canonical rows the exporters would
+    // hash, and handed to them so every format and the response header carry one value.
+    metadata.checksum = computeEventRowsChecksum(events, metadata, nodeSha256());
 
     let chunks: Generator<string>;
     let fileExtension: string;
@@ -236,12 +296,14 @@ export async function GET(
         );
     }
 
-    // Generate filename
-    const filename = generateExportFilename(
-      catalogue.name,
-      fileExtension,
-      format === 'quakeml' ? { prefix: 'quakeml' } : undefined
-    );
+    // Generate filename: it carries the catalogue version and the export timestamp, so a
+    // downloaded file still says which data state it holds.
+    const filename = generateExportFilename(catalogue.name, fileExtension, {
+      prefix: format === 'quakeml' ? 'quakeml' : undefined,
+      suffix: filters ? 'filtered' : undefined,
+      version: catalogueVersion,
+      customDate: exportedAt,
+    });
 
     const headers = new Headers(createDownloadHeaders(filename, fileExtension));
     // The full catalogue metadata is not embedded in the CSV (see the `metadata` query
@@ -250,6 +312,15 @@ export async function GET(
       'Link',
       `</api/catalogues/${encodeURIComponent(catalogueId)}>; rel="describedby"; type="application/json"`
     );
+    // The export's citation data, for every format (header values are ASCII: ids, a semantic
+    // version, an ISO timestamp, hex, and a percent-encoded query string).
+    headers.set('X-Catalogue-ID', asciiHeaderValue(catalogueId));
+    headers.set('X-Catalogue-Version', catalogueVersion);
+    headers.set('X-Export-Timestamp', metadata.generatedAt!);
+    headers.set('X-Export-Event-Count', String(events.length));
+    headers.set('X-Export-Rows-SHA256', metadata.checksum.value);
+    headers.set('X-Export-Filter', filters ? eventFiltersToSearchParams(filters).toString() : 'none');
+    headers.set('X-Export-Declustering', declustering.algorithm);
 
     // Return file
     return new NextResponse(toByteStream(chunks), {
@@ -298,6 +369,97 @@ async function getAllEventsForExport(catalogueId: string, expectedCount?: number
   } while (page <= totalPages);
 
   return allEvents;
+}
+
+/**
+ * Every event matching the filters, read page by page. A single getFilteredEvents call is
+ * capped by FILTERED_EVENTS_LIMIT (it serves the interactive filter UI); an export must never
+ * be silently truncated, so it keeps reading while the database reports more rows.
+ */
+async function getAllFilteredEventsForExport(catalogueId: string, filters: EventFilters): Promise<any[]> {
+  if (!dbQueries) return [];
+  const pageSize = 5000;
+  const allEvents: any[] = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await dbQueries.getFilteredEvents(catalogueId, filters, { limit: pageSize, offset });
+    for (const event of page.events) allEvents.push(event);
+    if (!page.truncated || page.events.length === 0) break;
+  }
+  return allEvents;
+}
+
+/**
+ * Gardner-Knopoff (1974) declustering of the exported events, as per-event tags (C7): the
+ * cluster an event belongs to (identified by its mainshock's event id) and whether it is
+ * independent (a mainshock or in no cluster). Runs lib/seismological-analysis.ts's
+ * gardnerKnopoffDeclustering, the analytics engine's own implementation, so an export and
+ * the analytics page decluster identically; its window parameters are recorded as computed.
+ */
+function declusterGardnerKnopoffForExport(events: ExportableEvent[]): ExportDeclustering {
+  const input: EarthquakeEvent[] = events.map(event => ({
+    id: event.id,
+    time: event.time,
+    latitude: event.latitude,
+    longitude: event.longitude,
+    depth: event.depth ?? 0,
+    magnitude: event.magnitude,
+  }));
+  const { clusters } = gardnerKnopoffDeclustering(input);
+
+  const tags = new Map<string, DeclusterTag>();
+  clusters.forEach((members, mainshockId) => {
+    const clusterId = String(mainshockId);
+    members.forEach(member => {
+      tags.set(String(member.id), { clusterId, isMainshock: String(member.id) === clusterId });
+    });
+  });
+  let dependentCount = 0;
+  for (const event of events) {
+    const tag = tags.get(event.id);
+    if (!tag) tags.set(event.id, { clusterId: null, isMainshock: true });
+    else if (!tag.isMainshock) dependentCount++;
+  }
+
+  return {
+    algorithm: 'gardner-knopoff',
+    parameters: {
+      reference: 'Gardner and Knopoff (1974); window table of van Stiphout et al. (2012), CORSSA',
+      timeWindow: 'forward only: 0 <= t - t_mainshock <= T(M)',
+      distance: 'epicentral (haversine) distance <= L(M)',
+      processingOrder: 'largest magnitude first; each cluster mainshock is reserved before its window is searched',
+      appliedTo: 'the exported events (after any filter)',
+      // The windows exactly as the implementation computes them (T in days, L in km).
+      windows: [2, 3, 4, 5, 6, 6.5, 7, 8].map(magnitude => {
+        const { timeWindowDays, distanceWindowKm } = getGardnerKnopoffWindow(magnitude);
+        return {
+          magnitude,
+          timeWindowDays: Number(timeWindowDays.toPrecision(6)),
+          distanceWindowKm: Number(distanceWindowKm.toPrecision(6)),
+        };
+      }),
+    },
+    summary: {
+      eventCount: events.length,
+      mainshockCount: events.length - dependentCount,
+      dependentCount,
+      clusterCount: clusters.size,
+    },
+    tags,
+  };
+}
+
+/** A node:crypto SHA-256 behind the exporters' incremental-hasher interface. */
+function nodeSha256() {
+  const hash = createHash('sha256');
+  return {
+    update: (text: string) => hash.update(text, 'utf8'),
+    digestHex: () => hash.digest('hex'),
+  };
+}
+
+/** Header values must be ByteStrings; ids are ASCII in practice, but never let one throw. */
+function asciiHeaderValue(value: string): string {
+  return /^[\x20-\x7e]*$/.test(value) ? value : encodeURIComponent(value);
 }
 
 /** Wrap a single already-built document as a one-chunk stream. */

@@ -52,8 +52,10 @@ export function assessEventQuality(event: any): IntegratedQualityAssessment {
     horizontalUncertainty: detailedMetrics.horizontalUncertainty ?? null, // km
     depthUncertainty: detailedMetrics.depthUncertainty ?? null,           // km (DB convention)
     // minimum_distance is stored in degrees (QuakeML/FDSN OriginQuality.minimumDistance);
-    // the QS scorer expects km, so convert here (~111.19 km per degree).
-    minimumDistance: typeof event?.minimum_distance === 'number' && Number.isFinite(event.minimum_distance)
+    // the QS scorer expects km, so convert here (~111.19 km per degree). A value outside
+    // the DB's accepted 0-180 deg range (a -999 sentinel) is absent, as it is once stored.
+    minimumDistance: typeof event?.minimum_distance === 'number' && Number.isFinite(event.minimum_distance) &&
+      event.minimum_distance >= 0 && event.minimum_distance <= 180
       ? event.minimum_distance * 111.19
       : null,
   };

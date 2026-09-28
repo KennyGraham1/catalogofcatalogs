@@ -98,11 +98,11 @@ Local Development
 ^^^^^^^^^^^^^^^^^
 
 
-1. Create a new branch from ``main``:
+1. Create a new branch from ``master`` (the repository's default branch):
 
    ```bash
-   git checkout main
-   git pull origin main
+   git checkout master
+   git pull origin master
    git checkout -b feature/your-feature
    ```
 

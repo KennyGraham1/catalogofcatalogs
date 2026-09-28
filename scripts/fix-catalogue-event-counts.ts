@@ -12,7 +12,7 @@
 
 import { dbQueries } from '../lib/db';
 
-async function fixCatalogueEventCounts() {
+export async function fixCatalogueEventCounts() {
   console.log('Starting catalogue event count fix...\n');
 
   if (!dbQueries) {
@@ -33,10 +33,16 @@ async function fixCatalogueEventCounts() {
 
     for (const catalogue of catalogueList) {
       try {
-        // Get actual event count for this catalogue
-        const events = await dbQueries.getEventsByCatalogueId(catalogue.id);
-        const eventList = Array.isArray(events) ? events : events.data;
-        const actualCount = eventList.length;
+        // Get the true event count via countDocuments. getEventsByCatalogueId's
+        // unpaginated form is capped by UNPAGINATED_EVENTS_LIMIT when that
+        // deployment variable is set (lib/db.ts), so using its .length here wrote
+        // min(true count, cap) as event_count — which then disables the export
+        // route's own truncation check (getAllEventsForExport treats
+        // event_count as proof a capped read is complete once they're equal),
+        // silently truncating every future export of that catalogue (gs#1). It
+        // also loaded every full event document (origins, picks, arrivals JSON)
+        // into memory just to discard them and keep a length.
+        const actualCount = await dbQueries.countEventsByCatalogue(catalogue.id);
         const storedCount = catalogue.event_count ?? 0;
 
         if (actualCount === storedCount) {
@@ -70,13 +76,15 @@ async function fixCatalogueEventCounts() {
   }
 }
 
-// Run the script
-fixCatalogueEventCounts()
-  .then(() => {
-    console.log('\nDone!');
-    process.exit(0);
-  })
-  .catch((error) => {
-    console.error('Script failed:', error);
-    process.exit(1);
-  });
+// Run the script (but not when imported by a test)
+if (require.main === module) {
+  fixCatalogueEventCounts()
+    .then(() => {
+      console.log('\nDone!');
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error('Script failed:', error);
+      process.exit(1);
+    });
+}

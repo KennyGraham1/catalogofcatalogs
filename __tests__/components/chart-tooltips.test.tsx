@@ -30,7 +30,14 @@ describe('chart tooltip formatters (enriched, professional)', () => {
     const html = f([{ axisValue: '5.0+', value: 25, color: '#ef4444' }]);
     expect(html).toContain('Magnitude 5.0+');
     expect(html).toContain('25 (25.0%)');
-    expect(html).toContain('class');
+    // An open-ended top bin spans every class from its lower bound up.
+    expect(html).toContain('Moderate class or larger');
+  });
+  it('magnitude distribution: the open-ended bottom bin is Micro, not NaN-classed', () => {
+    const f = fmt(<MagnitudeDistributionChart data={[{ range: '< 2.0', count: 40 }, { range: '2.0-2.5', count: 60 }]} />);
+    const html = f([{ axisValue: '< 2.0', value: 40, color: '#22c55e' }]);
+    expect(html).toContain('40 (40.0%)');
+    expect(html).toContain('Micro class');
   });
   it('depth distribution: depth class badge', () => {
     const f = fmt(<DepthDistributionChart data={[{ range: '0-10 km', count: 50 }]} />);

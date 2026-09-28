@@ -21,6 +21,7 @@ jest.mock('@/lib/geonet-client', () => ({
   geonetClient: {
     fetchEventsText: jest.fn(),
     fetchEventById: jest.fn(),
+    fetchEventQuakeMLText: jest.fn(),
   },
 }));
 
@@ -92,8 +93,11 @@ beforeAll(() => {
 beforeEach(() => {
   jest.clearAllMocks();
   jest.spyOn(console, 'warn').mockImplementation(() => {});
+  // An existing catalogue created by the GeoNet importer (the only kind it adds to).
   db.getCatalogueById.mockResolvedValue({
     id: 'cat-1',
+    name: 'GeoNet - Automated Import',
+    merge_config: JSON.stringify({ source: 'GeoNet' }),
     min_latitude: null,
     max_latitude: null,
     min_longitude: null,
@@ -109,6 +113,7 @@ beforeEach(() => {
   db.updateCatalogueGeoBounds.mockResolvedValue(undefined);
   db.insertImportHistory.mockResolvedValue(undefined);
   client.fetchEventById.mockResolvedValue(null);
+  client.fetchEventQuakeMLText.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -140,6 +145,9 @@ describe('server2 :: GeoNet import catalogue status', () => {
     // stored catalogue is not branded broken because of one bad source record.
     expect(result.success).toBe(false);
     expect(result.skippedEvents).toBe(0);
+    // The rejected row is counted, so the figures add up to what was fetched.
+    expect(result.invalidEvents).toBe(1);
+    expect(result.newEvents + result.invalidEvents).toBe(result.totalFetched);
 
     // The skip is reported to the caller and stored in the import history.
     expect(result.errors).toEqual(['Skipped event bad-1: invalid data']);
@@ -184,6 +192,11 @@ describe('server2 :: GeoNet import new-event accounting', () => {
     expect(db.bulkInsertEvents).toHaveBeenCalledTimes(1);
     expect(db.bulkInsertEvents.mock.calls[0][0]).toHaveLength(5);
     expect(result.newEvents).toBe(3);
+    // The two rows the index turned away are counted, not lost: 3 + 2 = 5 fetched.
+    // (This test used to pin skippedEvents 0 with nothing else, so 2 rows vanished.)
+    expect(result.collidedEvents).toBe(2);
+    expect(result.skippedEvents).toBe(0);
+    expect(result.totalFetched).toBe(5);
     expect(result.success).toBe(true);
     // The import history records the same figure.
     expect(db.insertImportHistory.mock.calls[0][5]).toBe(3);
@@ -210,6 +223,7 @@ describe('server2 :: GeoNet import new-event accounting', () => {
     const submitted = db.bulkInsertEvents.mock.calls.map((c) => c[0].length);
     expect(submitted).toEqual([1000, 1000, 500]);
     expect(result.newEvents).toBe(999 + 999 + 499);
+    expect(result.collidedEvents).toBe(3);
     expect(result.success).toBe(true);
     expect(db.getEventCoordinatesByIds).toHaveBeenCalledTimes(3);
   });

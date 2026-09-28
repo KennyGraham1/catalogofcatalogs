@@ -22,14 +22,19 @@ A comprehensive TypeScript client for the GeoNet FDSN Event Web Service with:
 
 - **Full API Support**: All query parameters (time range, magnitude, depth, location, event type, etc.)
 - **Multiple Formats**: Text (pipe-delimited) and QuakeML (XML) formats
-- **Helper Methods**: 
+- **Helper Methods**:
+
   - ``fetchEventsText()`` - Fetch events in text format
   - ``fetchEventsQuakeML()`` - Fetch events in QuakeML XML format
   - ``fetchEventById()`` - Fetch a specific event by ID
   - ``fetchRecentEvents()`` - Fetch events from last N hours
   - ``fetchUpdatedEvents()`` - Fetch events updated since a specific time
   - ``fetchEventsByDateRange()`` - Fetch events in a date range
-  - ``fetchNZEvents()`` - Fetch events in New Zealand region
+  - ``fetchNZEvents()`` - Fetch events across New Zealand's national bounds
+    (``NZ_NATIONAL_BOUNDS``: 53°S-28°S, 165°E across the antimeridian to
+    175°W — includes the Kermadec, Chatham, Bounty/Antipodes and
+    Auckland/Campbell Islands, which an older, smaller box excluded)
+
 - **Type Safety**: Full TypeScript type definitions
 - **Error Handling**: Proper error handling for API failures
 
@@ -64,7 +69,7 @@ Import Workflow
                API->>DB: Insert event
                end
            else Existing event
-               API->>DB: Update event (if newer)
+               API->>DB: Update event (if changed)
            else Unchanged
                API->>DB: Skip
            end
@@ -83,6 +88,7 @@ Import Workflow
 A robust import service that handles the entire import workflow:
 
 - **Flexible Import Options**:
+
   - Time range (last N hours or custom date range)
   - Magnitude filters (min/max)
   - Depth filters (min/max)
@@ -91,16 +97,28 @@ A robust import service that handles the entire import workflow:
   - Custom catalogue name
 
 - **Automated Processing**:
-  - Automatic duplicate detection by event ID
+
+  - Automatic duplicate detection by GeoNet EventID (``source_id``) only —
+    no time/distance/magnitude proximity matching is performed
   - Update existing events with revised data
   - Skip unchanged events
+  - Event typing: GeoNet's own event-type text is kept verbatim in
+    ``source_event_type``; the normalised ``event_type`` follows
+    SeisComP's QuakeML mapping (``outside of network interest`` ->
+    ``other event``, ``induced earthquake`` -> ``induced or triggered
+    event``); GeoNet's ``duplicate``, ``not existing`` and
+    ``not locatable`` types are excluded from the import entirely
   - Comprehensive error handling and logging
 
 - **Statistics Tracking**:
+
   - Total events fetched
   - New events added
   - Events updated
-  - Events skipped
+  - Events skipped (already stored and unchanged, or update not requested)
+  - Rows not written, broken out by reason: collided (EventID written by a
+    concurrent import), invalid (unusable/failed validation), excluded
+    (GeoNet type), failed (database write failed)
   - Errors encountered
   - Import duration
 
@@ -222,8 +240,16 @@ A complete page with tabbed interface:
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
 
-Test Script (`scripts/test-geonet-import.js`)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. note::
+   ``scripts/test-geonet-import.js`` and ``scripts/migrate-add-source-id.js``,
+   described below as they existed at the time of this implementation, were
+   later removed (the SQLite-era migration script is obsolete now that the
+   platform runs on MongoDB from a fresh ``npx tsx scripts/init-database.ts``;
+   see :doc:`/deployment/environment-setup`). This section is kept as a
+   historical record of what was originally delivered.
+
+Test Script (`scripts/test-geonet-import.js`, since removed)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 Comprehensive test script that:
@@ -236,8 +262,8 @@ Comprehensive test script that:
 
 **Lines of Code**: 130
 
-Migration Script (`scripts/migrate-add-source-id.js`)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Migration Script (`scripts/migrate-add-source-id.js`, since removed)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 Database migration script that:
@@ -254,8 +280,8 @@ Database migration script that:
 ^^^^^^^^^^^^^^^^
 
 
-User Documentation (`GEONET_IMPORT_DOCUMENTATION.md`)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+User Documentation (superseded by :doc:`/user-guide/importing-geonet`)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 Comprehensive user guide covering:
@@ -459,9 +485,11 @@ Created Files
 5. ``components/import/ImportForm.tsx`` - Import form component
 6. ``components/import/ImportHistory.tsx`` - History component
 7. ``app/import/page.tsx`` - Import page
-8. ``scripts/test-geonet-import.js`` - Test script
-9. ``scripts/migrate-add-source-id.js`` - Migration script
-10. ``GEONET_IMPORT_DOCUMENTATION.md`` - User documentation
+8. ``scripts/test-geonet-import.js`` - Test script (since removed)
+9. ``scripts/migrate-add-source-id.js`` - Migration script (since removed;
+   MongoDB collections are created by ``scripts/init-database.ts`` instead)
+10. ``GEONET_IMPORT_DOCUMENTATION.md`` - User documentation (since removed;
+    superseded by :doc:`/user-guide/importing-geonet`)
 11. ``GEONET_IMPORT_IMPLEMENTATION_SUMMARY.md`` - This file
 
 Modified Files

@@ -155,6 +155,19 @@ Public Endpoints
 - ``POST /api/auth/reset-password`` - Complete password reset
 - ``POST /api/auth/[...nextauth]`` - NextAuth endpoints
 
+Role Request and Account Safeguards
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+- Approving or rejecting a role request that is no longer pending (already
+  actioned) returns ``409 Conflict`` rather than succeeding silently.
+- If an admin changes a user's role directly via ``PATCH /api/users/[id]``
+  (outside the role-request approval flow), that user's pending role
+  requests are automatically closed/superseded.
+- An admin who tries to demote or deactivate **their own** account via
+  ``PATCH /api/users/[id]`` gets ``400 Bad Request``.
+- An action that would remove or deactivate the **last remaining active
+  admin** account gets ``409 Conflict``.
+
 Frontend Usage
 --------------
 
@@ -319,7 +332,9 @@ Security Best Practices
 1. **Always use HTTPS in production** - Set ``NEXTAUTH_URL`` to your HTTPS domain
 2. **Use a strong secret** - Generate ``NEXTAUTH_SECRET`` with ``openssl rand -base64 32``
 3. **Change default passwords** - Never use default admin credentials in production
-4. **Implement rate limiting** - Already configured for API routes
+4. **Implement rate limiting** - Already configured for API routes, including
+   dedicated credential-login throttling (10 failed attempts per
+   account+client and 50 per client within a 15-minute window)
 5. **Regular security audits** - Review user permissions and access logs
 6. **Password requirements** - Minimum 8 characters (enforced in registration)
 

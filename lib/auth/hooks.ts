@@ -16,7 +16,9 @@ export function useAuth() {
   
   return {
     user: session?.user || null,
-    isAuthenticated: status === 'authenticated',
+    // next-auth reports 'authenticated' for any non-empty session object, including a
+    // revoked one that carries no user, so require the user as well.
+    isAuthenticated: status === 'authenticated' && !!session?.user,
     isLoading: status === 'loading',
     session,
   };

@@ -288,6 +288,10 @@ export const COLLECTIONS = {
   AUDIT_LOGS: 'audit_logs',
   PENDING_UPLOADS: 'pending_uploads',
   UPLOAD_CHUNKS: 'upload_chunks',
+  // One document per cache scope ({ _id: scope, generation }): bumped by every
+  // catalogue mutation so API caches in every server instance stop serving data
+  // read before it (see lib/cache.ts getCacheGeneration).
+  CACHE_GENERATIONS: 'cache_generations',
 } as const;
 
 /**

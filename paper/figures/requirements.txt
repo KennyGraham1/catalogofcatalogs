@@ -1,4 +1,7 @@
-# Dependencies for paper/figures/generate_figures.py (Python 3.10+)
+# Dependencies for paper/figures/generate_figures.py (Python 3.9+).
+# The worked example's numbers are computed by the platform's TypeScript engine,
+# run through `npx tsx` from the repository root (Node.js and the repo's node_modules).
 numpy>=1.24
 matplotlib>=3.7
 cartopy>=0.22
+shapely>=2.0

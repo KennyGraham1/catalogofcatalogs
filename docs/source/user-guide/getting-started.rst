@@ -25,7 +25,7 @@ Before you begin, ensure you have the following software installed:
      - Version
      - Notes
    * - Node.js
-     - 18.x or higher
+     - 22.x or 24.x
      - LTS version recommended. Check with ``node --version``
    * - npm
      - 9.x or higher
@@ -84,7 +84,7 @@ Install all required Node.js packages:
 
 This installs:
 
-* **Next.js 13+** - React framework with App Router
+* **Next.js 15** - React framework with App Router
 * **React 18** - UI library
 * **MongoDB driver** - Database connectivity
 * **NextAuth.js** - Authentication
@@ -184,6 +184,29 @@ Option A: Local MongoDB
 **Windows (with WSL2):**
 
 Follow the Linux instructions within your WSL2 environment.
+
+.. important::
+
+   Saving a merged catalogue uses a multi-document transaction, which MongoDB only
+   supports on a replica set. On a standalone ``mongod`` the merge request fails with
+   "Transaction numbers are only allowed on a replica set member". Atlas clusters are
+   replica sets already; a local server can run as a single-node replica set.
+
+   With a system ``mongod``, add ``replication:`` / ``replSetName: rs0`` to
+   ``/etc/mongod.conf``, restart it, and initiate the set once:
+
+   .. code-block:: bash
+
+      mongosh --eval 'rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "127.0.0.1:27017" }] })'
+
+   Or with Docker:
+
+   .. code-block:: bash
+
+      docker run -d --name cofc-mongo -p 127.0.0.1:27017:27017 mongo:7.0 --replSet rs0
+      docker exec cofc-mongo mongosh --eval 'rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "127.0.0.1:27017" }] })'
+
+   Then connect with ``MONGODB_URI=mongodb://127.0.0.1:27017/earthquake_catalogue?replicaSet=rs0``.
 
 Option B: MongoDB Atlas (Cloud)
 -------------------------------

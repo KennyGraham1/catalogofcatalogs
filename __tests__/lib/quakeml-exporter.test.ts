@@ -324,12 +324,18 @@ describe('eventToQuakeML — fallback fires when origins/magnitudes JSON is abse
       longitude: { value: 170.0 },
       depth: { value: 10000 },
     };
+    // A stored origins blob comes with its preferred-origin id (lib/quakeml-to-db.ts always
+    // sets it). Without one, and with scalars that differ from every stored origin, the
+    // row's own solution is published beside the stored origin as the preferred one
+    // (cluster C, #66/#77; see __tests__/fix-export-quakeml-origins.test.ts).
     const event: MergedEvent = {
       ...minimalEvent,
       origins: JSON.stringify([storedOrigin]),
+      preferred_origin_id: 'quakeml:test/origin/json',
     };
     const xml = eventToQuakeML(event);
     expect(xml).toContain('quakeml:test/origin/json');
+    expect(xml).toContain('<preferredOriginID>quakeml:test/origin/json</preferredOriginID>');
     // Scalar lat should NOT appear (JSON origin takes precedence)
     expect(xml).not.toContain('<value>-41.2865</value>');
   });
@@ -348,6 +354,9 @@ describe('eventToQuakeML — fallback fires when origins/magnitudes JSON is abse
   it('emits station magnitudes before origins and attaches standalone arrivals to JSON origins', () => {
     const event: MergedEvent = {
       ...minimalEvent,
+      // The flat arrivals column is the PREFERRED origin's phase set (lib/quakeml-parser.ts),
+      // so it attaches to the stored origin the preferred-origin id names (cluster C, #67).
+      preferred_origin_id: 'quakeml:test/origin/json',
       origins: JSON.stringify([{
         publicID: 'quakeml:test/origin/json',
         time: { value: '2024-01-01T00:00:00Z' },
@@ -371,7 +380,11 @@ describe('eventToQuakeML — fallback fires when origins/magnitudes JSON is abse
     expect(xml.indexOf('<stationMagnitude publicID="quakeml:test/stmag/1"')).toBeLessThan(
       xml.indexOf('<origin publicID="quakeml:test/origin/json"')
     );
-    expect(xml).toContain('<arrival>');
+    // BED requires Arrival.publicID (QuakeML-BED-1.2.xsd); this test used to require the
+    // invalid bare <arrival>. An arrival stored without one gets an id derived from its
+    // origin (cluster C, #75).
+    expect(xml).not.toContain('<arrival>');
+    expect(xml).toContain('<arrival publicID="quakeml:test/origin/json#arrival-1">');
     expect(xml).toContain('<horizontalSlownessWeight>0.4</horizontalSlownessWeight>');
     expect(xml).toContain('<backazimuthWeight>0.5</backazimuthWeight>');
     expect(xml).toContain('arrival comment');

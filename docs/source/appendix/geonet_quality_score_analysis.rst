@@ -2,12 +2,23 @@ GeoNet Quality Score System - Analysis & Implementation Plan
 ============================================================
 
 
-**Date**: November 25, 2025  
-**Paper**: "A quantitative assessment of GeoNet earthquake location quality in Aotearoa New Zealand"  
-**DOI**: 10.1080/00288306.2024.2421309  
-**Status**: Analysis Complete - Implementation Plan Ready
+**Date**: November 25, 2025
+**Paper**: "A quantitative assessment of GeoNet earthquake location quality in Aotearoa New Zealand"
+**DOI**: 10.1080/00288306.2024.2421309 -- this platform's QS0-QS6 heuristic does not reproduce the method behind this DOI; see the notice below
+**Status**: Historical planning record -- Phase 1 (the in-house heuristic) was built; see *Document Status* at the end
 
 
+
+.. important::
+   This page documents the platform's own **in-house QS0-QS6 location-quality
+   heuristic**, inspired by but **not a reproduction of** the published
+   GeoNet Quality Score (Warren-Smith et al., 2025). The two use different
+   methods over different inputs, and a QS0-QS6 number from this platform is
+   **not comparable** to a QS number GeoNet would report for the same event.
+   See :doc:`/appendix/geonet_qs_implementation_guide` for the full disclaimer and the
+   corrected criteria; this page's "Likely Criteria" section below predates
+   that guide and describes the published paper's method (now confirmed from
+   the code's own provenance note), not this platform's heuristic.
 
 Executive Summary
 -----------------
@@ -15,7 +26,13 @@ Executive Summary
 
 The research paper proposes a **Quality Score (QS) system** ranging from **QS0 (unconstrained) to QS6 (best constrained)** for earthquake location quality assessment. This is a **discrete categorical system** based on specific location quality criteria, different from our current **continuous 0-100 scoring system**.
 
-**Key Finding**: The two systems are **complementary** rather than conflicting. We should **integrate** the GeoNet QS system as an additional quality metric alongside our existing scoring.
+**Key Finding**: The platform's in-house heuristic (``lib/geonet-quality-score.ts``)
+reuses the paper's QS0-QS6 numbering and general spirit as an additional,
+internal quality metric alongside the existing 0-100 scoring -- but it is a
+**different method over different inputs**, not an integration of the
+paper's actual method (see *Relationship to the published GeoNet Quality
+Score* in :doc:`/appendix/geonet_qs_implementation_guide`). Treat the two QS scales as
+inspired-by, not interchangeable-with, each other.
 
 
 
@@ -33,47 +50,35 @@ Based on the abstract and search results, the system uses a **7-level categorica
 - **QS5-QS1**: Progressively less constrained
 - **QS0**: Unconstrained locations
 
-Likely Criteria (Based on Standard Seismological Practice)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Confirmed Criteria (from the implementation's own provenance note)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+This section originally guessed at the paper's criteria because the full
+text was behind a paywall. The platform's own code (``lib/geonet-quality-score.ts``,
+header comment) now states the published method directly, so the guess
+below is replaced with the confirmed description:
 
-While the full paper is behind a paywall, standard earthquake location quality criteria typically include:
+The published QS is the **sum** of up to six independent **binary**
+(pass/fail) criteria, not a set of graded excellent/good/fair/poor bands:
 
-1. **Azimuthal Gap** - Angular distribution of stations around the event
-   - Excellent: < 90°
-   - Good: 90-180°
-   - Poor: > 180°
-   - Critical: > 270°
+1. **Azimuthal gap** <= 180°
+2. **Arrival count** >= 8 arrivals
+3. **P pick** >= 1 P-phase pick
+4. **S pick** >= 1 S-phase pick
+5. **Nearest-station distance** <= the event's hypocentral depth
+6. **Fixed-depth flag** (a QS5 variant of the scale applies when depth was
+   not fixed)
 
-2. **Station Count** - Number of seismic stations used
-   - Excellent: ≥ 20 stations
-   - Good: 10-19 stations
-   - Fair: 6-9 stations
-   - Poor: < 6 stations
-
-3. **RMS Residual** - Root mean square of travel time residuals
-   - Excellent: < 0.3s
-   - Good: 0.3-0.5s
-   - Fair: 0.5-1.0s
-   - Poor: > 1.0s
-
-4. **Horizontal Uncertainty** - Location precision
-   - Excellent: < 1 km
-   - Good: 1-5 km
-   - Fair: 5-10 km
-   - Poor: > 10 km
-
-5. **Depth Uncertainty** - Depth precision
-   - Excellent: < 2 km
-   - Good: 2-5 km
-   - Fair: 5-10 km
-   - Poor: > 10 km
-
-6. **Minimum Distance** - Distance to nearest station
-   - Excellent: < 50 km
-   - Good: 50-100 km
-   - Fair: 100-200 km
-   - Poor: > 200 km
+None of these six inputs (arrival counts, individual P/S picks, a
+depth-fixed flag) are available in this codebase, which only has
+network-derived summaries (azimuthal gap, station count, RMS residual,
+horizontal/depth uncertainty, nearest-station distance). That is the
+reason the platform's own heuristic (see :doc:`/appendix/geonet_qs_implementation_guide`)
+computes a **different** thing -- the *minimum* across six *graded*
+thresholds on largely different inputs -- rather than this sum of binary
+criteria, and why the two QS0-QS6 numbers are not comparable. To reproduce
+the published method exactly, see the authors' reference implementation
+(github.com/calum-chamberlain/EQ_catalog_location_quality).
 
 
 
@@ -123,58 +128,83 @@ Strengths of Current System
 ✅ **Detailed feedback** - Provides strengths, weaknesses, recommendations  
 ✅ **Already implemented** - Fully functional with tests
 
-Limitations vs GeoNet QS
-^^^^^^^^^^^^^^^^^^^^^^^^
+Limitations vs a Simple QS0-QS6 Scale
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+These are limitations of the 0-100 system relative to a simple discrete
+scale in general -- **not** a claim that the platform's own QS0-QS6
+heuristic is standardized or comparable to published research either; it
+is not (see *Confirmed Criteria* above).
 
-❌ **Not standardized** - Custom system, not comparable to published research  
-❌ **Complex** - Harder to communicate than simple QS0-QS6  
-❌ **No discrete categories** - Continuous scores less intuitive than QS levels  
+❌ **Complex** - Harder to communicate than a simple QS0-QS6 scale
+❌ **No discrete categories** - Continuous scores less intuitive than QS levels
 ❌ **Missing criteria** - Doesn't include minimum distance to nearest station
 
 
 
-Comparison: Our System vs GeoNet QS
------------------------------------
+Comparison: Our 0-100 System, the Published Paper, and This Platform's Heuristic
+---------------------------------------------------------------------------------
 
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 20 20
+   :widths: 20 20 20 20
 
    * - Aspect
-     - Our System
-     - GeoNet QS
+     - Our 0-100 System
+     - Published GeoNet QS (the paper)
+     - This platform's QS0-QS6 heuristic
    * - **Scale**
      - 0-100 continuous
      - QS0-QS6 discrete
+     - QS0-QS6 discrete (same numbering, different method)
    * - **Grades**
      - A+, A, B, C, D, F
      - QS6, QS5, ..., QS0
-   * - **Complexity**
-     - High (5 components, weighted)
-     - Medium (6-7 criteria)
+     - QS6, QS5, ..., QS0
+   * - **Method**
+     - Weighted sum of graded components
+     - Sum of six binary pass/fail criteria
+     - Minimum of six graded thresholds (different inputs)
    * - **Standardization**
      - Custom
      - Published research
+     - Custom, inspired by the published research but not conformant to it
    * - **Granularity**
      - Very fine (101 levels)
+     - Coarse (7 levels)
      - Coarse (7 levels)
    * - **Communication**
      - Technical
      - Simple & clear
-   * - **Comparability**
-     - Internal only
-     - Comparable to GeoNet catalogue
-   * - **Implementation**
-     - Complete
-     - Not implemented
+     - Simple & clear
+   * - **Comparability with the published GeoNet QS**
+     - Not applicable
+     - N/A (it is the reference)
+     - **Not comparable** -- different method, different inputs
+   * - **Implementation status in this platform**
+     - Complete, in production use
+     - Not implemented (would need phase-level picks and a fixed-depth flag
+       this codebase does not store)
+     - Complete (``lib/geonet-quality-score.ts``), not currently called from
+       any app route, component or script -- library/test-only today
 
 
 
 
 Proposed Integration Strategy
 -----------------------------
+
+.. note::
+   This section is kept as the original planning record. **Option 1 (Dual
+   System) was the option ultimately built**, via
+   ``lib/geonet-quality-score.ts`` and ``lib/integrated-quality-assessment.ts``
+   -- but as an in-house heuristic inspired by the paper's QS0-QS6 scale, not
+   an implementation of the paper's own method (that would have needed
+   phase-level arrival/pick data and a fixed-depth flag this codebase does
+   not store; see *Confirmed Criteria* above). Read "standardization" and
+   "comparability" below as describing the goal at planning time, not the
+   result.
 
 
 Option 1: Dual System (RECOMMENDED)
@@ -238,18 +268,29 @@ Option 3: Map Our Scores to QS Levels
 Implementation Plan (Option 1 - Dual System)
 --------------------------------------------
 
+.. note::
+   Kept as the original planning record; it predates *Confirmed Criteria*
+   above. The "obtain full paper" / "define thresholds" tasks below read as
+   still open, but the paper's actual criteria are now known directly from
+   the code's own provenance note (see above) -- what was never done, and
+   is not currently planned, is re-deriving this platform's thresholds
+   *from* those confirmed criteria, since the heuristic that was built uses
+   different inputs entirely (see the *Method* row two sections up).
 
 Phase 1: Research & Specification
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
 **Tasks**:
-1. ✅ Analyze paper (COMPLETE)
-2. ⏳ Obtain full paper text to confirm exact QS criteria
-3. ⏳ Define precise thresholds for QS0-QS6
-4. ⏳ Document GeoNet QS algorithm
 
-**Estimated Time**: 2-3 days (pending paper access)
+1. ✅ Analyze paper (COMPLETE)
+2. ✅ Confirm exact QS criteria -- done, from the code's provenance note,
+   not the full paper text (see *Confirmed Criteria* above)
+3. ✅ Define thresholds for this platform's own QS0-QS6 heuristic -- done;
+   see the threshold tables in :doc:`/appendix/geonet_qs_implementation_guide`
+4. ✅ Document the heuristic -- done, in :doc:`/appendix/geonet_qs_implementation_guide`
+
+**Estimated Time**: superseded -- complete
 
 Phase 2: Core Implementation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -313,29 +354,39 @@ Next Steps
 Immediate Actions
 ^^^^^^^^^^^^^^^^^
 
+.. note::
+   The two items below that originally motivated obtaining the paper are
+   resolved: the paper's actual criteria are confirmed from the code's own
+   provenance note (see *Confirmed Criteria* above), and Option 1 (Dual
+   System) already has stakeholder-level approval in the form of being
+   built and shipped as ``lib/geonet-quality-score.ts`` and
+   ``lib/integrated-quality-assessment.ts``. What remains genuinely open is
+   Phase 2/3 (database and UI integration) from the plan above, which are
+   not yet built.
 
-1. **Obtain Full Paper** - Need complete methodology to implement correctly
-   - Try institutional access
-   - Contact authors directly
-   - Check preprint servers (ResearchGate, arXiv)
-
-2. **Validate Criteria** - Confirm exact thresholds for each QS level
-   - May need to contact GeoNet directly
-   - Review GeoNet documentation
-
-3. **Get Stakeholder Approval** - Confirm dual system approach
-   - Present this analysis to team
-   - Get buy-in for implementation effort
+1. ✅ **Obtain Full Paper** -- superseded; the paper's method is confirmed
+   from the code's own provenance note without needing the full text (see
+   *Confirmed Criteria* above)
+2. ✅ **Validate Criteria** -- superseded for the same reason
+3. ✅ **Get Stakeholder Approval** -- the dual-system approach was built
 
 Questions to Resolve
 ^^^^^^^^^^^^^^^^^^^^
 
 
-1. **Exact QS Criteria** - What are the precise thresholds?
-2. **Minimum Distance** - Should we add this metric to our data model?
+1. ✅ **Exact QS Criteria** -- resolved, see *Confirmed Criteria* above (the
+   paper's own thresholds; this platform's heuristic uses different,
+   project-chosen thresholds, documented in
+   :doc:`/appendix/geonet_qs_implementation_guide`)
+2. ✅ **Minimum Distance** -- resolved; ``minimum_distance`` is a stored,
+   mappable field (see :doc:`/appendix/default_field_mappings`) and is one of the six
+   criteria the in-house heuristic scores
 3. **Backward Compatibility** - How to handle existing events without QS?
-4. **Performance** - Impact of calculating two quality scores?
-5. **UI/UX** - How to display both scores without confusion?
+   (still open -- QS is computed on demand from stored fields, not stored
+   itself, so this is more a display/filtering question than a migration one)
+4. **Performance** - Impact of calculating two quality scores? (still open)
+5. **UI/UX** - How to display both scores without confusion, and without
+   implying the in-house heuristic is the published GeoNet QS? (still open)
 
 
 
@@ -343,17 +394,20 @@ Conclusion
 ----------
 
 
-The GeoNet Quality Score system is a **valuable addition** to our platform that would:
+An in-house QS0-QS6 heuristic was a **valuable addition** to the platform. It:
 
-✅ **Standardize** our quality assessment with published research  
-✅ **Improve communication** with simpler QS0-QS6 scale  
-✅ **Enable comparison** with GeoNet catalogue  
-✅ **Complement** our existing detailed scoring system  
+✅ **Improves communication** with a simple QS0-QS6 scale alongside the 0-100 score
+✅ **Complements** the existing detailed scoring system
+⚠️ Does **not** standardize against, or enable comparison with, the published
+GeoNet Quality Score or the GeoNet catalogue -- see *Confirmed Criteria* and
+:doc:`/appendix/geonet_qs_implementation_guide` for why the two scales are not the
+same measurement, even though both run QS0-QS6.
 
-**Recommendation**: Implement **Option 1 (Dual System)** to gain benefits of both approaches.
-
-**Next Step**: Obtain full paper text to confirm exact QS criteria and thresholds.
-
+**Outcome**: **Option 1 (Dual System)** was implemented, as an in-house
+heuristic rather than a reproduction of the paper's method.
 
 
-**Document Status**: Analysis Complete - Awaiting Paper Access for Implementation
+
+**Document Status**: Historical planning record. Superseded by
+:doc:`/appendix/geonet_qs_implementation_guide` and :doc:`/appendix/geonet_qs_implementation_summary`,
+which describe what was actually built.

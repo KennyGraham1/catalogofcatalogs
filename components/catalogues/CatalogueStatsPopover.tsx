@@ -11,6 +11,19 @@ import { BarChart3, Calendar, TrendingUp, Layers, Activity, Ruler } from 'lucide
 import { Skeleton } from '@/components/ui/skeleton';
 import type { CatalogueStatistics } from '@/app/api/catalogues/[id]/statistics/route';
 
+/**
+ * Origin times are UTC (QuakeML 1.2 / ISO 8601), so the earliest and latest are
+ * shown as UTC calendar days with the zone named, as on the analytics page. The
+ * browser's zone put a boundary event on the next day under NZDT (UTC+13).
+ */
+const UTC_DATE_FORMAT = new Intl.DateTimeFormat('en-GB', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  timeZone: 'UTC',
+  timeZoneName: 'short',
+});
+
 interface CatalogueStatsPopoverProps {
   catalogueId: string;
   catalogueName: string;
@@ -49,11 +62,8 @@ export function CatalogueStatsPopover({ catalogueId, catalogueName }: CatalogueS
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-GB', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    });
+    const date = new Date(dateString);
+    return Number.isNaN(date.getTime()) ? dateString : UTC_DATE_FORMAT.format(date);
   };
 
   return (

@@ -189,7 +189,11 @@ Change User Role
 2. Go to ``/admin/users``
 3. Find the user
 4. Select new role from dropdown
-5. Changes apply immediately
+5. Changes apply on the user's next request (no re-login required); any
+   pending role request from that user is automatically closed
+6. Admins cannot change their own role or deactivate their own account from
+   this page (400), and the last remaining active admin cannot be demoted,
+   deactivated, or deleted (409)
 
 Create Additional Admin Users
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -271,7 +275,9 @@ Security Checklist
 - [ ] Enabled HTTPS (for production)
 - [ ] Reviewed user roles and permissions
 - [ ] Set up regular database backups
-- [ ] Configured rate limiting (already done)
+- [ ] Configured rate limiting (already done: sign-in attempts are capped at
+  10 failed tries per account+client and 50 per client within a 15-minute
+  window)
 - [ ] Reviewed audit logs regularly
 
 Support

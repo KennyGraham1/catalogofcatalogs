@@ -95,8 +95,12 @@ export async function PATCH(
 
     if (status === 'approved') {
       const usersCollection = await getCollection(COLLECTIONS.USERS);
+      // Apply the request only to the account as it was when the request was filed:
+      // a role changed since then (a promotion, or a demotion for misuse) or a
+      // deactivated account must not be overwritten by a stale request. The filter
+      // makes the check and the write one atomic step.
       const userUpdate = await usersCollection.updateOne(
-        { id: existing.user_id },
+        { id: existing.user_id, role: existing.current_role, is_active: { $ne: false } },
         { $set: { role: existing.requested_role, updated_at: now } }
       );
 
@@ -115,9 +119,23 @@ export async function PATCH(
           }
         );
 
+        const current = await usersCollection.findOne({ id: existing.user_id });
+        if (!current) {
+          return NextResponse.json(
+            { error: 'User for role request not found' },
+            { status: 404 }
+          );
+        }
+
+        const liveRole = String(current.role ?? 'unknown').toUpperCase();
         return NextResponse.json(
-          { error: 'User for role request not found' },
-          { status: 404 }
+          {
+            error: current.is_active === false
+              ? 'This account has been deactivated, so the request cannot be approved.'
+              : `The user's role has changed since this request was made (now ${liveRole}). ` +
+                'Reject it; the user can submit a new request if one is still needed.',
+          },
+          { status: 409 }
         );
       }
     }
@@ -152,18 +170,22 @@ export async function PATCH(
       });
     }
 
+    // An approval changed the role (from current_role: the update above only matched
+    // an account still in that role). A rejection changed nothing, so it is logged as
+    // what it was rather than as a role change.
     await writeAuditLog({
-      action: 'user.role_change',
+      action: status === 'approved' ? 'user.role_change' : 'role_request.reject',
       actor_id: authResult.user.id,
-      actor_email: authResult.user.email,
+      actor_email: authResult.user.email ?? undefined,
       target_id: existing.user_id,
+      target_type: 'user',
       metadata: {
         requestId: existing.id,
         status,
         fromRole: existing.current_role,
-        toRole: existing.requested_role,
+        ...(status === 'approved' ? { toRole: existing.requested_role } : { requestedRole: existing.requested_role }),
       },
-    });
+    }, request);
 
     const updated = await collection.findOne({ id: id });
     const sanitized = updated ? (({ _id, ...rest }) => rest)(updated as RoleChangeRequest & { _id?: unknown }) : null;

@@ -17,7 +17,9 @@ it('closes the pending cursor when the caller aborts an import', async () => {
   const cursor: any = { sort: () => cursor, batchSize: () => cursor, close,
     async *[Symbol.asyncIterator]() { yield { event: { id: 'a' } }; yield { event: { id: 'b' } }; },
   };
-  (getCollection as jest.Mock).mockResolvedValue({ find: () => cursor });
+  // lib/pending-uploads.ts creates its indexes once per process, on whichever read comes first,
+  // so this collection must support that too: the test cannot rely on running second.
+  (getCollection as jest.Mock).mockResolvedValue({ createIndex: jest.fn(async () => 'index'), find: () => cursor });
   const seen: unknown[] = [];
   for await (const batch of iteratePendingUploadEventBatches('valid', 1)) { seen.push(...batch); break; }
   expect(seen).toEqual([{ id: 'a' }]);

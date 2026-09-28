@@ -11,6 +11,7 @@ validation, error reporting, and data quality assessment.
 """
 
 import json
+import os
 import random
 import math
 from datetime import datetime, timedelta
@@ -20,6 +21,18 @@ random.seed(42)
 
 INVALID_RATIO_RANGE = (0.6, 0.8)
 CROSS_FIELD_ANOMALY_RATIO = 0.15
+
+# Designed time+space clusters (aftershock-sequence-like), as opposed to the
+# uniformly-random "background" events. A fresh cluster centre used to be drawn
+# for every "clustered" event, which (combined with lat/lon staying uniform over
+# the whole catalogue regardless) made the result indistinguishable from plain
+# uniform timing with no real spatial clustering at all: Gardner-Knopoff
+# declustering found no designed clusters, only chance groupings from the heavy
+# magnitude tail.
+CLUSTER_EVENT_FRACTION = 0.3      # fraction of events assigned to a cluster
+EVENTS_PER_CLUSTER = 150          # ~1 cluster centre per this many events
+CLUSTER_RADIUS_DEG = 0.15         # jitter radius around a cluster's epicentre (~15-17 km)
+CLUSTER_TIME_WINDOW_SECONDS = 2 * 86400  # +/- 2 days around a cluster's origin time
 
 INVALID_CASES = [
     "missing_time",
@@ -82,15 +95,80 @@ def introduce_cross_field_anomaly(event):
 
 def gutenberg_richter_magnitude(min_mag=1.0, max_mag=7.5, b_value=1.0):
     """
-    Generate magnitude following Gutenberg-Richter law.
-    More small earthquakes, fewer large ones.
+    Sample a magnitude from the doubly-truncated Gutenberg-Richter law
+    N(>=M) proportional to 10^(-b*M), truncated to [min_mag, max_mag].
+
+    Inverse-CDF form (Utsu 1965 / Page 1968): for u ~ Uniform(0, 1),
+        m = min_mag - log10(1 - u*(1 - 10^(-b*(max_mag - min_mag)))) / b_value
+    This matches paper/figures/generate_figures.py's gr_from_u. The previous
+    version, `min_mag + (max_mag - min_mag) * (1 - u**(1/b_value))`, is a
+    Beta(1, b_value) power law, not Gutenberg-Richter: at the b_value=2.5 this
+    file called it with, its local b ran from 0.20 at M2 to 2.2 at M7 (measured
+    on the platform's own b-value estimator: b ~= 0.25, not 2.5), and 9.7% of
+    events landed at M>=5 versus ~1e-4 for a real b=1 law.
     """
-    # Use power law distribution: N(M) = 10^(a - b*M)
-    # Generate uniform random number and transform
     u = random.random()
-    # Adjust to get more events across the full range
-    mag = min_mag + (max_mag - min_mag) * (1 - u**(1/b_value))
+    span = max_mag - min_mag
+    mag = min_mag - math.log10(1 - u * (1 - 10 ** (-b_value * span))) / b_value
     return round(mag, 1)
+
+def wrap_rake(rake):
+    """Wrap an angle in degrees into (-180, 180], QuakeML's NodalPlane.rake domain."""
+    wrapped = ((rake + 180.0) % 360.0) - 180.0
+    return wrapped + 360.0 if wrapped <= -180.0 else wrapped
+
+def _strike_dip_from_vector(n, e, u):
+    """
+    Convert a slip/normal-style (north, east, up) vector to (strike, dip),
+    in degrees. `u` is flipped to point upward (u >= 0) first, since a fault
+    plane's strike/dip is conventionally read off its upward-pointing normal.
+    """
+    if u < 0:
+        n, e, u = -n, -e, -u
+    strike = math.degrees(math.atan2(e, n)) - 90.0
+    strike %= 360.0
+    dip = math.degrees(math.atan2(math.hypot(n, e), u))
+    return strike, dip
+
+def auxiliary_plane(strike1, dip1, rake1):
+    """
+    True auxiliary plane of a double-couple source, computed from the slip and
+    normal vectors of plane 1 (Aki & Richards 1980 convention; this formulation
+    traces back to Herrmann's AUXPLN and is the one used by ObsPy/GMT psmeca).
+    Verified against the Aki & Richards moment-tensor formula over 50,000 random
+    mechanisms (max moment-tensor component error ~1e-13) and the involution
+    property auxiliary_plane(auxiliary_plane(p)) == p (same moment tensor).
+
+    Replaces the previous (strike+180, dip, -rake) shortcut, which is only the
+    true auxiliary plane for a vertical dip-slip fault: for example it put plane
+    2 sixty degrees away from the true auxiliary plane of a 30-degree-dip thrust,
+    and made it identical to plane 1 (degenerate) for a vertical strike-slip
+    fault.
+    """
+    z = math.radians(strike1 + 90.0)
+    d1 = math.radians(dip1)
+    r1 = math.radians(rake1)
+
+    # Slip vector of plane 1, in the same (north, east, up)-style convention as
+    # the fault normal below.
+    sl_1 = -math.cos(r1) * math.cos(z) - math.sin(r1) * math.sin(z) * math.cos(d1)
+    sl_2 = math.cos(r1) * math.sin(z) - math.sin(r1) * math.cos(z) * math.cos(d1)
+    sl_3 = math.sin(r1) * math.sin(d1)
+    strike2, dip2 = _strike_dip_from_vector(sl_2, sl_1, sl_3)
+
+    # Plane 1's normal, and plane 2's strike-parallel vector (= plane 1's slip
+    # vector): the rake of plane 2 is the angle between them.
+    n_1 = math.sin(z) * math.sin(d1)
+    n_2 = math.cos(z) * math.sin(d1)
+    h_1 = -sl_2
+    h_2 = sl_1
+    cos_rake2 = (h_1 * n_1 + h_2 * n_2) / math.hypot(h_1, h_2)
+    cos_rake2 = max(-1.0, min(1.0, cos_rake2))
+    rake2 = math.degrees(math.acos(cos_rake2))
+    if sl_3 < 0:
+        rake2 = 360.0 - rake2
+
+    return strike2, dip2, wrap_rake(rake2)
 
 def generate_focal_mechanism(region_type="subduction"):
     """
@@ -110,22 +188,21 @@ def generate_focal_mechanism(region_type="subduction"):
         strike = random.randint(0, 360)
         dip = random.randint(40, 70)
         rake = random.randint(-110, -70)
-    
-    # Calculate auxiliary plane (simplified)
-    strike2 = (strike + 180) % 360
-    dip2 = dip
-    rake2 = -rake
-    
+
+    # randint(160, 200) can exceed QuakeML's (-180, 180] rake domain.
+    rake = wrap_rake(rake)
+    strike2, dip2, rake2 = auxiliary_plane(strike, dip, rake)
+
     return {
         "nodalPlane1": {
             "strike": strike,
             "dip": dip,
-            "rake": rake
+            "rake": round(rake, 1)
         },
         "nodalPlane2": {
-            "strike": strike2,
-            "dip": dip2,
-            "rake": rake2
+            "strike": round(strike2, 1),
+            "dip": round(dip2, 1),
+            "rake": round(rake2, 1)
         }
     }
 
@@ -145,7 +222,10 @@ def generate_depth(region_type="shallow", magnitude=3.0):
     else:  # deep
         return round(random.uniform(100, 600), 1)
 
-def generate_catalogue(name, region, bounds, num_events=1000, 
+def _clamp(value, lo, hi):
+    return max(lo, min(hi, value))
+
+def generate_catalogue(name, region, bounds, num_events=1000,
                       start_date="2024-01-01", end_date="2024-10-29",
                       tectonic_type="subduction", depth_type="shallow",
                       invalid_ratio=None, invalid_ratio_range=INVALID_RATIO_RANGE,
@@ -156,37 +236,50 @@ def generate_catalogue(name, region, bounds, num_events=1000,
     start = datetime.fromisoformat(start_date)
     end = datetime.fromisoformat(end_date)
     time_range = (end - start).total_seconds()
-    
+
     events = []
     if invalid_ratio is None:
         invalid_ratio = random.uniform(*invalid_ratio_range)
     invalid_ratio = max(0, min(1, invalid_ratio))
     invalid_count = int(num_events * invalid_ratio)
     invalid_indices = set(random.sample(range(num_events), invalid_count))
-    
+
+    # Fixed cluster centres, drawn once, each tight in both space and time — an
+    # aftershock-sequence stand-in that a declustering algorithm can actually find.
+    num_clusters = max(1, num_events // EVENTS_PER_CLUSTER)
+    cluster_centres = [
+        {
+            "lat": random.uniform(bounds["minLatitude"], bounds["maxLatitude"]),
+            "lon": random.uniform(bounds["minLongitude"], bounds["maxLongitude"]),
+            "time": random.uniform(0, time_range),
+        }
+        for _ in range(num_clusters)
+    ]
+
     for i in range(num_events):
-        # Generate magnitude (Gutenberg-Richter distribution)
-        # Use b_value=2.5 to get more realistic distribution with some large events
-        magnitude = gutenberg_richter_magnitude(min_mag=1.0, max_mag=7.5, b_value=2.5)
-        
-        # Generate time (random but clustered - earthquakes cluster in time)
-        if random.random() < 0.3:  # 30% chance of being in a cluster
-            # Pick a random cluster time
-            cluster_time = random.uniform(0, time_range)
-            # Add small offset for cluster
-            event_time = cluster_time + random.uniform(-86400, 86400)  # ±1 day
+        # Generate magnitude (doubly-truncated Gutenberg-Richter, b ~= 1)
+        magnitude = gutenberg_richter_magnitude(min_mag=1.0, max_mag=7.5, b_value=1.0)
+
+        if random.random() < CLUSTER_EVENT_FRACTION:
+            centre = random.choice(cluster_centres)
+            event_time = _clamp(
+                centre["time"] + random.uniform(-CLUSTER_TIME_WINDOW_SECONDS, CLUSTER_TIME_WINDOW_SECONDS),
+                0, time_range,
+            )
+            lat = _clamp(centre["lat"] + random.uniform(-CLUSTER_RADIUS_DEG, CLUSTER_RADIUS_DEG),
+                         bounds["minLatitude"], bounds["maxLatitude"])
+            lon = _clamp(centre["lon"] + random.uniform(-CLUSTER_RADIUS_DEG, CLUSTER_RADIUS_DEG),
+                         bounds["minLongitude"], bounds["maxLongitude"])
         else:
             event_time = random.uniform(0, time_range)
-        
+            lat = random.uniform(bounds["minLatitude"], bounds["maxLatitude"])
+            lon = random.uniform(bounds["minLongitude"], bounds["maxLongitude"])
+
         event_datetime = start + timedelta(seconds=event_time)
-        
-        # Generate location within bounds
-        lat = random.uniform(bounds["minLatitude"], bounds["maxLatitude"])
-        lon = random.uniform(bounds["minLongitude"], bounds["maxLongitude"])
-        
+
         # Generate depth
         depth = generate_depth(depth_type, magnitude)
-        
+
         # Create event
         event = {
             "publicID": f"{region.lower().replace(' ', '_')}_{start.year}p{i+1:06d}",
@@ -196,7 +289,7 @@ def generate_catalogue(name, region, bounds, num_events=1000,
             "depth": depth,
             "magnitude": magnitude
         }
-        
+
         # Add focal mechanism for M >= 5.0
         if magnitude >= 5.0:
             event["focal_mechanisms"] = [generate_focal_mechanism(tectonic_type)]
@@ -206,9 +299,12 @@ def generate_catalogue(name, region, bounds, num_events=1000,
             introduce_cross_field_anomaly(event)
 
         events.append(event)
-    
-    # Sort by time
-    events.sort(key=lambda x: x.get("time") or "")
+
+    # Sort by time. str() guards against "invalid_types" occasionally setting
+    # event["time"] to a dict ({"bad": True}) — `x.get("time") or ""` then
+    # returned the dict itself (truthy), and comparing a dict to a str crashes
+    # sort() with a TypeError before any file is written.
+    events.sort(key=lambda x: str(x.get("time") or ""))
 
     numeric_magnitudes = [
         e["magnitude"] for e in events
@@ -218,7 +314,7 @@ def generate_catalogue(name, region, bounds, num_events=1000,
         "min": min(numeric_magnitudes) if numeric_magnitudes else None,
         "max": max(numeric_magnitudes) if numeric_magnitudes else None
     }
-    
+
     catalogue = {
         "catalogue_name": name,
         "region": region,
@@ -237,7 +333,7 @@ def generate_catalogue(name, region, bounds, num_events=1000,
         },
         "events": events
     }
-    
+
     return catalogue
 
 # Generate 3 example catalogues for New Zealand regions
@@ -292,6 +388,8 @@ deep_events_catalogue = generate_catalogue(
 
 # Save catalogues
 print("\nSaving catalogues to JSON files...")
+os.makedirs("test-data", exist_ok=True)
+
 with open("test-data/north-island-catalogue.json", "w") as f:
     json.dump(north_island_catalogue, f, indent=2)
 print("✓ Saved: test-data/north-island-catalogue.json")

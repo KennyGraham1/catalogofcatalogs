@@ -16,8 +16,33 @@ interface ImportHistoryRecord {
   new_events: number;
   updated_events: number;
   skipped_events: number;
+  // Breakdown of the rows not imported, where the record carries it.
+  collided_events?: number;
+  invalid_events?: number;
+  excluded_events?: number;
+  failed_events?: number;
   errors: string | null;
   created_at: string;
+}
+
+/**
+ * Rows GeoNet returned that the run did not store: repeated or already-stored IDs,
+ * invalid rows, records GeoNet flags as not real events, and failed writes. Derived
+ * from the totals so every row adds up, including records written before the
+ * breakdown was kept.
+ */
+function notImportedCount(record: ImportHistoryRecord): number {
+  return Math.max(0, record.total_fetched - record.new_events - record.updated_events - record.skipped_events);
+}
+
+function notImportedBreakdown(record: ImportHistoryRecord): string | undefined {
+  const parts = [
+    ['already stored / repeated', record.collided_events],
+    ['invalid', record.invalid_events],
+    ['excluded by GeoNet type', record.excluded_events],
+    ['write failed', record.failed_events],
+  ].filter(([, value]) => typeof value === 'number' && (value as number) > 0);
+  return parts.length > 0 ? parts.map(([label, value]) => `${label}: ${value}`).join(', ') : undefined;
 }
 
 interface ImportHistoryProps {
@@ -123,6 +148,7 @@ export function ImportHistory({ catalogueId, limit = 10 }: ImportHistoryProps) {
                   <TableHead className="text-right">New</TableHead>
                   <TableHead className="text-right">Updated</TableHead>
                   <TableHead className="text-right">Skipped</TableHead>
+                  <TableHead className="text-right">Not imported</TableHead>
                   <TableHead className="text-right">Duration</TableHead>
                 </TableRow>
               </TableHeader>
@@ -164,6 +190,9 @@ export function ImportHistory({ catalogueId, limit = 10 }: ImportHistoryProps) {
                       </TableCell>
                       <TableCell className="text-right text-gray-600">
                         {record.skipped_events}
+                      </TableCell>
+                      <TableCell className="text-right text-gray-600" title={notImportedBreakdown(record)}>
+                        {notImportedCount(record)}
                       </TableCell>
                       <TableCell className="text-right">
                         {formatDuration(record.start_time, record.end_time)}

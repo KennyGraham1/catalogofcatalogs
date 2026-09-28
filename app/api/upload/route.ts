@@ -1,16 +1,123 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { parseFile } from '@/lib/parsers';
+import { parseFile, type ParseResult } from '@/lib/parsers';
 import { type Delimiter } from '@/lib/delimiter-detector';
 import { type DateFormat } from '@/lib/date-format-detector';
 import { requireEditor } from '@/lib/auth/middleware';
 import { Logger } from '@/lib/errors';
 import { storePendingUpload } from '@/lib/pending-uploads';
-import { createUploadTooLargeResponse, getMaxSyncUploadParseBytes } from '@/lib/upload-limits';
+import {
+  createUploadTooLargeResponse,
+  getMaxSyncUploadParseBytes,
+  getUploadFileExtension,
+  isAllowedUploadExtension,
+} from '@/lib/upload-limits';
+import { DELIMITER_NAME_TO_CHARACTER } from '@/lib/upload-chunks';
+import type { ParsedEvent } from '@/types/upload';
 
 const logger = new Logger('UploadAPI');
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
 
 export const maxDuration = 120;
+
+// The response carries a bounded sample, never every event: parsed events are several
+// times larger than their source (raw columns plus canonical fields), and the whole set
+// already sits in the pending-upload store the catalogue is created from. These caps keep
+// the response far below Vercel's 4.5 MB function payload limit.
+const PREVIEW_MAX_EVENTS = 1000;
+const PREVIEW_MAX_BYTES = 1_500_000;
+const MAX_RESPONSE_ERRORS = 200;
+const MAX_RESPONSE_FAILURES = 500;
+
+const DATE_FORMATS: Record<string, DateFormat> = {
+  us: 'US',
+  international: 'International',
+  iso: 'ISO',
+};
+
+/**
+ * The form's delimiter option ('comma', 'tab', ...) or the character itself; 'auto' and
+ * empty mean auto-detect. Anything else is rejected rather than silently auto-detected.
+ */
+function resolveDelimiter(value: string | null): { ok: true; delimiter?: Delimiter } | { ok: false } {
+  if (value === null || value === '' || value.toLowerCase() === 'auto') return { ok: true };
+  const byName = DELIMITER_NAME_TO_CHARACTER[value.toLowerCase()];
+  if (byName) return { ok: true, delimiter: byName };
+  if ((Object.values(DELIMITER_NAME_TO_CHARACTER) as string[]).includes(value)) {
+    return { ok: true, delimiter: value as Delimiter };
+  }
+  return { ok: false };
+}
+
+function resolveDateFormat(value: string | null): { ok: true; dateFormat?: DateFormat } | { ok: false } {
+  if (value === null || value === '' || value.toLowerCase() === 'auto') return { ok: true };
+  const dateFormat = DATE_FORMATS[value.toLowerCase()];
+  return dateFormat ? { ok: true, dateFormat } : { ok: false };
+}
+
+/**
+ * An evenly spaced sample of the parsed events (QuakeML objects stripped), sized to fit
+ * the byte budget, with each sample's position in the file.
+ */
+function buildPreview(events: ParsedEvent[]): { previewEvents: ParsedEvent[]; previewIndices: number[] } {
+  if (events.length === 0) return { previewEvents: [], previewIndices: [] };
+  const strip = ({ quakeml: _quakeml, ...rest }: ParsedEvent) => rest as ParsedEvent;
+  const probe = events.slice(0, 50).map(strip);
+  const averageBytes = Math.max(1, JSON.stringify(probe).length / probe.length);
+  const count = Math.max(1, Math.min(events.length, PREVIEW_MAX_EVENTS, Math.floor(PREVIEW_MAX_BYTES / averageBytes)));
+  const previewEvents: ParsedEvent[] = [];
+  const previewIndices: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const index = Math.floor((i * events.length) / count);
+    previewEvents.push(strip(events[index]));
+    previewIndices.push(index);
+  }
+  return { previewEvents, previewIndices };
+}
+
+/** The upload response body: counts, mapping resolution and a bounded preview (C15). */
+function buildUploadResponse(params: {
+  fileName: string;
+  fileSize: number;
+  extension: string;
+  parseResult: ParseResult;
+  pendingUploadId?: string;
+}) {
+  const { fileName, fileSize, extension, parseResult, pendingUploadId } = params;
+  const { events, errors, warnings, validationReport, ...rest } = parseResult;
+  const resolution = parseResult as ParseResult & {
+    resolvedFieldSources?: Record<string, string>;
+    fileDecisions?: Record<string, unknown>;
+  };
+  const failures = validationReport?.failures ?? [];
+  const preview = buildPreview(events);
+
+  return {
+    ...rest,
+    fileName,
+    fileSize,
+    format: extension.toUpperCase(),
+    eventCount: events.length,
+    errors: errors.slice(0, MAX_RESPONSE_ERRORS),
+    errorCount: errors.length,
+    errorsTruncated: errors.length > MAX_RESPONSE_ERRORS,
+    warnings: warnings.slice(0, MAX_RESPONSE_ERRORS),
+    warningsTruncated: Boolean(parseResult.warningsTruncated) || warnings.length > MAX_RESPONSE_ERRORS,
+    resolvedFieldSources: resolution.resolvedFieldSources ?? {},
+    fileDecisions: resolution.fileDecisions ?? {},
+    ...(validationReport
+      ? {
+          validationReport: {
+            ...validationReport,
+            failures: failures.slice(0, MAX_RESPONSE_FAILURES),
+            failuresTruncated: failures.length > MAX_RESPONSE_FAILURES,
+          },
+        }
+      : {}),
+    ...preview,
+    previewTruncated: preview.previewEvents.length < events.length,
+    ...(pendingUploadId ? { pendingUploadId } : {}),
+  };
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,12 +152,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate file type by extension and MIME type
-    const allowedExtensions = ['csv', 'txt', 'dat', 'json', 'geojson', 'xml', 'qml'];
-    const extension = file.name.split('.').pop()?.toLowerCase();
+    const extension = getUploadFileExtension(file.name);
 
-    if (!extension || !allowedExtensions.includes(extension)) {
+    if (!isAllowedUploadExtension(file.name)) {
       return NextResponse.json(
-        { error: 'Invalid file type. Allowed: CSV, TXT, JSON, GeoJSON, XML, QML' },
+        { error: 'Invalid file type. Allowed: CSV, TXT, JSON, GeoJSON, XML, QML, QuakeML' },
         { status: 400 }
       );
     }
@@ -73,28 +179,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Parse delimiter parameter if provided
-    let delimiter: Delimiter | undefined;
-    if (delimiterParam) {
-      const delimiterMap: Record<string, Delimiter> = {
-        'comma': ',',
-        'tab': '\t',
-        'semicolon': ';',
-        'pipe': '|',
-        'space': ' '
-      };
-      delimiter = delimiterMap[delimiterParam.toLowerCase()];
+    // An explicit delimiter or date format that cannot be honoured is an error, not a
+    // silent fallback to auto-detection.
+    const delimiterChoice = resolveDelimiter(delimiterParam);
+    if (!delimiterChoice.ok) {
+      return NextResponse.json(
+        { error: `Invalid delimiter '${delimiterParam}'. Allowed: comma, tab, semicolon, pipe, space.`, code: 'INVALID_DELIMITER' },
+        { status: 400 }
+      );
     }
-
-    // Parse date format parameter if provided
-    let dateFormat: DateFormat | undefined;
-    if (dateFormatParam) {
-      const dateFormatMap: Record<string, DateFormat> = {
-        'us': 'US',
-        'international': 'International',
-        'iso': 'ISO'
-      };
-      dateFormat = dateFormatMap[dateFormatParam.toLowerCase()];
+    const dateFormatChoice = resolveDateFormat(dateFormatParam);
+    if (!dateFormatChoice.ok) {
+      return NextResponse.json(
+        { error: `Invalid date format '${dateFormatParam}'. Allowed: US, International, ISO.`, code: 'INVALID_DATE_FORMAT' },
+        { status: 400 }
+      );
     }
 
     // Read file content
@@ -102,40 +201,34 @@ export async function POST(request: NextRequest) {
 
     // Parse the file — full ParsedEvent objects are in memory here, including
     // the quakeml: QuakeMLEvent field for QuakeML files.
-    const parseResult = parseFile(content, file.name, delimiter, dateFormat);
+    const parseResult = parseFile(content, file.name, delimiterChoice.delimiter, dateFormatChoice.dateFormat);
 
     // ── Pending upload store ────────────────────────────────────────────────
     //
     // All parsed events are persisted in MongoDB under a pendingUploadId
-    // (TTL: 24 hours).  The browser receives only lightweight scalar fields
-    // for display/mapping plus the pendingUploadId token.  When the user
-    // creates the catalogue the catalogue API retrieves the full data
-    // directly from MongoDB — no data is ever discarded.
+    // (TTL: 24 hours), owned by the uploading user (C9). The browser receives
+    // counts, the parser's column resolution and a bounded preview; the
+    // catalogue is always created from the pending store, so no data is ever
+    // discarded and nothing large travels back through the browser.
     // ───────────────────────────────────────────────────────────────────────
 
     let pendingUploadId: string | undefined;
 
     if (parseResult.events.length > 0) {
-      pendingUploadId = await storePendingUpload(parseResult.events);
+      pendingUploadId = await storePendingUpload(parseResult.events, authResult.user.id);
       logger.info('Stored pending upload', {
         pendingUploadId,
         eventCount: parseResult.events.length,
       });
     }
 
-    // Build the lightweight events for the browser response.  For QuakeML
-    // files we strip the quakeml object; all other fields (scalars) are kept
-    // so the UI can display and remap them normally.
-    const events = parseResult.events.map(({ quakeml: _quakeml, ...rest }) => rest);
-
-    return NextResponse.json({
+    return NextResponse.json(buildUploadResponse({
       fileName: file.name,
       fileSize: file.size,
-      format: extension.toUpperCase(),
-      ...parseResult,
-      events,
-      ...(pendingUploadId ? { pendingUploadId } : {}),
-    });
+      extension,
+      parseResult,
+      pendingUploadId,
+    }));
 
   } catch (error) {
     logger.error('Upload error', error);

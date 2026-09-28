@@ -3,8 +3,10 @@
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
+import type { DelimiterOption } from '@/types/upload';
 
-export type DelimiterOption = 'auto' | 'comma' | 'tab' | 'semicolon' | 'pipe' | 'space';
+// Re-export for convenience — types/upload.ts is the single source of truth.
+export type { DelimiterOption } from '@/types/upload';
 
 interface DelimiterSelectorProps {
   value: DelimiterOption;

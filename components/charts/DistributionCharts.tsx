@@ -16,6 +16,50 @@ import { SEISMIC_COLORS, CATEGORICAL_COLORS, AXIS_FORMATTERS, magnitudeClass, de
 
 const compact = (v: number) => AXIS_FORMATTERS.compact(v);
 
+/** A histogram bin; callers that know the numeric bounds [min, max) pass them. */
+type RangeBin = { range: string; count: number; min?: number; max?: number };
+
+const RANGE_LABEL = /^(-?\d+(?:\.\d+)?)\s*[-–]\s*(-?\d+(?:\.\d+)?)/;
+const NUMBER_LABEL = /-?\d+(?:\.\d+)?/;
+
+/**
+ * Bounds [min, max) of a bin: the caller's, else read from labels such as '< 2.0',
+ * '2.0-2.5', '5.0+' or '40+ km'. Classing a bin by parseFloat(label) turned '< 2.0'
+ * into NaN, which magnitudeClass calls 'Great', and classed open bins by one bound.
+ */
+function binBounds(bin: RangeBin): { min: number; max: number } {
+  if (typeof bin.min === 'number' && typeof bin.max === 'number') return { min: bin.min, max: bin.max };
+  const label = bin.range.trim();
+  const pair = label.match(RANGE_LABEL);
+  if (pair) return { min: Number(pair[1]), max: Number(pair[2]) };
+  const single = label.match(NUMBER_LABEL);
+  const value = single ? Number(single[0]) : NaN;
+  if (label.startsWith('<')) return { min: -Infinity, max: value };
+  if (label.includes('+')) return { min: value, max: Infinity };
+  return { min: value, max: value };
+}
+
+/** Classes at the two ends of a bin's interior, or null if its bounds are unknown. */
+function classSpan(bin: RangeBin | undefined, classify: (value: number) => string): { low: string; high: string; open: boolean } | null {
+  if (!bin) return null;
+  const { min, max } = binBounds(bin);
+  if (Number.isNaN(min) || Number.isNaN(max)) return null;
+  return { low: classify(min + 1e-9), high: classify(max - 1e-9), open: max === Infinity };
+}
+
+function magnitudeBinBadge(bin: RangeBin | undefined): string | null {
+  const span = classSpan(bin, magnitudeClass);
+  if (!span) return null;
+  if (span.low === span.high) return `${span.low} class`;
+  return span.open ? `${span.low} class or larger` : `${span.low} to ${span.high} classes`;
+}
+
+function depthBinBadge(bin: RangeBin | undefined): string | null {
+  const span = classSpan(bin, depthClass);
+  if (!span) return null;
+  return span.low === span.high ? span.low : `${span.low} to ${span.high.toLowerCase()}`;
+}
+
 /** Colour magnitude bins by severity, keyed on the bin's lower bound (e.g. '4.5-5.0' -> 4.5, '5.0+' -> 5.0). */
 function magnitudeBarColor(range: string): string {
   const lower = parseFloat(range);
@@ -29,7 +73,7 @@ function magnitudeBarColor(range: string): string {
 export const MagnitudeDistributionChart = memo(function MagnitudeDistributionChart({
   data,
 }: {
-  data: { range: string; count: number }[];
+  data: RangeBin[];
 }) {
   const { resolvedTheme } = useTheme();
   const c = chartColors(resolvedTheme === 'dark');
@@ -47,9 +91,10 @@ export const MagnitudeDistributionChart = memo(function MagnitudeDistributionCha
           const total = data.reduce((s, d) => s + d.count, 0);
           const pct = total ? ((count / total) * 100).toFixed(1) : '0.0';
           const color = magnitudeBarColor(range);
+          const badge = magnitudeBinBadge(data[p.dataIndex] ?? data.find(d => d.range === range));
           return ttHeader(c, `Magnitude ${range}`) +
             ttRow(c, 'Events', `${count.toLocaleString()} (${pct}%)`, color) +
-            ttBadge(c, `${magnitudeClass(parseFloat(range))} class`, color);
+            (badge ? ttBadge(c, badge, color) : '');
         },
       }),
       xAxis: { ...axis(c, { type: 'category', name: 'Magnitude Range', nameGap: 38 }), data: data.map((d) => d.range) },
@@ -72,7 +117,7 @@ export const MagnitudeDistributionChart = memo(function MagnitudeDistributionCha
 export const DepthDistributionChart = memo(function DepthDistributionChart({
   data,
 }: {
-  data: { range: string; count: number }[];
+  data: RangeBin[];
 }) {
   const { resolvedTheme } = useTheme();
   const c = chartColors(resolvedTheme === 'dark');
@@ -89,10 +134,12 @@ export const DepthDistributionChart = memo(function DepthDistributionChart({
           const count = Number(p.value) || 0;
           const total = data.reduce((s, d) => s + d.count, 0);
           const pct = total ? ((count / total) * 100).toFixed(1) : '0.0';
-          const km = parseFloat(range);
+          const bin = data[p.dataIndex] ?? data.find(d => d.range === range);
+          const badge = depthBinBadge(bin);
+          const top = bin ? binBounds(bin).min : NaN;
           return ttHeader(c, `Depth ${range}`) +
             ttRow(c, 'Events', `${count.toLocaleString()} (${pct}%)`, SEISMIC_COLORS.depth.dark) +
-            ttBadge(c, depthClass(km), getDepthColor(km));
+            (badge ? ttBadge(c, badge, getDepthColor(top)) : '');
         },
       }),
       xAxis: { ...axis(c, { type: 'category', name: 'Depth Range', nameGap: 38 }), data: data.map((d) => d.range) },

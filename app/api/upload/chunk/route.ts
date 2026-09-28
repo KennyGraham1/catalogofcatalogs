@@ -27,16 +27,29 @@ export async function POST(request: NextRequest) {
   try {
     const authResult = await requireEditor(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { user } = authResult;
 
-    const formData   = await request.formData();
-    const sessionId  = formData.get('sessionId') as string | null;
-    const chunkIndex = Number(formData.get('chunkIndex'));
-    const chunkBlob  = formData.get('chunk') as Blob | null;
+    const formData  = await request.formData();
+    const sessionId = formData.get('sessionId') as string | null;
+    const chunkBlob = formData.get('chunk') as Blob | null;
+
+    // Number(null) and Number('') both coerce to 0, which used to let a
+    // missing or blank chunkIndex silently overwrite chunk 0 despite the
+    // error text below claiming the field is required. Require a non-blank
+    // string before coercing, and require an integer — Number.isFinite alone
+    // accepted values like 1.5, which sort between real chunk indexes and
+    // can stand in for a genuinely missing chunk (finding #52).
+    const chunkIndexRaw = formData.get('chunkIndex');
+    const chunkIndexStr = typeof chunkIndexRaw === 'string' ? chunkIndexRaw.trim() : '';
+    if (!chunkIndexStr) {
+      return NextResponse.json({ error: 'chunkIndex is required' }, { status: 400 });
+    }
+    const chunkIndex = Number(chunkIndexStr);
 
     if (!sessionId) {
       return NextResponse.json({ error: 'sessionId is required' }, { status: 400 });
     }
-    if (!Number.isFinite(chunkIndex) || chunkIndex < 0) {
+    if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
       return NextResponse.json({ error: 'chunkIndex must be a non-negative integer' }, { status: 400 });
     }
     if (!chunkBlob) {
@@ -46,8 +59,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'chunk exceeds maximum allowed size' }, { status: 400 });
     }
 
-    // Verify the session exists (prevents orphaned chunks from unknown sessions)
-    const session = await getUploadSession(sessionId);
+    // Verify the session exists and belongs to this user (C9). Scoping the
+    // lookup by owner means a session created by someone else looks exactly
+    // like a missing one — it does not confirm the session's existence to a
+    // non-owner, and it prevents an editor who has learned another user's
+    // sessionId from overwriting their in-progress chunks (finding #51).
+    const session = await getUploadSession(sessionId, user.id);
     if (!session) {
       return NextResponse.json(
         { error: 'Upload session not found or expired. Please restart the upload.' },

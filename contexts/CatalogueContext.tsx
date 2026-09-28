@@ -1,7 +1,8 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
-import { apiCache } from '@/lib/cache';
+import { getCatalogueSourceType } from '@/lib/catalogue-source-type';
+import { invalidateCatalogueData, subscribeToCatalogueInvalidation } from '@/lib/client-cache';
 
 // Types
 interface Catalogue {
@@ -33,6 +34,8 @@ interface CatalogueContextType {
   refreshCatalogues: () => Promise<void>;
   invalidateCache: () => void;
   lastUpdated: Date | null;
+  /** How often the provider refetches the catalogue list, in ms; 0 when it does not. */
+  autoRefreshInterval: number;
 }
 
 // Create context
@@ -63,17 +66,27 @@ export function CatalogueProvider({
   // Calculate statistics from catalogues
   const calculateStats = useCallback((catalogueList: Catalogue[]): CatalogueStats => {
     const totalCatalogues = catalogueList.length;
-    const totalEvents = catalogueList.reduce((sum, cat) => sum + (cat.event_count || 0), 0);
-    
-    // Count merged catalogues (those with source_catalogues)
-    const mergedCatalogues = catalogueList.filter(cat => {
-      try {
-        const sources = JSON.parse(cat.source_catalogues || '[]');
-        return Array.isArray(sources) && sources.length > 0;
-      } catch {
-        return false;
-      }
-    }).length;
+
+    // Classify once per catalogue with the shared C6 helper (merged = built from more
+    // than one source catalogue), reused below for both totalEvents and
+    // mergedCatalogues. The old test — "source_catalogues is a non-empty array" — is
+    // true for every catalogue: uploads and GeoNet/FDSN imports each write exactly
+    // one self-describing entry (e.g. {"source":"upload"}), not an empty array, so it
+    // counted every catalogue as merged (gc#3).
+    const sourceTypes = catalogueList.map((cat) => getCatalogueSourceType(cat));
+
+    // A merge's output catalogue duplicates every event already counted in its
+    // source catalogues, so summing event_count over every row (including merge
+    // outputs) double-counts those events on top of their originals. Excluding
+    // merge outputs instead gives an upper bound on distinct stored earthquakes —
+    // still not exact, since overlapping upload/import catalogues can share real
+    // events, but no longer inflated by the merge copies themselves.
+    const totalEvents = catalogueList.reduce(
+      (sum, cat, i) => sum + (sourceTypes[i] === 'merged' ? 0 : (cat.event_count || 0)),
+      0
+    );
+
+    const mergedCatalogues = sourceTypes.filter((type) => type === 'merged').length;
 
     // Count recently added (last 30 days)
     const thirtyDaysAgo = new Date();
@@ -97,7 +110,9 @@ export function CatalogueProvider({
       setLoading(true);
       setError(null);
 
-      const response = await fetch('/api/catalogues');
+      // no-store: a browser or intermediate HTTP cache serving a stale response here
+      // would silently undo invalidateCatalogueData()'s refetch (gc#0).
+      const response = await fetch('/api/catalogues', { cache: 'no-store' });
       if (!response.ok) {
         throw new Error('Failed to fetch catalogues');
       }
@@ -120,15 +135,28 @@ export function CatalogueProvider({
     await fetchCatalogues();
   }, [fetchCatalogues]);
 
-  // Invalidate cache and refresh
+  // Invalidate every client cache that can hold a stale catalogue list or
+  // per-catalogue page (lib/client-cache.ts, contract C5) and refetch. The refetch
+  // itself happens through the subscription below, so this and any other caller of
+  // invalidateCatalogueData() (upload, GeoNet import, merge, delete, rename) share
+  // exactly one refetch path instead of racing separate ones.
   const invalidateCache = useCallback(() => {
-    apiCache.clearAll();
-    fetchCatalogues();
-  }, [fetchCatalogues]);
+    invalidateCatalogueData();
+  }, []);
 
   // Initial fetch
   useEffect(() => {
     fetchCatalogues();
+  }, [fetchCatalogues]);
+
+  // Refetch whenever anything invalidates catalogue data — this provider's own
+  // invalidateCache() above, or a plain invalidateCatalogueData() import used by a
+  // flow with no reason to depend on this context (e.g. the upload page). This is
+  // what makes CatalogueProvider "the" refetch target promised by contract C5.
+  useEffect(() => {
+    return subscribeToCatalogueInvalidation(() => {
+      fetchCatalogues();
+    });
   }, [fetchCatalogues]);
 
   // Auto-refresh interval
@@ -150,6 +178,7 @@ export function CatalogueProvider({
     refreshCatalogues,
     invalidateCache,
     lastUpdated,
+    autoRefreshInterval,
   };
 
   return (

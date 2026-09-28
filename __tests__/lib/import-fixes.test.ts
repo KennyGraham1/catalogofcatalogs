@@ -2,11 +2,20 @@
  * Regression tests for the import-logic fixes:
  *  - UTC timestamp parsing (offset-less datetimes must NOT shift with server TZ)
  *  - RFC 4180 CSV parsing (escaped quotes, embedded newlines, preserved whitespace)
- *  - GeoNet EventType normalization (unknown types -> null, not a thrown batch abort)
+ *  - event_type normalization (non-QuakeML strings -> null, not a thrown batch abort),
+ *    with GeoNet's own SeisComP classifications mapped to QuakeML instead of erased
  */
+// p-limit v7 is ESM-only and jest does not transform node_modules here; the GeoNet
+// import service imports it, so stub it with a pass-through limiter.
+jest.mock('p-limit', () => ({
+  __esModule: true,
+  default: () => (fn: () => unknown) => fn(),
+}));
+
 import { normalizeTimestamp } from '@/lib/earthquake-utils';
 import { parseWithDelimiter } from '@/lib/delimiter-detector';
 import { normalizeEventType } from '@/lib/db';
+import { geonetEventTypeToQuakeML } from '@/lib/geonet-import-service';
 
 describe('normalizeTimestamp — offset-less timestamps are UTC (TZ-independent)', () => {
   it('space-separated datetime with no zone is treated as UTC', () => {
@@ -55,12 +64,31 @@ describe('normalizeEventType', () => {
     expect(normalizeEventType('earthquake')).toBe('earthquake');
     expect(normalizeEventType('Quarry Blast')).toBe('quarry blast');
   });
-  it('maps unknown GeoNet flags to null instead of throwing', () => {
-    expect(normalizeEventType('outside of network interest')).toBeNull();
-    expect(normalizeEventType('duplicate')).toBeNull();
+  it('maps strings outside the QuakeML enumeration to null instead of throwing', () => {
+    expect(normalizeEventType('not a real type')).toBeNull();
     expect(normalizeEventType('')).toBeNull();
     expect(normalizeEventType(null)).toBeNull();
     expect(normalizeEventType(undefined)).toBeNull();
+  });
+});
+
+describe('GeoNet event types', () => {
+  // GeoNet runs SeisComP, whose event types add 'duplicate', 'not locatable' and
+  // 'outside of network interest' to QuakeML's. This test used to assert that the
+  // importer turned them into null - the value for "no type reported" - erasing the
+  // agency's own judgement. They map the way SeisComP's SC3ML-to-QuakeML conversion
+  // maps them; the raw string is kept in source_event_type.
+  it("keeps GeoNet's classification as a QuakeML type instead of erasing it", () => {
+    expect(geonetEventTypeToQuakeML('outside of network interest')).toBe('other event');
+    expect(geonetEventTypeToQuakeML('duplicate')).toBe('other event');
+    expect(geonetEventTypeToQuakeML('not locatable')).toBe('other event');
+    expect(geonetEventTypeToQuakeML('induced earthquake')).toBe('induced or triggered event');
+    expect(geonetEventTypeToQuakeML('not existing')).toBe('not existing');
+    expect(geonetEventTypeToQuakeML('Earthquake')).toBe('earthquake');
+  });
+  it('leaves a missing type missing', () => {
+    expect(geonetEventTypeToQuakeML('')).toBeNull();
+    expect(geonetEventTypeToQuakeML(undefined)).toBeNull();
   });
 });
 

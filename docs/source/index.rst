@@ -14,8 +14,8 @@ A comprehensive web application for managing, analyzing, and visualizing earthqu
 .. image:: https://img.shields.io/badge/license-MIT-green.svg
    :alt: MIT License
 
-.. image:: https://img.shields.io/badge/Next.js-13+-black.svg
-   :alt: Next.js 13+
+.. image:: https://img.shields.io/badge/Next.js-15-black.svg
+   :alt: Next.js 15
 
 --------
 Features
@@ -35,11 +35,14 @@ Features
    - Complete import history tracking
 
 📈 **Visualization & Analysis**
-   - Interactive Leaflet-based maps with clustering
-   - Uncertainty ellipses and focal mechanisms
+   - Interactive Leaflet-based maps with multiple colour modes (depth, quality,
+     azimuthal gap, source catalogue) — no marker clustering; every event is its
+     own marker
+   - Uncertainty ellipses and focal mechanisms, shown on demand
    - Quality metrics with A+ to F grading
    - Advanced seismological analytics (b-value, Mc, temporal patterns)
-   - Station coverage analysis
+   - Station coverage analysis via the azimuthal-gap colour mode and a
+     per-event coverage card
 
 🔧 **Additional Features**
    - QuakeML 1.2 export/import

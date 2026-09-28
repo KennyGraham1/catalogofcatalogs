@@ -8,7 +8,7 @@ This document provides comprehensive architecture information for the Earthquake
 Overview
 --------
 
-The Earthquake Catalogue Platform is a Next.js 13+ application built with a modern, serverless architecture. It follows a three-tier architecture pattern:
+The Earthquake Catalogue Platform is a Next.js 15 application built with a modern, serverless architecture. It follows a three-tier architecture pattern:
 
 1. **Presentation Layer:** React components with Next.js App Router
 2. **Application Layer:** Next.js API Routes (serverless functions)
@@ -32,7 +32,7 @@ High-Level Components
            Maps["Leaflet Map Visualizations"]
        end
 
-       subgraph NextJS["Next.js 13+ Application"]
+       subgraph NextJS["Next.js 15 Application"]
            subgraph Frontend["Frontend (App Router)"]
                Pages["Pages &amp; Layouts"]
                Components["React Components"]
@@ -464,13 +464,13 @@ API Protection
 * **Input validation:** Zod schemas for all inputs
 * **MongoDB query-safety:** validated request bodies and literal query filters to avoid query selector injection
 * **XSS prevention:** React automatic escaping
-* **CSRF protection:** NextAuth CSRF tokens
+* **Cross-site request forgery:** no CSRF token. ``middleware.ts`` refuses any state-changing (POST/PUT/PATCH/DELETE) request to ``/api/*`` (excluding ``/api/auth/*``, which checks its own CSRF-equivalent) whose ``Origin`` header names a different host than the app itself, returning ``403``. An Origin-less request — real browsers always attach ``Origin`` on a cross-site write — is let through to the other defences: the NextAuth session cookie's ``SameSite=Lax`` attribute, which keeps it off cross-site POSTs, and route-level role/permission checks
 
 See :doc:`../administration/authentication` for security details.
 
------------------------
+------------------------
 Performance Architecture
------------------------
+------------------------
 
 Optimization Strategies
 =======================

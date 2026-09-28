@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -21,9 +22,15 @@ import {
   Download,
   BarChart3,
   Activity,
-  ChevronDown
+  ChevronDown,
+  FilterX
 } from 'lucide-react';
 import { EventTable } from '@/components/events/EventTable';
+import { EventFilters, applyEventFilters, type EventFilterValues } from '@/components/event-filters';
+import { eventFiltersToSearchParams } from '@/lib/event-filter-params';
+import { SavedFiltersDialog } from '@/components/catalogues/SavedFiltersDialog';
+import { resolveEventQuality } from '@/components/events/event-quality';
+import type { QualityGrade } from '@/lib/quality-scoring';
 import { toast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCatalogueEvents } from '@/hooks/use-catalogue-events';
@@ -42,6 +49,7 @@ interface Event {
   location_name?: string | null;
   event_type?: string | null;
   quality_score?: number | null;
+  quality_grade?: string | null;
   azimuthal_gap?: number | null;
   used_station_count?: number | null;
   public_id?: string | null;
@@ -54,7 +62,12 @@ interface Catalogue {
   status: string;
   created_at: string;
   source_catalogues?: string;
+  // C3: "MAJOR.MINOR.PATCH"; legacy catalogues written before versioning read as "1.0.0".
+  version?: string | null;
 }
+
+/** Table 2 order, worst to best reversed for display (best grade first). */
+const GRADE_DISPLAY_ORDER: QualityGrade[] = ['A+', 'A', 'B+', 'B', 'C', 'D', 'F'];
 
 export default function CatalogueDetailPage() {
   const params = useParams();
@@ -83,15 +96,40 @@ export default function CatalogueDetailPage() {
 
   const loading = cataloguesLoading || (eventsLoading && events.length === 0);
   const error = cataloguesError?.message || eventsError;
+
+  // Catalogue-level quality aggregate (#65/#135): the paper describes Q as shown per event
+  // in the table and aggregated at catalogue level here, not as a count of "has a score"
+  // (every event resolves to a score - stored, or computed client-side for legacy rows - so
+  // that count was always 100% once quality_score existed and told the user nothing).
   const stats = useMemo(() => {
     const depths = events.filter(event => event.depth != null);
+    const gradeCounts: Partial<Record<QualityGrade, number>> = {};
+    let qualitySum = 0;
+    for (const event of events) {
+      const { score, grade } = resolveEventQuality(event);
+      qualitySum += score;
+      gradeCounts[grade] = (gradeCounts[grade] ?? 0) + 1;
+    }
     return {
       total: events.length,
       avgMagnitude: events.length ? (events.reduce((sum, event) => sum + event.magnitude, 0) / events.length).toFixed(2) : '—',
       avgDepth: depths.length ? (depths.reduce((sum, event) => sum + event.depth!, 0) / depths.length).toFixed(1) : '—',
-      withQuality: events.filter(event => (event as typeof event & { quality_score?: number }).quality_score != null).length,
+      meanQuality: events.length ? qualitySum / events.length : null,
+      gradeCounts,
     };
   }, [events]);
+
+  // Client-side event filtering (C4 shape) over the already-loaded event array. The
+  // filtered-events API route is not wired up yet (H2a); this keeps the table and the
+  // "Export filtered events" action consistent with each other in the meantime, and both
+  // will still work once server-side filtering lands (this just becomes a client-side
+  // preview of the same filter instead of the only way it's applied).
+  const [filters, setFilters] = useState<EventFilterValues>({});
+  const filteredEvents = useMemo(() => applyEventFilters(events, filters), [events, filters]);
+  const hasActiveFilters = Object.keys(filters).length > 0;
+  // Export option: tag every exported event with its Gardner-Knopoff cluster (C12), which
+  // the export route computes over the exported events (after any filter).
+  const [includeDeclustering, setIncludeDeclustering] = useState(false);
 
   // Show error toast if there's an error
   useEffect(() => {
@@ -109,7 +147,7 @@ export default function CatalogueDetailPage() {
     // console.log('Event clicked:', event);
   };
 
-  const handleExport = async (format: 'csv' | 'json' | 'geojson' | 'kml' | 'quakeml') => {
+  const handleExport = async (format: 'csv' | 'json' | 'geojson' | 'kml' | 'quakeml', filterParams?: URLSearchParams) => {
     try {
       if (!canExportCatalogues) {
         toast({
@@ -120,7 +158,14 @@ export default function CatalogueDetailPage() {
         return;
       }
 
-      const response = await fetch(`/api/catalogues/${catalogueId}/export?format=${format}`);
+      // "Export filtered events" (C12): forward the active filters as query params using the
+      // same key names as EventFilterValues/C4. The export route ignores keys it doesn't
+      // recognise yet, so this degrades to a full export rather than failing.
+      const query = new URLSearchParams(filterParams);
+      query.set('format', format);
+      if (includeDeclustering) query.set('decluster', 'gardner-knopoff');
+
+      const response = await fetch(`/api/catalogues/${catalogueId}/export?${query.toString()}`);
       if (!response.ok) {
         let message = 'Export failed';
         try {
@@ -162,7 +207,8 @@ export default function CatalogueDetailPage() {
 
       toast({
         title: 'Export successful',
-        description: `Catalogue exported as ${formatLabels[format]}`,
+        description: `Catalogue exported as ${formatLabels[format]}` +
+          (includeDeclustering ? ' with Gardner-Knopoff declustering tags' : ''),
       });
     } catch (error) {
       toast({
@@ -220,6 +266,9 @@ export default function CatalogueDetailPage() {
             <Badge variant={catalogue.status === 'complete' ? 'default' : 'secondary'}>
               {catalogue.status}
             </Badge>
+            <Badge variant="outline" title="Catalogue version">
+              v{catalogue.version || '1.0.0'}
+            </Badge>
           </div>
           <p className="text-muted-foreground ml-12">
             Created {new Date(catalogue.created_at).toLocaleDateString('en-GB', {
@@ -263,6 +312,16 @@ export default function CatalogueDetailPage() {
                   <Download className="mr-2 h-4 w-4" />
                   QuakeML (Seismology)
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuCheckboxItem
+                  checked={includeDeclustering}
+                  onCheckedChange={checked => setIncludeDeclustering(checked === true)}
+                  // Keep the menu open so a format can be picked next.
+                  onSelect={event => event.preventDefault()}
+                  title="Tags each exported event with its Gardner-Knopoff (1974) cluster and whether it is a mainshock (forward time window), and records the windows used"
+                >
+                  Include Gardner-Knopoff declustering tags
+                </DropdownMenuCheckboxItem>
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
@@ -318,31 +377,66 @@ export default function CatalogueDetailPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">With Quality Score</CardTitle>
+            <CardTitle className="text-sm font-medium">Mean Quality (Q)</CardTitle>
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {stats.withQuality} 
-              <span className="text-sm font-normal text-muted-foreground ml-1">
-                ({stats.total > 0 ? ((stats.withQuality / stats.total) * 100).toFixed(0) : 0}%)
-              </span>
+              {stats.meanQuality != null ? stats.meanQuality.toFixed(0) : '—'}
+              <span className="text-sm font-normal text-muted-foreground ml-1">/ 100</span>
+            </div>
+            <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-2">
+              {GRADE_DISPLAY_ORDER.filter(grade => stats.gradeCounts[grade]).map(grade => (
+                <span key={grade}>{grade}: {stats.gradeCounts[grade]}</span>
+              ))}
             </div>
           </CardContent>
         </Card>
       </div>}
+
+      {/* Event filters: client-side over the already-loaded events (C4 shape), with saved
+          filters and a filtered export (C12) alongside. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <EventFilters onFilterChange={setFilters} activeFilters={filters} />
+        <SavedFiltersDialog
+          currentFilters={filters}
+          onLoadFilter={(config) => setFilters(config ?? {})}
+          readOnly={!user}
+        />
+        {hasActiveFilters && (
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setFilters({})} className="gap-1">
+              <FilterX className="h-4 w-4" />
+              Clear filters
+            </Button>
+            {canExportCatalogues && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleExport('csv', eventFiltersToSearchParams(filters))}
+                className="gap-1"
+              >
+                <Download className="h-4 w-4" />
+                Export filtered events (CSV)
+              </Button>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Events Table */}
       <Card>
         <CardHeader>
           <CardTitle>Events</CardTitle>
           <CardDescription>
-            {events.length} earthquake events in this catalogue. Click column headers to sort.
+            {hasActiveFilters
+              ? `${filteredEvents.length.toLocaleString()} of ${events.length.toLocaleString()} earthquake events match the active filters. Click column headers to sort.`
+              : `${events.length.toLocaleString()} earthquake events in this catalogue. Click column headers to sort.`}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
-          <EventTable 
-            events={events} 
+          <EventTable
+            events={filteredEvents}
             onEventClick={handleEventClick}
           />
         </CardContent>

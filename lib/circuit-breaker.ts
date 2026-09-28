@@ -215,8 +215,14 @@ export class CircuitBreaker {
     }
 
     console.log(`[${this.options.name}] Circuit breaker: ${oldState} -> ${newState}`);
-    
+
     this.state = newState;
+    // Every half-open trial counts its own successes. A failed trial returns to OPEN
+    // without passing through reset(), so a success from it used to carry into the
+    // next trial and close the breaker after fewer than successThreshold probes.
+    if (newState === CircuitState.HALF_OPEN || newState === CircuitState.OPEN) {
+      this.successes = 0;
+    }
     this.options.onStateChange(oldState, newState);
 
     if (newState === CircuitState.OPEN) {

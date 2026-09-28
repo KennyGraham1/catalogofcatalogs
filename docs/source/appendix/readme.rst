@@ -30,8 +30,8 @@ A web application for managing, analyzing, and visualizing earthquake catalogue 
 📈 Visualization & Analysis
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-- **Interactive Maps**: Leaflet-based map visualization with event clustering
-- **Enhanced Map View**: Visualization with uncertainty ellipses, focal mechanisms, and station coverage
+- **Interactive Maps**: Leaflet-based map visualization
+- **Map Colour Modes & Overlays**: Colour the map by magnitude, depth, quality, azimuthal gap, or source catalogue, plus on-demand uncertainty-ellipse and focal-mechanism overlays — see the Visualization guide
 - **Charts & Graphs**: Statistical analysis with Recharts
 - **Quality Metrics**: Comprehensive quality scoring and filtering with A+ to F grading system
 - **Event Filtering**: Filtering by multiple criteria
@@ -226,7 +226,7 @@ Importing from GeoNet
 4. View import statistics and history
 5. Enable "Update Existing Events" to refresh data for duplicate events
 
-For detailed instructions, see ``GEONET_IMPORT_DOCUMENTATION.md <GEONET_IMPORT_DOCUMENTATION.md>``_
+For detailed instructions, see the GeoNet Baseline Setup page of this documentation site.
 
 Merging Catalogues
 ^^^^^^^^^^^^^^^^^^
@@ -246,8 +246,8 @@ Visualizing Data
 
 
 Navigate to the **Analytics** page for visualization and analysis features:
-- Interactive map with event clustering
-- Enhanced map with uncertainty ellipses
+- Interactive map with colour modes (magnitude, depth, quality, azimuthal gap, source catalogue)
+- On-demand uncertainty-ellipse overlay
 - Focal mechanism beach ball diagrams
 - Station coverage visualization
 - Quality score analysis
@@ -342,8 +342,8 @@ Run the test suite:
    │   └── types/                        # TypeScript type definitions
    ├── scripts/               # Utility scripts
    │   ├── init-database.ts              # Database initialization
-   │   ├── migrate-add-source-id.js      # Database migration
-   │   └── migrate-add-geo-bounds.js     # Geographic bounds migration
+   │   ├── clean-and-setup-database.sh   # Guarded database reset
+   │   └── check-database-integrity.ts   # Orphan sweep / integrity checks
    └── __tests__/             # Jest test files
 
 
@@ -355,7 +355,7 @@ Run the test suite:
 Frontend
 ^^^^^^^^
 
-- **Next.js 13**: React framework with App Router
+- **Next.js 15**: React framework with App Router
 - **TypeScript**: Type-safe development
 - **Tailwind CSS**: Utility-first CSS framework
 - **shadcn/ui**: High-quality React components (40+ Radix UI components)
@@ -501,7 +501,7 @@ Tracks all GeoNet imports:
 
 Stores reusable field mapping templates for data uploads
 
-For complete schema details, see ``QUAKEML_SCHEMA_DESIGN.md <QUAKEML_SCHEMA_DESIGN.md>``_
+For complete schema details, see ``QuakeML Schema Design <docs/source/appendix/quakeml_schema_design.rst>``_
 
 🔒 Security
 ----------
@@ -601,24 +601,34 @@ Database Management
 
 .. code-block:: bash
 
-   # Clean and reset database
+   # Reset the database: drops all data (gated by a typed confirmation that
+   # names the database, or --yes to skip it non-interactively), then
+   # re-creates empty collections/indexes. node scripts/clean-database.js
+   # does the same thing.
    bash scripts/clean-and-setup-database.sh
-   
-   # Initialize database
-   npm run tsx scripts/init-database.ts
-   
-   # Run migrations
-   node scripts/migrate-add-source-id.js
-   node scripts/migrate-add-geo-bounds.js
-   
-   # Fix missing geographic bounds
-   npm run tsx scripts/fix-missing-geo-bounds.ts
-   
-   # Populate realistic test data
-   npm run tsx scripts/populate-realistic-nz-data.ts
+
+   # Initialize database (collections and indexes) on its own
+   npx tsx scripts/init-database.ts
+
+   # Fix missing geographic bounds on existing catalogues
+   npx tsx scripts/fix-missing-geo-bounds.ts
 
 
-For detailed database management instructions, see ``DATABASE_MANAGEMENT.md <DATABASE_MANAGEMENT.md>``_
+Neither reset script populates data automatically any more; they print the
+two commands below instead:
+
+.. code-block:: bash
+
+   # Synthetic NZ test catalogues (writes JSON files under test-data/, then
+   # import them via the UI at /import or the API)
+   python3 scripts/generate_test_data.py
+
+   # Real GeoNet baseline catalogue
+   npx tsx scripts/populate-geonet-baseline.ts
+
+
+See this documentation site's Deployment → Environment Setup and Appendix →
+GeoNet Baseline Setup pages for further database management details.
 
 
 Code Style
@@ -659,7 +669,7 @@ Completed Features ✅
 - [x] GeoNet automatic import with duplicate detection
 - [x] Catalogue merging with configurable rules
 - [x] QuakeML 1.2 BED specification support
-- [x] Interactive map visualization with marker clustering
+- [x] Interactive map visualization
 - [x] Visualization (uncertainty ellipses, focal mechanisms, station coverage)
 - [x] Quality scoring and filtering (A+ to F grading)
 - [x] Analytics dashboard with seismological analysis
@@ -693,7 +703,7 @@ The application is fully functional with features for earthquake catalogue manag
 - ✅ GeoNet automatic import
 - ✅ Catalogue merging
 - ✅ QuakeML 1.2 support
-- ✅ Interactive visualization with clustering
+- ✅ Interactive visualization
 - ✅ Seismological analytics
 - ✅ Quality-based filtering
 - ✅ MongoDB Atlas integration

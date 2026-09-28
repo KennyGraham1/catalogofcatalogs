@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { ImportForm } from '@/components/import/ImportForm';
+import { useState, useEffect, useCallback } from 'react';
+import { ImportForm, isGeoNetImportTarget, type ImportResult } from '@/components/import/ImportForm';
 import { ImportHistory } from '@/components/import/ImportHistory';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -17,6 +17,8 @@ import { getApiError } from '@/lib/api';
 interface Catalogue {
   id: string;
   name: string;
+  merge_config?: string | null;
+  event_count?: number;
 }
 
 export default function ImportPage() {
@@ -30,39 +32,50 @@ export default function ImportPage() {
   const [selectedCatalogueId, setSelectedCatalogueId] = useState<string>('');
   const [isLoadingCatalogues, setIsLoadingCatalogues] = useState(true);
 
-  useEffect(() => {
-    const fetchCatalogues = async () => {
-      try {
-        const response = await fetch('/api/catalogues');
-        if (!response.ok) {
-          const errorInfo = await getApiError(response, 'Failed to load catalogues');
-          throw new Error(errorInfo.message);
-        }
-        const data = await response.json();
-        setCatalogues(data);
+  const fetchCatalogues = useCallback(async (selectId?: string) => {
+    try {
+      const response = await fetch('/api/catalogues', { cache: 'no-store' });
+      if (!response.ok) {
+        const errorInfo = await getApiError(response, 'Failed to load catalogues');
+        throw new Error(errorInfo.message);
+      }
+      const data: Catalogue[] = await response.json();
+      setCatalogues(data);
 
-        // Auto-select GeoNet catalogue if it exists
-        const geonetCatalogue = data.find((c: Catalogue) =>
+      if (selectId) {
+        // Show the history of the catalogue an import just ran into.
+        setSelectedCatalogueId(selectId);
+      } else {
+        // Auto-select a GeoNet import catalogue if one exists
+        const geonetCatalogue = data.find(isGeoNetImportTarget) ?? data.find((c) =>
           c.name.includes('GeoNet') || c.name.includes('Automated Import')
         );
         if (geonetCatalogue) {
-          setSelectedCatalogueId(geonetCatalogue.id);
+          setSelectedCatalogueId((current) => current || geonetCatalogue.id);
         }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Failed to fetch catalogues.';
-        console.error('Failed to fetch catalogues:', error);
-        toast({
-          title: 'Failed to load catalogues',
-          description: errorMessage,
-          variant: 'destructive',
-        });
-      } finally {
-        setIsLoadingCatalogues(false);
       }
-    };
-
-    fetchCatalogues();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch catalogues.';
+      console.error('Failed to fetch catalogues:', error);
+      toast({
+        title: 'Failed to load catalogues',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoadingCatalogues(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchCatalogues();
+  }, [fetchCatalogues]);
+
+  // A new catalogue must appear in the target list, and the history of the one the
+  // import ran into is the one worth showing.
+  const handleImportComplete = useCallback((result: ImportResult) => {
+    fetchCatalogues(result.catalogueId || undefined);
+  }, [fetchCatalogues]);
 
   return (
     <div className="container py-6 max-w-7xl mx-auto">
@@ -91,7 +104,11 @@ export default function ImportPage() {
 
         <TabsContent value="import" className="space-y-6">
           {canImport ? (
-            <ImportForm readOnly={isReadOnly} />
+            <ImportForm
+              readOnly={isReadOnly}
+              catalogues={catalogues}
+              onImportComplete={handleImportComplete}
+            />
           ) : (
             <AuthGateCard
               title={isAuthenticated ? 'Editor access required' : 'Login required'}
@@ -191,12 +208,14 @@ export default function ImportPage() {
               <div>
                 <h3 className="font-semibold mb-2">Supported Features</h3>
                 <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
-                  <li>Import events by time range (last N hours or custom date range)</li>
+                  <li>Import events by time range (last N hours or custom date range, in UTC)</li>
                   <li>Filter by magnitude (minimum and maximum)</li>
                   <li>Filter by depth (minimum and maximum)</li>
-                  <li>Filter by geographic bounds (latitude/longitude)</li>
-                  <li>Automatic duplicate detection by event ID</li>
-                  <li>Update existing events with revised data</li>
+                  <li>Filter by geographic bounds (latitude/longitude), including boxes across 180° such as New Zealand with the Kermadec and Chatham Islands</li>
+                  <li>Import into a new catalogue, or add to a catalogue an earlier GeoNet import created</li>
+                  <li>Automatic duplicate detection by GeoNet event ID</li>
+                  <li>Update existing events GeoNet has revised (when adding to an existing catalogue)</li>
+                  <li>Records GeoNet marks as duplicate, not existing or not locatable are left out and counted</li>
                   <li>Track import history and statistics</li>
                 </ul>
               </div>
@@ -204,11 +223,12 @@ export default function ImportPage() {
               <div>
                 <h3 className="font-semibold mb-2">Imported Fields</h3>
                 <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
-                  <li>Event ID (GeoNet public ID)</li>
-                  <li>Time (origin time)</li>
+                  <li>Event ID (GeoNet event ID, and its QuakeML public ID smi:nz.org.geonet/&lt;ID&gt;)</li>
+                  <li>Time (origin time, UTC)</li>
                   <li>Location (latitude, longitude, depth)</li>
                   <li>Magnitude (value and type)</li>
-                  <li>Event type (earthquake, quarry blast, etc.)</li>
+                  <li>Event type (as a QuakeML type, with GeoNet&apos;s own classification kept alongside)</li>
+                  <li>For M5.0+ events: origin quality and focal mechanisms from GeoNet&apos;s QuakeML</li>
                 </ul>
               </div>
 
@@ -217,7 +237,7 @@ export default function ImportPage() {
                 <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                   <li>Start with a small time range (e.g., last 24 hours) to test the import</li>
                   <li>Use magnitude filters to reduce the number of events imported</li>
-                  <li>Enable &quot;Update existing events&quot; to keep data synchronized with GeoNet</li>
+                  <li>To keep a catalogue synchronised with GeoNet, choose it as the target catalogue and enable &quot;Update existing events&quot;</li>
                   <li>Check the import history to monitor for errors or issues</li>
                   <li>Consider setting up scheduled imports for regular data updates</li>
                 </ul>

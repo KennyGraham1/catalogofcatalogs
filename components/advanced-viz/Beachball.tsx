@@ -13,6 +13,18 @@ import { useId, useMemo } from 'react';
 import { useTheme } from 'next-themes';
 import { computeBeachball, type FocalMechanism } from '@/lib/focal-mechanism-utils';
 
+/**
+ * Beach-ball colours, shared by the ball and its legend so the two cannot disagree:
+ * the compressional quadrants are filled, the dilatational ones show the background.
+ */
+export function beachballPalette(isDark: boolean): { fill: string; background: string; stroke: string } {
+  return {
+    fill: '#2563eb', // compressional (blue) — professional, legible in both themes
+    background: isDark ? '#0b1220' : '#ffffff',
+    stroke: isDark ? '#e5e7eb' : '#0f172a',
+  };
+}
+
 export function Beachball({
   mechanism,
   size = 200,
@@ -30,9 +42,7 @@ export function Beachball({
   const g = useMemo(() => computeBeachball(mechanism, size), [mechanism, size]);
   if (!g) return null;
 
-  const fill = '#2563eb'; // compressional (blue) — professional, legible in both themes
-  const background = isDark ? '#0b1220' : '#ffffff';
-  const stroke = isDark ? '#e5e7eb' : '#0f172a';
+  const { fill, background, stroke } = beachballPalette(isDark);
   const axisR = g.radius * 0.07;
 
   return (
@@ -66,6 +76,29 @@ export function Beachball({
         </>
       )}
     </svg>
+  );
+}
+
+/**
+ * Legend for Beachball, drawn in the ball's own colours. The shaded quadrants are
+ * compressional (first motion up) and contain the T (tension) axis; the unshaded ones
+ * are dilatational (first motion down) and contain the P (pressure) axis (Aki &
+ * Richards 1980; Stein & Wysession 2003, sec. 4.2).
+ */
+export function BeachballLegend({ className }: { className?: string }) {
+  const { resolvedTheme } = useTheme();
+  const { fill, background, stroke } = beachballPalette(resolvedTheme === 'dark');
+  return (
+    <div className={className}>
+      <div className="flex items-center gap-2">
+        <div className="w-4 h-4 rounded border" style={{ backgroundColor: fill, borderColor: stroke }} aria-hidden="true"></div>
+        <span>Compressional (shaded, contains T)</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="w-4 h-4 rounded border" style={{ backgroundColor: background, borderColor: stroke }} aria-hidden="true"></div>
+        <span>Dilatational (unshaded, contains P)</span>
+      </div>
+    </div>
   );
 }
 

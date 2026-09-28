@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { BASE_LAYERS, getDefaultBaseLayer } from '@/hooks/use-map-theme';
+import { positionInMapWorld } from '@/lib/map-event-selection';
+import { formatOriginTime } from '@/components/map/OptimizedEventPopup';
 
 interface EventData {
   id?: string;
@@ -133,6 +135,20 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
     // Clear previously drawn markers/polylines (base layers untouched).
     overlay.clearLayers();
 
+    // Draw every event in the reference event's world copy. Merge matches duplicates across
+    // the antimeridian (Kermadec/Chatham), and Leaflet does not wrap markers, polylines or
+    // bounds, so a pair at 179.95° and -179.97° (8 km apart) was drawn 360° apart and fitted
+    // at world zoom. A zero-width box at the reference longitude centres positionInMapWorld
+    // on it. Popups still report the stored coordinates.
+    const referenceEvent = group.events[0];
+    const referenceWorld = {
+      north: referenceEvent.latitude,
+      south: referenceEvent.latitude,
+      east: referenceEvent.longitude,
+      west: referenceEvent.longitude,
+    };
+    const displayPosition = (event: EventData) => positionInMapWorld(event, referenceWorld);
+
     // Add markers for each event
     const markers: L.Marker[] = [];
     group.events.forEach((event, idx) => {
@@ -167,21 +183,15 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
         iconAnchor: [isSelected ? 12 : 8, isSelected ? 12 : 8],
       });
 
-      const marker = L.marker([event.latitude, event.longitude], { icon })
+      // formatOriginTime returns an unparseable time verbatim, so it is escaped like the name.
+      const marker = L.marker(displayPosition(event), { icon })
         .bindPopup(`
           <div style="min-width: 200px;">
             <div style="font-weight: bold; margin-bottom: 4px; color: ${color};">
               ${escapeHtml(event.catalogueName)}
             </div>
             <div style="font-size: 12px;">
-              <div><strong>Time:</strong> ${new Date(event.time).toLocaleString('en-GB', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-              })}</div>
+              <div><strong>Time:</strong> ${escapeHtml(formatOriginTime(event.time))}</div>
               <div><strong>Magnitude:</strong> ${event.magnitude.toFixed(2)}</div>
               <div><strong>Depth:</strong> ${event.depth != null ? event.depth.toFixed(1) + ' km' : 'N/A'}</div>
               <div><strong>Location:</strong> ${event.latitude.toFixed(4)}, ${event.longitude.toFixed(4)}</div>
@@ -196,13 +206,12 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
 
     // Draw lines connecting events
     if (group.events.length > 1) {
-      const referenceEvent = group.events[0];
       group.events.slice(1).forEach((event) => {
         overlay.addLayer(
           L.polyline(
             [
-              [referenceEvent.latitude, referenceEvent.longitude],
-              [event.latitude, event.longitude],
+              displayPosition(referenceEvent),
+              displayPosition(event),
             ],
             {
               color: '#666',

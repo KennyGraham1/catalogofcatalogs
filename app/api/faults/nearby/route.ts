@@ -1,10 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getFaultSlipTypeName } from '@/lib/fault-data';
+import { requireViewer } from '@/lib/auth/middleware';
+import { applyRateLimit, readRateLimiter } from '@/lib/rate-limiter';
 
 // Force dynamic rendering for this API route
 export const dynamic = 'force-dynamic';
 
-/** Features fetched per bbox before distance ranking; independent of the display limit. */
+/**
+ * Upper bounds on a query. The map popup asks for 3 faults within 50 km; every extra
+ * kilometre of radius multiplies the GNS WFS requests behind one call (radius=3000 from
+ * the Tasman Sea pulled the whole AF250 layer, ~20 MB over ~27 upstream requests, and a
+ * 200 km box over the central North Island already takes up to 16).
+ */
+const MAX_RADIUS_KM = 200;
+const MAX_LIMIT = 50;
+/** Lookups per client per minute: one per opened event popup. */
+const RATE_LIMIT_PER_MINUTE = 30;
+
+/** WFS page size: features fetched per bbox before distance ranking, independent of the display limit. */
 const WFS_FETCH_CAP = 2000;
 /** A box that comes back full is split into quadrants this many times at most (4^3 = 64 boxes). */
 const WFS_MAX_SPLIT_DEPTH = 3;
@@ -17,11 +30,34 @@ const WFS_MAX_EXTRA_PAGES = 5;
  * Query parameters:
  * - lat: Latitude of the point
  * - lon: Longitude of the point
- * - radius: Search radius in kilometers (default: 50km)
- * - limit: Maximum number of faults to return (default: 10)
+ * - radius: Search radius in kilometers (default: 50km, at most MAX_RADIUS_KM)
+ * - limit: Maximum number of faults to return (default: 10, at most MAX_LIMIT)
+ *
+ * Requires a viewer session, like the event routes: the only caller is the map popup
+ * of events that are themselves served to viewers only.
  */
 export async function GET(request: NextRequest) {
   try {
+    const authResult = await requireViewer(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
+    // Each lookup fans out to the third-party GNS WFS, so throttle per client.
+    const rateLimitResult = applyRateLimit(request, readRateLimiter, RATE_LIMIT_PER_MINUTE);
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        {
+          error: 'Too many requests. Please try again later.',
+          retryAfter: rateLimitResult.headers['Retry-After'],
+        },
+        {
+          status: 429,
+          headers: rateLimitResult.headers,
+        }
+      );
+    }
+
     const searchParams = request.nextUrl.searchParams;
     const lat = parseFloat(searchParams.get('lat') || '');
     const lon = parseFloat(searchParams.get('lon') || '');
@@ -43,16 +79,16 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    if (!Number.isFinite(radius) || radius <= 0) {
+    if (!Number.isFinite(radius) || radius <= 0 || radius > MAX_RADIUS_KM) {
       return NextResponse.json(
-        { error: 'Radius must be a positive number of kilometres' },
+        { error: `Radius must be a positive number of kilometres, at most ${MAX_RADIUS_KM}` },
         { status: 400 }
       );
     }
 
-    if (!Number.isFinite(limit) || limit <= 0) {
+    if (!Number.isFinite(limit) || limit <= 0 || limit > MAX_LIMIT) {
       return NextResponse.json(
-        { error: 'Limit must be a positive integer' },
+        { error: `Limit must be a positive integer, at most ${MAX_LIMIT}` },
         { status: 400 }
       );
     }
@@ -63,7 +99,7 @@ export async function GET(request: NextRequest) {
      */
     const featuresById = new Map<unknown, any>();
     const features: any[] = [];
-    const fetchCount = Math.max(limit, WFS_FETCH_CAP);
+    const fetchCount = WFS_FETCH_CAP;
     let requestCount = 0;
     const collectWithin = async (searchRadius: number): Promise<NextResponse | null> => {
       // Calculate bounding box from point and radius

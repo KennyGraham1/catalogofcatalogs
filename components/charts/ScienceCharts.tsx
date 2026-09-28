@@ -2,8 +2,8 @@
 
 /**
  * Seismology plots (Apache ECharts): Gutenberg-Richter, frequency-magnitude
- * completeness, cumulative temporal series, moment release, and multi-catalogue
- * MFD comparison. These preserve the scientific content of the previous recharts
+ * completeness, cumulative temporal series, moment release (by magnitude and over
+ * time), the goodness-of-fit Mc test, and multi-catalogue MFD comparison. These preserve the scientific content of the previous recharts
  * versions (Mc reference lines, log axes, per-catalogue series) and add a few
  * tasteful touches (shaded incomplete region, zoomable axes).
  */
@@ -301,6 +301,145 @@ export const MomentReleaseChart = memo(function MomentReleaseChart({
     [data, totalMoment, c]
   );
   return <EChart option={option} height={height} exportData={data} exportName="moment-release" aria-label="Moment release by magnitude" />;
+});
+
+// ---------------------------------------------------------------------------
+// Cumulative moment / radiated-energy release over time (step line, UTC axis)
+// ---------------------------------------------------------------------------
+/** Calendar day (UTC) of a bin start: time-series bins are UTC days, weeks and months. */
+const UTC_DAY_FORMAT = new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC',
+});
+
+export interface ReleasePoint {
+  date: string;
+  moment: number;
+  energy: number;
+  cumulativeMoment: number;
+  cumulativeEnergy: number;
+}
+
+export const CumulativeReleaseChart = memo(function CumulativeReleaseChart({
+  data,
+  quantity = 'moment',
+  height = 380,
+}: {
+  /** lib/seismological-analysis analyzeSeismicityTimeSeries release bins. */
+  data: ReleasePoint[];
+  /** Seismic moment M0 (N·m), or radiated energy E (J) from log10 E = 1.5 M + 4.8. */
+  quantity?: 'moment' | 'energy';
+  height?: number;
+}) {
+  const { resolvedTheme } = useTheme();
+  const c = chartColors(resolvedTheme === 'dark');
+  const isMoment = quantity === 'moment';
+  const unit = isMoment ? 'N·m' : 'J';
+  const name = isMoment ? 'Cumulative seismic moment' : 'Cumulative radiated energy';
+  const option = useMemo<EChartsOption>(
+    () => ({
+      useUTC: true,
+      grid: grid({ top: 24, left: 76, right: 28, bottom: 64 }),
+      tooltip: tooltip(c, {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          if (!params?.length) return '';
+          const row = data[params[0].dataIndex];
+          if (!row) return '';
+          const date = new Date(Date.parse(row.date));
+          const cumulative = isMoment ? row.cumulativeMoment : row.cumulativeEnergy;
+          const released = isMoment ? row.moment : row.energy;
+          let html = ttHeader(c, Number.isNaN(date.getTime()) ? row.date : `From ${UTC_DAY_FORMAT.format(date)}`) +
+            ttRow(c, name, `${cumulative.toExponential(2)} ${unit}`, SEISMIC_COLORS.energy.dark) +
+            ttRow(c, 'Released in this period', `${released.toExponential(2)} ${unit}`);
+          // Mw = (log10 M0 - 9.1) / 1.5 (N·m; Hanks & Kanamori, 1979, IASPEI 2005).
+          if (isMoment && cumulative > 0) html += ttRow(c, 'Equivalent single event', `Mw ${((Math.log10(cumulative) - 9.1) / 1.5).toFixed(2)}`);
+          return html;
+        },
+      }),
+      xAxis: axis(c, { type: 'time' }),
+      yAxis: {
+        ...axis(c, { name: `${name} (${unit})`, nameGap: 64 }),
+        axisLabel: { ...axis(c).axisLabel, formatter: (v: number) => (v === 0 ? '0' : Number(v).toExponential(1)) },
+      },
+      dataZoom: [
+        { type: 'inside' },
+        { type: 'slider', height: 16, bottom: 30, borderColor: c.grid, textStyle: { color: c.subtext, fontSize: 10 } },
+      ],
+      series: [
+        {
+          type: 'line',
+          name,
+          step: 'end',
+          showSymbol: false,
+          lineStyle: { color: SEISMIC_COLORS.energy.dark, width: 2 },
+          itemStyle: { color: SEISMIC_COLORS.energy.dark },
+          areaStyle: { color: SEISMIC_COLORS.energy.dark, opacity: 0.08 },
+          data: data.map(d => [Date.parse(d.date), isMoment ? d.cumulativeMoment : d.cumulativeEnergy]),
+        },
+      ],
+    }),
+    [data, c, isMoment, unit, name]
+  );
+  return <EChart option={option} height={height} exportData={data as unknown as Record<string, unknown>[]}
+    exportName={isMoment ? 'cumulative-moment' : 'cumulative-energy'} aria-label={`${name} over time`} />;
+});
+
+// ---------------------------------------------------------------------------
+// Goodness-of-fit test for Mc: R (%) against candidate cut-off
+// ---------------------------------------------------------------------------
+export const GoodnessOfFitChart = memo(function GoodnessOfFitChart({
+  curve,
+  mc,
+  height = 300,
+}: {
+  curve: { magnitude: number; fit: number }[];
+  /** The Mc the test chose, or null when it fell back to MAXC. */
+  mc: number | null;
+  height?: number;
+}) {
+  const { resolvedTheme } = useTheme();
+  const c = chartColors(resolvedTheme === 'dark');
+  const option = useMemo<EChartsOption>(() => {
+    const lowest = curve.reduce((min, p) => Math.min(min, p.fit), 100);
+    return {
+      grid: grid({ top: 28, left: 60, right: 28, bottom: 52 }),
+      tooltip: tooltip(c, {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          if (!params?.length) return '';
+          const point = curve[params[0].dataIndex];
+          if (!point) return '';
+          const reached = point.fit >= 95 ? 'Reaches 95%' : point.fit >= 90 ? 'Reaches 90%' : 'Below 90%';
+          return ttHeader(c, `Cut-off M ${point.magnitude.toFixed(1)}`) +
+            ttRow(c, 'Goodness of fit R', `${point.fit.toFixed(1)}%`, SEISMIC_COLORS.frequency.dark) +
+            ttBadge(c, reached, point.fit >= 90 ? c.fit : c.reference);
+        },
+      }),
+      xAxis: axis(c, { name: 'Candidate Mc (magnitude cut-off)', nameGap: 30 }),
+      yAxis: { ...axis(c, { name: 'R (%)', nameGap: 40 }), min: Math.max(0, Math.floor(Math.min(lowest, 88) / 5) * 5), max: 100 },
+      series: [
+        {
+          type: 'line',
+          name: 'Goodness of fit R',
+          symbol: 'circle',
+          symbolSize: 6,
+          lineStyle: { color: SEISMIC_COLORS.frequency.dark, width: 2 },
+          itemStyle: { color: SEISMIC_COLORS.frequency.dark },
+          data: curve.map(p => [p.magnitude, p.fit]),
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            data: [
+              { yAxis: 95, lineStyle: { color: c.fit, type: 'dashed', width: 1.5 }, label: { formatter: '95%', color: c.fit, position: 'insideStartTop' } },
+              { yAxis: 90, lineStyle: { color: c.subtext, type: 'dashed', width: 1.5 }, label: { formatter: '90%', color: c.subtext, position: 'insideStartTop' } },
+              ...(mc != null ? [{ xAxis: mc, lineStyle: { color: c.reference, type: 'dashed' as const, width: 2 }, label: { formatter: `Mc = ${mc.toFixed(1)}`, color: c.reference, fontWeight: 'bold' as const, position: 'insideEndTop' as const } }] : []),
+            ],
+          },
+        },
+      ],
+    } as EChartsOption;
+  }, [curve, mc, c]);
+  return <EChart option={option} height={height} exportData={curve} exportName="mc-goodness-of-fit" aria-label="Goodness-of-fit test for the completeness magnitude" />;
 });
 
 // ---------------------------------------------------------------------------

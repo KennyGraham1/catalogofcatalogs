@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import https from 'https';
+import { summarizeFaultFeatures } from './lib/fault-summary';
 
 const WFS_URL = 'https://maps.gns.cri.nz/gns/wfs';
 
@@ -55,30 +56,25 @@ async function downloadFaultData() {
     console.log(`✓ Saved fault data to: ${outputPath}`);
     console.log(`\nFile size: ${(fs.statSync(outputPath).size / 1024).toFixed(2)} KB`);
 
-    // Print some statistics
+    // Print some statistics. summarizeFaultFeatures (scripts/lib/fault-summary.ts)
+    // reads the AF250 layer's real, lower-case property names (`name`,
+    // `slip_type`) — this used to read SLIP_TYPE/NAME, which are absent from the
+    // real file, so every fault fell into "Unknown" and every sample name
+    // printed "Unnamed".
     if (data.features && data.features.length > 0) {
+      const summary = summarizeFaultFeatures(data.features);
+
       console.log('\nFault Data Statistics:');
-      console.log(`- Total faults: ${data.features.length}`);
-      
-      // Count by slip type
-      const slipTypes: Record<string, number> = {};
-      data.features.forEach((feature: any) => {
-        const slipType = feature.properties?.SLIP_TYPE || 'Unknown';
-        slipTypes[slipType] = (slipTypes[slipType] || 0) + 1;
-      });
-      
+      console.log(`- Total faults: ${summary.totalFaults}`);
+
       console.log('\nFaults by slip type:');
-      Object.entries(slipTypes)
-        .sort((a, b) => b[1] - a[1])
-        .forEach(([type, count]) => {
-          console.log(`  - ${type}: ${count}`);
-        });
+      summary.slipTypeCounts.forEach(([type, count]) => {
+        console.log(`  - ${type}: ${count}`);
+      });
 
       // Sample fault names
       console.log('\nSample fault names:');
-      data.features.slice(0, 10).forEach((feature: any) => {
-        const name = feature.properties?.NAME || 'Unnamed';
-        const slipType = feature.properties?.SLIP_TYPE || 'Unknown';
+      summary.sampleNames.forEach(({ name, slipType }) => {
         console.log(`  - ${name} (${slipType})`);
       });
     }

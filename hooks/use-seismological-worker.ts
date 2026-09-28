@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { createSeismologicalWorker } from '@/lib/seismological-worker-client';
+import type { McMethod, RateIntervalOption } from '@/lib/seismological-analysis';
 
 interface EarthquakeEvent {
   id: number | string;
@@ -20,7 +21,20 @@ interface WorkerResult<T> {
   cached: boolean;
 }
 
-type AnalysisType = 'gutenberg-richter' | 'completeness' | 'temporal' | 'moment';
+type AnalysisType = 'gutenberg-richter' | 'completeness' | 'temporal' | 'moment' | 'time-series';
+
+/** Parameters an analysis reads besides its events (workers/seismological-worker.ts). */
+export interface SeismologicalWorkerOptions {
+  /** Explicit magnitude cut-off (G-R fit, time series). */
+  minMagnitude?: number;
+  binWidth?: number;
+  /** How Mc is estimated wherever it is: MAXC (default) or the goodness-of-fit test. */
+  mcMethod?: McMethod;
+  /** Correction added to the MAXC bin (default 0.2). */
+  maxcCorrection?: number;
+  /** Bin interval of the time series (default 'auto'). */
+  interval?: RateIntervalOption;
+}
 
 /**
  * Hook for running seismological analysis in a web worker
@@ -30,12 +44,15 @@ export function useSeismologicalWorker<T>(
   type: AnalysisType,
   events: EarthquakeEvent[],
   enabled: boolean = true,
-  options?: { minMagnitude?: number; binWidth?: number }
+  options?: SeismologicalWorkerOptions
 ): WorkerResult<T> {
   const minMagnitude = options?.minMagnitude;
   const binWidth = options?.binWidth;
-  const request = useMemo(() => ({ type, events, enabled, minMagnitude, binWidth }),
-    [type, events, enabled, minMagnitude, binWidth]);
+  const mcMethod = options?.mcMethod;
+  const maxcCorrection = options?.maxcCorrection;
+  const interval = options?.interval;
+  const request = useMemo(() => ({ type, events, enabled, minMagnitude, binWidth, mcMethod, maxcCorrection, interval }),
+    [type, events, enabled, minMagnitude, binWidth, mcMethod, maxcCorrection, interval]);
   const pending: WorkerResult<T> = { data: null, loading: enabled && events.length > 0, error: null, cached: false };
   const [state, setState] = useState<WorkerResult<T> & { request: typeof request }>({ ...pending, request });
 
@@ -47,7 +64,12 @@ export function useSeismologicalWorker<T>(
       finish({});
       return;
     }
-    const minEvents = type === 'completeness' ? 50 : type === 'gutenberg-richter' ? 10 : 1;
+    // The worker's own floors, checked here so no worker starts for a withheld fit:
+    // 50 events whenever Mc is estimated (the Mc tab, or a G-R fit without an
+    // explicit cut-off), 10 for a G-R fit above a supplied cut-off. The time series
+    // counts every event itself when there are too few to estimate Mc.
+    const minEvents = type === 'completeness' ? 50
+      : type === 'gutenberg-richter' ? (minMagnitude == null ? 50 : 10) : 1;
     if (events.length < minEvents) {
       finish({ error: `Insufficient data (need at least ${minEvents} events)` });
       return;
@@ -67,7 +89,7 @@ export function useSeismologicalWorker<T>(
       };
       // Send only the inputs the science algorithms use. Nested event details
       // otherwise incur an unnecessary structured clone for every tab change.
-      worker.postMessage({ type, minMagnitude, binWidth, events: events.map(event => ({
+      worker.postMessage({ type, minMagnitude, binWidth, mcMethod, maxcCorrection, interval, events: events.map(event => ({
         id: event.id, time: event.time, latitude: event.latitude, longitude: event.longitude,
         depth: event.depth, magnitude: event.magnitude, magnitude_type: event.magnitude_type,
       })) });
@@ -77,7 +99,7 @@ export function useSeismologicalWorker<T>(
       finish({ error: error instanceof Error ? error.message : 'Unable to start analysis worker' });
     }
     return () => { active = false; worker?.terminate(); };
-  }, [request, type, events, enabled, minMagnitude, binWidth]);
+  }, [request, type, events, enabled, minMagnitude, binWidth, mcMethod, maxcCorrection, interval]);
 
   // A queued message or an old result must never describe newly selected inputs.
   return state.request === request ? state : pending;
@@ -85,27 +107,57 @@ export function useSeismologicalWorker<T>(
 
 /**
  * Hook to manage multiple seismological analyses with lazy loading
+ *
+ * `options.fitEvents` feeds the G-R and Mc fits when they need a different sample
+ * from `events`, and `options.minMagnitude` is the G-R fit's explicit cut-off. The
+ * Analytics page passes its events without the magnitude filter's lower bound plus
+ * that bound as the cut-off: run on a sample already cut at c, MAXC finds its peak
+ * at c by construction and reports Mc = c + 0.2, discarding a further ~37% of the
+ * events the user kept (Woessner & Wiemer, 2005: MAXC needs the untruncated FMD).
+ *
+ * `mcMethod` and `maxcCorrection` choose the Mc estimate the G-R fit, the Mc tab and
+ * the seismicity-rate series share. The Temporal tab runs two analyses: 'temporal'
+ * (rates, cumulative count, declustering) and the cheap 'time-series' (rate above Mc
+ * and cumulative moment per `rateInterval` bin), so changing the interval does not
+ * rerun the declustering.
  */
-export function useSeismologicalAnalyses(events: EarthquakeEvent[], activeTab: string) {
+export function useSeismologicalAnalyses(
+  events: EarthquakeEvent[],
+  activeTab: string,
+  options?: {
+    fitEvents?: EarthquakeEvent[];
+    minMagnitude?: number;
+    mcMethod?: McMethod;
+    maxcCorrection?: number;
+    rateInterval?: RateIntervalOption;
+  }
+) {
+  const fitEvents = options?.fitEvents ?? events;
+  const mcMethod = options?.mcMethod;
+  const maxcCorrection = options?.maxcCorrection;
   // Only compute analysis for active tab
   const grEnabled = activeTab === 'gutenberg-richter';
   const completenessEnabled = activeTab === 'completeness';
   const temporalEnabled = activeTab === 'temporal' && events.length > 0;
   const momentEnabled = activeTab === 'moment' && events.length > 0;
 
-  const gr = useSeismologicalWorker<any>('gutenberg-richter', events, grEnabled);
-  const completeness = useSeismologicalWorker<any>('completeness', events, completenessEnabled);
+  const gr = useSeismologicalWorker<any>('gutenberg-richter', fitEvents, grEnabled,
+    { minMagnitude: options?.minMagnitude, mcMethod, maxcCorrection });
+  const completeness = useSeismologicalWorker<any>('completeness', fitEvents, completenessEnabled,
+    { mcMethod, maxcCorrection });
   const temporal = useSeismologicalWorker<any>('temporal', events, temporalEnabled);
+  const timeSeries = useSeismologicalWorker<any>('time-series', events, temporalEnabled,
+    { minMagnitude: options?.minMagnitude, mcMethod, maxcCorrection, interval: options?.rateInterval });
   const moment = useSeismologicalWorker<any>('moment', events, momentEnabled);
 
   return {
     grAnalysis: gr,
     completeness,
     temporalAnalysis: temporal,
+    timeSeriesAnalysis: timeSeries,
     momentAnalysis: moment,
-    anyLoading: gr.loading || completeness.loading || temporal.loading || moment.loading
+    anyLoading: gr.loading || completeness.loading || temporal.loading || timeSeries.loading || moment.loading
   };
 }
 
 export default useSeismologicalWorker;
-

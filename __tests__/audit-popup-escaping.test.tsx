@@ -15,6 +15,9 @@ jest.mock('leaflet', () => ({ __esModule: true, default: {
   latLngBounds: () => ({}),
 } }));
 import { DuplicateGroupMap } from '@/components/merge/DuplicateGroupMap';
+// Both tests read popupHtml[0]: start each from an empty list so neither depends on the order
+// the tests run in (jest --randomize ran the station test first and left its popup here).
+beforeEach(() => { popupHtml.length = 0; });
 it('renders catalogue names as text in Leaflet popup HTML', () => {
   const name = '<form data-audit-probe="injected"><input name="password"></form>';
   render(React.createElement(DuplicateGroupMap, { group: { id: 'g', selectedEventIndex: 0, isSuspicious: false, validationWarnings: [], events: [{ id: 'e', time: '2024-01-01T00:00:00Z', latitude: -41, longitude: 174, magnitude: 4, depth: 10, source: 'A', catalogueId: 'a', catalogueName: name }] }, catalogueColors: {} }));
@@ -26,7 +29,6 @@ it('renders catalogue names as text in Leaflet popup HTML', () => {
 
 import { StationMarker } from '@/components/advanced-viz/StationMarker';
 it('renders station fields as text, including names and network codes', () => {
-  popupHtml.length = 0;
   const payload = '<form><input name="password"></form>';
   render(<StationMarker position={[-41, 174]} stationCode={payload} stationNetwork={payload} stationName={payload} />);
   const dom = new DOMParser().parseFromString(popupHtml[0], 'text/html');

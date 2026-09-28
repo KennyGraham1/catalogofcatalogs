@@ -31,22 +31,17 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Filter, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { resolveEventQuality } from '@/components/events/event-quality';
+import type { EventFilters as C4EventFilters } from '@/lib/event-filter-params';
 
-export interface EventFilterValues {
-  minMagnitude?: number;
-  maxMagnitude?: number;
-  minDepth?: number;
-  maxDepth?: number;
-  startTime?: string;
-  endTime?: string;
-  eventType?: string;
-  magnitudeType?: string;
-  evaluationStatus?: string;
-  evaluationMode?: string;
-  maxAzimuthalGap?: number;
-  minUsedPhaseCount?: number;
-  minUsedStationCount?: number;
-  maxStandardError?: number;
+/**
+ * Extends the shared C4 filter contract (lib/event-filter-params.ts, owner H2a: magnitude,
+ * depth, time, event/magnitude type, evaluation status/mode, azimuthal gap, station/phase
+ * counts, standard error, per-field uncertainty maxima, minQuality, geographic bounds) with
+ * two filters this component has always offered that C4 does not cover, because they need
+ * the fault layer rather than anything stored on the event row.
+ */
+export interface EventFilterValues extends C4EventFilters {
   maxFaultDistance?: number; // Maximum distance from nearest fault (km)
   nearFaultsOnly?: boolean; // Only show events near known faults
 }
@@ -99,6 +94,18 @@ export function EventFilters({ onFilterChange, activeFilters }: EventFiltersProp
     maxStandardError: 'Max Standard Error',
     maxFaultDistance: 'Max Fault Distance',
     nearFaultsOnly: 'Near Faults Only',
+    minQuality: 'Min Quality (Q)',
+    maxHorizontalUncertainty: 'Max Horizontal Uncertainty',
+    maxDepthUncertainty: 'Max Depth Uncertainty',
+    maxTimeUncertainty: 'Max Time Uncertainty',
+    maxMagnitudeUncertainty: 'Max Magnitude Uncertainty',
+    // Geographic bounds (C4): no input in this panel yet (map-bounds filtering lives on the
+    // map view), but a saved filter or a future caller can still set them, so the active
+    // filter badges need a label rather than showing "undefined".
+    minLatitude: 'Min Latitude',
+    maxLatitude: 'Max Latitude',
+    minLongitude: 'Min Longitude',
+    maxLongitude: 'Max Longitude',
   };
 
   return (
@@ -257,11 +264,13 @@ export function EventFilters({ onFilterChange, activeFilters }: EventFiltersProp
             <div className="space-y-2">
               <Label htmlFor="eventType">Event Type</Label>
               <Select
-                value={filters.eventType ?? ''}
+                // Radix Select.Item forbids value="" (reserved to mean "cleared"); "all" is
+                // the sentinel for "no eventType filter" and is translated back to undefined.
+                value={filters.eventType ?? 'all'}
                 onValueChange={(value) =>
                   setFilters({
                     ...filters,
-                    eventType: value || undefined,
+                    eventType: value === 'all' ? undefined : value,
                   })
                 }
               >
@@ -269,7 +278,7 @@ export function EventFilters({ onFilterChange, activeFilters }: EventFiltersProp
                   <SelectValue placeholder="All types" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All types</SelectItem>
+                  <SelectItem value="all">All types</SelectItem>
                   <SelectItem value="earthquake">Earthquake</SelectItem>
                   <SelectItem value="quarry blast">Quarry Blast</SelectItem>
                   <SelectItem value="explosion">Explosion</SelectItem>
@@ -283,11 +292,11 @@ export function EventFilters({ onFilterChange, activeFilters }: EventFiltersProp
             <div className="space-y-2">
               <Label htmlFor="magnitudeType">Magnitude Type</Label>
               <Select
-                value={filters.magnitudeType ?? ''}
+                value={filters.magnitudeType ?? 'all'}
                 onValueChange={(value) =>
                   setFilters({
                     ...filters,
-                    magnitudeType: value || undefined,
+                    magnitudeType: value === 'all' ? undefined : value,
                   })
                 }
               >
@@ -295,7 +304,7 @@ export function EventFilters({ onFilterChange, activeFilters }: EventFiltersProp
                   <SelectValue placeholder="All types" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All types</SelectItem>
+                  <SelectItem value="all">All types</SelectItem>
                   <SelectItem value="ML">ML (Local)</SelectItem>
                   <SelectItem value="Mw">Mw (Moment)</SelectItem>
                   <SelectItem value="mb">mb (Body wave)</SelectItem>
@@ -309,11 +318,11 @@ export function EventFilters({ onFilterChange, activeFilters }: EventFiltersProp
             <div className="space-y-2">
               <Label htmlFor="evaluationStatus">Evaluation Status</Label>
               <Select
-                value={filters.evaluationStatus ?? ''}
+                value={filters.evaluationStatus ?? 'all'}
                 onValueChange={(value) =>
                   setFilters({
                     ...filters,
-                    evaluationStatus: value || undefined,
+                    evaluationStatus: value === 'all' ? undefined : value,
                   })
                 }
               >
@@ -321,7 +330,7 @@ export function EventFilters({ onFilterChange, activeFilters }: EventFiltersProp
                   <SelectValue placeholder="All statuses" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All statuses</SelectItem>
+                  <SelectItem value="all">All statuses</SelectItem>
                   <SelectItem value="preliminary">Preliminary</SelectItem>
                   <SelectItem value="confirmed">Confirmed</SelectItem>
                   <SelectItem value="reviewed">Reviewed</SelectItem>
@@ -333,7 +342,29 @@ export function EventFilters({ onFilterChange, activeFilters }: EventFiltersProp
             {/* Quality metrics */}
             <div className="space-y-4">
               <h3 className="font-semibold">Quality Metrics</h3>
-              
+
+              <div className="space-y-2">
+                <Label htmlFor="minQuality">Minimum Quality Score (Q)</Label>
+                <Input
+                  id="minQuality"
+                  type="number"
+                  step="1"
+                  min="0"
+                  max="100"
+                  placeholder="e.g., 70"
+                  value={filters.minQuality ?? ''}
+                  onChange={(e) =>
+                    setFilters({
+                      ...filters,
+                      minQuality: e.target.value ? parseFloat(e.target.value) : undefined,
+                    })
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  Only show events with a quality score of at least this value (0-100)
+                </p>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="maxAzimuthalGap">Max Azimuthal Gap (degrees)</Label>
                 <Input
@@ -400,6 +431,82 @@ export function EventFilters({ onFilterChange, activeFilters }: EventFiltersProp
                     })
                   }
                 />
+              </div>
+            </div>
+
+            {/* Per-field uncertainty maxima (C4). horizontal_uncertainty covers the QuakeML
+                OriginUncertainty error ellipse (and the plain circular column); GeoNet and
+                USGS imports only ever populate that and depth_uncertainty, never a
+                latitude/longitude uncertainty pair - see the map page's "With Uncertainty"
+                stat (#57) for the same convention. */}
+            <div className="space-y-4">
+              <h3 className="font-semibold">Location Uncertainty</h3>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="maxHorizontalUncertainty">Max Horizontal (km)</Label>
+                  <Input
+                    id="maxHorizontalUncertainty"
+                    type="number"
+                    step="0.1"
+                    placeholder="e.g., 5"
+                    value={filters.maxHorizontalUncertainty ?? ''}
+                    onChange={(e) =>
+                      setFilters({
+                        ...filters,
+                        maxHorizontalUncertainty: e.target.value ? parseFloat(e.target.value) : undefined,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="maxDepthUncertainty">Max Depth (km)</Label>
+                  <Input
+                    id="maxDepthUncertainty"
+                    type="number"
+                    step="0.1"
+                    placeholder="e.g., 5"
+                    value={filters.maxDepthUncertainty ?? ''}
+                    onChange={(e) =>
+                      setFilters({
+                        ...filters,
+                        maxDepthUncertainty: e.target.value ? parseFloat(e.target.value) : undefined,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="maxTimeUncertainty">Max Time (s)</Label>
+                  <Input
+                    id="maxTimeUncertainty"
+                    type="number"
+                    step="0.1"
+                    placeholder="e.g., 1"
+                    value={filters.maxTimeUncertainty ?? ''}
+                    onChange={(e) =>
+                      setFilters({
+                        ...filters,
+                        maxTimeUncertainty: e.target.value ? parseFloat(e.target.value) : undefined,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="maxMagnitudeUncertainty">Max Magnitude</Label>
+                  <Input
+                    id="maxMagnitudeUncertainty"
+                    type="number"
+                    step="0.01"
+                    placeholder="e.g., 0.2"
+                    value={filters.maxMagnitudeUncertainty ?? ''}
+                    onChange={(e) =>
+                      setFilters({
+                        ...filters,
+                        maxMagnitudeUncertainty: e.target.value ? parseFloat(e.target.value) : undefined,
+                      })
+                    }
+                  />
+                </div>
               </div>
             </div>
 
@@ -480,5 +587,106 @@ export function EventFilters({ onFilterChange, activeFilters }: EventFiltersProp
       </AlertDialog>
     </div>
   );
+}
+
+/** Minimal shape `applyEventFilters` reads; a real event row (EventTable's Event, an API
+ *  EventSummary, ...) carries more fields than this and satisfies it structurally. */
+export interface FilterableEvent {
+  time: string;
+  latitude: number;
+  longitude: number;
+  magnitude: number;
+  depth: number | null;
+  event_type?: string | null;
+  magnitude_type?: string | null;
+  evaluation_status?: string | null;
+  evaluation_mode?: string | null;
+  azimuthal_gap?: number | null;
+  used_phase_count?: number | null;
+  used_station_count?: number | null;
+  standard_error?: number | null;
+  quality_score?: number | null;
+  quality_grade?: string | null;
+  horizontal_uncertainty?: number | null;
+  min_horizontal_uncertainty?: number | null;
+  max_horizontal_uncertainty?: number | null;
+  depth_uncertainty?: number | null;
+  time_uncertainty?: number | null;
+  magnitude_uncertainty?: number | null;
+}
+
+/**
+ * Apply EventFilterValues to an already-loaded event array. Mirrors the semantics
+ * lib/event-filter-params.ts / getFilteredEvents define for the server (C4), so the table a
+ * user is looking at and the file "Export filtered events" downloads (C12, built with that
+ * module's own eventFiltersToSearchParams) cover the same events even before every page
+ * calls the server-side filtered-events route for its main event list.
+ *
+ * maxFaultDistance/nearFaultsOnly are intentionally not applied here: fault proximity needs
+ * the fault layer the map view loads, which this module does not have.
+ */
+export function applyEventFilters<T extends FilterableEvent>(events: T[], filters: EventFilterValues): T[] {
+  const hasStart = typeof filters.startTime === 'string' && filters.startTime.length > 0;
+  const hasEnd = typeof filters.endTime === 'string' && filters.endTime.length > 0;
+  const start = hasStart ? Date.parse(filters.startTime as string) : NaN;
+  const end = hasEnd ? Date.parse(filters.endTime as string) : NaN;
+
+  return events.filter((event) => {
+    if (filters.minMagnitude != null && event.magnitude < filters.minMagnitude) return false;
+    if (filters.maxMagnitude != null && event.magnitude > filters.maxMagnitude) return false;
+    if (filters.minDepth != null && (event.depth == null || event.depth < filters.minDepth)) return false;
+    if (filters.maxDepth != null && (event.depth == null || event.depth > filters.maxDepth)) return false;
+
+    if (hasStart && !Number.isNaN(start)) {
+      const eventTime = Date.parse(event.time);
+      if (Number.isNaN(eventTime) || eventTime < start) return false;
+    }
+    if (hasEnd && !Number.isNaN(end)) {
+      const eventTime = Date.parse(event.time);
+      if (Number.isNaN(eventTime) || eventTime > end) return false;
+    }
+
+    if (filters.eventType && (event.event_type ?? '').toLowerCase() !== filters.eventType.toLowerCase()) return false;
+    if (filters.magnitudeType && (event.magnitude_type ?? '').toLowerCase() !== filters.magnitudeType.toLowerCase()) return false;
+    if (filters.evaluationStatus && (event.evaluation_status ?? '').toLowerCase() !== filters.evaluationStatus.toLowerCase()) return false;
+    if (filters.evaluationMode && (event.evaluation_mode ?? '').toLowerCase() !== filters.evaluationMode.toLowerCase()) return false;
+
+    if (filters.maxAzimuthalGap != null && (event.azimuthal_gap == null || event.azimuthal_gap > filters.maxAzimuthalGap)) return false;
+    if (filters.minUsedPhaseCount != null && (event.used_phase_count == null || event.used_phase_count < filters.minUsedPhaseCount)) return false;
+    if (filters.minUsedStationCount != null && (event.used_station_count == null || event.used_station_count < filters.minUsedStationCount)) return false;
+    if (filters.maxStandardError != null && (event.standard_error == null || event.standard_error > filters.maxStandardError)) return false;
+
+    // Horizontal uncertainty: the error-ellipse semi-major axis when present, else the plain
+    // circular column - the same precedence metricsFromEvent uses for Q's location dimension.
+    if (filters.maxHorizontalUncertainty != null) {
+      const horizontal = event.max_horizontal_uncertainty ?? event.horizontal_uncertainty;
+      if (horizontal == null || horizontal > filters.maxHorizontalUncertainty) return false;
+    }
+    if (filters.maxDepthUncertainty != null && (event.depth_uncertainty == null || event.depth_uncertainty > filters.maxDepthUncertainty)) return false;
+    if (filters.maxTimeUncertainty != null && (event.time_uncertainty == null || event.time_uncertainty > filters.maxTimeUncertainty)) return false;
+    if (filters.maxMagnitudeUncertainty != null && (event.magnitude_uncertainty == null || event.magnitude_uncertainty > filters.maxMagnitudeUncertainty)) return false;
+
+    if (filters.minQuality != null) {
+      const { score } = resolveEventQuality(event);
+      if (score < filters.minQuality) return false;
+    }
+
+    if (filters.minLatitude != null && event.latitude < filters.minLatitude) return false;
+    if (filters.maxLatitude != null && event.latitude > filters.maxLatitude) return false;
+    if (filters.minLongitude != null && filters.maxLongitude != null) {
+      // minLongitude > maxLongitude is a box crossing the antimeridian (RFC 7946 S5.2,
+      // matching lib/event-filter-params.ts), e.g. 177..-178 for the Kermadec arc.
+      const crossesAntimeridian = filters.minLongitude > filters.maxLongitude;
+      const inBounds = crossesAntimeridian
+        ? event.longitude >= filters.minLongitude || event.longitude <= filters.maxLongitude
+        : event.longitude >= filters.minLongitude && event.longitude <= filters.maxLongitude;
+      if (!inBounds) return false;
+    } else {
+      if (filters.minLongitude != null && event.longitude < filters.minLongitude) return false;
+      if (filters.maxLongitude != null && event.longitude > filters.maxLongitude) return false;
+    }
+
+    return true;
+  });
 }
 

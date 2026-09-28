@@ -8,6 +8,7 @@ import { createUser } from '@/lib/auth/utils';
 import { UserRole } from '@/lib/auth/types';
 import { Logger } from '@/lib/errors';
 import { applyRateLimit, authRateLimiter } from '@/lib/rate-limiter';
+import { writeAuditLog } from '@/lib/audit';
 
 const logger = new Logger('RegisterAPI');
 
@@ -54,6 +55,14 @@ export async function POST(request: NextRequest) {
     const user = await createUser(email, password, name, UserRole.VIEWER);
 
     logger.info('User registered successfully', { userId: user.id, email: user.email });
+    await writeAuditLog({
+      action: 'user.register',
+      actor_id: user.id,
+      actor_email: user.email,
+      target_id: user.id,
+      target_type: 'user',
+      metadata: { role: user.role },
+    }, request);
 
     return NextResponse.json(
       {
@@ -65,9 +74,14 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     logger.error('Registration failed', error);
 
+    // This answer does reveal that an account exists. Kept deliberately: email delivery
+    // is optional (EMAIL_WEBHOOK_URL), so a uniform "check your inbox" reply would leave
+    // deployments without it unable to tell people why they cannot register. Probing
+    // is limited per client (authRateLimiter), and probing a new address creates a
+    // real, audit-logged account. Sign-in and password reset no longer reveal it.
     if (error instanceof Error && error.message.includes('already exists')) {
       return NextResponse.json(
-        { error: 'User with this email already exists' },
+        { error: 'An account with this email already exists. Sign in, or reset your password if you have forgotten it.' },
         { status: 409 }
       );
     }

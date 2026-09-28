@@ -2,71 +2,60 @@
 
 /**
  * Check User Role Script
- * 
+ *
  * This script checks the role of a user by email address.
- * 
+ *
  * Usage:
  *   npx tsx scripts/check-user-role.ts <email>
- * 
+ *
  * Example:
  *   npx tsx scripts/check-user-role.ts test@example.com
  */
 
-import { MongoClient } from 'mongodb';
-import { config } from 'dotenv';
-import { resolve } from 'path';
-
-// Load environment variables from .env file
-config({ path: resolve(__dirname, '../.env') });
-
-const MONGODB_URI = process.env.MONGODB_URI || '';
-const MONGODB_DATABASE = process.env.MONGODB_DATABASE || 'earthquake_catalogue';
+import { resolveDbTarget } from './lib/db-target';
 
 async function checkUserRole(email: string) {
-  if (!MONGODB_URI) {
-    console.error('❌ Error: MONGODB_URI environment variable is not set');
-    process.exit(1);
-  }
-
   if (!email) {
     console.error('❌ Error: Email address is required');
     console.log('\nUsage: npx tsx scripts/check-user-role.ts <email>');
     console.log('Example: npx tsx scripts/check-user-role.ts test@example.com');
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
-  const client = new MongoClient(MONGODB_URI);
+  // See scripts/migrate-add-region.ts for why this goes through lib/mongodb.ts's
+  // getDb() instead of resolving MONGODB_URI/MONGODB_DATABASE itself (gs#3/gs#4).
+  // Read-only script, so no write confirmation is needed here.
+  const target = await resolveDbTarget();
 
   try {
-    console.log('🔌 Connecting to MongoDB...');
-    await client.connect();
-    console.log('✓ Connected to MongoDB\n');
+    console.log(`   Database: ${target.db.databaseName}\n`);
 
-    const db = client.db(MONGODB_DATABASE);
-    const usersCollection = db.collection('users');
-
-    // Find the user
-    const user = await usersCollection.findOne(
-      { email },
-      { projection: { name: 1, email: 1, role: 1, is_active: 1, created_at: 1 } }
-    );
+    // getUserByEmail matches case-insensitively, the same way login does — an
+    // exact-case findOne could report "not found" for an account that exists
+    // under different casing (same root cause as gs#6). Deferred import: see
+    // migrate-auth-schema.ts for why.
+    const { getUserByEmail } = await import('../lib/auth/utils');
+    const user = await getUserByEmail(email);
 
     if (!user) {
       console.error(`❌ Error: User with email "${email}" not found\n`);
       console.log('Available users:');
+      const usersCollection = target.db.collection('users');
       const allUsers = await usersCollection.find(
         {},
         { projection: { email: 1, name: 1, role: 1 } }
       ).toArray();
-      
+
       if (allUsers.length === 0) {
         console.log('  No users found in database');
       } else {
-        allUsers.forEach(u => {
+        allUsers.forEach((u: any) => {
           console.log(`  - ${u.email} (${u.name}) - Role: ${u.role}`);
         });
       }
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
 
     console.log('👤 User Details:');
@@ -82,7 +71,7 @@ async function checkUserRole(email: string) {
     // Show permissions based on role
     console.log('🔐 Permissions:');
     console.log('━'.repeat(50));
-    
+
     switch (user.role) {
       case 'admin':
         console.log('   ✅ View all catalogues');
@@ -130,13 +119,17 @@ async function checkUserRole(email: string) {
 
   } catch (error) {
     console.error('❌ Error:', error);
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
-    await client.close();
+    await target.close();
     console.log('\n✓ Disconnected from MongoDB');
   }
 }
 
 // Get email from command line arguments
-const email = process.argv[2];
-checkUserRole(email);
+if (require.main === module) {
+  const email = process.argv[2];
+  checkUserRole(email).then(() => process.exit(process.exitCode ?? 0));
+}
+
+export { checkUserRole };

@@ -2,7 +2,7 @@ Earthquake Catalogue Management Application - Architecture Documentation
 ========================================================================
 
 
-This document provides comprehensive architecture diagrams for the Earthquake Catalogue Management Application, a Next.js 13+ application for uploading, parsing, validating, and managing seismic event catalogues.
+This document provides comprehensive architecture diagrams for the Earthquake Catalogue Management Application, a Next.js 15 application for uploading, parsing, validating, and managing seismic event catalogues.
 
 Table of Contents
 -----------------
@@ -41,7 +41,7 @@ This diagram shows the complete application structure including the frontend (Re
            Maps["Leaflet Map Visualizations"]
        end
 
-       subgraph NextJS["Next.js 13+ Application"]
+       subgraph NextJS["Next.js 15 Application"]
            subgraph FrontendGrp["Frontend (App Router)"]
                Pages["Pages &amp; Layouts"]
                Components["React Components"]
@@ -197,9 +197,9 @@ This diagram illustrates the complete 7-stage upload process from file selection
        FormData --> API
 
        API --> Detect
-       Detect -->|".csv, .txt"| CSV
-       Detect -->|".json"| JSONp
-       Detect -->|".xml, .quakeml"| XML
+       Detect -->|".csv, .txt, .dat"| CSV
+       Detect -->|".json, .geojson"| JSONp
+       Detect -->|".xml, .qml, .quakeml"| XML
 
        CSV --> Normalize
        JSONp --> Normalize
@@ -533,12 +533,12 @@ This Entity Relationship Diagram shows all 5 database tables, their fields, data
 This diagram details the complete file parsing flow from input through format detection, parsing, timestamp normalization, validation, and output.
 
 **Key Features:**
-- **Format Detection**: Extension-based (.csv, .json, .xml) with content-based fallback
+- **Format Detection**: Extension-based (.csv, .txt, .dat, .json, .geojson, .xml, .qml, .quakeml) with content-based fallback
 - **CSV Parser**: Header parsing, row parsing, flexible field name mapping
 - **JSON Parser**: Supports 5 structures (array, events, data, GeoJSON, auto-detect)
 - **QuakeML Parser**: Full QuakeML 1.2 support with origins, magnitudes, and quality metrics
 - **Timestamp Normalization**: 15+ formats including ISO 8601, DD/MM/YYYY, Julian day, Unix
-- **Validation**: Coordinates (-90/90, -180/180), magnitude (-2 to 10), depth (0-1000km)
+- **Validation**: Coordinates (-90/90, -180/180), magnitude (-3 to 10), depth (-5 to 1000 km; negative depth is valid — events above sea level)
 
 .. mermaid::
    :align: center
@@ -595,8 +595,8 @@ This diagram details the complete file parsing flow from input through format de
 
        subgraph Validation["Event Validation"]
            ValCoords[/"Validate Coordinates (lat -90..90, lon -180..180)"/]
-           ValMag[/"Validate Magnitude (-2 to 10)"/]
-           ValDepth[/"Validate Depth (0 to 1000 km)"/]
+           ValMag[/"Validate Magnitude (-3 to 10)"/]
+           ValDepth[/"Validate Depth (-5 to 1000 km)"/]
            ValTime[/"Validate Timestamp (is valid Date)"/]
            ValResult{"Valid?"}
            ValError("Add to Errors")
@@ -612,9 +612,9 @@ This diagram details the complete file parsing flow from input through format de
        end
 
        File --> ExtCheck
-       ExtCheck -->|".csv, .txt"| CSVHead
-       ExtCheck -->|".json"| JSONStruct
-       ExtCheck -->|".xml, .quakeml"| XMLParse
+       ExtCheck -->|".csv, .txt, .dat"| CSVHead
+       ExtCheck -->|".json, .geojson"| JSONStruct
+       ExtCheck -->|".xml, .qml, .quakeml"| XMLParse
        ExtCheck -->|"unknown"| ContentCheck
        ContentCheck -->|"CSV-like"| CSVHead
        ContentCheck -->|"JSON-like"| JSONStruct
@@ -753,7 +753,7 @@ Technology Stack Summary
    * - Layer
      - Technology
    * - **Frontend**
-     - Next.js 13+ (App Router), React 18, TypeScript
+     - Next.js 15 (App Router), React 18, TypeScript
    * - **UI Components**
      - shadcn/ui, Tailwind CSS, Radix UI
    * - **Maps**

@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { getCatalogueSourceType } from '@/lib/catalogue-source-type';
 
 export function RecentCatalogues() {
   const { catalogues, loading } = useCatalogues();
@@ -18,14 +19,7 @@ export function RecentCatalogues() {
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 5)
     .map(cat => {
-      // Determine if it's a merged catalogue
-      let isMerged = false;
-      try {
-        const sources = JSON.parse(cat.source_catalogues || '[]');
-        isMerged = Array.isArray(sources) && sources.length > 0;
-      } catch {
-        isMerged = false;
-      }
+      const isMerged = getCatalogueSourceType(cat) === 'merged';
 
       return {
         id: cat.id,

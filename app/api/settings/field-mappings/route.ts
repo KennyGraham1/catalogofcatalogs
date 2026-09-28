@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/mongodb';
 import { requireAdmin } from '@/lib/auth/middleware';
+import { parseFieldMappingsConfig } from '@/lib/field-definitions';
 
 const SETTINGS_COLLECTION = 'settings';
 const FIELD_MAPPINGS_KEY = 'default_field_mappings';
@@ -65,49 +66,26 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const body = await request.json();
-
-    // Validate required fields
-    if (typeof body.autoDetectEnabled !== 'boolean') {
-      return NextResponse.json(
-        { error: 'Invalid configuration: autoDetectEnabled is required' },
-        { status: 400 }
-      );
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
-    if (!body.formats || typeof body.formats !== 'object') {
-      return NextResponse.json(
-        { error: 'Invalid configuration: formats object is required' },
-        { status: 400 }
-      );
-    }
-
-    if (!Array.isArray(body.customMappings)) {
-      return NextResponse.json(
-        { error: 'Invalid configuration: customMappings array is required' },
-        { status: 400 }
-      );
-    }
-
-    // Validate each custom mapping
-    for (const mapping of body.customMappings) {
-      if (!mapping.sourcePattern || !mapping.targetField) {
-        return NextResponse.json(
-          { error: 'Invalid mapping: sourcePattern and targetField are required' },
-          { status: 400 }
-        );
-      }
+    // The whole configuration is validated: it is applied to every upload's schema step,
+    // and a single malformed rule (missing pattern, invalid regex, unknown target,
+    // priority as a string) used to break that step for every user.
+    const parsed = parseFieldMappingsConfig(body);
+    if (!parsed.ok) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
 
     const collection = db.collection(SETTINGS_COLLECTION);
 
     const config = {
-      autoDetectEnabled: body.autoDetectEnabled,
-      strictValidation: body.strictValidation ?? false,
-      fuzzyMatchThreshold: body.fuzzyMatchThreshold ?? 0.6,
-      formats: body.formats,
-      customMappings: body.customMappings,
-      lastUpdated: body.lastUpdated || new Date().toISOString()
+      ...parsed.config,
+      lastUpdated: new Date().toISOString(),
     };
 
     await collection.updateOne(

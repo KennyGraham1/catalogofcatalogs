@@ -18,11 +18,19 @@
  * catalogue creation and expire automatically after 24 hours via a TTL index.
  *
  * Storage layout (collection: pending_uploads):
- *   { upload_id: string, seq: number, event: ParsedEvent, expires_at: Date }
+ *   { upload_id: string, seq: number, event: ParsedEvent, expires_at: Date,
+ *     owner_id?: string }
  *
  * Indexes:
  *   { upload_id: 1, seq: 1 }  — query + sort
  *   { expires_at: 1 }         — TTL, expireAfterSeconds: 0
+ *
+ * Ownership (C9): every document may carry the id of the session user who
+ * uploaded it. getPendingUploadEvents / iteratePendingUploadEventBatches take
+ * an optional ownerId that, when given, restricts the read to that owner's
+ * own documents — a token for someone else's upload then reads back exactly
+ * like an expired one, closing the object-level authorization gap where any
+ * editor holding a pendingUploadId could import another user's parsed data.
  */
 
 import { getCollection, COLLECTIONS } from './mongodb';
@@ -54,13 +62,13 @@ async function ensureIndexes(): Promise<void> {
  *
  * @returns The `pendingUploadId` to embed in the upload API response.
  */
-export async function storePendingUpload(events: ParsedEvent[]): Promise<string> {
+export async function storePendingUpload(events: ParsedEvent[], ownerId?: string): Promise<string> {
   await ensureIndexes();
 
   const { uploadId, expiresAt } = await createPendingUpload();
 
   if (events.length > 0) {
-    await appendPendingUploadEvents(uploadId, events, 0, expiresAt);
+    await appendPendingUploadEvents(uploadId, events, 0, expiresAt, ownerId);
   }
 
   return uploadId;
@@ -92,13 +100,14 @@ export async function appendPendingUploadEvents(
   events: ParsedEvent[],
   startSeq: number,
   expiresAt = new Date(Date.now() + PENDING_TTL_HOURS * 60 * 60 * 1000),
+  ownerId?: string,
 ): Promise<number> {
   await ensureIndexes();
 
   if (events.length === 0) return startSeq;
 
   const collection = await getCollection(COLLECTIONS.PENDING_UPLOADS);
-  let batch: Array<{ upload_id: string; seq: number; event: ParsedEvent; expires_at: Date }> = [];
+  let batch: Array<{ upload_id: string; seq: number; event: ParsedEvent; expires_at: Date; owner_id?: string }> = [];
   let batchBytes = 0;
   let seq = startSeq;
 
@@ -124,6 +133,7 @@ export async function appendPendingUploadEvents(
       seq,
       event,
       expires_at: expiresAt,
+      owner_id: ownerId,
     });
     batchBytes += estimatedBytes;
     seq += 1;
@@ -138,12 +148,17 @@ export async function appendPendingUploadEvents(
  *
  * Returns `null` when the `uploadId` is not found (e.g. already consumed or
  * expired). Callers must reject missing tokens to preserve event alignment.
+ *
+ * `ownerId`, when given, restricts the read to documents stored for that
+ * owner (C9) — a token that exists but belongs to someone else then reads
+ * back as `null`, the same as an expired one.
  */
 export async function getPendingUploadEvents(
   uploadId: string,
+  ownerId?: string,
 ): Promise<ParsedEvent[] | null> {
   const events: ParsedEvent[] = [];
-  for await (const batch of iteratePendingUploadEventBatches(uploadId)) {
+  for await (const batch of iteratePendingUploadEventBatches(uploadId, 1000, ownerId)) {
     events.push(...batch);
   }
 
@@ -153,12 +168,17 @@ export async function getPendingUploadEvents(
 export async function* iteratePendingUploadEventBatches(
   uploadId: string,
   batchSize = 1000,
+  ownerId?: string,
 ): AsyncGenerator<ParsedEvent[]> {
   await ensureIndexes();
 
   const collection = await getCollection(COLLECTIONS.PENDING_UPLOADS);
   const cursor = collection
-    .find({ upload_id: uploadId, expires_at: { $gt: new Date() } })
+    .find({
+      upload_id: uploadId,
+      expires_at: { $gt: new Date() },
+      ...(ownerId ? { owner_id: ownerId } : {}),
+    })
     .sort({ seq: 1 })
     .batchSize(batchSize);
 

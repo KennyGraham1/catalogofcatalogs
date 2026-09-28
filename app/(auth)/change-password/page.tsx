@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { signOut } from 'next-auth/react';
 import { useAuth } from '@/lib/auth/hooks';
 import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import { Button } from '@/components/ui/button';
@@ -71,14 +72,15 @@ export default function ChangePasswordPage() {
         throw new Error(data.error || 'Failed to change password');
       }
 
-      setSuccess('Password changed successfully! Redirecting to profile...');
+      // Changing the password ends every session, this one included (the server bumps
+      // the account's JWT version), so sign in again, then return to the profile.
+      setSuccess('Password changed. You have been signed out of all sessions; sign in again with your new password.');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
 
-      // Redirect to profile after 2 seconds
       setTimeout(() => {
-        router.push('/profile');
+        void signOut({ callbackUrl: '/login?callbackUrl=%2Fprofile&passwordChanged=1' });
       }, 2000);
 
     } catch (err) {

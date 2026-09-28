@@ -79,8 +79,8 @@ describe('calculateStationDistributionRatio — real azimuths only', () => {
   it('rates a clustered network as poorly distributed', () => {
     // 8 azimuths, meanGap = 45. gaps = seven 5s and one 325.
     // variance = (7*(5-45)^2 + (325-45)^2)/8 = (11200 + 78400)/8 = 11200
-    // stdDev = sqrt(11200) = 105.83; expectedStdDev = 22.5
-    // ratio = min(1, 105.83 / 45) = 1
+    // stdDev = sqrt(11200) = 105.83; random expectation = 45 * sqrt(7/9) = 39.69
+    // ratio = min(1, 105.83 / 79.37) = 1
     const ratio = calculateStationDistributionRatio([10, 15, 20, 25, 30, 35, 40, 45])!;
     expect(ratio).toBe(1);
     expect(getStationDistributionDescription(ratio).quality).toBe('poor');

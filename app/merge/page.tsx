@@ -14,6 +14,7 @@ import { MergeActions } from '@/components/merge/MergeActions';
 import { MergeMetadataForm, MergeMetadata } from '@/components/merge/MergeMetadataForm';
 import { MergeProgressIndicator, MergeStep } from '@/components/merge/MergeProgressIndicator';
 import { useCatalogues } from '@/contexts/CatalogueContext';
+import { invalidateCatalogueData } from '@/lib/client-cache';
 import { InfoTooltip, LabelWithTooltip } from '@/components/ui/info-tooltip';
 import { useDebounce } from '@/hooks/use-debounce';
 import { usePagination } from '@/hooks/use-pagination';
@@ -39,6 +40,8 @@ import {
   Settings,
   Tag,
   ArrowRight,
+  ArrowUp,
+  ArrowDown,
   AlertTriangle,
   ArrowRightLeft,
   Save,
@@ -70,6 +73,7 @@ import { GeographicSearchPanel, GeographicBounds } from '@/components/catalogues
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { DataPagination } from '@/components/ui/data-pagination';
 import { getApiError } from '@/lib/api';
+import { loadCatalogueEvents } from '@/lib/catalogue-event-loader';
 
 type CatalogueStatus = 'all' | 'complete' | 'processing' | 'incomplete';
 type SortField = 'name' | 'date' | 'events' | 'sourceType' | 'source';
@@ -97,6 +101,15 @@ type CatalogueItem = {
   status?: string;
   source_catalogues?: string;
   merge_config?: string;
+};
+
+// Display names of the merge strategies, as the strategy select labels them.
+const MERGE_STRATEGY_LABELS: Record<string, string> = {
+  quality: 'Quality-Based',
+  priority: 'Source Priority',
+  average: 'Average Values',
+  newest: 'Most Recent Solution',
+  complete: 'Most Complete Record',
 };
 
 // Status labels for merge status
@@ -131,7 +144,7 @@ export default function MergePage() {
     ? 'Log in to merge catalogues.'
     : 'Editor or Admin access is required to merge catalogues.';
   // Use global catalogue context
-  const { catalogues: realCatalogues, loading: cataloguesLoading, invalidateCache } = useCatalogues();
+  const { catalogues: realCatalogues, loading: cataloguesLoading } = useCatalogues();
 
   const [activeTab, setActiveTab] = useState('select');
   const [selectedCatalogues, setSelectedCatalogues] = useState<(number | string)[]>([]);
@@ -139,9 +152,22 @@ export default function MergePage() {
   const [timeThreshold, setTimeThreshold] = useState(60);
   const [distanceThreshold, setDistanceThreshold] = useState(10);
   const [priority, setPriority] = useState('newest');
+  // Custom Order ranking (catalogue ids, highest priority first). Only the selected
+  // catalogues are ranked; see rankedCatalogues.
+  const [priorityOrder, setPriorityOrder] = useState<string[]>([]);
+  const [priorityOrderAnnouncement, setPriorityOrderAnnouncement] = useState('');
   const [mergeStrategy, setMergeStrategy] = useState('priority');
   const [mergeStatus, setMergeStatus] = useState<MergeStatus>('idle');
   const [mergedEvents, setMergedEvents] = useState<any[]>([]);
+  // Id of the saved merged catalogue (null for export-only merges); MergeActions exports it
+  // through the server route so downloads are never limited to the events held here.
+  const [mergedCatalogueId, setMergedCatalogueId] = useState<string | null>(null);
+  // The config and source catalogues sent with the merge behind the current result. Browser-
+  // built downloads record these, not the live form, which can be edited after the merge.
+  const [completedMerge, setCompletedMerge] = useState<{
+    config: Record<string, unknown>;
+    sourceCatalogues: Array<{ id: number | string; name: string; events: number; source: string }>;
+  } | null>(null);
   const [geoSearchActive, setGeoSearchActive] = useState(false);
   const [geoSearching, setGeoSearching] = useState(false);
   const [geoSearchBounds, setGeoSearchBounds] = useState<GeographicBounds | null>(null);
@@ -177,6 +203,8 @@ export default function MergePage() {
   // Monotonic request id so a slow in-flight preview response can't overwrite state that
   // belongs to a newer request (config/selection changed while a preview was loading).
   const previewRequestIdRef = useRef(0);
+  // Cancels loading the merged catalogue's events if the page unmounts mid-load.
+  const mergedEventsAbortRef = useRef<AbortController | null>(null);
 
   // Initialize filtered catalogues with real data from context
   useEffect(() => {
@@ -190,7 +218,7 @@ export default function MergePage() {
   useEffect(() => {
     previewRequestIdRef.current++;
     setPreviewData(null);
-  }, [timeThreshold, distanceThreshold, mergeStrategy, priority]);
+  }, [timeThreshold, distanceThreshold, mergeStrategy, priority, priorityOrder]);
 
   // Clear preview data when selected catalogues change (same in-flight invalidation).
   useEffect(() => {
@@ -198,15 +226,28 @@ export default function MergePage() {
     setPreviewData(null);
   }, [selectedCatalogues]);
 
-  // Cleanup progress interval on unmount
+  // Cleanup progress interval and any in-flight merged-event load on unmount
   useEffect(() => {
     return () => {
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
         progressIntervalRef.current = null;
       }
+      mergedEventsAbortRef.current?.abort();
     };
   }, []);
+
+  // One config builder for the preview and merge requests so the two cannot drift apart.
+  const buildMergeConfig = (): Record<string, unknown> => ({
+    timeThreshold,
+    distanceThreshold,
+    mergeStrategy,
+    priority,
+    // Only a Custom Order merge carries a ranking, so every other request keeps its shape.
+    ...(mergeStrategy === 'priority' && priority === 'custom'
+      ? { priorityOrder: rankedCatalogues.map(catalogue => String(catalogue.id)) }
+      : {}),
+  });
 
   // Memoized catalogue selection handler
   const handleCatalogueSelect = useCallback((id: number | string) => {
@@ -284,12 +325,7 @@ export default function MergePage() {
         // Validation schema requires a "name" field, even for preview
         name: mergedName || 'Preview Only',
         sourceCatalogues,
-        config: {
-          timeThreshold,
-          distanceThreshold,
-          mergeStrategy,
-          priority,
-        },
+        config: buildMergeConfig(),
       };
 
       if (process.env.NODE_ENV !== 'production') {
@@ -390,6 +426,8 @@ export default function MergePage() {
 
     setMergeStatus('merging');
     setMergeProgress(0);
+    setMergedCatalogueId(null);
+    setCompletedMerge(null);
     // Clear the QC preview so its "Proceed with Merge" button cannot re-trigger a merge
     // while this one runs or after it completes.
     previewRequestIdRef.current++;
@@ -430,6 +468,8 @@ export default function MergePage() {
         source: (cat as any).source || cat.name || 'unknown',
       }));
 
+      const config = buildMergeConfig();
+
       // Update step 1
       setMergeSteps(steps => steps.map(s =>
         s.id === 'fetch-1' ? { ...s, status: 'in-progress' as const } : s
@@ -443,12 +483,7 @@ export default function MergePage() {
         body: JSON.stringify({
           name: mergedName,
           sourceCatalogues,
-          config: {
-            timeThreshold,
-            distanceThreshold,
-            mergeStrategy,
-            priority
-          },
+          config,
           metadata: mergeMetadata,
           exportOnly
         }),
@@ -460,6 +495,7 @@ export default function MergePage() {
       }
 
       const result = await response.json();
+      setCompletedMerge({ config, sourceCatalogues });
 
       // Server accepted and returned the merge result — only now mark the
       // fetch/match/merge/bounds steps complete (they previously flipped green
@@ -480,22 +516,32 @@ export default function MergePage() {
 
       // Fetch the actual merged events from the newly created catalogue
       if (result.catalogueId && !exportOnly) {
+        // Page through the summary view until the server reports no more pages. The
+        // parameter-less events read is capped by UNPAGINATED_EVENTS_LIMIT and says nothing
+        // when it truncates, so a large merge showed (and exported) only its newest events.
+        // Downloads are served by the export route, which pages past that cap itself.
+        const controller = new AbortController();
+        mergedEventsAbortRef.current = controller;
         try {
-          const eventsResponse = await fetch(`/api/catalogues/${result.catalogueId}/events`);
-          if (eventsResponse.ok) {
-            const eventsData = await eventsResponse.json();
-            const events = Array.isArray(eventsData) ? eventsData : eventsData.data || [];
-            setMergedEvents(events);
-          } else {
-            // Fallback to empty array if fetch fails
-            const errorInfo = await getApiError(eventsResponse, 'Failed to fetch merged events');
-            console.warn('Failed to fetch merged events:', errorInfo.message);
-            setMergedEvents([]);
-          }
+          const events = await loadCatalogueEvents(
+            [{ id: String(result.catalogueId), name: mergedName, event_count: result.eventCount }],
+            { signal: controller.signal }
+          );
+          setMergedEvents(events);
         } catch (error) {
           console.error('Error fetching merged events:', error);
           setMergedEvents([]);
+          if (!controller.signal.aborted) {
+            toast({
+              title: "Merged events could not be loaded",
+              description: "The merged catalogue was saved, but its events could not be shown here. Exports still contain every saved event.",
+              variant: "destructive"
+            });
+          }
+        } finally {
+          if (mergedEventsAbortRef.current === controller) mergedEventsAbortRef.current = null;
         }
+        setMergedCatalogueId(String(result.catalogueId));
       } else if (result.events && exportOnly) {
         // For export-only mode, use the returned events
         setMergedEvents(result.events);
@@ -513,9 +559,10 @@ export default function MergePage() {
         progressIntervalRef.current = null;
       }
 
-      // Invalidate cache and refresh catalogues across all pages (only if not export-only)
+      // A saved merge created a catalogue: clear every client cache of catalogue data and
+      // refresh the catalogue list on all pages (contract C5). Export-only writes nothing.
       if (!exportOnly) {
-        invalidateCache();
+        invalidateCatalogueData();
       }
 
       const mergedCount = getSelectedCatalogues.length;
@@ -556,6 +603,28 @@ export default function MergePage() {
   const getSelectedCatalogues = useMemo(() => {
     return realCatalogues.filter(catalogue => selectedCatalogues.includes(catalogue.id));
   }, [selectedCatalogues, realCatalogues]);
+
+  // The Custom Order ranking over the current selection: ranked catalogues keep their place,
+  // newly selected ones join at the bottom, and deselected ones drop out.
+  const rankedCatalogues = useMemo(() => {
+    const ranked = priorityOrder
+      .map(id => getSelectedCatalogues.find(catalogue => String(catalogue.id) === id))
+      .filter((catalogue): catalogue is (typeof getSelectedCatalogues)[number] => catalogue !== undefined);
+    return ranked.concat(getSelectedCatalogues.filter(catalogue => !ranked.includes(catalogue)));
+  }, [priorityOrder, getSelectedCatalogues]);
+
+  // Swap a catalogue with its neighbour. The buttons stay enabled at the ends of the list
+  // (a no-op there) so keyboard focus is never dropped onto the page.
+  const moveInPriorityOrder = (index: number, offset: -1 | 1) => {
+    const target = index + offset;
+    if (target < 0 || target >= rankedCatalogues.length) return;
+    const ids = rankedCatalogues.map(catalogue => String(catalogue.id));
+    [ids[index], ids[target]] = [ids[target], ids[index]];
+    setPriorityOrder(ids);
+    setPriorityOrderAnnouncement(
+      `${rankedCatalogues[index].name} moved to position ${target + 1} of ${ids.length}.`
+    );
+  };
 
   // Memoized total events calculation
   const getTotalSelectedEvents = useMemo(() => {
@@ -1183,6 +1252,8 @@ export default function MergePage() {
           previewRequestIdRef.current++;
           setPreviewData(null);
           setMergedEvents([]);
+          setMergedCatalogueId(null);
+          setCompletedMerge(null);
           setMergeProgress(0);
           setMergeSteps(steps => steps.map(s => ({ ...s, status: 'pending' as const })));
         }}>
@@ -1599,15 +1670,16 @@ export default function MergePage() {
                               <SelectItem value="quality">Quality-Based (Recommended)</SelectItem>
                               <SelectItem value="priority">Source Priority</SelectItem>
                               <SelectItem value="average">Average Values</SelectItem>
-                              <SelectItem value="newest">Newest Data</SelectItem>
+                              <SelectItem value="newest">Most Recent Solution</SelectItem>
                               <SelectItem value="complete">Most Complete Record</SelectItem>
                             </SelectContent>
                           </Select>
                           <p className="text-xs text-muted-foreground">
-                            {mergeStrategy === 'quality' && 'Select events with best quality metrics (station count, azimuthal gap, location error, magnitude uncertainty). Uses seismological best practices.'}
-                            {mergeStrategy === 'priority' && 'Use data from higher priority sources when conflicts occur.'}
-                            {mergeStrategy === 'average' && 'Averages only the epicentre (uncertainty-weighted) across sources. Magnitude is selected by type hierarchy (Mw > Ms > mb > ML) and depth by lowest uncertainty — neither is averaged. Time is the earliest reported origin time.'}
-                            {mergeStrategy === 'newest' && 'Prefer the most recently updated event data.'}
+                            {/* Each text states what lib/merge.ts does for that strategy. */}
+                            {mergeStrategy === 'quality' && 'Keeps the best-constrained solution, comparing only the quality metrics every catalogue in the group reports (station count, azimuthal gap, RMS residual, magnitude uncertainty and type, evaluation status). If a catalogue reports none of them, network authority decides.'}
+                            {mergeStrategy === 'priority' && 'Keeps the record from the source you rank highest when the same event appears in more than one catalogue.'}
+                            {mergeStrategy === 'average' && 'Averages only the epicentre: weighted by inverse variance when every source reports a horizontal uncertainty, equally otherwise. Magnitude and depth are selected, not averaged: magnitude by type (Mw first; below M5.5 local ML ahead of mb, from M5.5 Ms ahead), depth from the best-constrained solution that solved for depth. Time is the earliest reported origin time; one agency\'s origin details (time uncertainty, station counts, agency) are not carried onto the averaged epicentre.'}
+                            {mergeStrategy === 'newest' && 'Keeps the most recently determined solution: the one whose origin the agency computed last (QuakeML creation time). When not every catalogue reports that time, reviewed or final solutions win over preliminary ones, then the quality score decides.'}
                             {mergeStrategy === 'complete' && 'Use the record with the most complete information.'}
                           </p>
                         </div>
@@ -1617,27 +1689,77 @@ export default function MergePage() {
                             <div className="flex items-center gap-1.5">
                               <Label htmlFor="source-priority">Source Priority</Label>
                               <InfoTooltip
-                                content="Determines which source takes precedence when values conflict. Falls back to quality-based if the preferred source is missing."
+                                content="Decides which catalogue's record is kept when the same event appears in more than one catalogue. Most Recent Solution keeps the solution its agency computed last. Custom Order uses your ranking, with quality score breaking any remaining tie. GeoNet > Others and GNS > Others keep GeoNet's record (GNS operates GeoNet); when a group has none, the built-in network-authority ranking decides, then quality score."
                               />
                             </div>
                             <Select
                               value={priority}
                               onValueChange={value => setPriority(value)}
                             >
-                              <SelectTrigger id="source-priority">
+                              <SelectTrigger id="source-priority" aria-describedby="source-priority-help">
                                 <SelectValue placeholder="Select priority" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="quality">Quality-Based Fallback</SelectItem>
-                                <SelectItem value="newest">Newest First</SelectItem>
+                                <SelectItem value="quality">Quality-Based</SelectItem>
+                                <SelectItem value="newest">Most Recent Solution</SelectItem>
                                 <SelectItem value="geonet">GeoNet &gt; Others</SelectItem>
                                 <SelectItem value="gns">GNS &gt; Others</SelectItem>
                                 <SelectItem value="custom">Custom Order</SelectItem>
                               </SelectContent>
                             </Select>
-                            <p className="text-xs text-muted-foreground">
-                              Define which sources should take precedence when conflicts occur. Falls back to quality-based selection if priority source not found.
+                            {/* Describes what the selected option does as implemented (lib/merge.ts
+                                mergeByPriority). Nothing falls back to quality alone: a missing
+                                preferred agency falls back to network authority, then quality. */}
+                            <p id="source-priority-help" className="text-xs text-muted-foreground">
+                              Choose whose record is kept when the same event appears in more than one catalogue.
+                              {priority === 'quality' && ' The record with the best quality score is kept, comparing only the metrics every catalogue in the group reports; network authority decides when a catalogue reports none.'}
+                              {priority === 'newest' && ' The most recently determined solution is kept (the latest origin creation time the agencies report); when not every catalogue reports one, reviewed or final solutions win over preliminary ones, then quality score.'}
+                              {(priority === 'geonet' || priority === 'gns') &&
+                                ' The GeoNet record (GNS operates GeoNet) is kept when the group has one. It is recognised by its agency code (such as WEL) or the catalogue\'s provider or import source, not by words in a catalogue name. Otherwise the built-in network-authority ranking decides (GeoNet, GCMT, ISC, USGS, then other agencies), and quality score breaks ties.'}
+                              {priority === 'custom' && ' Your ranking below decides: the record from the highest-ranked catalogue is kept, and quality score breaks any remaining tie.'}
                             </p>
+                            {priority === 'custom' && (
+                              <div className="space-y-1.5">
+                                <p id="priority-order-hint" className="text-xs font-medium">
+                                  Catalogue ranking (highest priority first)
+                                </p>
+                                <ol
+                                  aria-label="Catalogue priority order"
+                                  aria-describedby="priority-order-hint"
+                                  className="divide-y rounded-md border"
+                                >
+                                  {rankedCatalogues.map((catalogue, index) => (
+                                    <li key={catalogue.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+                                      <span className="w-5 text-xs text-muted-foreground tabular-nums">{index + 1}.</span>
+                                      <span className="flex-1 truncate" title={catalogue.name}>{catalogue.name}</span>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 aria-disabled:opacity-40"
+                                        aria-label={`Move ${catalogue.name} up`}
+                                        aria-disabled={index === 0}
+                                        onClick={() => moveInPriorityOrder(index, -1)}
+                                      >
+                                        <ArrowUp className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 aria-disabled:opacity-40"
+                                        aria-label={`Move ${catalogue.name} down`}
+                                        aria-disabled={index === rankedCatalogues.length - 1}
+                                        onClick={() => moveInPriorityOrder(index, 1)}
+                                      >
+                                        <ArrowDown className="h-4 w-4" />
+                                      </Button>
+                                    </li>
+                                  ))}
+                                </ol>
+                                <p aria-live="polite" className="sr-only">{priorityOrderAnnouncement}</p>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1751,7 +1873,7 @@ export default function MergePage() {
                         </div>
                         <div>
                           <p className="text-sm text-muted-foreground">Merge Strategy</p>
-                          <p className="font-medium capitalize">{mergeStrategy}</p>
+                          <p className="font-medium">{MERGE_STRATEGY_LABELS[mergeStrategy] ?? mergeStrategy}</p>
                         </div>
                         <div>
                           <p className="text-sm text-muted-foreground">Time Threshold</p>
@@ -1822,9 +1944,12 @@ export default function MergePage() {
                   <MergeActions
                     events={mergedEvents}
                     onDownload={() => { }}
+                    catalogueId={mergedCatalogueId}
                     catalogueMetadata={{
                       name: mergedName,
-                      ...mergeMetadata
+                      ...mergeMetadata,
+                      merge_config: completedMerge?.config,
+                      source_catalogues: completedMerge?.sourceCatalogues
                     }}
                   />
                 )}

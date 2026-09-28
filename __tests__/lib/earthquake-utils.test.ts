@@ -44,11 +44,15 @@ describe('earthquake-utils', () => {
 
   describe('getMagnitudeLabel', () => {
     it('should return correct labels for different magnitudes', () => {
-      expect(getMagnitudeLabel(1)).toBe('Minor');
+      // Richter-style descriptor classes (the bands chart tooltips use): M >= 8 is
+      // 'Great', not 'Major'; below M2 is 'Micro', not 'Minor'.
+      expect(getMagnitudeLabel(1)).toBe('Micro');
+      expect(getMagnitudeLabel(2.5)).toBe('Minor');
       expect(getMagnitudeLabel(4)).toBe('Light');
       expect(getMagnitudeLabel(5)).toBe('Moderate');
       expect(getMagnitudeLabel(6.5)).toBe('Strong');
-      expect(getMagnitudeLabel(8)).toBe('Major');
+      expect(getMagnitudeLabel(7.8)).toBe('Major');
+      expect(getMagnitudeLabel(8)).toBe('Great');
     });
   });
 

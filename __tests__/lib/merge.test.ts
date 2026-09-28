@@ -480,9 +480,11 @@ describe('Quality Score Calculation', () => {
 
 describe('Weighted Location Averaging', () => {
   describe('getLocationWeight', () => {
-    it('should return 1.0 for events without uncertainty data', () => {
+    it('should return null (not the weight of a 1 km solution) for events without uncertainty data', () => {
+      // 1.0 is exactly 1/σ² for σ = 1 km: an undocumented location used to outweigh every
+      // documented one worse than 1 km. weightedLocationAverage uses equal weights instead.
       const event = createMockEvent();
-      expect(getLocationWeight(event)).toBe(1.0);
+      expect(getLocationWeight(event)).toBeNull();
     });
 
     it('should return higher weight for lower uncertainty', () => {
@@ -492,7 +494,7 @@ describe('Weighted Location Averaging', () => {
       const highUncertainty = createMockEvent({
         horizontal_uncertainty: 10.0, // 10 km
       });
-      expect(getLocationWeight(lowUncertainty)).toBeGreaterThan(getLocationWeight(highUncertainty));
+      expect(getLocationWeight(lowUncertainty)).toBeGreaterThan(getLocationWeight(highUncertainty)!);
     });
 
     it('should use QuakeML origin uncertainty when available', () => {
@@ -923,12 +925,19 @@ describe('Focal Mechanism Merging', () => {
       expect(getFocalMechanismPriority('GlobalCMT')).toBe(1);
     });
 
-    it('should return priority 2 for GeoNet', () => {
-      expect(getFocalMechanismPriority('GeoNet')).toBe(2);
+    // publication/merge_strategies.tex §Focal mechanism: GCMT > USGS/NEIC > GEOFON/GFZ >
+    // GeoNet CMT > INGV CMT. (These tests used to pin GeoNet above USGS.)
+    it('should return priority 2 for USGS/NEIC', () => {
+      expect(getFocalMechanismPriority('USGS')).toBe(2);
+      expect(getFocalMechanismPriority('NEIC')).toBe(2);
     });
 
-    it('should return priority 3 for USGS', () => {
-      expect(getFocalMechanismPriority('USGS')).toBe(3);
+    it('should return priority 3 for GEOFON', () => {
+      expect(getFocalMechanismPriority('GEOFON')).toBe(3);
+    });
+
+    it('should return priority 4 for GeoNet', () => {
+      expect(getFocalMechanismPriority('GeoNet')).toBe(4);
     });
 
     it('should return 100 for unknown sources', () => {
@@ -1056,9 +1065,12 @@ describe('Focal Mechanism Merging', () => {
       expect(gcmt?.priority).toBe(1);
     });
 
-    it('should have GeoNet at priority 2', () => {
-      const geonet = FOCAL_MECHANISM_HIERARCHY.find(h => h.patterns.includes('geonet'));
-      expect(geonet?.priority).toBe(2);
+    it('should rank GeoNet CMT below USGS/NEIC and GEOFON (white-paper order)', () => {
+      const priority = (token: string) => FOCAL_MECHANISM_HIERARCHY.find(h => h.patterns.includes(token))?.priority;
+      expect(priority('usgs')).toBe(2);
+      expect(priority('geofon')).toBe(3);
+      expect(priority('geonet')).toBe(4);
+      expect(priority('ingv')).toBe(5);
     });
   });
 });

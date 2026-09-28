@@ -27,3 +27,39 @@ export function sampleMagnitudeDepth<T extends { magnitude: number; depth: numbe
   }
   return { points: Array.from(selected, index => sorted[index]), total };
 }
+
+/**
+ * Bound a magnitude-versus-time scatter. Every event when they fit the budget;
+ * otherwise the largest tenth of the budget by magnitude (so no large event drops out)
+ * plus an even stride through the rest in time order, which keeps the plotted density
+ * proportional to the event rate, the feature a completeness change shows up in.
+ * Points come back in time order with their parsed origin time `t` (ms, UTC).
+ */
+export function sampleMagnitudeTime<T extends { time: string; magnitude: number }>(
+  data: T[], limit = 3000
+): { points: (T & { t: number })[]; total: number } {
+  // Indices of the plottable events in time order; only the chosen ones are copied.
+  const times = data.map(point => Date.parse(point.time));
+  const order: number[] = [];
+  data.forEach((point, index) => {
+    if (Number.isFinite(times[index]) && Number.isFinite(point.magnitude)) order.push(index);
+  });
+  order.sort((a, b) => times[a] - times[b]);
+  const total = order.length;
+  const budget = limit === Infinity ? total : Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 0;
+  const withTime = (positions: number[]) => positions.map(position => ({ ...data[order[position]], t: times[order[position]] }));
+  if (total <= budget) return { points: withTime(order.map((_, position) => position)), total };
+  if (budget === 0) return { points: [], total };
+
+  // Positions in the time-ordered list.
+  const selected = new Set<number>();
+  const largest = order.map((_, position) => position)
+    .sort((a, b) => data[order[b]].magnitude - data[order[a]].magnitude);
+  for (const position of largest.slice(0, Math.max(1, Math.floor(budget / 10)))) selected.add(position);
+  const remaining = order.map((_, position) => position).filter(position => !selected.has(position));
+  const slots = budget - selected.size;
+  for (let i = 0; i < slots; i++) {
+    selected.add(remaining[Math.floor((i + 0.5) * remaining.length / slots)]);
+  }
+  return { points: withTime(Array.from(selected).sort((a, b) => a - b)), total };
+}
