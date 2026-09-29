@@ -9,10 +9,13 @@
  * event counts add up through the pipeline, and (2) that paper/srl_paper.tex and
  * paper/srl_supplement.tex quote those numbers as computed, so a regenerated summary
  * cannot silently disagree with the text (and hand-edited text cannot drift from the
- * pipeline). Rerun the generator and update the text together.
+ * pipeline). Rerun the generator and update the text together. (3) The magnitude-type
+ * switch of the Average values merge, as stated in the paper and the white papers, is
+ * the one the merge engine applies.
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import { getMagnitudePriority } from '@/lib/merge';
 
 const ROOT = path.join(__dirname, '..', '..');
 const read = (rel: string) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -202,5 +205,38 @@ describe('supplement - the captions quote the screen-capture values', () => {
       `merge into\n    ${thin(p.eventsAfter)} events`,
       `${thin(shots.catalogues[0].statistics.totalEvents)} GeoNet-like and ${thin(shots.catalogues[1].statistics.totalEvents)}`,
     ]);
+  });
+});
+
+describe('merge magnitude preference - the text states the engine\'s switch', () => {
+  // The Average values strategy ranks magnitude types by the event's size; the paper
+  // and both white papers state where the ranking changes. Checked against the engine.
+  const rank = (type: string, size: number) => getMagnitudePriority(type, size);
+
+  it('the engine switches from ML-first to Ms-first at M6.2', () => {
+    expect(rank('ML', 6.19)).toBeLessThan(rank('mb', 6.19));
+    expect(rank('mb', 6.19)).toBeLessThan(rank('Ms', 6.19));
+    expect(rank('Ms', 6.19)).toBeLessThan(rank('Md', 6.19));
+    expect(rank('Ms', 6.2)).toBeLessThan(rank('mB', 6.2));
+    expect(rank('mB', 6.2)).toBeLessThan(rank('ML', 6.2));
+    expect(rank('ML', 6.2)).toBeLessThan(rank('mb', 6.2));
+    for (const size of [3, 6.19, 6.2, 8]) {
+      expect(rank('Mww', size)).toBeLessThan(rank('Mwp', size));
+      expect(rank('Mwp', size)).toBeLessThan(Math.min(rank('ML', size), rank('Ms', size)));
+    }
+  });
+
+  it('the paper and the white papers state the same switch', () => {
+    const docs: Record<string, string> = {
+      paper,
+      main: read('publication/main.tex'),
+      mergeStrategies: read('publication/merge_strategies.tex'),
+    };
+    for (const [name, text] of Object.entries(docs)) {
+      const body = text.replace(/\s+/g, ' ');
+      expect({ name, statesSwitch: /below \$M6\.2\$/i.test(body) && /from \$M6\.2\$/.test(body) })
+        .toEqual({ name, statesSwitch: true });
+      expect({ name, oldSwitch: /(below|from) \$M5\.5\$/i.test(body) }).toEqual({ name, oldSwitch: false });
+    }
   });
 });

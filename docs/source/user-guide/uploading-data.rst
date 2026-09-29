@@ -104,12 +104,23 @@ International.
   ``YYYY/MM/DD`` and ``YYYY.MM.DD`` (the time part, and seconds within it, are optional)
 * US format: ``MM/DD/YYYY HH:MM:SS``
 * International format: ``DD/MM/YYYY HH:MM:SS``
+* A 12-hour clock with AM/PM, the common spreadsheet default: ``1/15/2024 10:30:00 AM``.
+  ``12 AM`` is midnight (``00:00``), ``12 PM`` is noon; an hour of ``0`` or above ``12``
+  together with AM/PM is not a valid 12-hour time and is rejected.
 * Month names, with an optional weekday, including RFC 2822: ``15 Jan 2024 10:30:00``,
-  ``Jan 15, 2024``, ``Mon, 15 Jan 2024 10:30:00 +1300``
+  ``Jan 15, 2024``, ``Mon, 15 Jan 2024 10:30:00 +1300``, and asctime/ctime/Unix ``date``
+  output: ``Mon Jan 15 10:30:00 2024``, ``Mon Jan 15 10:30:00 UTC 2024``
 * Compact forms: ``20240115``, ``20240115T103000Z``
-* Two-digit years on slash, dot and month-name dates (e.g. ``15/01/24``), resolved to the
-  most recent year ending in those digits that is not in the future — plain numeric
-  ``DD-MM-YYYY``-style dates still require a full four-digit year
+* Day-of-year: ``YYYY DDD HH:MM:SS`` / ``YYYY-DDD HH:MM:SS`` / ``YYYYDDDHHMMSS``
+* Two-digit years on slash, dot and month-name dates (e.g. ``15/01/24``) are read **only**
+  when the day/month order is declared, or the file's own dates leave exactly one order
+  possible (a lone ``'20/05/17'`` is ambiguous — DD/MM/YY 2017 or YY/MM/DD 2020 alike — so
+  it is not read on its own). When they are read, it is as the most recent year ending in
+  those digits that is not in the future (currently ``00``-``26`` as 2000-2026, ``27``-``99``
+  as 1927-1999; this pivot advances every year), and a file-level warning states the order
+  and the pivot used. When they cannot be read, a warning explains why and asks you to
+  declare the date format. Plain numeric ``DD-MM-YYYY``-style dates still require a full
+  four-digit year.
 * Fractional seconds of any number of digits (truncated to millisecond precision)
 * Unix timestamp: ``1705315845`` (seconds since epoch) or ``1705315845123`` (milliseconds)
 
@@ -119,11 +130,31 @@ rather than guessed, since it cannot be placed exactly. Excel serial date number
 ``45306.4380``, days since 1900) are **not** supported or converted — export dates as text
 first if your spreadsheet stores them as serial numbers.
 
+If, after all of the above, an event's origin time is still date-only (no time of day
+found anywhere in that row), it is stored at midnight UTC, and the file gets a warning
+stating how many rows this happened to.
+
+**Header rules:**
+
+* A leading block of comment lines (starting ``#`` or ``%``) is skipped. If one of those
+  comment lines actually names the columns, it is used as the header instead of being
+  discarded: the **last** comment line with at least two cells that resolve to known
+  field names (the FDSN event-text layout ``#EventID|Time|Latitude|...``, or an ISC-GEM
+  ``#  date , lat , ...`` line) is chosen, so a units line after it (``#UTC,deg,deg,km``)
+  is correctly skipped rather than mistaken for the header.
+* A time-of-day column is found by its **values** as well as its name, so a column named
+  e.g. ``hhmmss`` next to a date-only ``date`` column is still recognised.
+* Repeated header names (e.g. two columns both literally called ``mm``) are kept apart
+  with a numeric suffix (``mm``, ``mm_2``) rather than one overwriting the other; a column
+  literally named ``mm`` immediately after an hour column is read as minutes.
+* A column's original letter case is kept for values read from it verbatim, so a magnitude
+  type column written ``mB`` is stored ``mB``, not lower-cased.
+* Header names longer than 64 characters are read (and matched against the last 64
+  characters, so a long descriptive prefix does not defeat matching) but are otherwise
+  used as given.
+
 **Other parsing notes:**
 
-* A leading block of comment lines (starting ``#`` or ``%``) is skipped, including the
-  FDSN event-text header line (``#EventID|Time|Latitude|...``), which is read and used
-  rather than discarded.
 * Separate date and time columns (e.g. ``date`` + ``time``) are combined into a single
   origin time.
 * Longitude values outside -180..180 are wrapped into a consistent -180..180 range, so
@@ -136,6 +167,9 @@ first if your spreadsheet stores them as serial numbers.
   (inclusive).
 * Magnitude descriptor classes used across the platform (e.g. in chart tooltips): Great
   ≥ 8, Major 7-7.9, Strong 6-6.9, Moderate 5-5.9, Light 4-4.9, Minor 2-3.9, Micro < 2.
+
+QuakeML and GeoJSON files have their origin times normalised to UTC ISO 8601 at parse
+time as well (GeoJSON honours the same declared/detected day/month order as CSV).
 
 **Example CSV with common fields:**
 
@@ -219,6 +253,13 @@ Two formats are supported:
        }
      ]
    }
+
+.. note::
+   ``time`` may also be a JSON number. A number written as a bare integer date in the
+   range 18000101-21001231 (e.g. ``20240115``) is read as ``YYYYMMDD``, since no origin
+   time is ever given as a Unix epoch that lands in that range; any other number is read
+   as an epoch (seconds if its magnitude is small enough to be a plausible date since
+   1970, otherwise milliseconds).
 
 GeoJSON Files
 =============
@@ -388,7 +429,12 @@ Drag your file directly onto the upload area.
 .. note::
    Large files are uploaded to the server in chunks from your browser. The upload session
    belongs to your account, and its expiry is refreshed every time a chunk is received, so
-   a slow connection does not by itself cause the session to expire mid-upload.
+   a slow connection does not by itself cause the session to expire mid-upload. The delimiter
+   and date-format overrides available for a regular upload apply here too: a delimiter name
+   is matched case-insensitively (``auto`` or none means auto-detect; anything else must be
+   ``comma``, ``tab``, ``semicolon``, ``pipe`` or ``space``), and a date format must be
+   ``US``, ``International``, ``ISO`` or ``auto``/empty — anything else is rejected up front
+   rather than silently falling back to auto-detection.
 
 **Progress Indicator:**
 
@@ -414,7 +460,11 @@ Review this to ensure the file was parsed correctly.
    1.5 MB, whichever is smaller — rather than the full file, so the response stays under
    Vercel's response-size limit. For a file larger than that, the preview and any
    correctness checks shown at this stage run on that sample only; the interface labels
-   results as sample-based when the file is bigger than the preview.
+   results as sample-based when the file is bigger than the preview. Within each previewed
+   event, bulky structures the preview never needs (QuakeML picks, arrivals, amplitudes,
+   station magnitudes, origins, focal mechanisms) are left out entirely, and any other
+   field longer than 2,000 characters is left out too, so one oversized event cannot by
+   itself crowd the rest of the sample out of the byte budget.
 
 Step 5: Map Fields to Schema
 ============================
@@ -425,6 +475,17 @@ depth unit and date format it inferred for that file, and any longitude wrapping
 than a blank or independent guess. A fuzzy, auto-detected suggestion may be shown for a
 column the parser could not resolve, but it is never applied on its own: only an explicit
 change you make to a specific file's mapping is applied on top of the parser's baseline.
+
+A column the parser actually **consumed** to produce a value — a date column combined with
+a separate time column into one origin time, or a magnitude type derived from a named
+scale column — can never be remapped here: it is shown greyed out with a read-only badge,
+e.g. "Origin Time (assembled by the parser)". A scale-named magnitude column that lost out
+to a higher-priority one (e.g. an ``ML`` column when the file also has ``Mw``) is different:
+it defaults to "Alternative magnitude (ML)" but you can still remap it if you want it read
+into a different field. Whenever you do explicitly remap a column, the new target's value
+is read straight from that column's raw cell text (not from whatever the parser had already
+derived for it); a column remapped onto a length/distance field with no stated unit in its
+own name falls back to the parser's default metres rule.
 
 Review and adjust mappings as needed.
 
@@ -709,7 +770,10 @@ Optional Field Validation
   outside this range is not rejected — it is set to "unknown" and the event is kept, with
   a warning, on every input format (CSV, TXT, JSON, GeoJSON and QuakeML alike). Very deep
   events (> 700 km) are separately flagged as an informational note, since they are rare
-  but do occur in subduction zones.
+  but do occur in subduction zones. Every field left empty this way (unreadable or
+  out-of-range, on any field, not only depth) is tallied by field name in the import
+  report shown after the catalogue is created, e.g. "3 depth values were unreadable or
+  out of range and left empty."
 * **azimuthal_gap**: 0 to 360 degrees
 * **used_phase_count**: Positive integer
 * **used_station_count**: Positive integer, ≤ used_phase_count

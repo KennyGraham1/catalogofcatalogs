@@ -166,6 +166,10 @@ QuakeML Export
 * Quality metrics
 * Evaluation metadata
 
+A QuakeML export is **streamed**: the server writes it a chunk at a time as it is
+generated rather than building the whole document in memory first, so exporting a very
+large catalogue does not need memory proportional to its size.
+
 **Example:**
 
 .. code-block:: xml

@@ -276,6 +276,14 @@ Data*) shows the type mix behind the fit, since mixing magnitude scales
 (including GeoNet's bare ``"M"``, its own type family) biases both the
 b-value and Mc.
 
+The magnitude filter's **upper** bound, unlike its lower bound, is never
+applied to the G-R or Mc fit itself -- only to what is displayed elsewhere on
+the page. A maximum-likelihood b-value and an estimated Mc both assume the
+sample runs on above the fitted range; truncating it at a filter ceiling
+biases the fit (an M ≤ 3 cap on a true b = 1 catalogue was measured to
+return b = 1.34). Both tabs show a note to this effect whenever an upper
+bound is set.
+
 **Interpretation:**
 
 * b-value ≈ 1.0: Normal seismicity
@@ -305,13 +313,21 @@ Monday-Sunday)** or **Month (calendar, UTC)**.
   set, otherwise the estimated Mc under the current Mc settings. With fewer
   than 50 analysed events (too few to estimate Mc) every event is counted
   instead, with a note that the rate then also tracks changes in detection
-  rather than only in seismicity. A partial first or last bin is drawn
-  scaled up to a full bin (count × bin length ÷ days actually covered),
-  shown dashed with a hollow marker; its tooltip gives the raw count and the
-  number of days covered. Series are labelled by threshold and bin, e.g.
-  "Events ≥ M2.3 per week".
-* **Cumulative Event Time Series** -- running total of analysed events over
-  time.
+  rather than only in seismicity. A partial first or last bin is scaled up
+  to a full bin (count × bin length ÷ days actually covered) only when its
+  coverage is actually known: the time filter's window, intersected with the
+  catalogue's own declared start/end when every analysed event comes from
+  one catalogue that states it (the declared period is end-exclusive, and a
+  date-only declared end is read as covering that whole day). Without
+  either, a partial bin's true coverage cannot be measured from the data
+  alone, so it is drawn at its raw, unscaled count instead, with a note that
+  it may understate the rate. Either way a partial bin is shown dashed with
+  a hollow marker, and its tooltip gives the raw count and (when known) the
+  days covered. Series are labelled by threshold and bin, e.g. "Events ≥
+  M2.3 per week".
+* **Cumulative Event Time Series** -- running total of analysed events,
+  plotted at the **end** of each bin (a UTC calendar day, or an ISO week for
+  a span over a year).
 * **Magnitude vs Time** -- magnitude plotted against origin time on a UTC
   axis, with a dashed reference line labelled "Mc = x" or "Cut-off M x".
   Above 3,000 analysed events the plot is sampled rather than drawn in full:
@@ -319,10 +335,16 @@ Monday-Sunday)** or **Month (calendar, UTC)**.
   rest are spread with an even stride through time.
 * **Cumulative Moment/Energy Release** -- titled "Cumulative Seismic Moment
   Release" or "Cumulative Radiated Energy Release" depending on a
-  **Quantity** menu (Seismic moment, N·m / Radiated energy, J). Values are
-  summed per bin and accumulated over every analysed event, independent of
-  the Seismicity Rate threshold. See *Seismic Moment* and *Energy Release*
-  below for the formulas and which magnitude types are included.
+  **Quantity** menu (Seismic moment, N·m / Radiated energy, J), also
+  plotted at each bin's end. Values are summed per bin and accumulated over
+  every analysed event, independent of the Seismicity Rate threshold. See
+  *Seismic Moment* and *Energy Release* below for the formulas and which
+  magnitude types are included.
+
+An event whose origin time cannot be parsed at all takes no place in any of
+these series (it would sort nowhere in time) and stays independent in any
+declustering pass; it is counted and the count is reported rather than the
+event being silently dropped.
 
 The **Daily Rate**/**Monthly Rate** summary cards elsewhere on the page
 count all analysed magnitudes (they are not limited by the Seismicity Rate
@@ -386,11 +408,24 @@ filter has no lower bound) offers:
   full-precision magnitudes); a = log10 N(>= Mi) + b * Mi; the predicted
   cumulative count at every bin edge Mj >= Mi is Sj = N(>= Mi) *
   10^(-b(Mj-Mi)), compared against the observed cumulative count Bj = N(>=
-  Mj). The goodness of fit is R = 100 - 100 * sum(|Bj - Sj|) / sum(Bj); Mc
-  is the lowest Mi reaching R >= 95%, else the lowest reaching R >= 90%.
-  If no candidate reaches even 90%, Mc falls back to MAXC + the same
-  correction, with the message "No cut-off reached a 90% goodness of fit,
-  so Mc is maximum curvature + c".
+  Mj). The goodness of fit is R = 100 - 100 * sum(|Bj - Sj|) / sum(Bj) --
+  summed only up to the bin holding the largest analysed magnitude, not
+  beyond it (an empty bin above the data would otherwise pull R down and
+  shift Mc in a small catalogue). Mc is the lowest Mi reaching R >= 95%,
+  else the lowest reaching R >= 90%. If no candidate reaches even 90%, Mc
+  falls back to MAXC + the same correction, with the message "No cut-off
+  reached a 90% goodness of fit, so Mc is maximum curvature + c".
+
+A magnitude is treated as lying on a reporting step (e.g. the common 0.1 or
+0.01 rounding) when it is within 2^-20 of an exact multiple of that step --
+enough to absorb floating-point noise without mistaking a genuinely
+different value for a rounded one. Coarser common steps (0.5, 0.25, 0.2)
+are recognised, and given the same half-step correction, only when at least
+95% of the analysed magnitudes fall exactly on that step; the finer steps
+have no such threshold, since their contribution is unmixed proportionally
+instead (a value on a 0.1 grid also lands on a 0.5 grid one time in five, by
+chance alone, and that share is subtracted out rather than gating a
+yes/no test).
 
 Either method needs at least 50 analysed events to estimate Mc at all. The
 result is shown as "M{mc} +/- 0.1" with one of three explanations
@@ -401,7 +436,10 @@ width shown is only a lower bound on the true uncertainty. The Mc tab's
 method card names the method used ("MAXC" or "GFT (95%)"/"GFT (90%)") with
 its R value, and a request for GFT adds a "Goodness-of-Fit Test" chart
 plotting R against every candidate cut-off, with the 95%/90% reference
-lines and the chosen Mc marked.
+lines and the chosen Mc marked. The "events at or above Mc" share shown
+alongside it uses the same tolerant (2^-20) comparison as the fit itself,
+so a magnitude reported exactly at Mc is never excluded by floating-point
+rounding.
 
 .. note::
    ZMAP's classic implementation of this test differs in its search range

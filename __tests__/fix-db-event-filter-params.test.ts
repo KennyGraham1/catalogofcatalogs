@@ -27,10 +27,14 @@ import {
   parseEventFilterParams,
   hasEventFilters,
   eventFiltersToSearchParams,
+  eventMatchesFilters,
+  magnitudeTypePattern,
   QUAKEML_EVENT_TYPES,
   NON_BED_EVENT_TYPES,
   type EventFilters,
 } from '@/lib/event-filter-params';
+import { applyEventFilters } from '@/components/event-filters';
+import { calculateQualityScore, metricsFromEvent } from '@/lib/quality-scoring';
 import { buildEventFilterQuery, dbQueries, ALLOWED_EVENT_TYPE } from '@/lib/db';
 import { requireViewer } from '@/lib/auth/middleware';
 import { GET as getFiltered } from '@/app/api/catalogues/[id]/events/filtered/route';
@@ -95,6 +99,7 @@ function matches(doc: Doc, query: Record<string, any>): boolean {
   return Object.entries(query).every(([key, cond]) => {
     if (key === '$or') return (cond as any[]).some((q) => matches(doc, q));
     if (key === '$and') return (cond as any[]).every((q) => matches(doc, q));
+    if (key === '$nor') return !(cond as any[]).some((q) => matches(doc, q));
     if (key === '$expr') return evalExpr(cond, doc) === true;
     return matchValue(doc[key], cond);
   });
@@ -227,6 +232,22 @@ describe('C4 :: buildEventFilterQuery semantics', () => {
     expect(select(docs, { maxHorizontalUncertainty: 20 })).toEqual(['ellipse-big', 'ellipse-small', 'circular', 'marginals']);
   });
 
+  it('#4 :: falls back past a value outside its valid range, as the quality score does', () => {
+    const rows: Doc[] = [
+      // A legacy 150 km ellipse and a -1 sentinel are not valid ellipses: the circle decides.
+      { id: 'legacy-ellipse', latitude: -41, max_horizontal_uncertainty: 150, horizontal_uncertainty: 2 },
+      { id: 'sentinel-ellipse', latitude: -41, max_horizontal_uncertainty: -1, horizontal_uncertainty: 2 },
+      // A -999 circle is not valid either: the lat/lon marginals decide (0.01 deg ~ 1.1 km).
+      { id: 'sentinel-circle', latitude: -41, horizontal_uncertainty: -999, latitude_uncertainty: 0.01, longitude_uncertainty: 0.01 },
+      { id: 'too-wide', latitude: -41, max_horizontal_uncertainty: 150, horizontal_uncertainty: 9 },
+    ];
+    expect(select(rows, { maxHorizontalUncertainty: 5 })).toEqual(['legacy-ellipse', 'sentinel-ellipse', 'sentinel-circle']);
+    for (const row of rows) {
+      const q = metricsFromEvent(row).horizontalUncertainty;
+      expect(select([row], { maxHorizontalUncertainty: 5 }).length === 1).toBe(q != null && q <= 5);
+    }
+  });
+
   it('keeps the horizontal alternatives and an antimeridian box as separate conditions', () => {
     const rows: Doc[] = [
       { id: 'east', latitude: -30, longitude: 178, horizontal_uncertainty: 1 },
@@ -265,8 +286,89 @@ describe('C4 :: buildEventFilterQuery semantics', () => {
     expect(select([{ id: 'x', magnitude_type: 'Mw(mB)' }, { id: 'y', magnitude_type: 'MwmB' }], { magnitudeType: 'Mw(mB)' })).toEqual(['x']);
   });
 
+  it('#2 :: keeps the case-significant broadband mB apart from short-period mb', () => {
+    const rows: Doc[] = [
+      { id: 'mb', magnitude_type: 'mb' }, { id: 'MB', magnitude_type: 'MB' }, { id: 'Mb', magnitude_type: 'Mb' },
+      { id: 'mB', magnitude_type: 'mB' }, { id: 'mB_BB', magnitude_type: 'mB_BB' },
+      { id: 'Mw(mB)', magnitude_type: 'Mw(mB)' }, { id: 'MW(mB)', magnitude_type: 'MW(mB)' }, { id: 'Mw(mb)', magnitude_type: 'Mw(mb)' },
+      { id: 'mbLg', magnitude_type: 'mbLg' }, { id: 'mBLg', magnitude_type: 'mBLg' },
+    ];
+    // All-caps MB is short-period mb in upper case; only mixed-case mB is broadband.
+    expect(select(rows, { magnitudeType: 'mb' })).toEqual(['mb', 'MB', 'Mb']);
+    expect(select(rows, { magnitudeType: 'MB' })).toEqual(['mb', 'MB', 'Mb']);
+    expect(select(rows, { magnitudeType: 'mB' })).toEqual(['mB']);
+    expect(select(rows, { magnitudeType: 'mB_BB' })).toEqual(['mB_BB']);
+    expect(select(rows, { magnitudeType: 'Mw(mB)' })).toEqual(['Mw(mB)', 'MW(mB)']);
+    expect(select(rows, { magnitudeType: 'mw(mb)' })).toEqual(['Mw(mb)']);
+    // mB followed by Lg is the regional mb_Lg, not broadband.
+    expect(select(rows, { magnitudeType: 'mblg' })).toEqual(['mbLg', 'mBLg']);
+    // The client uses the same pattern.
+    expect(magnitudeTypePattern('mb').test('mB')).toBe(false);
+    expect(applyEventFilters(rows.map((r) => ({ ...r, time: 't', latitude: 0, longitude: 0, magnitude: 1, depth: 1 })),
+      { magnitudeType: 'mb' }).map((r: Doc) => r.id)).toEqual(['mb', 'MB', 'Mb']);
+  });
+
   it('refuses a non-finite numeric filter instead of querying with NaN', () => {
     expect(() => buildEventFilterQuery('cat', { minMagnitude: NaN })).toThrow(/minMagnitude/);
+  });
+});
+
+describe('#3 :: the table filter and the server query keep the same events', () => {
+  // A corpus covering every rule: null / missing / wrong-typed values, sentinels, legacy
+  // rows without a stored Q, both spellings of the 180-degree seam, time spellings,
+  // vocabulary and magnitude-type case.
+  let n = 0;
+  const row = (extra: Doc): Doc => ({
+    id: `r${++n}`, time: '2024-03-01T00:00:00.000Z', latitude: -41, longitude: 174, depth: 10,
+    magnitude: 3, magnitude_type: 'ML', event_type: 'earthquake', ...extra,
+  });
+  const corpus: Doc[] = [
+    row({}), row({ depth: null }), row({ magnitude: 5.2, depth: -2 }), row({ magnitude: null }),
+    row({ time: '2020-01-01T00:00:00Z' }), row({ time: '2020-01-01T12:00:00+12:00' }), row({ time: '2020-01-01T00:00:00.5Z' }),
+    row({ event_type: 'Earthquake' }), row({ event_type: 'quarry blast' }), row({ event_type: null }),
+    row({ magnitude_type: 'mb' }), row({ magnitude_type: 'mB' }), row({ magnitude_type: 'Ml' }), row({ magnitude_type: 'MLv' }),
+    row({ evaluation_status: 'Reviewed', evaluation_mode: 'manual' }), row({ evaluation_status: 'preliminary', evaluation_mode: 'AUTOMATIC' }),
+    row({ azimuthal_gap: 90, used_phase_count: 40, used_station_count: 20, standard_error: 0.3 }),
+    row({ azimuthal_gap: -999, used_phase_count: 0, used_station_count: null, standard_error: -1 }),
+    row({ depth_uncertainty: 1, time_uncertainty: 0.2, magnitude_uncertainty: 0.1 }),
+    row({ depth_uncertainty: -1, time_uncertainty: null, magnitude_uncertainty: 9 }),
+    row({ max_horizontal_uncertainty: 3 }), row({ horizontal_uncertainty: 4 }),
+    row({ latitude_uncertainty: 0.02, longitude_uncertainty: 0.02 }), row({ latitude_uncertainty: 0.02 }),
+    row({ max_horizontal_uncertainty: 150, horizontal_uncertainty: 2 }), row({ max_horizontal_uncertainty: -1, horizontal_uncertainty: 2 }),
+    row({ horizontal_uncertainty: -999, latitude_uncertainty: 0.01, longitude_uncertainty: 0.01, latitude: -60 }),
+    row({ quality_score: 80 }), row({ quality_score: 20 }),
+    row({ used_station_count: 40, azimuthal_gap: 40, standard_error: 0.2, horizontal_uncertainty: 1, depth_uncertainty: 1,
+      time_uncertainty: 0.1, magnitude_uncertainty: 0.1, evaluation_mode: 'manual', evaluation_status: 'reviewed' }),
+    ...[175, -175, 180, -180, 0, 170, -170].map((longitude) => row({ longitude })),
+    row({ latitude: -30.5 }), row({ latitude: null }),
+  ];
+  // What the server has stored once getFilteredEvents has scored the legacy rows for a
+  // minQuality filter (ensureCatalogueQualityScores): the score an insert would give them.
+  const scored = corpus.map((d) => (typeof d.quality_score === 'number' ? d
+    : { ...d, quality_score: calculateQualityScore(metricsFromEvent(d)).overall }));
+
+  const cases = [
+    'minMagnitude=3', 'maxMagnitude=4', 'minDepth=0&maxDepth=20',
+    'startTime=2020-01-01&endTime=2020-01-01T00:00:00Z', 'endTime=2020-01-01T00:00:00Z', 'startTime=2021-01-01',
+    'eventType=earthquake', 'eventType=Quarry%20Blast', 'evaluationStatus=reviewed', 'evaluationMode=automatic',
+    'magnitudeType=ml', 'magnitudeType=mb', 'magnitudeType=mB',
+    'maxAzimuthalGap=120', 'minUsedPhaseCount=0', 'minUsedStationCount=10', 'maxStandardError=0.5',
+    'maxDepthUncertainty=2', 'maxTimeUncertainty=1', 'maxMagnitudeUncertainty=0.5',
+    'maxHorizontalUncertainty=5', 'maxHorizontalUncertainty=2.3', 'maxHorizontalUncertainty=500',
+    'minQuality=50', 'minQuality=0', 'minQuality=81',
+    'minLatitude=-41&maxLatitude=-30', 'minLongitude=170&maxLongitude=-170', 'minLongitude=170&maxLongitude=180',
+    'minLongitude=-180&maxLongitude=-170', 'minLongitude=170', 'maxLongitude=-170', 'minLongitude=180&maxLongitude=-180',
+    'minMagnitude=2&maxHorizontalUncertainty=5&minLongitude=170&maxLongitude=-170',
+  ];
+
+  it.each(cases)('%s', (qs) => {
+    const parsed = parseEventFilterParams(new URLSearchParams(qs));
+    if (!parsed.ok) throw new Error(parsed.error);
+    const query = buildEventFilterQuery('cat', parsed.filters);
+    const server = scored.filter((d) => matches({ catalogue_id: 'cat', ...d }, query)).map((d) => d.id);
+    const table = applyEventFilters(corpus as any[], parsed.filters).map((d: Doc) => d.id);
+    expect(table).toEqual(server);
+    expect(corpus.filter((d) => eventMatchesFilters(d, parsed.filters)).map((d) => d.id)).toEqual(server);
   });
 });
 

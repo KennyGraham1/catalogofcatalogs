@@ -13,7 +13,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireEditor } from '@/lib/auth/middleware';
 import { Logger } from '@/lib/errors';
-import { createUploadSession, CHUNK_SIZE, isValidStoredDelimiter } from '@/lib/upload-chunks';
+import {
+  createUploadSession,
+  CHUNK_SIZE,
+  DELIMITER_NAME_TO_CHARACTER,
+  isValidStoredDelimiter,
+} from '@/lib/upload-chunks';
 import {
   createUploadTooLargeResponse,
   getMaxSyncUploadParseBytes,
@@ -25,6 +30,17 @@ export const dynamic = 'force-dynamic';
 
 const logger = new Logger('UploadInitAPI');
 const MAX_FILE_SIZE = 500 * 1024 * 1024;
+
+const DATE_FORMATS: Record<string, string> = { us: 'US', international: 'International', iso: 'ISO' };
+
+/** 'auto' or nothing means auto-detect, as on /api/upload; a named delimiter in any case. */
+function normaliseDelimiter(value: unknown): unknown {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string') return value;
+  if (value.toLowerCase() === 'auto') return undefined;
+  const name = value.toLowerCase();
+  return Object.prototype.hasOwnProperty.call(DELIMITER_NAME_TO_CHARACTER, name) ? name : value;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -83,12 +99,28 @@ export async function POST(request: NextRequest) {
     // through as the delimiter character used to zero out every large
     // CSV/TXT/DAT import (findings #36/#46). See lib/upload-chunks.ts for the
     // validator and the canonical name → character map finalize maps through.
-    if (delimiter !== undefined && delimiter !== null && !isValidStoredDelimiter(delimiter)) {
+    const storedDelimiter = normaliseDelimiter(delimiter);
+    if (storedDelimiter !== undefined && !isValidStoredDelimiter(storedDelimiter)) {
       return NextResponse.json(
         {
           error: `Invalid delimiter '${delimiter}'. Allowed: comma, tab, semicolon, pipe, space.`,
           code: 'INVALID_DELIMITER',
         },
+        { status: 400 },
+      );
+    }
+
+    // The date format is checked here too, so a value finalize could not honour is
+    // refused before any chunk is sent ('auto' or nothing means detect it).
+    const dateFormatName = typeof dateFormat === 'string' ? dateFormat.trim().toLowerCase() : dateFormat;
+    const detectDateFormat = dateFormatName === undefined || dateFormatName === null ||
+      dateFormatName === '' || dateFormatName === 'auto';
+    const storedDateFormat = !detectDateFormat && typeof dateFormatName === 'string'
+      ? DATE_FORMATS[dateFormatName]
+      : undefined;
+    if (!detectDateFormat && storedDateFormat === undefined) {
+      return NextResponse.json(
+        { error: `Invalid date format '${dateFormat}'. Allowed: US, International, ISO.`, code: 'INVALID_DATE_FORMAT' },
         { status: 400 },
       );
     }
@@ -99,8 +131,8 @@ export async function POST(request: NextRequest) {
       fileName,
       fileSize,
       totalChunks,
-      delimiter ?? undefined,
-      dateFormat ?? undefined,
+      storedDelimiter as string | undefined,
+      storedDateFormat,
       user.id,
     );
 

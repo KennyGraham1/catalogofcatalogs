@@ -692,9 +692,11 @@ locations stand out spatially.
 \textbf{Frequency-magnitude distribution.}  The Gutenberg-Richter and $M_c$
 tabs plot the cumulative and non-cumulative event counts by magnitude bin and
 overlay the fitted GR line and the $M_c$ estimate.  When the magnitude filter
-has a lower bound, the fit uses it as an explicit cut-off (and says so); $M_c$
-itself is always estimated from the untruncated distribution, with the method
-and correction chosen in the $M_c$ settings (Section~\ref{sec:mc}).
+has a lower bound, the fit uses it as an explicit cut-off (and says so); the
+filter's upper bound is never applied to the fit, which needs the distribution's
+upper tail, and $M_c$ itself is always estimated from the untruncated
+distribution, with the method and correction chosen in the $M_c$ settings
+(Section~\ref{sec:mc}).
 
 \textbf{Time-series panels.}  The Temporal tab shows a seismicity-rate series,
 the cumulative event count, magnitude against origin time (with the $M_c$ or
@@ -703,10 +705,17 @@ even stride in time), and the cumulative release of seismic moment or radiated
 energy.  The rate series counts the events at or above the magnitude cut-off,
 or above the estimated $M_c$ when no cut-off is set, per bin of one UTC day, ISO
 week or calendar month (by default daily for spans up to a year and weekly
-beyond), so that step changes in network completeness show up as rate anomalies;
-partial first and last bins are drawn scaled to a full bin and marked as such.
-The Analysis page withholds these physical totals, like the $b$-value and $M_c$,
-for a set pooled from several catalogues, which would count shared earthquakes
+beyond), so that step changes in network completeness show up as rate anomalies.
+A first or last bin that the analysed period covers only in part is drawn dashed.
+It is scaled to a full bin when that period is known: the time filter's window
+and, when a single catalogue is analysed, the catalogue's declared time period,
+intersected when both are set (the end is exclusive, and a date-only end covers
+that day).  Otherwise its coverage can only be read off the first or last event,
+so it is drawn at its raw count, with a note that it may understate the rate.
+Cumulative curves are plotted at the end of each bin, and events whose origin
+time cannot be parsed are left out of the series and counted.
+The Analysis page withholds the moment and energy totals, like the $b$-value and
+$M_c$, for a set pooled from several catalogues, which would count shared earthquakes
 more than once.
 
 \subsection{Supported input formats}
@@ -901,8 +910,9 @@ time and distance count equally whatever the window sizes; magnitude agreement
 only breaks ties).  Candidates are joined in increasing separation, so each report
 is claimed by its closest counterpart in each other catalogue rather than by
 whichever earlier report reached it first; a group never holds two reports from
-one catalogue (each catalogue is taken to be free of internal duplicates), and a
-group of three or more must have a member inside the window of every other
+one catalogue (each catalogue is taken to be free of internal duplicates, and a
+merge request that lists the same catalogue twice is refused), and a group of
+three or more must have a member inside the window of every other
 member, so reports linked only through a chain are not fused.  A group that fails
 the validity gates below is split into its largest self-consistent sub-groups
 (seeded from its earliest report, candidates tried nearest first), and reports left
@@ -934,7 +944,9 @@ applied.  CofC offers five strategies (Table~\ref{tab:strategies}).
 \centering
 \caption{Merge strategies available in CofC.  Whatever the strategy, every
 report in a duplicate group is kept in the merged event's lineage, with the
-report whose solution was published marked.}
+report whose solution was published marked (none, for an averaged event); no
+other report's origin or depth metadata is attached to the published solution
+(see text).}
 \label{tab:strategies}
 \small
 \begin{tabular}{@{}lp{10.4cm}@{}}
@@ -955,8 +967,9 @@ Source priority
     unranked catalogues come last.  \emph{GeoNet (or GNS) $>$ Others}: the
     GeoNet report, recognised by its agency code or by the catalogue's metadata
     or name, is kept; a group without one falls back to the network-authority
-    ranking, then quality.  The Quality-Based and Most Recent Solution options
-    apply those rules. \\
+    ranking, with equally authoritative reports compared on the metrics they all
+    state, as in the Quality-based strategy.  The Quality-Based and Most Recent
+    Solution options apply those rules. \\
 Most recent solution
   & Keeps the solution the agency computed last (the origin's QuakeML creation
     time, else the record's creation or modification time).  When not every
@@ -968,18 +981,34 @@ Most complete
 Average values
   & Only the epicentre is averaged: weighted by $1/\sigma^{2}$ when every report
     states a horizontal uncertainty, with equal weights otherwise (no
-    uncertainty is assumed for a report that states none).  Magnitude is selected,
-    not averaged: $M_w$ first; below $M5.5$, $M_L$ before $m_b$, $M_s$ and $M_d$;
-    from $M5.5$, $M_s$ and $m_B$ before $M_L$, $m_b$ and $M_d$; rejected
-    magnitudes are skipped and proxy $M_w$ types rank below true $M_w$.  Depth
-    is taken from the best-constrained report that solved for depth (a fixed
-    depth only when none did); origin time is the earliest in the group; no
-    single agency's origin details (gap, counts, RMS) are carried onto the
-    averaged epicentre.  Best treated as exploratory, for closely consistent
+    uncertainty is assumed for a report that states none).  Magnitude is selected
+    by type, not averaged, and published as reported (see text).  Depth, with its
+    type and uncertainty, is taken from the best-constrained report that solved
+    for depth (a fixed depth
+    only when none did); origin time is the earliest in the group; no single
+    agency's origin details (gap, counts, RMS) are carried onto the averaged
+    epicentre.  Best treated as exploratory, for closely consistent
     solutions. \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+Whatever the strategy, the published origin keeps its own metadata (agency,
+method, gap, counts, residual, evaluation status) and the published depth its own
+type and uncertainty: none of these is filled in from another report, and a
+location or magnitude uncertainty is filled in only from a report stating the
+same location, or the same magnitude value and type.  The Average values strategy
+selects the magnitude rather than averaging it, and publishes it as reported, not
+converted.  The preference depends on the event's size, taken as the median of the
+reported magnitudes on the $M_w$ scale ($M_L$ as $M_w$; $m_b$ and $M_s$ by the
+relations of \citealp{scordilis2006}).  $M_w$ comes first, with proxy $M_w$ types
+($M_w(m_B)$, $M_{wp}$) below true ones.  Below $M6.2$, the $M_L$ family (including
+GeoNet's summary magnitude $M$) comes before $m_b$, $m_B$ and $m_{bLg}$, then
+$M_s$, then $M_d$; from $M6.2$, $M_s$ comes first, then $m_B$, $M_L$, $m_b$ and
+$m_{bLg}$, and $M_d$.  The switch is at 6.2 because there the $M_s$ relation
+becomes one to one while $M_L$ still reads $M_w$, so the published value stays
+within about 0.1 of $M_w$ on either side.  Rejected magnitudes are skipped; ties go
+to the smaller uncertainty, then to the agency's preferred magnitude.
 
 The Quality-based strategy is recommended because it selects the
 best-constrained solution by an explicit, configurable rule rather than a
@@ -1002,8 +1031,8 @@ committed.
 
 \begin{figure}[p]
   \centering
-  \includegraphics[width=0.80\linewidth]{figures/app_merge_c.png}\\[5pt]
-  \includegraphics[width=0.80\linewidth]{figures/app_preview_crop.png}
+  \includegraphics[width=0.80\linewidth,height=0.34\textheight,keepaspectratio]{figures/app_merge_c.png}\\[5pt]
+  \includegraphics[width=0.80\linewidth,height=0.34\textheight,keepaspectratio]{figures/app_preview_crop.png}
   \caption{%
     The merge workflow in the browser (the release described here).
     \textit{Top:} the \emph{Configure} step, with the matching windows
@@ -1052,9 +1081,15 @@ Section~\ref{sec:mc}), and $\Delta M$ is the step to which the magnitudes are
 $0.1$ wide, so the correction $\Delta M/2$ is $0.05$ for magnitudes reported to
 $0.1$, $0.005$ for $0.01$, and $0$ for magnitudes reported to full precision (as
 GeoNet reports them).  CofC detects the reporting step from the magnitudes
-themselves; for a catalogue that mixes steps, such as a merged one, it applies
-the correction weighted by the share of the sample at each step, and reports the
-step and the correction with each estimate.  Equation~\eqref{eq:aki} is the
+themselves, counting a magnitude within $2^{-20}$ of a grid value as lying on
+it: the steps $0.1$, $0.05$, $0.01$ and $0.001$, and the coarse steps $0.2$,
+$0.25$ and $0.5$ of historical and intensity-derived magnitudes when at least
+95\% of the sample lies on one of them.  For a catalogue that mixes steps, such
+as a merged one, it applies the correction weighted by the share of the sample
+at each step, and it reports the step and the correction with each estimate.
+For the coarse steps the $\Delta M/2$ correction is itself approximate and leaves
+$\hat{b}$ 2--10\% low at $b \approx 1$; the binned estimator of
+\citet{bender1983} is exact.  Equation~\eqref{eq:aki} is the
 uncorrected maximum-likelihood estimator and is biased high for small samples
 ($\mathrm{E}[\hat{b}] = b\,N/(N-1)$; \citealp{marzocchi2003}), so at the minimum
 fitting count above an explicit cut-off ($N=10$; Section~\ref{sec:mc}) $\hat{b}$ is
@@ -1100,7 +1135,8 @@ at least 10 events at or above it in at least three populated bins is a
 candidate cut-off; $b$ is estimated above it by equation~\eqref{eq:aki} (with the
 same reporting-step correction), the predicted cumulative counts
 $S_j = N(\geq M_i)\,10^{-b(M_j - M_i)}$ are compared with the observed counts
-$B_j = N(\geq M_j)$ at every bin edge $M_j \geq M_i$, and the fit is
+$B_j = N(\geq M_j)$ at every bin edge $M_j \geq M_i$ up to the bin holding the
+largest magnitude, and the fit is
 $R = 100 - 100\sum_j |B_j - S_j| / \sum_j B_j$.  $M_c$ is the lowest candidate
 with $R \geq 95\%$, else the lowest with $R \geq 90\%$; if no candidate reaches
 $90\%$, CofC reports the MAXC estimate and says so.  The Analysis page plots $R$
@@ -1168,7 +1204,9 @@ seismicity rate, is implemented in the analysis library as an alternative,
 though the browser worker currently exposes only the Gardner-Knopoff method.
 
 Declustering returns a mainshock/aftershock partition for the events under
-analysis.  Exports can carry it: with the export option for Gardner-Knopoff
+analysis; an event whose origin time cannot be parsed falls in no window and is
+left independent, and the Temporal tab reports how many such events there are.
+Exports can carry it: with the export option for Gardner-Knopoff
 tags, each exported event gains its cluster (identified by its mainshock) and a
 mainshock flag, and the export records the algorithm, the windows used and the
 counts; writing the partition back as a separate catalogue within the platform
@@ -1190,7 +1228,8 @@ reported and, assuming $M_L \approx M_w$, to $M_L$, to GeoNet's summary
 magnitude $M$ and to untyped magnitudes; $m_b$, $m_B$, $M_s$, $M_d$ and other stated types are excluded, and
 the Analysis page states how many events were treated each way.  (The library's
 empirical conversions, after \citet{scordilis2006} for $m_b$ and $M_s$, serve the
-merge's magnitude-consistency gate; automatic homogenisation of mixed magnitude
+merge's magnitude-consistency gate and its estimate of an event's size for the
+magnitude-type preference; automatic homogenisation of mixed magnitude
 types within the analysis pipeline remains future work,
 Section~\ref{sec:biases}.)  Because cumulative moment is dominated by the largest
 events, magnitude saturation (Section~\ref{sec:biases}) in any saturated input
@@ -1213,8 +1252,10 @@ user, or by default daily for spans up to a year and weekly beyond) and plotted 
 a rate time series.  The threshold is the magnitude filter's lower bound when one
 is set, and otherwise the $M_c$ estimated under the current $M_c$ settings; with
 fewer than 50 events, too few to estimate $M_c$, every event is counted and the
-page says that the rate then also follows changes in detection.  Sudden rate
-changes, which often correspond to network upgrades, station outages, or changes
+page says that the rate then also follows changes in detection.  Partial first
+and last bins are scaled or marked as described in Section~\ref{sec:viz}, and
+events whose origin time cannot be parsed are left out of the series and
+counted.  Sudden rate changes, which often correspond to network upgrades, station outages, or changes
 in processing procedures, are immediately visible and can be used to identify
 breakpoints for time-varying $M_c$ analysis \citep{mignan2012}.
 

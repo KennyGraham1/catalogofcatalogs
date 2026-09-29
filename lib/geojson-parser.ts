@@ -5,7 +5,8 @@
 
 import { summarizeValidationFailures, validateEventWithDetails, type ValidationEventContext, type ValidationFailureDetail } from './validation';
 import { validateEventCrossFields } from './cross-field-validation';
-import { NON_NEGATIVE_EVENT_FIELDS, parseStrictNumber, validateDepth, wrapLongitude, type ParseFileDecisions } from './earthquake-utils';
+import { NON_NEGATIVE_EVENT_FIELDS, normalizeTimestamp, parseStrictNumber, validateDepth, wrapLongitude, type ParseFileDecisions } from './earthquake-utils';
+import { decideFileDateFormat, type DateFormat } from './date-format-detector';
 import type { ParsedEvent, ParseResult } from './parsers';
 
 interface ValidationAccumulator {
@@ -85,7 +86,7 @@ export interface GeoJSONFeatureCollection {
  * Parse GeoJSON format earthquake catalogue
  * Supports both FeatureCollection and single Feature
  */
-export function parseGeoJSON(content: string): ParseResult {
+export function parseGeoJSON(content: string, dateFormat?: DateFormat): ParseResult {
   const errors: Array<{ line: number; message: string }> = [];
   const warnings: Array<{ line: number; message: string }> = [];
   const events: ParsedEvent[] = [];
@@ -159,6 +160,25 @@ export function parseGeoJSON(content: string): ParseResult {
       };
     }
 
+    // The day/month order of string times is decided once for the file, from every
+    // feature, as the CSV and JSON parsers decide it (and the declared format wins).
+    const timeCells = features.map((feature) => {
+      const props = feature?.properties ?? {};
+      const key = firstPresentKey(props, TIME_PROPERTIES);
+      return key === undefined ? undefined : props[key];
+    });
+    const dateDecision = decideFileDateFormat(timeCells, dateFormat);
+    for (const message of dateDecision.warnings) warnings.push({ line: 0, message });
+    adjustments.dateHint = dateDecision.dateFormat === 'US' || dateDecision.dateFormat === 'International'
+      ? dateDecision.dateFormat
+      : undefined;
+    adjustments.twoDigitYears = dateDecision.twoDigitYears;
+    adjustments.dateDecisions = {
+      ...(dateDecision.dateFormat !== undefined ? { dateFormat: dateDecision.dateFormat } : {}),
+      ...(dateDecision.dateFormatSource !== undefined ? { dateFormatSource: dateDecision.dateFormatSource } : {}),
+      ...(dateDecision.twoDigitYears ? { twoDigitYears: true } : {}),
+    };
+
     // Parse each feature
     features.forEach((feature, index) => {
       try {
@@ -220,6 +240,7 @@ export function parseGeoJSON(content: string): ParseResult {
   }
 
   const fileDecisions: ParseFileDecisions = {
+    ...adjustments.dateDecisions,
     wrappedLongitudes: adjustments.wrappedLongitudes,
     outOfRangeDepths: adjustments.outOfRangeDepths,
     sentinelValues: adjustments.sentinelValues,
@@ -246,6 +267,10 @@ interface FeatureAdjustments {
   outOfRangeDepths: number;
   sentinelValues: number;
   sources: Map<string, Map<string, number>>;
+  /** The file's day/month order and two-digit-year decision for string times. */
+  dateHint?: 'US' | 'International';
+  twoDigitYears: boolean;
+  dateDecisions: Pick<ParseFileDecisions, 'dateFormat' | 'dateFormatSource' | 'twoDigitYears'>;
 }
 
 const createFeatureAdjustments = (): FeatureAdjustments => ({
@@ -253,7 +278,12 @@ const createFeatureAdjustments = (): FeatureAdjustments => ({
   outOfRangeDepths: 0,
   sentinelValues: 0,
   sources: new Map(),
+  twoDigitYears: false,
+  dateDecisions: {},
 });
+
+/** Property names read as the origin time, first present wins. */
+const TIME_PROPERTIES = ['time', 'datetime', 'date', 'origin_time', 'origintime'];
 
 function recordFeatureSource(adjustments: FeatureAdjustments, targetField: string, source: string): void {
   let bySource = adjustments.sources.get(targetField);
@@ -382,7 +412,7 @@ function parseGeoJSONFeature(
   if (depthOutOfRangeKm !== null) depth = null;
 
   // Build event from GeoJSON properties
-  const timeKey = firstPresentKey(props, ['time', 'datetime', 'date', 'origin_time', 'origintime']);
+  const timeKey = firstPresentKey(props, TIME_PROPERTIES);
   const magnitudeKey = firstPresentKey(props, ['magnitude', 'mag', 'm']);
   if (timeKey !== undefined) recordFeatureSource(adjustments, 'time', timeKey);
   if (magnitudeKey !== undefined) recordFeatureSource(adjustments, 'magnitude', magnitudeKey);
@@ -394,7 +424,7 @@ function parseGeoJSONFeature(
     // real instant), so a self-identified USGS/GeoNet feature converts as milliseconds;
     // any other producer's bare number is classified by magnitude (seconds below
     // 1e11), which is what Python/GeoPandas exports carry.
-    time: epochToIso(timeKey === undefined ? undefined : props[timeKey], knownProducer),
+    time: originTime(timeKey === undefined ? undefined : props[timeKey], knownProducer, adjustments),
     // `||` treats a magnitude of 0.0 as absent; M0.0 is a real value in microseismic
     // catalogues, so pick the first field that is genuinely present.
     magnitude: magnitudeKey === undefined ? undefined : props[magnitudeKey],
@@ -606,6 +636,17 @@ function epochToIso(value: unknown, knownMillisecondsProducer: boolean): any {
     return isNaN(date.getTime()) ? value : date.toISOString();
   }
   return value;
+}
+
+/**
+ * A feature's origin time as the UTC instant: a number by epochToIso, a string by
+ * normalizeTimestamp with the file's day/month order. A string used to stay as written
+ * and was later read with new Date(), which takes a zone-less time as server-local time.
+ * A string no shape matches stays as written, for validation to report.
+ */
+function originTime(value: unknown, knownMillisecondsProducer: boolean, adjustments: FeatureAdjustments): any {
+  if (typeof value !== 'string') return epochToIso(value, knownMillisecondsProducer);
+  return normalizeTimestamp(value, adjustments.dateHint, { twoDigitYears: adjustments.twoDigitYears }) ?? value;
 }
 
 /** First argument that is neither undefined, null, nor the empty string. */

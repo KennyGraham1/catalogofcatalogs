@@ -25,7 +25,7 @@ const STREAM_CHUNK_CHARS = 64 * 1024;
  * module: tsconfig targets ES5 with downlevelIteration off, under which for-of is only allowed
  * over arrays.
  */
-function* coalesce(parts: Generator<string>): Generator<string> {
+export function* coalesce(parts: Generator<string>): Generator<string> {
   let buffer = '';
   for (let step = parts.next(); !step.done; step = parts.next()) {
     buffer += step.value;
@@ -41,7 +41,7 @@ function* coalesce(parts: Generator<string>): Generator<string> {
  * Concatenate a chunk stream into one string, for callers that need the whole document in
  * memory (the browser-side merge export, tests). Server routes should stream the chunks.
  */
-function joinChunks(chunks: Generator<string>): string {
+export function joinChunks(chunks: Generator<string>): string {
   let out = '';
   for (let step = chunks.next(); !step.done; step = chunks.next()) out += step.value;
   return out;
@@ -367,8 +367,14 @@ function attributedSource(
  * contracts C1/C2) come back empty; source catalogue IDs are read from the members'
  * catalogueId, which is what C2's source_catalogue_ids records, when the row lacks the column.
  */
-export function eventLineage(event: ExportableEvent, catalogueStrategy?: string | null): EventLineage {
-  const members = parseSourceEvents(event.source_events);
+export function eventLineage(
+  event: ExportableEvent,
+  catalogueStrategy?: string | null,
+  // The row's source_events already parsed, so a caller that also needs the members (the
+  // QuakeML exporter) does not parse that JSON twice; it embeds whole contributor rows.
+  parsedMembers?: SourceEventMember[]
+): EventLineage {
+  const members = parsedMembers ?? parseSourceEvents(event.source_events);
   const selected = members.find(member => member.selected) ?? null;
 
   let storedIds: unknown = event.source_catalogue_ids;

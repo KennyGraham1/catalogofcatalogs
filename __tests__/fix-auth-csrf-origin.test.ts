@@ -19,6 +19,11 @@ import middleware from '@/middleware';
 const run = middleware as unknown as (req: NextRequest) => Promise<Response>;
 const ORIGINAL_NEXTAUTH_URL = process.env.NEXTAUTH_URL;
 
+// Each test states its public URL; none is inherited from the environment.
+beforeEach(() => {
+  delete process.env.NEXTAUTH_URL;
+});
+
 afterEach(() => {
   if (ORIGINAL_NEXTAUTH_URL === undefined) delete process.env.NEXTAUTH_URL;
   else process.env.NEXTAUTH_URL = ORIGINAL_NEXTAUTH_URL;
@@ -103,5 +108,60 @@ describe('#112 legitimate requests are unaffected', () => {
     const response = await run(apiRequest('POST', '/api/auth/callback/credentials', { origin: 'https://evil.example' }));
 
     expect(response.status).not.toBe(403);
+  });
+});
+
+describe('review: whole origins are compared (scheme, host and port)', () => {
+  /** As the original nginx config forwarded it: Host and X-Forwarded-Host without port. */
+  function viaNginx(origin: string, extra: Record<string, string> = {}) {
+    const req = new NextRequest('http://app:3000/api/users/u2', {
+      method: 'PATCH',
+      headers: {
+        host: 'quakes.example.org',
+        'x-forwarded-host': 'quakes.example.org',
+        'content-type': 'text/plain',
+        origin,
+        ...extra,
+      },
+      body: '{"role":"admin"}',
+    });
+    return Object.assign(req, { nextauth: { token: null } });
+  }
+
+  it.each([
+    ['https://quakes.example.org', 200],
+    ['https://quakes.example.org:8443', 403], // another port on the same host
+    ['http://quakes.example.org:8080', 403], // another scheme and port
+    ['http://quakes.example.org', 403], // the site is https
+    ['https://evil.quakes.example.org', 403],
+    ['null', 403],
+  ])('with NEXTAUTH_URL set, Origin %s -> %i', async (origin, status) => {
+    process.env.NEXTAUTH_URL = 'https://quakes.example.org';
+
+    expect((await run(viaNginx(origin))).status).toBe(status);
+  });
+
+  it.each([
+    ['https://quakes.example.org:8443', 200],
+    ['https://quakes.example.org', 403],
+    ['http://quakes.example.org:8443', 403],
+  ])('from the forwarded scheme, host and port (nginx/nginx.conf), Origin %s -> %i', async (origin, status) => {
+    delete process.env.NEXTAUTH_URL;
+    const req = viaNginx(origin, {
+      host: 'quakes.example.org:8443',
+      'x-forwarded-host': 'quakes.example.org:8443',
+      'x-forwarded-proto': 'https',
+      'x-forwarded-port': '8443',
+    });
+
+    expect((await run(req)).status).toBe(status);
+  });
+
+  it('takes the port from X-Forwarded-Port when the forwarded host has none', async () => {
+    delete process.env.NEXTAUTH_URL;
+    const headers = { 'x-forwarded-proto': 'https', 'x-forwarded-port': '8443' };
+
+    expect((await run(viaNginx('https://quakes.example.org:8443', headers))).status).toBe(200);
+    expect((await run(viaNginx('https://quakes.example.org', headers))).status).toBe(403);
   });
 });

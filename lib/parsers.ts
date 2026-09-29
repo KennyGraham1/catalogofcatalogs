@@ -26,10 +26,10 @@ import * as sax from 'sax';
 import { createReadStream } from 'fs';
 import { createInterface } from 'readline';
 import { Transform } from 'stream';
-import { detectDelimiter, parseLine, parseWithDelimiter, stripHeaderCommentMarker, endsInsideQuotedField, isCommentLine, isHeaderLikeRecord, type Delimiter } from './delimiter-detector';
+import { detectDelimiter, parseLine, parseWithDelimiter, stripHeaderCommentMarker, endsInsideQuotedField, isCommentLine, isHeaderLikeRecord, chooseCommentHeader, uniqueHeaderNames, type Delimiter } from './delimiter-detector';
 import { stripSpreadsheetFormulaGuard } from './export-utils';
 import { parseGeoJSON } from './geojson-parser';
-import { detectDateFormat, type DateFormat } from './date-format-detector';
+import { decideFileDateFormat, type DateFormat, type FileDateFormatDecision } from './date-format-detector';
 import { FIELD_ALIASES, resolveHeaderAlias } from './field-definitions';
 import type { ParsedEvent } from '@/types/upload';
 import type { QuakeMLEvent } from './types/quakeml';
@@ -109,18 +109,38 @@ function failedParseResult(
  */
 class FieldSourceTally {
   private counts = new Map<string, Map<string, number>>();
+  // Rows of a file almost always map alike: a report equal to the previous one is only
+  // counted, and folded into `counts` when a different one arrives.
+  private pending: FieldMappingTrace[] | null = null;
+  private pendingRows = 0;
 
   add(report: FieldMappingTrace[] | undefined): void {
     if (!report) return;
-    for (const { targetField, sourceField } of report) {
+    const pending = this.pending;
+    if (pending && pending.length === report.length &&
+        pending.every((entry, i) => entry.targetField === report[i].targetField && entry.sourceField === report[i].sourceField)) {
+      this.pendingRows += 1;
+      return;
+    }
+    this.flush();
+    this.pending = report;
+    this.pendingRows = 1;
+  }
+
+  private flush(): void {
+    if (!this.pending) return;
+    for (const { targetField, sourceField } of this.pending) {
       let bySource = this.counts.get(targetField);
       if (!bySource) this.counts.set(targetField, (bySource = new Map()));
-      bySource.set(sourceField, (bySource.get(sourceField) ?? 0) + 1);
+      bySource.set(sourceField, (bySource.get(sourceField) ?? 0) + this.pendingRows);
     }
+    this.pending = null;
+    this.pendingRows = 0;
   }
 
   /** The most-used source per field; the first seen wins a tie. */
   resolve(): Record<string, string> {
+    this.flush();
     const out: Record<string, string> = {};
     this.counts.forEach((bySource, targetField) => {
       let best: string | null = null;
@@ -139,16 +159,20 @@ interface RowAdjustmentCounts {
   wrappedLongitudes: number;
   outOfRangeDepths: number;
   firstOutOfRangeDepth: { line: number; value: unknown } | null;
-  negativeOutOfRangeDepths: number;
+  /** The depth column as a whole looks negative-downward (see looksNegativeDownward). */
+  negativeDownLikely: boolean;
   sentinelValues: number;
+  /** Origin times with a date but no time of day (stored at 00:00:00 UTC). */
+  dateOnlyTimes: number;
 }
 
 const createRowAdjustmentCounts = (): RowAdjustmentCounts => ({
   wrappedLongitudes: 0,
   outOfRangeDepths: 0,
   firstOutOfRangeDepth: null,
-  negativeOutOfRangeDepths: 0,
+  negativeDownLikely: false,
   sentinelValues: 0,
+  dateOnlyTimes: 0,
 });
 
 /**
@@ -164,11 +188,18 @@ function appendRowAdjustmentWarnings(
     let message =
       `${counts.outOfRangeDepths} depth value(s) outside -5 to 1000 km were set to unknown; the events were kept` +
       (first ? ` (first on line ${first.line}: ${String(first.value)})` : '') + '.';
-    if (counts.negativeOutOfRangeDepths > counts.outOfRangeDepths / 2) {
-      message += ' Most of them are negative: if the file reports depth as negative downward ' +
+    if (counts.negativeDownLikely) {
+      message += ' Most depths in the file are negative: if it reports depth as negative downward ' +
         '(elevation), negate the depth column and upload it again.';
     }
     warnings.push({ line: 0, message });
+  }
+  if (counts.dateOnlyTimes > 0) {
+    warnings.push({
+      line: 0,
+      message: `${counts.dateOnlyTimes} origin time(s) have a date but no time of day and were stored at ` +
+        '00:00:00 UTC. If the file has a time-of-day column, map it to the time field.',
+    });
   }
   if (counts.sentinelValues > 0) {
     warnings.push({
@@ -385,7 +416,9 @@ function parsedEventFromQuakeMLEvent(
   const depthKm = origin.depth ? origin.depth.value / 1000 : undefined;
   const depthOutOfRange = depthKm !== undefined && !validateDepth(depthKm);
   const event: ParsedEvent = {
-    time: origin.time.value,
+    // Stored as the UTC instant: the checks that follow read the time with new Date(),
+    // which takes a zone-less xs:dateTime as server-local time.
+    time: normalizeTimestamp(origin.time.value) ?? origin.time.value,
     latitude: origin.latitude.value,
     longitude: origin.longitude.value,
     depth: depthOutOfRange ? null : depthKm,
@@ -451,7 +484,7 @@ function parsedEventFromQuakeMLEvent(
   if (depthOutOfRange && depthKm !== undefined) {
     const rawDepth = `${origin.depth?.value} m`;
     validationAccumulator.failures.push(outOfRangeDepthFailure(context, depthKm, rawDepth));
-    countOutOfRangeDepth(adjustments, index, depthKm, rawDepth);
+    countOutOfRangeDepth(adjustments, index, rawDepth);
   }
   appendCrossFieldFailures(validationAccumulator, event, context);
 
@@ -474,9 +507,8 @@ function outOfRangeDepthFailure(context: ValidationEventContext, depthKm: number
   });
 }
 
-function countOutOfRangeDepth(counts: RowAdjustmentCounts, line: number, depthKm: number, rawValue: unknown): void {
+function countOutOfRangeDepth(counts: RowAdjustmentCounts, line: number, rawValue: unknown): void {
   counts.outOfRangeDepths += 1;
-  if (depthKm < 0) counts.negativeOutOfRangeDepths += 1;
   if (!counts.firstOutOfRangeDepth) counts.firstOutOfRangeDepth = { line, value: rawValue };
 }
 
@@ -529,10 +561,11 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
   // error: silently absorbing the rest of the file into one cell would report success
   // while discarding most of the catalogue.
   let headers: string[];
+  let writtenHeaders: string[];
   let rows: string[][];
   let dataStartLine: number;
   try {
-    ({ headers, rows, dataStartLine } = parseWithDelimiter(content, actualDelimiter));
+    ({ headers, writtenHeaders, rows, dataStartLine } = parseWithDelimiter(content, actualDelimiter));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to tokenize delimited content';
     return failedParseResult(message, validationAccumulator, warnings);
@@ -543,34 +576,46 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
     return failedParseResult('No headers found in file', validationAccumulator);
   }
 
+  // Facts about the columns, worked out once for the file: the field each name maps to,
+  // the magnitude scale it states (from the name as written: 'mB' is not 'mb'), and a
+  // minutes column known by its place ('yyyy mm dd hh mm ss').
+  const facts = new HeaderFacts(
+    new Map(headers.map((header, i) => [header, writtenHeaders[i]])),
+    positionalMinuteColumn(headers)
+  );
+
   // Decide the day/month order ONCE for the whole file, from every cell of every column
   // that maps to the origin time (a separate date column included).
-  const timeColumnIndices = timeSourceKeys(headers).map((key) => headers.lastIndexOf(key));
-  const dateDecision = decideFileDateFormat(
-    rows.flatMap((row) => timeColumnIndices.map((index) => row[index])),
-    dateFormat,
+  const timeColumnIndices = timeSourceKeys(headers, facts).map((key) => headers.indexOf(key));
+  const dateDecision = applyDateDecision(
+    decideFileDateFormat(rows.flatMap((row) => timeColumnIndices.map((index) => row[index])), dateFormat),
     warnings
   );
   const actualDateFormat = dateDecision.dateFormat ?? dateFormat;
+  const rowContext: RowContext = {
+    facts,
+    twoDigitYears: dateDecision.twoDigitYears === true,
+    timeOfDayColumn: findTimeOfDayColumn(headers, facts, (key) => {
+      const index = headers.indexOf(key);
+      return rows.slice(0, 50).map((row) => row[index]);
+    }),
+  };
 
   // Decide the depth unit ONCE for the whole file (see inferDepthUnit)
-  const depthColumn = findSourceKeyForTarget(headers, 'depth');
-  // lastIndexOf: duplicate header names collapse to one key, and the LAST column wins
-  const depthColumnIndex = depthColumn === null ? -1 : headers.lastIndexOf(depthColumn);
-  const depthUnit = inferDepthUnit(
-    depthColumn,
-    depthColumnIndex < 0
-      ? []
-      : rows.reduce<number[]>((acc, row) => {
-          const v = safeParseFloat(row[depthColumnIndex]);
-          if (v !== null) acc.push(v);
-          return acc;
-        }, [])
-  );
+  const depthColumn = findSourceKeyForTarget(headers, 'depth', facts);
+  const depthColumnIndex = depthColumn === null ? -1 : headers.indexOf(depthColumn);
+  const depthValues = depthColumnIndex < 0
+    ? []
+    : rows.reduce<number[]>((acc, row) => {
+        const v = safeParseFloat(row[depthColumnIndex]);
+        if (v !== null) acc.push(v);
+        return acc;
+      }, []);
+  const depthUnit = inferDepthUnit(depthColumn, depthValues);
   if (depthUnit.divisor !== 1) {
     warnings.push({ line: 0, message: metresDepthWarning(depthUnit) });
   }
-  const lengthDivisors = uncertaintyDivisors(headers, depthUnit);
+  const lengthDivisors = uncertaintyDivisors(headers, depthUnit, facts);
 
   // Decide the moment-tensor unit ONCE for the whole file (see inferMomentTensorScaleForFile).
   // headers are lower-cased above, so the column lookup is too.
@@ -590,6 +635,7 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
 
   const sources = new FieldSourceTally();
   const adjustments = createRowAdjustmentCounts();
+  adjustments.negativeDownLikely = looksNegativeDownward(depthValues, depthUnit);
 
   // Parse data rows
   for (let i = 0; i < rows.length; i++) {
@@ -615,8 +661,9 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
       });
 
       // Map common field names with date format hint
-      const mappedEvent = mapCommonFields(event, actualDateFormat, true, momentTensorScale, adjustments);
-      const depthOutcome = normalizeOptionalDepth(mappedEvent as Record<string, unknown>, depthUnit, lengthDivisors);
+      const { mappedEvent, depthOutcome } = mapTabularRow(
+        event, actualDateFormat, true, momentTensorScale, adjustments, rowContext, depthUnit, lengthDivisors
+      );
       const mappingReport = (mappedEvent as any)._mappingReport as FieldMappingTrace[] | undefined;
       sources.add(mappingReport);
       const context: ValidationEventContext = {
@@ -643,7 +690,7 @@ export function parseCSV(content: string, delimiter?: Delimiter, dateFormat?: Da
         continue;
       }
 
-      if (depthOutcome.status === 'out_of_range') countOutOfRangeDepth(adjustments, lineNumber, depthOutcome.km, depthOutcome.raw);
+      if (depthOutcome.status === 'out_of_range') countOutOfRangeDepth(adjustments, lineNumber, depthOutcome.raw);
       validationAccumulator.validEvents += 1;
       validationAccumulator.failures.push(...failures);
       appendCrossFieldFailures(validationAccumulator, mappedEvent, context);
@@ -697,7 +744,7 @@ export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult
     // Check if this is GeoJSON format
     if (data.type === 'FeatureCollection' || data.type === 'Feature') {
       debugLog('[Parser] Detected GeoJSON format, using specialized parser');
-      return parseGeoJSON(content);
+      return parseGeoJSON(content, dateFormat);
     }
 
     // Handle different JSON structures
@@ -715,7 +762,7 @@ export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult
     } else if (data.features && Array.isArray(data.features)) {
       // GeoJSON-like format without type field - use GeoJSON parser
       debugLog('[Parser] Detected features array, attempting GeoJSON parsing');
-      return parseGeoJSON(content);
+      return parseGeoJSON(content, dateFormat);
     } else if (data.earthquakes && Array.isArray(data.earthquakes)) {
       // { earthquakes: [...] } structure
       eventArray = data.earthquakes;
@@ -751,33 +798,41 @@ export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult
       detectedFields = Object.keys(records[0]);
     }
 
+    // Facts about the keys, worked out once per key for this file (JSON keys keep their case).
+    const facts = new HeaderFacts(undefined, positionalMinuteColumn(detectedFields));
+
     // Decide the day/month order ONCE for the whole file, as parseCSV does: parseJSON is
     // the path every JSON upload takes, and without this step each record's ambiguous
     // date was read on its own (DD/MM for some, MM/DD for others).
     const timeCells: unknown[] = [];
     for (const item of records) {
       if (!isPlainRecord(item)) continue;
-      for (const key of timeSourceKeys(Object.keys(item))) timeCells.push(item[key]);
+      for (const key of facts.shapeOf(Object.keys(item)).timeKeys) timeCells.push(item[key]);
     }
-    const dateDecision = decideFileDateFormat(timeCells, dateFormat, warnings);
+    const dateDecision = applyDateDecision(decideFileDateFormat(timeCells, dateFormat), warnings);
     const actualDateFormat = dateDecision.dateFormat ?? dateFormat;
+    const rowContext: RowContext = {
+      facts,
+      twoDigitYears: dateDecision.twoDigitYears === true,
+      timeOfDayColumn: findTimeOfDayColumn(detectedFields, facts, (key) =>
+        records.slice(0, 50).map((item) => (isPlainRecord(item) ? item[key] : undefined))),
+    };
 
     // Decide the depth unit ONCE for the whole file (see inferDepthUnit)
-    const depthKey = findSourceKeyForTarget(detectedFields, 'depth');
-    const depthUnit = inferDepthUnit(
-      depthKey,
-      depthKey === null
-        ? []
-        : records.reduce<number[]>((acc, item) => {
-            const v = safeParseFloat(item?.[depthKey]);
-            if (v !== null) acc.push(v);
-            return acc;
-          }, [])
-    );
+    const depthKey = findSourceKeyForTarget(detectedFields, 'depth', facts);
+    const depthValues = depthKey === null
+      ? []
+      : records.reduce<number[]>((acc, item) => {
+          const v = safeParseFloat(item?.[depthKey]);
+          if (v !== null) acc.push(v);
+          return acc;
+        }, []);
+    const depthUnit = inferDepthUnit(depthKey, depthValues);
     if (depthUnit.divisor !== 1) {
       warnings.push({ line: 0, message: metresDepthWarning(depthUnit) });
     }
-    const lengthDivisors = uncertaintyDivisors(detectedFields, depthUnit);
+    const lengthDivisors = uncertaintyDivisors(detectedFields, depthUnit, facts);
+    adjustments.negativeDownLikely = looksNegativeDownward(depthValues, depthUnit);
 
     // Decide the moment-tensor unit ONCE for the whole file (see inferMomentTensorScaleForFile)
     let hasMomentTensorColumns = false;
@@ -795,8 +850,9 @@ export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult
     // Parse each event
     records.forEach((item, index) => {
       try {
-        const mappedEvent = mapCommonFields(item, actualDateFormat, true, momentTensorScale, adjustments);
-        const depthOutcome = normalizeOptionalDepth(mappedEvent as Record<string, unknown>, depthUnit, lengthDivisors);
+        const { mappedEvent, depthOutcome } = mapTabularRow(
+          item, actualDateFormat, true, momentTensorScale, adjustments, rowContext, depthUnit, lengthDivisors
+        );
         const mappingReport = (mappedEvent as any)._mappingReport as FieldMappingTrace[] | undefined;
         sources.add(mappingReport);
         const context: ValidationEventContext = {
@@ -823,7 +879,7 @@ export function parseJSON(content: string, dateFormat?: DateFormat): ParseResult
           return;
         }
 
-        if (depthOutcome.status === 'out_of_range') countOutOfRangeDepth(adjustments, index + 1, depthOutcome.km, depthOutcome.raw);
+        if (depthOutcome.status === 'out_of_range') countOutOfRangeDepth(adjustments, index + 1, depthOutcome.raw);
         validationAccumulator.validEvents += 1;
         validationAccumulator.failures.push(...failures);
         appendCrossFieldFailures(validationAccumulator, mappedEvent, context);
@@ -1492,17 +1548,152 @@ const HOUR_COMPONENT_FIELDS = ['hour', 'hr', 'hh', 'hours'];
 const MINUTE_COMPONENT_FIELDS = ['minute', 'min', 'mn', 'minutes'];
 const SECOND_COMPONENT_FIELDS = ['second', 'sec', 'ss', 'seconds', 'sc'];
 
-/** The first populated numeric column among the given names, with the key it was read from. */
-function findComponent(event: any, fieldNames: string[]): { key: string; value: number } | null {
-  for (const name of fieldNames) {
-    // Check exact match and case-insensitive match
-    for (const key of Object.keys(event)) {
-      if (key.toLowerCase() === name.toLowerCase()) {
-        const value = event[key];
-        if (value !== undefined && value !== null && value !== '' && !isNaN(Number(value))) {
-          return { key, value: Number(value) };
-        }
+/** Lower-case names of the flat nodal-plane / moment-tensor columns assembleFocalMechanismFromRow reads. */
+const FOCAL_MECHANISM_COLUMNS = new Set([
+  'strike1', 'dip1', 'rake1', 'strike2', 'dip2', 'rake2',
+  'mxx', 'mxy', 'mxz', 'myy', 'myz', 'mzz', 'taz', 'paz',
+]);
+
+/** Keys of a row that hold each split date/time component, in the order they are tried. */
+interface ComponentColumns {
+  year: string[];
+  month: string[];
+  day: string[];
+  hour: string[];
+  minute: string[];
+  second: string[];
+}
+
+/** What a row's set of keys says, worked out once per distinct set of keys. */
+interface RowShape {
+  components: ComponentColumns;
+  /** The row has year and day columns (so 'mo' is a month, 'mn' minutes, 'ms' milliseconds). */
+  hasDateParts: boolean;
+  /** The row has flat focal-mechanism columns. */
+  hasFocalMechanismColumns: boolean;
+  /** Keys that map to the canonical `time` field (time, date, origin_time ...). */
+  timeKeys: string[];
+}
+
+type AliasLookupEntry = { targetField: string; isExact: boolean };
+
+/**
+ * Facts about the column names of ONE file, each worked out once instead of once per
+ * row: the canonical field a name maps to (resolveHeaderAlias, the resolution the schema
+ * step shows), the magnitude scale it states, and the shape of a row's keys. Scoped to a
+ * parse, so a file with many distinct keys (JSON records with unique names) does not grow
+ * a process-wide cache.
+ */
+class HeaderFacts {
+  private readonly aliases = new Map<string, AliasLookupEntry | null>();
+  private readonly scales = new Map<string, string | null>();
+  private lastKeys: string[] | null = null;
+  private lastShape: RowShape | null = null;
+
+  /**
+   * @param writtenNames - lower-cased CSV header -> the header as written, so a scale
+   *   the case distinguishes ('mB', broadband body-wave) is read from the file's spelling.
+   * @param minuteColumn - a column read as minutes by its position ('mm' after 'hh').
+   */
+  constructor(
+    private readonly writtenNames?: ReadonlyMap<string, string>,
+    readonly minuteColumn?: string
+  ) {}
+
+  /** The canonical field a column or key name maps to; `isExact` for one of the field's exact spellings. */
+  lookup(name: string): AliasLookupEntry | undefined {
+    let entry = this.aliases.get(name);
+    if (entry === undefined) {
+      const targetField = resolveHeaderAlias(name);
+      entry = targetField
+        ? { targetField, isExact: FIELD_ALIASES[targetField]?.exactMatches.includes(name) ?? false }
+        : null;
+      this.aliases.set(name, entry);
+    }
+    return entry ?? undefined;
+  }
+
+  /** The magnitude scale a column name states ('mb', 'Ms'), from the name as written. */
+  scale(name: string): string | null {
+    let scale = this.scales.get(name);
+    if (scale === undefined) {
+      scale = inferMagnitudeTypeFromColumn(this.writtenNames?.get(name) ?? name);
+      this.scales.set(name, scale);
+    }
+    return scale;
+  }
+
+  /** The shape of a row with these keys (CSV rows and most JSON records repeat one set). */
+  shapeOf(keys: string[]): RowShape {
+    const last = this.lastKeys;
+    if (last && this.lastShape && last.length === keys.length && last.every((key, i) => key === keys[i])) {
+      return this.lastShape;
+    }
+    const lower = keys.map((key) => key.toLowerCase());
+    const byName = (names: string[]) => {
+      const found: string[] = [];
+      for (const name of names) {
+        lower.forEach((key, i) => { if (key === name && !found.includes(keys[i])) found.push(keys[i]); });
       }
+      return found;
+    };
+    const minute = byName(MINUTE_COMPONENT_FIELDS);
+    const month = byName(MONTH_COMPONENT_FIELDS);
+    if (this.minuteColumn !== undefined && keys.includes(this.minuteColumn)) {
+      // 'mm' right after an hour column is the minute (yyyy mm dd hh mm ss).
+      minute.unshift(this.minuteColumn);
+      const index = month.indexOf(this.minuteColumn);
+      if (index >= 0) month.splice(index, 1);
+    }
+    const shape: RowShape = {
+      components: {
+        year: byName(YEAR_COMPONENT_FIELDS),
+        month,
+        day: byName(DAY_COMPONENT_FIELDS),
+        hour: byName(HOUR_COMPONENT_FIELDS),
+        minute,
+        second: byName(SECOND_COMPONENT_FIELDS),
+      },
+      hasDateParts: lower.some((key) => YEAR_COMPONENT_FIELDS.includes(key)) &&
+        lower.some((key) => DAY_COMPONENT_FIELDS.includes(key)),
+      hasFocalMechanismColumns: lower.some((key) => FOCAL_MECHANISM_COLUMNS.has(key)),
+      timeKeys: keys.filter((key) => this.lookup(key)?.targetField === 'time'),
+    };
+    this.lastKeys = keys;
+    this.lastShape = shape;
+    return shape;
+  }
+}
+
+/**
+ * A column that sits right after an hour column and is named 'mm' is the minutes, even
+ * where 'mm' is otherwise a month ('yyyy mm dd hh mm ss'; the second 'mm' is 'mm_2' once
+ * the names are made unique).
+ */
+function positionalMinuteColumn(headers: string[]): string | undefined {
+  for (let i = 0; i + 1 < headers.length; i++) {
+    if (HOUR_COMPONENT_FIELDS.includes(headers[i].toLowerCase()) && /^mm(?:_\d+)?$/i.test(headers[i + 1])) {
+      return headers[i + 1];
+    }
+  }
+  return undefined;
+}
+
+/** File-level facts every row of one parse is read with. */
+interface RowContext {
+  facts: HeaderFacts;
+  /** Read numeric dates with a two-digit year (the file's order is declared or unambiguous). */
+  twoDigitYears: boolean;
+  /** A column whose values are times of day, found by its values (see findTimeOfDayColumn). */
+  timeOfDayColumn?: string;
+}
+
+/** The first populated numeric column among the given keys, with the key it was read from. */
+function findComponent(event: any, keys: string[]): { key: string; value: number } | null {
+  for (const key of keys) {
+    const value = event[key];
+    if (value !== undefined && value !== null && value !== '' && !isNaN(Number(value))) {
+      return { key, value: Number(value) };
     }
   }
   return null;
@@ -1512,11 +1703,11 @@ function findComponent(event: any, fieldNames: string[]): { key: string; value: 
  * The time of day in hour / minute / second columns, as seconds after midnight, or null
  * when the row has no hour column or a component is not a valid clock value.
  */
-function readTimeOfDayColumns(event: any): { seconds: number; keys: string[] } | null {
-  const hour = findComponent(event, HOUR_COMPONENT_FIELDS);
+function readTimeOfDayColumns(event: any, components: ComponentColumns): { seconds: number; keys: string[] } | null {
+  const hour = findComponent(event, components.hour);
   if (!hour) return null;
-  const minute = findComponent(event, MINUTE_COMPONENT_FIELDS);
-  const second = findComponent(event, SECOND_COMPONENT_FIELDS);
+  const minute = findComponent(event, components.minute);
+  const second = findComponent(event, components.second);
   const h = hour.value;
   const m = minute?.value ?? 0;
   const s = second?.value ?? 0;
@@ -1534,17 +1725,18 @@ function readTimeOfDayColumns(event: any): { seconds: number; keys: string[] } |
  * Synthesize a timestamp from separate date/time component columns
  * Supports common variations: year/month/day/hour/minute/second, yr/mo/dy/hr/mn/sc, etc.
  * @param event - The event object with potential date/time component fields
+ * @param components - The row's component columns (see HeaderFacts.shapeOf)
  * @returns ISO 8601 formatted timestamp and the columns it was read from, or null if
  *          components are missing
  */
-function synthesizeTimestamp(event: any): { iso: string; keys: string[] } | null {
+function synthesizeTimestamp(event: any, components: ComponentColumns): { iso: string; keys: string[] } | null {
   // Extract date/time components
-  const year = findComponent(event, YEAR_COMPONENT_FIELDS);
-  const month = findComponent(event, MONTH_COMPONENT_FIELDS);
-  const day = findComponent(event, DAY_COMPONENT_FIELDS);
-  const hour = findComponent(event, HOUR_COMPONENT_FIELDS);
-  const minute = findComponent(event, MINUTE_COMPONENT_FIELDS);
-  const second = findComponent(event, SECOND_COMPONENT_FIELDS);
+  const year = findComponent(event, components.year);
+  const month = findComponent(event, components.month);
+  const day = findComponent(event, components.day);
+  const hour = findComponent(event, components.hour);
+  const minute = findComponent(event, components.minute);
+  const second = findComponent(event, components.second);
 
   // Require at least year, month, and day to synthesize a timestamp
   if (year === null || month === null || day === null) {
@@ -1585,8 +1777,27 @@ function synthesizeTimestamp(event: any): { iso: string; keys: string[] } | null
   return { iso, keys };
 }
 
-/** A time of day on its own: 12:34, 12:34:56.7, 12:34:56Z. */
-const TIME_OF_DAY_ONLY = /^\d{1,2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:\s*(?:Z|UTC|GMT|[+-]\d{2}(?::?\d{2})?))?$/i;
+/** A time of day on its own: 12:34, 12:34:56.7, 1:05:07 PM, 12:34:56Z. */
+const TIME_OF_DAY_ONLY = /^\d{1,2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:\s*[AaPp]\.?[Mm]\.?)?(?:\s*(?:Z|UTC|GMT|[+-]\d{2}(?::?\d{2})?))?$/i;
+/** A compact time of day, HHMMSS[.f], as bulletins write it next to a YYYYMMDD date. */
+const COMPACT_TIME_OF_DAY = /^(\d{2})(\d{2})(\d{2})(?:[.,](\d+))?$/;
+
+/**
+ * A cell that is a time of day and nothing else, as text normalizeTimestamp reads after
+ * a date ('10:30:00', '1:05:07 PM'; compact '103000' as '10:30:00'), or null.
+ */
+function timeOfDayText(cell: unknown): string | null {
+  const text = typeof cell === 'number' && Number.isInteger(cell) && cell >= 0 && cell < 240000
+    ? String(cell).padStart(6, '0')
+    : typeof cell === 'string' ? cell.trim() : null;
+  if (text === null || text.length > 32) return null;
+  if (TIME_OF_DAY_ONLY.test(text)) return text;
+  const m = text.match(COMPACT_TIME_OF_DAY);
+  if (m && Number(m[1]) <= 23 && Number(m[2]) <= 59 && Number(m[3]) <= 60) {
+    return `${m[1]}:${m[2]}:${m[3]}${m[4] ? `.${m[4]}` : ''}`;
+  }
+  return null;
+}
 
 /** A calendar date on its own, in the shapes normalizeTimestamp reads. */
 const DATE_ONLY_SHAPES = [
@@ -1597,10 +1808,38 @@ const DATE_ONLY_SHAPES = [
   /^(?:[A-Za-z]{3,9}\.?,?\s+)?[A-Za-z]{3,9}\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}$/,
 ];
 
-const isDateOnly = (value: string): boolean => DATE_ONLY_SHAPES.some((shape) => shape.test(value));
+const isDateOnly = (value: string): boolean => value.length <= 40 && DATE_ONLY_SHAPES.some((shape) => shape.test(value));
+
+/** A JSON date written as the number YYYYMMDD (20240115). */
+const isDateNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 18000101 && value <= 21001231;
 
 function dateFormatHint(dateFormat?: DateFormat): 'US' | 'International' | undefined {
   return dateFormat === 'US' ? 'US' : dateFormat === 'International' ? 'International' : undefined;
+}
+
+/**
+ * The column holding the time of day when the file's time column is a date only: a
+ * column the alias table maps to no field, whose sampled values are all times of day
+ * (HH:MM[:SS[.f]] with or without AM/PM, or compact HHMMSS), preferring a name that says
+ * time ('hhmmss', 'origin_hms'). Found by its values, as its name need not be an alias.
+ */
+function findTimeOfDayColumn(
+  keys: string[],
+  facts: HeaderFacts,
+  sample: (key: string) => unknown[]
+): string | undefined {
+  const shape = facts.shapeOf(keys);
+  const componentKeys = new Set(Object.values(shape.components).flat());
+  let fallback: string | undefined;
+  for (const key of keys) {
+    if (facts.lookup(key) !== undefined || componentKeys.has(key)) continue;
+    const values = sample(key).filter((value) => value !== undefined && value !== null && String(value).trim() !== '');
+    if (values.length === 0 || !values.every((value) => timeOfDayText(value) !== null)) continue;
+    if (/time|hms|clock/i.test(key)) return key;
+    fallback ??= key;
+  }
+  return fallback;
 }
 
 /**
@@ -1609,70 +1848,56 @@ function dateFormatHint(dateFormat?: DateFormat): 'US' | 'International' | undef
  * field shadowed the other: a bare time of day was rejected on every row, and a date
  * with hour/minute/second columns was stored at midnight. When the value that claimed
  * `time` is only a date or only a time of day, complete it from the row's other
- * time-like column, or from its hour/minute/second columns.
+ * time-like column, its hour/minute/second columns, or the file's time-of-day column.
  */
 function combineDateAndTimeOfDay(
   event: any,
   current: unknown,
-  dateFormat?: DateFormat
+  dateFormat: DateFormat | undefined,
+  shape: RowShape,
+  context: RowContext
 ): { value: string; sources: string[] } | null {
-  if (typeof current !== 'string') return null;
-  const resolved = current.trim();
-  const currentIsTime = TIME_OF_DAY_ONLY.test(resolved);
+  const resolved = isDateNumber(current) ? String(current) : typeof current === 'string' ? current.trim() : null;
+  if (resolved === null) return null;
+  const clockText = timeOfDayText(resolved);
+  const currentIsTime = clockText !== null && !isDateNumber(current);
   const currentIsDate = !currentIsTime && isDateOnly(resolved);
   if (!currentIsTime && !currentIsDate) return null;
 
-  const timeKeys = timeSourceKeys(Object.keys(event));
-  const currentKey = timeKeys.find((key) => typeof event[key] === 'string' && event[key].trim() === resolved) ?? 'time';
-  for (const key of timeKeys) {
-    if (key === currentKey || typeof event[key] !== 'string') continue;
-    const other = event[key].trim();
-    if (currentIsTime && isDateOnly(other)) return { value: `${other} ${resolved}`, sources: [key, currentKey] };
-    if (currentIsDate && TIME_OF_DAY_ONLY.test(other)) return { value: `${resolved} ${other}`, sources: [currentKey, key] };
+  const currentKey = shape.timeKeys.find((key) => {
+    const cell = event[key];
+    return (typeof cell === 'string' ? cell.trim() : isDateNumber(cell) ? String(cell) : null) === resolved;
+  }) ?? 'time';
+  for (const key of shape.timeKeys) {
+    if (key === currentKey) continue;
+    const cell = event[key];
+    const other = isDateNumber(cell) ? String(cell) : typeof cell === 'string' ? cell.trim() : null;
+    if (other === null) continue;
+    if (currentIsTime && isDateOnly(other)) return { value: `${other} ${clockText}`, sources: [key, currentKey] };
+    const otherClock = currentIsDate ? timeOfDayText(other) : null;
+    if (otherClock !== null) return { value: `${resolved} ${otherClock}`, sources: [currentKey, key] };
   }
 
   if (currentIsDate) {
-    const clock = readTimeOfDayColumns(event);
+    const clock = readTimeOfDayColumns(event, shape.components);
     if (clock) {
-      const midnight = normalizeTimestamp(resolved, dateFormatHint(dateFormat));
+      const midnight = normalizeTimestamp(resolved, dateFormatHint(dateFormat), { twoDigitYears: context.twoDigitYears });
       if (!midnight) return null;
       // The seconds are added as a duration, so 59.9999 s carries into the next minute.
       const iso = new Date(Date.parse(midnight) + Math.round(clock.seconds * 1000)).toISOString();
       return { value: iso, sources: [currentKey, ...clock.keys] };
     }
+    const column = context.timeOfDayColumn;
+    const text = column === undefined ? null : timeOfDayText(event[column]);
+    if (text !== null) return { value: `${resolved} ${text}`, sources: [currentKey, column!] };
   } else {
     // A time of day beside year/month/day columns.
-    const date = synthesizeTimestamp(event);
+    const date = synthesizeTimestamp(event, shape.components);
     if (date && date.keys.length === 3) {
-      return { value: `${date.iso.slice(0, 10)} ${resolved}`, sources: [...date.keys, currentKey] };
+      return { value: `${date.iso.slice(0, 10)} ${clockText}`, sources: [...date.keys, currentKey] };
     }
   }
   return null;
-}
-
-type AliasLookupEntry = { targetField: string; isExact: boolean };
-
-const resolvedHeaderCache = new Map<string, AliasLookupEntry | null>();
-
-/**
- * The canonical field a column or key name maps to: resolveHeaderAlias
- * (lib/field-definitions.ts), the resolution the schema step shows, so the parser and
- * the upload detector cannot drift. The exact spelling is tried first, then lower case
- * (the resolution every existing header keeps), then the name under normalizeFieldName
- * ('Origin Time', 'Horizontal Error'); a bracketed unit ('Depth (km)', 'Horizontal
- * Error (m)') is set aside only when the field is stored in or converted from that unit.
- * The name itself still carries the unit for the unit decisions (inferDepthUnit,
- * uncertaintyDivisors). `isExact` marks a name that is one of the field's exact spellings.
- */
-function lookupAlias(name: string): AliasLookupEntry | undefined {
-  const cached = resolvedHeaderCache.get(name);
-  if (cached !== undefined) return cached ?? undefined;
-  const targetField = resolveHeaderAlias(name);
-  const entry = targetField
-    ? { targetField, isExact: FIELD_ALIASES[targetField]?.exactMatches.includes(name) ?? false }
-    : null;
-  resolvedHeaderCache.set(name, entry);
-  return entry ?? undefined;
 }
 
 /**
@@ -1702,54 +1927,34 @@ const DEPTH_UNIT_KM: DepthUnitDecision = { divisor: 1, unit: 'km', reason: 'no e
  * Mirrors mapCommonFields' first-wins resolution so the unit decided here is the unit
  * of the column that actually ends up in the event.
  */
-function findSourceKeyForTarget(keys: string[], targetField: string): string | null {
+function findSourceKeyForTarget(keys: string[], targetField: string, facts: HeaderFacts): string | null {
   for (const key of keys) {
-    if (lookupAlias(key)?.targetField === targetField) return key;
+    if (facts.lookup(key)?.targetField === targetField) return key;
   }
   return null;
 }
 
 /** Every key that maps to the canonical `time` field (time, date, origin_time ...). */
-function timeSourceKeys(keys: string[]): string[] {
-  return keys.filter((key) => lookupAlias(key)?.targetField === 'time');
+function timeSourceKeys(keys: string[], facts: HeaderFacts): string[] {
+  return keys.filter((key) => facts.lookup(key)?.targetField === 'time');
 }
 
-/**
- * Decide the day/month order ONCE for the whole file, from every non-empty cell of its
- * time columns: the order is a property of the file, and one day > 12 anywhere settles
- * it for every row. Detection used to see only the first 50 cells, so a time-sorted US
- * catalogue whose sequence reached day 13 after row 50 was split between two calendars.
- */
-function decideFileDateFormat(
-  cells: unknown[],
-  declared: DateFormat | undefined,
+/** Apply the file's date decision: its warnings go to the file, the rest is returned. */
+function applyDateDecision(
+  decision: FileDateFormatDecision,
   warnings: Array<{ line: number; message: string }>
-): Pick<ParseFileDecisions, 'dateFormat' | 'dateFormatSource'> {
-  if (declared && declared !== 'Unknown') return { dateFormat: declared, dateFormatSource: 'declared' };
-  const dateStrings = cells.filter((cell): cell is string => typeof cell === 'string' && cell.trim().length > 0);
-  if (dateStrings.length === 0) return {};
-
-  const detection = detectDateFormat(dateStrings, dateStrings.length);
-  if (detection.confidence < 0.5) {
-    // Only a file with dates that depend on the order needs to hear about it.
-    if (detection.ambiguousCount > 0) {
-      warnings.push({
-        line: 0,
-        message: `Low confidence date format detection (${Math.round(detection.confidence * 100)}%). ${detection.reasoning}`
-      });
-    }
-  } else if (detection.format !== 'ISO' && detection.format !== 'Unknown') {
-    warnings.push({
-      line: 0,
-      message: `Detected ${detection.format} date format. ${detection.reasoning}`
-    });
-  }
-  return { dateFormat: detection.format, dateFormatSource: 'detected' };
+): Pick<ParseFileDecisions, 'dateFormat' | 'dateFormatSource' | 'twoDigitYears'> {
+  for (const message of decision.warnings) warnings.push({ line: 0, message });
+  return {
+    ...(decision.dateFormat !== undefined ? { dateFormat: decision.dateFormat } : {}),
+    ...(decision.dateFormatSource !== undefined ? { dateFormatSource: decision.dateFormatSource } : {}),
+    ...(decision.twoDigitYears ? { twoDigitYears: true } : {}),
+  };
 }
 
 /** fileDecisions for a CSV or JSON file (contract C14). */
 function tabularFileDecisions(
-  dateDecision: Pick<ParseFileDecisions, 'dateFormat' | 'dateFormatSource'>,
+  dateDecision: Pick<ParseFileDecisions, 'dateFormat' | 'dateFormatSource' | 'twoDigitYears'>,
   depthUnit: DepthUnitDecision,
   adjustments: RowAdjustmentCounts,
   momentTensorScale: MomentTensorScale | null
@@ -1761,6 +1966,7 @@ function tabularFileDecisions(
     wrappedLongitudes: adjustments.wrappedLongitudes,
     outOfRangeDepths: adjustments.outOfRangeDepths,
     sentinelValues: adjustments.sentinelValues,
+    ...(adjustments.dateOnlyTimes > 0 ? { dateOnlyTimes: adjustments.dateOnlyTimes } : {}),
     ...(momentTensorScale
       ? { momentTensorUnits: momentTensorScale === MOMENT_TENSOR_SCALE_CGS ? 'dyne-cm' as const : 'N-m' as const }
       : {}),
@@ -1794,6 +2000,22 @@ function inferDepthUnit(sourceColumn: string | null, values: number[]): DepthUni
   return DEPTH_UNIT_KM;
 }
 
+/** A "not determined" depth: -9, -99, -999 ... (-99.9 ...), never a depth. */
+const isDepthSentinel = (value: number): boolean => value <= -9 && /^-9+(?:\.9+)?$/.test(String(value));
+
+/**
+ * Whether a depth column looks like the negative-downward (elevation) convention: most of
+ * its values are negative, some deeper than the -5 km an above-sea-level event can reach.
+ * The whole column decides, without sentinels, so one -999 among positive depths is not
+ * taken for a convention.
+ */
+function looksNegativeDownward(values: number[], depthUnit: DepthUnitDecision): boolean {
+  const depths = values.filter((value) => Number.isFinite(value) && !isDepthSentinel(value));
+  if (depths.length === 0) return false;
+  const negative = depths.filter((value) => value < 0).length;
+  return negative > depths.length / 2 && depths.some((value) => value / depthUnit.divisor < -5);
+}
+
 /** What happened to one event's depth when the file's unit was applied. */
 type DepthOutcome =
   | { status: 'absent' | 'ok' }
@@ -1813,10 +2035,10 @@ const LENGTH_UNCERTAINTY_FIELDS = ['depth_uncertainty', 'horizontal_uncertainty'
  * own name states ('Horizontal Error (m)', 'Depth Error (km)') wins, as it does for the
  * depth column and in normalizeMappedValue; otherwise the depth column's unit applies.
  */
-function uncertaintyDivisors(keys: string[], depthUnit: DepthUnitDecision): Record<string, number> {
+function uncertaintyDivisors(keys: string[], depthUnit: DepthUnitDecision, facts: HeaderFacts): Record<string, number> {
   const divisors: Record<string, number> = {};
   for (const field of LENGTH_UNCERTAINTY_FIELDS) {
-    const named = lengthUnitFromColumnName(findSourceKeyForTarget(keys, field));
+    const named = lengthUnitFromColumnName(findSourceKeyForTarget(keys, field, facts));
     divisors[field] = named === 'm' ? 1000 : named === 'km' ? 1 : depthUnit.divisor;
   }
   return divisors;
@@ -1858,6 +2080,32 @@ function normalizeOptionalDepth(
 }
 
 /**
+ * Keep, in `_raw`, the cells whose value the event no longer holds as written: a column
+ * named like a canonical field that now holds a converted value (metres to km, a 0-360
+ * longitude, a sentinel read as missing) or a value from another column (`magnitude`
+ * beside `mw`, a date completed with its time of day). The upload schema step re-reads
+ * such a cell for an explicit remap (app/api/catalogues/route.ts rawCell). A cell the
+ * event still holds as written (the number a numeric string spells; a time read from its
+ * own cell) is not copied: `_raw` on every row grew pending uploads by two thirds. `_raw`
+ * never reaches a stored event: parsedEventToDbFields and the QuakeML mapping read named
+ * fields only.
+ */
+function attachRewrittenCells(raw: Record<string, unknown>, mapped: Record<string, unknown>, timeFromOwnCell: boolean): void {
+  let rewritten: Record<string, unknown> | null = null;
+  for (const key of Object.keys(raw)) {
+    const cell = raw[key];
+    const stored = mapped[key];
+    if (stored === cell) continue;
+    if (typeof stored === 'number' && parseStrictNumber(cell) === stored) continue;
+    if ((stored === null || stored === undefined) &&
+        (cell === null || cell === undefined || (typeof cell === 'string' && cell.trim() === ''))) continue;
+    if (key === 'time' && timeFromOwnCell && typeof stored === 'string') continue;
+    (rewritten ??= {})[key] = cell;
+  }
+  if (rewritten) mapped._raw = rewritten;
+}
+
+/**
  * The order in which other scale-named columns stand in for the event magnitude when a
  * row has no Mw, generic or ML magnitude: the moment-magnitude variants first (the same
  * size measure as Mw: W-phase, centroid, body-wave, regional, P-wave), then the
@@ -1877,25 +2125,24 @@ function lastResortMagnitudeRank(type: string): number {
 
 /**
  * Scale-named magnitude columns of a row other than those already read as the Mw, ML or
- * generic magnitude, with the scale their name states (inferMagnitudeTypeFromColumn) and a
- * numeric value, in column order. A column the alias table gives to another field is that
- * field, and in a row with split date columns 'mn' and 'ms' are minutes and milliseconds,
- * not the Nuttli (MN) or surface-wave (Ms) magnitudes.
+ * generic magnitude, with the scale their name states (inferMagnitudeTypeFromColumn, from
+ * the name as written) and a numeric value, in column order. A column the alias table
+ * gives to another field is that field, and in a row with split date columns 'mn' and 'ms'
+ * are minutes and milliseconds, not the Nuttli (MN) or surface-wave (Ms) magnitudes.
  */
 function otherMagnitudeScaleColumns(
   event: any,
-  consumedKeys: Array<string | undefined>
+  keys: string[],
+  consumedKeys: Array<string | undefined>,
+  shape: RowShape,
+  facts: HeaderFacts
 ): Array<{ value: number; type: string; source: string }> {
-  const keys = Object.keys(event);
-  const hasDateParts = keys.some((k) => YEAR_COMPONENT_FIELDS.includes(k.toLowerCase())) &&
-    keys.some((k) => DAY_COMPONENT_FIELDS.includes(k.toLowerCase()));
   const out: Array<{ value: number; type: string; source: string }> = [];
   for (const key of keys) {
-    if (consumedKeys.includes(key)) continue;
-    if (hasDateParts && ['mn', 'ms'].includes(key.toLowerCase())) continue;
-    const type = inferMagnitudeTypeFromColumn(key);
-    if (!type) continue;
-    const mappedTo = lookupAlias(key)?.targetField;
+    const type = facts.scale(key);
+    if (!type || consumedKeys.includes(key)) continue;
+    if (shape.hasDateParts && (key.toLowerCase() === 'mn' || key.toLowerCase() === 'ms')) continue;
+    const mappedTo = facts.lookup(key)?.targetField;
     if (mappedTo !== undefined && mappedTo !== 'magnitude') continue;
     const value = safeParseFloat(event[key]);
     if (value !== null) out.push({ value, type, source: key });
@@ -1913,6 +2160,42 @@ export interface MappingReportEntry {
 }
 
 /**
+ * Record how a field was mapped. One entry per target: a later decision (the magnitude
+ * scale column, a combined date and time) replaces the first-pass entry, so the report
+ * names the column the stored value actually came from.
+ */
+function reportMapping(report: MappingReportEntry[] | null, entry: MappingReportEntry): void {
+  if (!report) return;
+  const existing = report.findIndex((e) => e.targetField === entry.targetField);
+  if (existing >= 0) report[existing] = entry;
+  else report.push(entry);
+}
+
+/** The first of the keys whose cell holds a value. */
+function firstPopulated(event: any, keys: string[]): { key: string; value: unknown } | undefined {
+  for (const key of keys) {
+    const value = event[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') return { key, value };
+  }
+  return undefined;
+}
+
+/** Other magnitudes than the selected one, without repeats of it. */
+function magnitudeAlternatives(
+  selected: { value: number; type: string },
+  others: Array<{ value: number; type: string }>
+): Array<{ type: string; mag: { value: number } }> {
+  return others
+    .filter((c) => !(c.value === selected.value && c.type.toLowerCase() === selected.type.toLowerCase()))
+    .filter((c) => c.type !== 'unknown' || c.value !== selected.value)
+    .map((c) => ({ type: c.type, mag: { value: c.value } }));
+}
+
+const GENERIC_MAGNITUDE_KEYS = ['magnitude', 'Magnitude', 'MAGNITUDE', 'Mag', 'MAG', 'mag', 'm', 'M', 'mpref', 'prefmag', 'pref_magnitude'];
+const MW_MAGNITUDE_KEYS = ['Mw', 'MW', 'mw'];
+const ML_MAGNITUDE_KEYS = ['ML', 'ml'];
+
+/**
  * Map common field name variations to standard names using FIELD_ALIASES
  * This is the single source of truth for field mappings, shared with the UI
  * @param event - The event object to map
@@ -1921,25 +2204,21 @@ export interface MappingReportEntry {
  * @param momentTensorScale - Optional file-level moment-tensor unit decision
  *                            (see inferMomentTensorScaleForFile)
  * @param adjustments - Optional per-file counts of wrapped longitudes and sentinels
+ * @param context - The file's header facts and date decisions (one per parse)
  */
 function mapCommonFields(
   event: any,
   dateFormat?: DateFormat,
   includeMappingReport: boolean = false,
   momentTensorScale?: MomentTensorScale,
-  adjustments?: RowAdjustmentCounts
+  adjustments?: RowAdjustmentCounts,
+  context: RowContext = { facts: new HeaderFacts(), twoDigitYears: false }
 ): ParsedEvent {
+  const { facts } = context;
   const mapped: any = { ...event };
-  const mappingReport: MappingReportEntry[] = [];
-  // One entry per target: a later decision (the magnitude scale column, a combined
-  // date and time) replaces the first-pass entry, so the report names the column the
-  // stored value actually came from.
-  const report = (entry: MappingReportEntry) => {
-    if (!includeMappingReport) return;
-    const existing = mappingReport.findIndex((e) => e.targetField === entry.targetField);
-    if (existing >= 0) mappingReport[existing] = entry;
-    else mappingReport.push(entry);
-  };
+  const report: MappingReportEntry[] | null = includeMappingReport ? [] : null;
+  const keys = Object.keys(event);
+  const shape = facts.shapeOf(keys);
 
   // Track which target fields have been set
   const setTargetFields = new Set<string>();
@@ -1947,9 +2226,10 @@ function mapCommonFields(
   let firstPassMagnitudeKey: string | undefined;
 
   // First pass: check for exact matches and aliases using pre-computed lookup
-  for (const [sourceKey, value] of Object.entries(event)) {
-    // Exact spelling first, then lower case, then the normalised name (see lookupAlias)
-    const lookup = lookupAlias(sourceKey);
+  for (const sourceKey of keys) {
+    const value = event[sourceKey];
+    // Exact spelling first, then lower case, then the normalised name (see HeaderFacts)
+    const lookup = facts.lookup(sourceKey);
     if (!lookup) continue;
     const { targetField, isExact } = lookup;
     const numeric = NUMERIC_EVENT_FIELDS.has(targetField);
@@ -1980,7 +2260,7 @@ function mapCommonFields(
       setTargetFields.add(targetField);
       if (targetField === 'magnitude' && numValue !== null) firstPassMagnitudeKey = sourceKey;
       if (hasValue) {
-        report({ targetField, sourceField: sourceKey, matchType: isExact ? 'exact' : 'alias' });
+        reportMapping(report, { targetField, sourceField: sourceKey, matchType: isExact ? 'exact' : 'alias' });
       }
       continue;
     }
@@ -1990,7 +2270,7 @@ function mapCommonFields(
     const existingValue = mapped[targetField];
     if (existingValue !== undefined && existingValue !== null && existingValue !== '') {
       setTargetFields.add(targetField);
-      report({ targetField, sourceField: targetField, matchType: 'exact' });
+      reportMapping(report, { targetField, sourceField: targetField, matchType: 'exact' });
       continue;
     }
 
@@ -1998,25 +2278,30 @@ function mapCommonFields(
     if (value !== undefined && value !== null && value !== '') {
       mapped[targetField] = value;
       setTargetFields.add(targetField);
-      report({ targetField, sourceField: sourceKey, matchType: isExact ? 'exact' : 'alias' });
+      reportMapping(report, { targetField, sourceField: sourceKey, matchType: isExact ? 'exact' : 'alias' });
     }
   }
 
   // A date column and a time-of-day column (or hour/minute/second columns) together
   // make the origin time.
-  const combined = combineDateAndTimeOfDay(event, mapped.time, dateFormat);
+  const combined = combineDateAndTimeOfDay(event, mapped.time, dateFormat, shape, context);
   if (combined) {
     mapped.time = combined.value;
-    report({ targetField: 'time', sourceField: combined.sources.join('+'), matchType: 'synthesized' });
+    reportMapping(report, { targetField: 'time', sourceField: combined.sources.join('+'), matchType: 'synthesized' });
   }
 
   // Special handling for 'time' field - synthesize from split date/time columns if needed
   if (!mapped.time) {
-    const synthesized = synthesizeTimestamp(event);
+    const synthesized = synthesizeTimestamp(event, shape.components);
     if (synthesized) {
       mapped.time = synthesized.iso;
-      report({ targetField: 'time', sourceField: synthesized.keys.join('+'), matchType: 'synthesized' });
+      reportMapping(report, { targetField: 'time', sourceField: synthesized.keys.join('+'), matchType: 'synthesized' });
     }
+  }
+
+  // A date with no time of day is stored at midnight UTC; the file is told how many.
+  if (adjustments && (isDateNumber(mapped.time) || (typeof mapped.time === 'string' && isDateOnly(mapped.time.trim())))) {
+    adjustments.dateOnlyTimes += 1;
   }
 
   // Normalize timestamp to ISO 8601 UTC. normalizeTimestamp resolves an ambiguous
@@ -2024,7 +2309,7 @@ function mapCommonFields(
   // seconds or a zone designator, two- or four-digit years), and reads a zone-less time
   // as UTC, never in the server's local time.
   if (mapped.time) {
-    const normalized = normalizeTimestamp(mapped.time, dateFormatHint(dateFormat));
+    const normalized = normalizeTimestamp(mapped.time, dateFormatHint(dateFormat), { twoDigitYears: context.twoDigitYears });
     if (normalized) {
       mapped.time = normalized;
     }
@@ -2037,34 +2322,19 @@ function mapCommonFields(
   // an Ms-only or mb-only bulletin imports with its own scale. Every other value present
   // is kept as an alternative in `magnitudes`, so nothing the file reported is discarded.
   {
-    const pickRaw = (keys: string[]): { key: string; value: unknown } | undefined => {
-      for (const k of keys) {
-        const v = event[k];
-        if (v !== undefined && v !== null && String(v).trim() !== '') return { key: k, value: v };
-      }
-      return undefined;
-    };
-    const genericKeys = ['magnitude', 'Magnitude', 'MAGNITUDE', 'Mag', 'MAG', 'mag', 'm', 'M', 'mpref', 'prefmag', 'pref_magnitude'];
-    const mwRaw = pickRaw(['Mw', 'MW', 'mw']);
-    const mlRaw = pickRaw(['ML', 'ml']);
-    const genericRaw = pickRaw(genericKeys);
+    const mwRaw = firstPopulated(event, MW_MAGNITUDE_KEYS);
+    const mlRaw = firstPopulated(event, ML_MAGNITUDE_KEYS);
+    const genericRaw = firstPopulated(event, GENERIC_MAGNITUDE_KEYS);
     const mw = mwRaw === undefined ? null : safeParseFloat(mwRaw.value);
     const ml = mlRaw === undefined ? null : safeParseFloat(mlRaw.value);
     const generic = genericRaw === undefined ? null : safeParseFloat(genericRaw.value);
     const explicitType = typeof mapped.magnitude_type === 'string' && mapped.magnitude_type.trim() !== ''
       ? String(mapped.magnitude_type).trim()
       : null;
-    const alternativesOf = (
-      selected: { value: number; type: string },
-      others: Array<{ value: number; type: string }>
-    ) => others
-      .filter((c) => !(c.value === selected.value && c.type.toLowerCase() === selected.type.toLowerCase()))
-      .filter((c) => c.type !== 'unknown' || c.value !== selected.value)
-      .map((c) => ({ type: c.type, mag: { value: c.value } }));
 
     // Every other scale-named column (mb, mB, Ms, Md, Mwp, MLv ...) is a further
     // measurement of the same event, typed by its column name.
-    const otherScales = otherMagnitudeScaleColumns(event, [mwRaw?.key, mlRaw?.key, genericRaw?.key]);
+    const otherScales = otherMagnitudeScaleColumns(event, keys, [mwRaw?.key, mlRaw?.key, genericRaw?.key], shape, facts);
 
     if (mw !== null || ml !== null) {
       const candidates: Array<{ value: number; type: string; source: string }> = [];
@@ -2073,26 +2343,27 @@ function mapCommonFields(
       if (ml !== null) candidates.push({ value: ml, type: 'ML', source: mlRaw!.key });
       candidates.push(...otherScales);
       const selected = candidates[0];
-      const alternatives = alternativesOf(selected, candidates.slice(1));
+      const alternatives = magnitudeAlternatives(selected, candidates.slice(1));
       mapped.magnitude = selected.value;
       mapped.magnitude_type = selected.type === 'unknown' ? (explicitType ?? undefined) : selected.type;
       if (mapped.magnitude_type === undefined) delete mapped.magnitude_type;
       if (alternatives.length > 0 && !mapped.magnitudes) mapped.magnitudes = JSON.stringify(alternatives);
-      report({ targetField: 'magnitude', sourceField: selected.source, matchType: 'exact' });
-      if (selected.type !== 'unknown') {
-        // The scale is the column's name, not a cell.
-        report({ targetField: 'magnitude_type', sourceField: selected.source, matchType: 'synthesized' });
+      reportMapping(report, { targetField: 'magnitude', sourceField: selected.source, matchType: 'exact' });
+      if (selected.type !== 'unknown' && selected.source !== genericRaw?.key) {
+        // The scale is the column's name, not a cell. A generic magnitude's type came from
+        // the type column, whose first-pass entry stays the reported source.
+        reportMapping(report, { targetField: 'magnitude_type', sourceField: selected.source, matchType: 'synthesized' });
       }
     } else if (typeof mapped.magnitude === 'number') {
       // The generic magnitude the alias pass found stays the event magnitude. A column
       // that reached it by a normalised name and states a scale ('m_l') gives its type.
-      const scale = firstPassMagnitudeKey === undefined ? null : inferMagnitudeTypeFromColumn(firstPassMagnitudeKey);
+      const scale = firstPassMagnitudeKey === undefined ? null : facts.scale(firstPassMagnitudeKey);
       if (scale && !explicitType) {
         mapped.magnitude_type = scale;
-        report({ targetField: 'magnitude_type', sourceField: firstPassMagnitudeKey!, matchType: 'synthesized' });
+        reportMapping(report, { targetField: 'magnitude_type', sourceField: firstPassMagnitudeKey!, matchType: 'synthesized' });
       }
       const selected = { value: mapped.magnitude, type: String(mapped.magnitude_type ?? 'unknown') };
-      const alternatives = alternativesOf(selected, otherScales.filter((c) => c.source !== firstPassMagnitudeKey));
+      const alternatives = magnitudeAlternatives(selected, otherScales.filter((c) => c.source !== firstPassMagnitudeKey));
       if (alternatives.length > 0 && !mapped.magnitudes) mapped.magnitudes = JSON.stringify(alternatives);
     } else if (otherScales.length > 0) {
       // No Mw, generic or ML magnitude: the best-ranked other scale stands in, typed by
@@ -2102,30 +2373,54 @@ function mapCommonFields(
         .sort((a, b) => lastResortMagnitudeRank(a.column.type) - lastResortMagnitudeRank(b.column.type) || a.index - b.index)
         .map(({ column }) => column);
       const selected = ranked[0];
-      const alternatives = alternativesOf(selected, otherScales.filter((c) => c !== selected));
+      const alternatives = magnitudeAlternatives(selected, otherScales.filter((c) => c !== selected));
       mapped.magnitude = selected.value;
       mapped.magnitude_type = selected.type;
       if (alternatives.length > 0 && !mapped.magnitudes) mapped.magnitudes = JSON.stringify(alternatives);
-      report({ targetField: 'magnitude', sourceField: selected.source, matchType: 'exact' });
-      report({ targetField: 'magnitude_type', sourceField: selected.source, matchType: 'synthesized' });
+      reportMapping(report, { targetField: 'magnitude', sourceField: selected.source, matchType: 'exact' });
+      reportMapping(report, { targetField: 'magnitude_type', sourceField: selected.source, matchType: 'synthesized' });
     }
   }
 
   // Assemble focal mechanism from flat nodal-plane / moment-tensor columns if present
-  if (!mapped.focal_mechanisms) {
+  if (!mapped.focal_mechanisms && shape.hasFocalMechanismColumns) {
     const fm = assembleFocalMechanismFromRow(event, momentTensorScale);
     if (fm) {
       mapped.focal_mechanisms = JSON.stringify([fm]);
-      report({ targetField: 'focal_mechanisms', sourceField: 'strike1/dip1/rake1/Mxx/...', matchType: 'synthesized' });
+      reportMapping(report, { targetField: 'focal_mechanisms', sourceField: 'strike1/dip1/rake1/Mxx/...', matchType: 'synthesized' });
     }
   }
 
   // Attach mapping report if requested
-  if (includeMappingReport && mappingReport.length > 0) {
-    mapped._mappingReport = mappingReport;
+  if (report && report.length > 0) {
+    mapped._mappingReport = report;
   }
 
   return mapped as ParsedEvent;
+}
+
+/**
+ * Map one row, apply the file's depth unit, and keep the cells the event no longer holds
+ * as written (attachRewrittenCells): the per-row steps every tabular parser shares.
+ */
+function mapTabularRow(
+  row: Record<string, unknown>,
+  dateFormat: DateFormat | undefined,
+  includeMappingReport: boolean,
+  momentTensorScale: MomentTensorScale | undefined,
+  adjustments: RowAdjustmentCounts | undefined,
+  context: RowContext,
+  depthUnit: DepthUnitDecision,
+  lengthDivisors: Record<string, number> | undefined
+): { mappedEvent: ParsedEvent; depthOutcome: DepthOutcome } {
+  const mappedEvent = mapCommonFields(row, dateFormat, includeMappingReport, momentTensorScale, adjustments, context);
+  const depthOutcome = normalizeOptionalDepth(mappedEvent as Record<string, unknown>, depthUnit, lengthDivisors);
+  const report = (mappedEvent as any)._mappingReport as FieldMappingTrace[] | undefined;
+  const timeFromOwnCell = report
+    ? report.some((entry) => entry.targetField === 'time' && entry.sourceField === 'time')
+    : typeof row.time === 'string' && normalizeTimestamp(row.time, dateFormatHint(dateFormat), { twoDigitYears: context.twoDigitYears }) === mappedEvent.time;
+  attachRewrittenCells(row, mappedEvent as Record<string, unknown>, timeFromOwnCell);
+  return { mappedEvent, depthOutcome };
 }
 
 /**
@@ -2147,7 +2442,7 @@ export function parseFile(content: string, filename: string, delimiter?: Delimit
       return parseJSON(content, dateFormat);
     case 'geojson':
       debugLog(`[Parser] Parsing ${filename} as GeoJSON based on extension`);
-      return parseGeoJSON(content);
+      return parseGeoJSON(content, dateFormat);
     case 'xml':
     case 'qml':
     case 'quakeml':
@@ -2201,6 +2496,11 @@ export async function parseCSVStream(
   // unconverted metres file fails validateEvent() loudly instead of being half-converted.
   let depthUnit: DepthUnitDecision = DEPTH_UNIT_KM;
   let lengthDivisors: Record<string, number> | undefined;
+  // A declared day/month order also settles two-digit years; a stream detects none.
+  let rowContext: RowContext = {
+    facts: new HeaderFacts(),
+    twoDigitYears: dateFormat === 'US' || dateFormat === 'International',
+  };
 
   const fileStream = createReadStream(filePath, { encoding: 'utf-8' });
   const rl = createInterface({
@@ -2214,10 +2514,10 @@ export async function parseCSVStream(
   let pendingStartLine = 0;
   let pendingLines = 0;
   const MAX_RECORD_LINES = 200;
-  // Leading '#' comment lines are skipped; the last one is the header when the first
-  // line after them is data (see parseWithDelimiter).
+  // Leading '#' comment lines are skipped; one that names the columns is the header when
+  // the first line after them is data (see parseWithDelimiter / chooseCommentHeader).
   let headerParsed = false;
-  let lastLeadingComment: string | null = null;
+  const leadingComments: string[] = [];
 
   for await (const physicalLine of rl) {
     lineNumber++;
@@ -2226,7 +2526,7 @@ export async function parseCSVStream(
       continue; // Skip empty lines
     }
     if (!headerParsed && !pendingRecord && isCommentLine(physicalLine)) {
-      lastLeadingComment = physicalLine;
+      leadingComments.push(physicalLine);
       continue;
     }
 
@@ -2266,8 +2566,6 @@ export async function parseCSVStream(
         }
       }
 
-      const toHeaders = (cells: string[]) =>
-        cells.map((h, index) => (index === 0 ? stripHeaderCommentMarker(h) : h).trim().toLowerCase());
       let cells: string[] = [];
       try {
         cells = parseLine(line, actualDelimiter);
@@ -2277,14 +2575,19 @@ export async function parseCSVStream(
           message: `Parse error: ${error instanceof Error ? error.message : String(error)}`
         });
       }
-      const commentHeader = lastLeadingComment === null
-        ? null
-        : parseLine(stripHeaderCommentMarker(lastLeadingComment), actualDelimiter, { strictQuotes: false });
-      const headerIsComment = commentHeader !== null && isHeaderLikeRecord(commentHeader) && !isHeaderLikeRecord(cells);
-      headers = toHeaders(headerIsComment ? commentHeader! : cells);
+      const commentHeader = leadingComments.length > 0 && !isHeaderLikeRecord(cells)
+        ? chooseCommentHeader(leadingComments, actualDelimiter, cells.length)
+        : null;
+      const headerIsComment = commentHeader !== null;
+      const written = (commentHeader ?? cells).map((h, index) => (index === 0 ? stripHeaderCommentMarker(h) : h).trim());
+      headers = uniqueHeaderNames(written.map((h) => h.toLowerCase()));
       detectedFields = [...headers];
-      depthUnit = inferDepthUnit(findSourceKeyForTarget(headers, 'depth'), []);
-      lengthDivisors = uncertaintyDivisors(headers, depthUnit);
+      rowContext = {
+        facts: new HeaderFacts(new Map(headers.map((h, i) => [h, written[i]])), positionalMinuteColumn(headers)),
+        twoDigitYears: rowContext.twoDigitYears,
+      };
+      depthUnit = inferDepthUnit(findSourceKeyForTarget(headers, 'depth', rowContext.facts), []);
+      lengthDivisors = uncertaintyDivisors(headers, depthUnit, rowContext.facts);
       if (!headerIsComment) {
         batchStartLine = lineNumber + 1;
         continue;
@@ -2311,8 +2614,7 @@ export async function parseCSVStream(
       });
 
       // Map common field names
-      const mappedEvent = mapCommonFields(event, dateFormat);
-      normalizeOptionalDepth(mappedEvent as Record<string, unknown>, depthUnit, lengthDivisors);
+      const { mappedEvent } = mapTabularRow(event, dateFormat, false, undefined, undefined, rowContext, depthUnit, lengthDivisors);
 
       // Validate the event
       const validation = validateEvent(mappedEvent);
@@ -2403,13 +2705,15 @@ export async function parseJSONStream(
   let depthUnit: DepthUnitDecision = DEPTH_UNIT_KM;
   let lengthDivisors: Record<string, number> | undefined;
   let actualDateFormat = dateFormat;
+  const facts = new HeaderFacts();
+  let rowContext: RowContext = { facts, twoDigitYears: false };
 
   const makeFileLevelDecisions = () => {
     decisionsMade = true;
     const sample = pending.filter((rec) => rec.data !== null && typeof rec.data === 'object');
     const keys = sample.length > 0 ? Object.keys(sample[0].data) : [];
 
-    const depthKey = findSourceKeyForTarget(keys, 'depth');
+    const depthKey = findSourceKeyForTarget(keys, 'depth', facts);
     depthUnit = inferDepthUnit(
       depthKey,
       depthKey === null
@@ -2423,20 +2727,25 @@ export async function parseJSONStream(
     if (depthUnit.divisor !== 1) {
       warnings.push({ line: 0, message: metresDepthWarning(depthUnit) });
     }
-    lengthDivisors = uncertaintyDivisors(keys, depthUnit);
+    lengthDivisors = uncertaintyDivisors(keys, depthUnit, facts);
 
     // Every held record's time cells, not the first 50 (see decideFileDateFormat).
     const timeCells: unknown[] = [];
     for (const rec of sample) {
-      for (const key of timeSourceKeys(Object.keys(rec.data))) timeCells.push(rec.data[key]);
+      for (const key of timeSourceKeys(Object.keys(rec.data), facts)) timeCells.push(rec.data[key]);
     }
-    actualDateFormat = decideFileDateFormat(timeCells, dateFormat, warnings).dateFormat ?? dateFormat;
+    const dateDecision = applyDateDecision(decideFileDateFormat(timeCells, dateFormat), warnings);
+    actualDateFormat = dateDecision.dateFormat ?? dateFormat;
+    rowContext = {
+      facts,
+      twoDigitYears: dateDecision.twoDigitYears === true,
+      timeOfDayColumn: findTimeOfDayColumn(keys, facts, (key) => sample.slice(0, 50).map((rec) => rec.data[key])),
+    };
   };
 
   const processRecord = async (eventData: any, line: number) => {
     try {
-      const mappedEvent = mapCommonFields(eventData, actualDateFormat);
-      normalizeOptionalDepth(mappedEvent as Record<string, unknown>, depthUnit, lengthDivisors);
+      const { mappedEvent } = mapTabularRow(eventData, actualDateFormat, false, undefined, undefined, rowContext, depthUnit, lengthDivisors);
 
       // Validate the event
       const validation = validateEvent(mappedEvent);

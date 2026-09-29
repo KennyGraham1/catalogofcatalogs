@@ -1,16 +1,28 @@
 /**
  * @jest-environment node
  *
- * #126: the credential limiter must throttle guessing without letting anyone lock an
- * account's owner out.
+ * Credential throttling (#126 and its security-review follow-ups).
  *
  * The audit #7 repair counted every attempt (successes included) against a hard
- * per-account limit of 10 that nothing ever reset, before the password was checked.
- * Ten requests from anywhere therefore locked the real owner out, even with the correct
- * password, and ten more after each 15-minute boundary kept them out.
+ * per-account limit of 10 that nothing reset, so ten requests from anywhere locked the
+ * owner out. Its replacement keyed hard limits on (account, client) but still let
+ * anyone raise an account-wide count: the review showed 101 failures from one IPv6 /64
+ * refusing the owner's correct password from any new address, and, because that count
+ * reset every 15-minute window, 9,600 password checks per account per day.
  *
- * These tests run the real authorize() and the real limiter; the user store, bcrypt and
- * the auth_rate_limits collection are in-memory fakes.
+ * The rules under test (lib/auth/login-rate-limit.ts):
+ * - per client (an IPv4 address, or an IPv6 /64): 50 failures per 15-minute window;
+ * - per (account, client): 10 failures per window;
+ * - per account: 100 CONSECUTIVE failures from clients without a known-device cookie,
+ *   reset by any successful sign-in and forgotten 24 h after the last one; beyond it
+ *   such clients are refused;
+ * - a browser holding a signed known-device cookie for the account (issued on a
+ *   successful sign-in or password reset) is exempt from the account and client limits
+ *   and has its own limit of 10 failures per window.
+ *
+ * The real authorize() and limiter run against an in-memory auth_rate_limits
+ * collection; the user store and bcrypt are fakes, and next/headers' cookie jar is
+ * captured.
  */
 
 jest.mock('next-auth/providers/credentials', () => ({ __esModule: true, default: (opts: unknown) => opts }));
@@ -26,19 +38,24 @@ jest.mock('@/lib/mongodb', () => ({
   getCollection: jest.fn(),
   COLLECTIONS: { AUTH_RATE_LIMITS: 'auth_rate_limits' },
 }));
+const mockCookieJar: Array<{ name: string; value: string; options: Record<string, unknown> }> = [];
+jest.mock('next/headers', () => ({
+  cookies: async () => ({
+    set: (name: string, value: string, options: Record<string, unknown>) => mockCookieJar.push({ name, value, options }),
+  }),
+}));
 
 import type { authOptions as AuthOptions } from '@/lib/auth/config';
-import type * as Limiter from '@/lib/auth/login-rate-limit';
 
 const WINDOW_MS = 15 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Fresh module instances per test: the limiter keeps process state (TTL-index
 // readiness, the in-memory fallback store) that must not leak between tests.
 let authOptions: typeof AuthOptions;
-let beginCredentialAttempt: typeof Limiter.beginCredentialAttempt;
-let rememberCredentialClient: typeof Limiter.rememberCredentialClient;
 let auth: { getUserByEmail: jest.Mock; verifyPassword: jest.Mock };
 let getCollection: jest.Mock;
+let clock: jest.SpyInstance;
 
 type Doc = { attempts?: number; expires_at?: Date };
 
@@ -48,28 +65,28 @@ function fakeLimiterCollection() {
   const collection = {
     docs,
     createIndex: jest.fn(async () => 'expires_at_1'),
-    findOneAndUpdate: jest.fn(async (filter: { _id: string }, update: { $inc?: { attempts: number }; $setOnInsert?: Doc }) => {
+    findOneAndUpdate: jest.fn(async (
+      filter: { _id: string },
+      update: { $inc?: { attempts: number }; $setOnInsert?: Doc; $set?: Doc },
+    ) => {
       const doc = docs.get(filter._id) ?? { ...(update.$setOnInsert ?? {}) };
       doc.attempts = (doc.attempts ?? 0) + (update.$inc?.attempts ?? 0);
+      if (update.$set) Object.assign(doc, update.$set);
       docs.set(filter._id, doc);
       return { _id: filter._id, ...doc };
     }),
-    updateOne: jest.fn(async (
-      filter: { _id: string; attempts?: { $gt: number } },
-      update: { $inc?: { attempts: number }; $set?: Doc },
-      options?: { upsert?: boolean },
-    ) => {
+    updateOne: jest.fn(async (filter: { _id: string; attempts?: { $gt: number } }, update: { $inc?: { attempts: number } }) => {
       const doc = docs.get(filter._id);
-      if (!doc) {
-        if (options?.upsert) docs.set(filter._id, { ...(update.$set ?? {}) });
-        return { matchedCount: 0 };
-      }
-      if (filter.attempts && !((doc.attempts ?? 0) > filter.attempts.$gt)) return { matchedCount: 0 };
+      if (!doc || (filter.attempts && !((doc.attempts ?? 0) > filter.attempts.$gt))) return { matchedCount: 0 };
       if (update.$inc) doc.attempts = (doc.attempts ?? 0) + update.$inc.attempts;
-      if (update.$set) Object.assign(doc, update.$set);
       return { matchedCount: 1 };
     }),
-    deleteOne: jest.fn(async (filter: { _id: string }) => ({ deletedCount: docs.delete(filter._id) ? 1 : 0 })),
+    deleteOne: jest.fn(async (filter: { _id: string; expires_at?: { $lte: Date } }) => {
+      const doc = docs.get(filter._id);
+      if (!doc || (filter.expires_at && !(doc.expires_at && doc.expires_at <= filter.expires_at.$lte))) return { deletedCount: 0 };
+      docs.delete(filter._id);
+      return { deletedCount: 1 };
+    }),
     findOne: jest.fn(async (filter: { _id: string; expires_at?: { $gt: Date } }) => {
       const doc = docs.get(filter._id);
       if (!doc) return null;
@@ -86,34 +103,57 @@ function addUser(email: string, password: string) {
   users[email] = { id: `id-${email}`, email, name: email, role: 'admin', is_active: true, password_hash: `hash:${password}` };
 }
 
-function signIn(email: string, password: string, ip: string) {
-  return (authOptions.providers[0] as any).authorize({ email, password }, { headers: { 'x-forwarded-for': ip } });
-}
+type Outcome = 'ok' | 'invalid' | 'throttled' | 'protected';
 
-async function outcome(email: string, password: string, ip: string): Promise<'ok' | 'throttled' | 'invalid'> {
+async function outcome(email: string, password: string, ip: string, cookie?: string): Promise<Outcome> {
+  const headers: Record<string, string> = { 'x-forwarded-for': ip };
+  if (cookie) headers.cookie = cookie;
   try {
-    await signIn(email, password, ip);
+    await (authOptions.providers[0] as any).authorize({ email, password }, { headers });
     return 'ok';
   } catch (error) {
-    return /Too many|TooManyAttempts/.test((error as Error).message) ? 'throttled' : 'invalid';
+    const code = (error as Error).message;
+    if (code === 'TooManyAttempts') return 'throttled';
+    if (code === 'AccountProtected') return 'protected';
+    return 'invalid';
+  }
+}
+
+/** Sign in successfully and return the known-device cookie it issued, as a Cookie header. */
+async function signInForDeviceCookie(email: string, password: string, ip: string): Promise<string> {
+  mockCookieJar.length = 0;
+  expect(await outcome(email, password, ip)).toBe('ok');
+  expect(mockCookieJar).toHaveLength(1);
+  const [{ name, value, options }] = mockCookieJar;
+  expect(options).toMatchObject({ httpOnly: true, sameSite: 'lax', path: '/' });
+  expect(options.maxAge).toBeGreaterThanOrEqual(30 * 24 * 60 * 60);
+  return `${name}=${value}`;
+}
+
+/** 100 failures for `email` from 10 addresses (the pair limit), in the current window. */
+async function hundredFailures(email: string, prefix = '203.0.113') {
+  for (let host = 0; host < 10; host++) {
+    for (let i = 0; i < 10; i++) expect(await outcome(email, 'guess', `${prefix}.${100 + host}`)).toBe('invalid');
   }
 }
 
 let warnSpy: jest.SpyInstance;
 let errorSpy: jest.SpyInstance;
+let windowStart: number;
 
 beforeEach(() => {
+  process.env.NEXTAUTH_SECRET = 'known-device-test-secret-at-least-32-characters';
   jest.isolateModules(() => {
     ({ authOptions } = require('@/lib/auth/config'));
-    ({ beginCredentialAttempt, rememberCredentialClient } = require('@/lib/auth/login-rate-limit'));
     auth = require('@/lib/auth/utils');
     ({ getCollection } = require('@/lib/mongodb'));
   });
   // Pin the clock one minute into a window so no test straddles a window boundary.
-  const start = Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS + 60_000;
-  jest.spyOn(Date, 'now').mockReturnValue(start);
+  windowStart = Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS + 60_000;
+  clock = jest.spyOn(Date, 'now').mockReturnValue(windowStart);
   warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
   errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+  mockCookieJar.length = 0;
   auth.getUserByEmail.mockImplementation(async (email: string) => users[email] ?? null);
   auth.verifyPassword.mockImplementation(async (password: string, hash: string) => hash === `hash:${password}`);
 });
@@ -145,7 +185,7 @@ describe('#126 no victim lockout', () => {
   });
 });
 
-describe('#126 hard limits', () => {
+describe('#126 hard limits per client', () => {
   it('stops one client after ten failures on one account, before lookup and bcrypt, and resets on success', async () => {
     fakeLimiterCollection();
     addUser('pair@example.test', 'pw-pair');
@@ -173,38 +213,154 @@ describe('#126 hard limits', () => {
 
     expect(results.filter(r => r === 'throttled')).toHaveLength(10);
   });
+
+  it('treats one IPv6 /64 as one client', async () => {
+    fakeLimiterCollection();
+    addUser('v6@example.test', 'pw-v6');
+
+    // The review's attacker rotated through addresses inside one /64.
+    const results = [];
+    for (let i = 1; i <= 20; i++) results.push(await outcome('v6@example.test', 'guess', `2001:db8:bad:1::${i.toString(16)}`));
+
+    expect(results.filter(r => r === 'invalid')).toHaveLength(10);
+    expect(results.filter(r => r === 'throttled')).toHaveLength(10);
+    expect(auth.verifyPassword).toHaveBeenCalledTimes(10);
+    // Written differently, still the same /64.
+    expect(await outcome('v6@example.test', 'pw-v6', '2001:0db8:0bad:0001:ffff::1')).toBe('throttled');
+    // Another /64 is another client.
+    expect(await outcome('v6@example.test', 'pw-v6', '2001:db8:bad:2::1')).toBe('ok');
+  });
 });
 
-describe('#126 account-wide threshold: logged step-up, never a lock on known clients', () => {
-  it('above 100 failures only clients that signed in before may keep trying', async () => {
+describe('review: consecutive failures on an account (NIST SP 800-63B 5.2.2)', () => {
+  it('allows at most 100 password checks per account per day from unknown clients', async () => {
     fakeLimiterCollection();
-    addUser('target@example.test', 'pw-target');
-    expect(await outcome('target@example.test', 'pw-target', '198.51.100.12')).toBe('ok');
+    addUser('victim@example.test', 'never-guessed');
 
-    // 100 failures spread over ten addresses (ten each, the pair limit).
-    for (let host = 0; host < 10; host++) {
-      for (let i = 0; i < 10; i++) expect(await outcome('target@example.test', 'guess', `203.0.113.${100 + host}`)).toBe('invalid');
+    // The review's probe: ten fixed addresses, ten guesses each, every window for 24 h.
+    const outcomes: Outcome[] = [];
+    for (let w = 0; w < 96; w++) {
+      clock.mockReturnValue(windowStart + w * WINDOW_MS);
+      for (let host = 1; host <= 10; host++) {
+        for (let i = 0; i < 10; i++) outcomes.push(await outcome('victim@example.test', `guess-${w}-${host}-${i}`, `203.0.113.${host}`));
+      }
     }
 
-    // From here on, a client with no successful sign-in to this account is refused...
-    expect(await outcome('target@example.test', 'guess', '203.0.113.200')).toBe('throttled');
-    expect(await outcome('target@example.test', 'pw-target', '192.0.2.1')).toBe('throttled');
-    // ...while the owner's known client still gets in.
-    expect(await outcome('target@example.test', 'pw-target', '198.51.100.12')).toBe('ok');
+    expect(auth.verifyPassword).toHaveBeenCalledTimes(100);
+    expect(outcomes.filter(o => o === 'invalid')).toHaveLength(100);
+    expect(outcomes.slice(100).every(o => o === 'protected' || o === 'throttled')).toBe(true);
     expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0][0]).toContain('target@example.test');
+    expect(warnSpy.mock.calls[0][0]).toContain('victim@example.test');
   });
 
-  it('a completed password reset makes that client known', async () => {
+  it('does not reset the count when a window rolls over', async () => {
     fakeLimiterCollection();
-    for (let host = 0; host < 10; host++) {
-      for (let i = 0; i < 10; i++) await beginCredentialAttempt('reset@example.test', { 'x-forwarded-for': `203.0.113.${host}` });
+    addUser('rolling@example.test', 'pw-rolling');
+
+    for (let w = 0; w < 10; w++) {
+      clock.mockReturnValue(windowStart + w * WINDOW_MS);
+      for (let i = 0; i < 10; i++) expect(await outcome('rolling@example.test', 'guess', `203.0.113.${w}`)).toBe('invalid');
     }
-    expect(await beginCredentialAttempt('reset@example.test', { 'x-forwarded-for': '192.0.2.50' })).toBeNull();
 
-    await rememberCredentialClient('reset@example.test', { 'x-forwarded-for': '192.0.2.50' });
+    clock.mockReturnValue(windowStart + 10 * WINDOW_MS);
+    expect(await outcome('rolling@example.test', 'pw-rolling', '198.51.100.20')).toBe('protected');
+  });
 
-    expect(await beginCredentialAttempt('reset@example.test', { 'x-forwarded-for': '192.0.2.50' })).not.toBeNull();
+  it('is reset by a successful sign-in', async () => {
+    fakeLimiterCollection();
+    addUser('reset-count@example.test', 'pw-count');
+
+    for (let host = 0; host < 9; host++) {
+      for (let i = 0; i < 10; i++) await outcome('reset-count@example.test', 'guess', `203.0.113.${host}`);
+    }
+    for (let i = 0; i < 9; i++) await outcome('reset-count@example.test', 'guess', '203.0.113.50');
+    // 99 consecutive failures; the owner's success from a fresh address resets them.
+    expect(await outcome('reset-count@example.test', 'pw-count', '198.51.100.21')).toBe('ok');
+
+    clock.mockReturnValue(windowStart + WINDOW_MS);
+    await hundredFailures('reset-count@example.test', '192.0.2');
+    expect(auth.verifyPassword).toHaveBeenCalledTimes(99 + 1 + 100);
+  });
+
+  it('is forgotten 24 h after the last counted failure', async () => {
+    fakeLimiterCollection();
+    addUser('lapse@example.test', 'pw-lapse');
+
+    await hundredFailures('lapse@example.test');
+    expect(await outcome('lapse@example.test', 'pw-lapse', '198.51.100.22')).toBe('protected');
+
+    clock.mockReturnValue(windowStart + DAY_MS + 1);
+    expect(await outcome('lapse@example.test', 'pw-lapse', '198.51.100.22')).toBe('ok');
+  });
+});
+
+describe('review: known-device cookie', () => {
+  it("keeps the owner's browser signing in, from any address, while unknown clients are refused", async () => {
+    fakeLimiterCollection();
+    addUser('seismologist@institute.example', 'correct horse battery');
+    // Yesterday, from the office.
+    const cookie = await signInForDeviceCookie('seismologist@institute.example', 'correct horse battery', '192.0.2.10');
+
+    await hundredFailures('seismologist@institute.example');
+
+    // A browser that has never signed in to the account is refused...
+    expect(await outcome('seismologist@institute.example', 'correct horse battery', '198.51.100.78')).toBe('protected');
+    // ...but the owner's laptop, travelling (new address, known-device cookie), is not.
+    expect(await outcome('seismologist@institute.example', 'correct horse battery', '198.51.100.77', cookie)).toBe('ok');
+    // That success reset the count for everyone.
+    expect(await outcome('seismologist@institute.example', 'correct horse battery', '198.51.100.78')).toBe('ok');
+  });
+
+  it('refuses unknown browsers while the count stands, whatever the password', async () => {
+    fakeLimiterCollection();
+    addUser('standing@example.test', 'pw-standing');
+
+    await hundredFailures('standing@example.test');
+
+    expect(await outcome('standing@example.test', 'pw-standing', '198.51.100.79')).toBe('protected');
+    expect(auth.verifyPassword).toHaveBeenCalledTimes(100);
+  });
+
+  it('gives a known device a limit of its own, which does not raise the account count', async () => {
+    fakeLimiterCollection();
+    addUser('device@example.test', 'pw-device');
+    const cookie = await signInForDeviceCookie('device@example.test', 'pw-device', '192.0.2.11');
+
+    // Ten failures from the known browser, over ten different addresses.
+    for (let i = 0; i < 10; i++) expect(await outcome('device@example.test', 'wrong', `198.51.100.${30 + i}`, cookie)).toBe('invalid');
+    expect(await outcome('device@example.test', 'pw-device', '198.51.100.45', cookie)).toBe('throttled');
+    // They did not count against the account: 100 more failures from elsewhere still run.
+    await hundredFailures('device@example.test');
+  });
+
+  it('ignores a tampered cookie and a cookie issued for another account', async () => {
+    fakeLimiterCollection();
+    addUser('mine@example.test', 'pw-mine');
+    addUser('theirs@example.test', 'pw-theirs');
+    const theirs = await signInForDeviceCookie('theirs@example.test', 'pw-theirs', '192.0.2.12');
+    const mine = await signInForDeviceCookie('mine@example.test', 'pw-mine', '192.0.2.13');
+    const tampered = mine.replace(/.$/, c => (c === 'A' ? 'B' : 'A'));
+
+    await hundredFailures('mine@example.test');
+
+    expect(await outcome('mine@example.test', 'pw-mine', '198.51.100.90', theirs)).toBe('protected');
+    expect(await outcome('mine@example.test', 'pw-mine', '198.51.100.91', tampered)).toBe('protected');
+    expect(await outcome('mine@example.test', 'pw-mine', '198.51.100.92', mine)).toBe('ok');
+  });
+});
+
+describe('review: spellings of one address share its limits', () => {
+  it('folds compatibility variants (NFKC) and case before counting and lookup', async () => {
+    fakeLimiterCollection();
+    addUser('seismologist@example.test', 'pw-variant');
+
+    // U+017F LONG S, fullwidth letters and the Kelvin sign all stand for ASCII letters.
+    const variants = ['ſeismologist@example.test', 'ＳＥＩＳＭＯＬＯＧＩＳＴ@example.test', 'seismologist@example.test'];
+    const results = [];
+    for (let i = 0; i < 12; i++) results.push(await outcome(variants[i % variants.length], 'guess', '198.51.100.60'));
+
+    expect(results.filter(r => r === 'throttled')).toHaveLength(2);
+    expect(auth.getUserByEmail.mock.calls.every(([email]) => email === 'seismologist@example.test')).toBe(true);
   });
 });
 
@@ -227,3 +383,4 @@ describe('#126 store failures are bounded, not a site-wide lockout', () => {
     expect(await outcome('noindex@example.test', 'pw-noindex', '198.51.100.15')).toBe('ok');
   });
 });
+

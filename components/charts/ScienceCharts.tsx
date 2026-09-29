@@ -15,6 +15,13 @@ import { EChart } from './EChart';
 import { chartColors, axis, tooltip, grid, legend, ttHeader, ttRow, ttBadge } from '@/lib/echarts-theme';
 import { SEISMIC_COLORS, getMagnitudeColor, magnitudeClass } from '@/lib/chart-config';
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Calendar day (UTC): time-series bins are UTC days, ISO weeks and months. */
+const UTC_DAY_FORMAT = new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC',
+});
+
 // ---------------------------------------------------------------------------
 // Gutenberg-Richter: observed cumulative FMD (points) + linear fit + Mc line
 // ---------------------------------------------------------------------------
@@ -166,9 +173,13 @@ export const CompletenessChart = memo(function CompletenessChart({
 // ---------------------------------------------------------------------------
 export const TemporalSeriesChart = memo(function TemporalSeriesChart({
   data,
+  binDays = 1,
   height = 420,
 }: {
-  data: { date: string; cumulativeCount: number; dailyCount?: number }[];
+  /** Occupied bins keyed by their first UTC day; cumulativeCount runs to the bin's end. */
+  data: { date: string; cumulativeCount: number; count?: number; dailyCount?: number }[];
+  /** Bin length in days (analyzeTemporalPattern binDays: 1, or 7 for ISO weeks). */
+  binDays?: number;
   height?: number;
 }) {
   const { resolvedTheme } = useTheme();
@@ -176,6 +187,8 @@ export const TemporalSeriesChart = memo(function TemporalSeriesChart({
   // Current day/week bins use UTC dates. Preserve elapsed time between occupied
   // bins; a category axis makes a quiet year look as short as a quiet day.
   // Older saved results may still have week labels, so retain their fallback.
+  // A running total counts every event up to the END of its bin, so it is plotted
+  // there: at the bin's start it credited the whole bin's events up to a week early.
   const timeAxis = data.every(d => Number.isFinite(Date.parse(d.date)));
   const fmtDate = (v: string | number) => {
     const t = typeof v === 'number' ? v : Date.parse(v);
@@ -200,8 +213,11 @@ export const TemporalSeriesChart = memo(function TemporalSeriesChart({
           const row = data[params[0].dataIndex];
           if (!row) return '';
           const date = fmtTooltipDate(row.date);
-          let html = ttHeader(c, date) + ttRow(c, 'Cumulative events', row.cumulativeCount.toLocaleString(), SEISMIC_COLORS.time.dark);
-          if (row.dailyCount !== undefined) html += ttRow(c, 'This period', row.dailyCount.toLocaleString());
+          const lastDay = Date.parse(row.date) + (binDays - 1) * DAY_MS;
+          const header = binDays > 1 && Number.isFinite(lastDay) ? `${date} – ${UTC_DAY_FORMAT.format(new Date(lastDay))}` : date;
+          let html = ttHeader(c, header) + ttRow(c, 'Cumulative events', row.cumulativeCount.toLocaleString(), SEISMIC_COLORS.time.dark);
+          const inPeriod = row.dailyCount ?? row.count;
+          if (inPeriod !== undefined) html += ttRow(c, 'This period', inPeriod.toLocaleString());
           return html;
         },
       }),
@@ -238,11 +254,11 @@ export const TemporalSeriesChart = memo(function TemporalSeriesChart({
               ],
             },
           },
-          data: data.map(d => timeAxis ? [Date.parse(d.date), d.cumulativeCount] : d.cumulativeCount),
+          data: data.map(d => timeAxis ? [Date.parse(d.date) + binDays * DAY_MS, d.cumulativeCount] : d.cumulativeCount),
         },
       ],
     }),
-    [data, c, timeAxis]
+    [data, c, timeAxis, binDays]
   );
   return <EChart option={option} height={height} exportData={data} exportName="cumulative-time-series" aria-label="Cumulative event time series" />;
 });
@@ -306,13 +322,11 @@ export const MomentReleaseChart = memo(function MomentReleaseChart({
 // ---------------------------------------------------------------------------
 // Cumulative moment / radiated-energy release over time (step line, UTC axis)
 // ---------------------------------------------------------------------------
-/** Calendar day (UTC) of a bin start: time-series bins are UTC days, weeks and months. */
-const UTC_DAY_FORMAT = new Intl.DateTimeFormat('en-GB', {
-  day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC',
-});
-
 export interface ReleasePoint {
+  /** First UTC day of the bin. */
   date: string;
+  /** Length of the bin in days; the cumulative totals run to its end. */
+  days: number;
   moment: number;
   energy: number;
   cumulativeMoment: number;
@@ -345,10 +359,14 @@ export const CumulativeReleaseChart = memo(function CumulativeReleaseChart({
           if (!params?.length) return '';
           const row = data[params[0].dataIndex];
           if (!row) return '';
-          const date = new Date(Date.parse(row.date));
+          const start = Date.parse(row.date);
+          const lastDay = start + (row.days - 1) * DAY_MS;
+          const header = !Number.isFinite(start) ? row.date
+            : row.days > 1 ? `${UTC_DAY_FORMAT.format(new Date(start))} – ${UTC_DAY_FORMAT.format(new Date(lastDay))}`
+              : UTC_DAY_FORMAT.format(new Date(start));
           const cumulative = isMoment ? row.cumulativeMoment : row.cumulativeEnergy;
           const released = isMoment ? row.moment : row.energy;
-          let html = ttHeader(c, Number.isNaN(date.getTime()) ? row.date : `From ${UTC_DAY_FORMAT.format(date)}`) +
+          let html = ttHeader(c, header) +
             ttRow(c, name, `${cumulative.toExponential(2)} ${unit}`, SEISMIC_COLORS.energy.dark) +
             ttRow(c, 'Released in this period', `${released.toExponential(2)} ${unit}`);
           // Mw = (log10 M0 - 9.1) / 1.5 (N·m; Hanks & Kanamori, 1979, IASPEI 2005).
@@ -374,7 +392,9 @@ export const CumulativeReleaseChart = memo(function CumulativeReleaseChart({
           lineStyle: { color: SEISMIC_COLORS.energy.dark, width: 2 },
           itemStyle: { color: SEISMIC_COLORS.energy.dark },
           areaStyle: { color: SEISMIC_COLORS.energy.dark, opacity: 0.08 },
-          data: data.map(d => [Date.parse(d.date), isMoment ? d.cumulativeMoment : d.cumulativeEnergy]),
+          // Each running total is reached at the END of its bin, so it is plotted there
+          // (at the bin start it showed a bin's release up to a month early).
+          data: data.map(d => [Date.parse(d.date) + d.days * DAY_MS, isMoment ? d.cumulativeMoment : d.cumulativeEnergy]),
         },
       ],
     }),

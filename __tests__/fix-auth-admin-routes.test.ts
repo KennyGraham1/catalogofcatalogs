@@ -383,3 +383,89 @@ describe('#121 admins cannot lock the system out of administration', () => {
     expect(stored('users', 'admin2')!.role).toBe(UserRole.EDITOR);
   });
 });
+
+describe('review: the last-active-admin guard cannot be bypassed', () => {
+  const activeAdmins = () => db.users.docs.filter(doc => doc.role === UserRole.ADMIN && doc.is_active === true);
+  const actor = (id: string) => ({ ...ADMIN, id, email: `${id}@example.test`, name: id });
+  const actOnce = (id: string) => (requireAdmin as jest.Mock).mockResolvedValueOnce({ session: { user: actor(id) }, user: actor(id) });
+
+  /** Pause the next read of `id` until `release` is called; `read` resolves once it happened. */
+  function pauseNextRead(id: string) {
+    const realFindOne = db.users.findOne.getMockImplementation()!;
+    let release!: () => void;
+    let signalRead!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const read = new Promise<void>(resolve => { signalRead = resolve; });
+    db.users.findOne.mockImplementationOnce(async (filter: Doc) => {
+      const doc = await realFindOne(filter);
+      if (filter.id === id) { signalRead(); await gate; }
+      return doc;
+    });
+    return { read, release };
+  }
+
+  it('refuses a PATCH computed from a read the account has since outgrown', async () => {
+    // The review's probe: a demotion of X decided while X was an editor lands after X
+    // was promoted and has demoted the only other admin.
+    setUsers(user('A', UserRole.ADMIN), user('X', UserRole.EDITOR));
+    const paused = pauseNextRead('X');
+    actOnce('A');
+    const late = patchUser(jsonRequest('/api/users/X', 'PATCH', { role: UserRole.VIEWER }), params('X'));
+    await paused.read;
+
+    actOnce('A');
+    expect((await patchUser(jsonRequest('/api/users/X', 'PATCH', { role: UserRole.ADMIN }), params('X'))).status).toBe(200);
+    actOnce('X');
+    expect((await patchUser(jsonRequest('/api/users/A', 'PATCH', { role: UserRole.VIEWER }), params('A'))).status).toBe(200);
+    paused.release();
+
+    expect((await late).status).toBe(409);
+    expect(activeAdmins().map(doc => doc.id)).toEqual(['X']);
+  });
+
+  it('refuses a DELETE computed from a read the account has since outgrown', async () => {
+    setUsers(user('A', UserRole.ADMIN), user('X', UserRole.EDITOR));
+    const paused = pauseNextRead('X');
+    actOnce('A');
+    const late = deleteUser(jsonRequest('/api/users/X', 'DELETE'), params('X'));
+    await paused.read;
+
+    actOnce('A');
+    await patchUser(jsonRequest('/api/users/X', 'PATCH', { role: UserRole.ADMIN }), params('X'));
+    actOnce('X');
+    await patchUser(jsonRequest('/api/users/A', 'PATCH', { role: UserRole.VIEWER }), params('A'));
+    paused.release();
+
+    expect((await late).status).toBe(409);
+    expect(activeAdmins().map(doc => doc.id)).toEqual(['X']);
+  });
+
+  it('undoes a refused demotion even if the account was written to in between (a sign-in)', async () => {
+    // The acting admin was deactivated after its session check: admin2 is the last one.
+    setUsers(user('admin1', UserRole.ADMIN, { is_active: false }), user('admin2', UserRole.ADMIN));
+    const realCount = db.users.countDocuments.getMockImplementation()!;
+    db.users.countDocuments.mockImplementationOnce(async (filter?: Doc) => {
+      // admin2 signs in meanwhile; updateLastLogin writes last_login and updated_at.
+      Object.assign(stored('users', 'admin2')!, { last_login: '2026-09-29T00:00:00.000Z', updated_at: '2026-09-29T00:00:00.000Z' });
+      return realCount(filter);
+    });
+
+    const res = await patchUser(jsonRequest('/api/users/admin2', 'PATCH', { role: UserRole.EDITOR }), params('admin2'));
+
+    expect(res.status).toBe(409);
+    expect(stored('users', 'admin2')).toMatchObject({ role: UserRole.ADMIN, is_active: true });
+  });
+
+  it('does not count an admin that cannot sign in (no is_active flag) as the remaining one', async () => {
+    setUsers(
+      user('admin1', UserRole.ADMIN, { is_active: false }), // the caller, deactivated since
+      user('admin2', UserRole.ADMIN),
+      user('legacy', UserRole.ADMIN, { is_active: undefined }), // login refuses it
+    );
+
+    const res = await patchUser(jsonRequest('/api/users/admin2', 'PATCH', { is_active: false }), params('admin2'));
+
+    expect(res.status).toBe(409);
+    expect(stored('users', 'admin2')).toMatchObject({ role: UserRole.ADMIN, is_active: true });
+  });
+});

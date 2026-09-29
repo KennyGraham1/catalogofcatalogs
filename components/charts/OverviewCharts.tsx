@@ -94,6 +94,7 @@ export const EventTimelineChart = memo(function EventTimelineChart({
   daysPerBin,
   exportName = 'earthquake-timeline',
   ariaLabel = 'Earthquake timeline',
+  partialBins = 'scale',
 }: {
   /**
    * `coveredDays` marks a bin its data span covers only part of (lib/event-timeline, or
@@ -106,19 +107,30 @@ export const EventTimelineChart = memo(function EventTimelineChart({
   daysPerBin?: number;
   exportName?: string;
   ariaLabel?: string;
+  /**
+   * 'scale': coverage was measured against a known period, so a partial bin is drawn
+   * scaled to a full one. 'mark': it was read off the first and last events, whose bins
+   * hold an event by construction, so scaling would overstate the rate; the raw count
+   * is drawn, marked as partial.
+   */
+  partialBins?: 'scale' | 'mark';
 }) {
   const { resolvedTheme } = useTheme();
   const c = chartColors(resolvedTheme === 'dark');
   const showDots = data.length < 100;
   const option = useMemo<EChartsOption>(() => {
-    // A partial bin's raw total would read as a rate drop, so it is drawn scaled to a
-    // full period, as a dashed segment ending in a hollow marker.
+    // A partial bin's raw total would read as a rate drop, so it is drawn as a dashed
+    // segment ending in a hollow marker: scaled to a full period when its coverage is
+    // known, else at its raw count.
     const binDays = (d: { days?: number }) => d.days ?? daysPerBin;
     const isPartial = (d: { days?: number; coveredDays?: number }) => {
       const length = binDays(d);
       return length != null && d.coveredDays != null && d.coveredDays > 0 && d.coveredDays < length;
     };
-    const scaled = (d: { count: number; days?: number; coveredDays?: number }) => d.count * binDays(d)! / d.coveredDays!;
+    const scaled = (d: { count: number; days?: number; coveredDays?: number }) =>
+      partialBins === 'scale' ? d.count * binDays(d)! / d.coveredDays! : d.count;
+    // Coverage against a known period can be fractional (a window opening at noon).
+    const days = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
     const partial = data.map(isPartial);
     const hasPartial = partial.some(Boolean);
     return {
@@ -134,8 +146,14 @@ export const EventTimelineChart = memo(function EventTimelineChart({
             : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
           const row = typeof p.dataIndex === 'number' ? data[p.dataIndex] : undefined;
           if (row && isPartial(row)) {
+            const events = `${row.count.toLocaleString()} event${row.count === 1 ? '' : 's'}`;
+            if (partialBins === 'mark') {
+              return ttHeader(c, label) +
+                ttRow(c, 'Partial period', `${events}; data span ${days(row.coveredDays!)} of ${binDays(row)} days`, SEISMIC_COLORS.magnitude.dark) +
+                ttRow(c, seriesName, `${row.count.toLocaleString()} (raw count, not scaled: the catalogue's coverage period is unknown)`);
+            }
             return ttHeader(c, label) +
-              ttRow(c, 'Partial period', `${row.count.toLocaleString()} event${row.count === 1 ? '' : 's'} in ${row.coveredDays} of ${binDays(row)} days`, SEISMIC_COLORS.magnitude.dark) +
+              ttRow(c, 'Partial period', `${events} in ${days(row.coveredDays!)} of ${binDays(row)} days`, SEISMIC_COLORS.magnitude.dark) +
               ttRow(c, seriesName, `≈ ${Number(scaled(row).toPrecision(3)).toLocaleString()} (scaled to ${binDays(row)} days)`);
           }
           const value = row ? row.count : Number(p.value);
@@ -173,7 +191,7 @@ export const EventTimelineChart = memo(function EventTimelineChart({
         // full neighbour by a dashed segment.
         ...(hasPartial ? [{
           type: 'line' as const,
-          name: `${seriesName} (partial period, scaled)`,
+          name: `${seriesName} (partial period, ${partialBins === 'scale' ? 'scaled' : 'raw count'})`,
           showSymbol: true,
           symbol: 'emptyCircle',
           symbolSize: 7,
@@ -185,7 +203,7 @@ export const EventTimelineChart = memo(function EventTimelineChart({
         }] : []),
       ],
     };
-  }, [data, c, showDots, seriesName, daysPerBin]);
+  }, [data, c, showDots, seriesName, daysPerBin, partialBins]);
   return <EChart option={option} height={height} exportData={data} exportName={exportName} aria-label={ariaLabel} />;
 });
 

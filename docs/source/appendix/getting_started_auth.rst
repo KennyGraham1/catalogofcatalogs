@@ -277,7 +277,13 @@ Security Checklist
 - [ ] Set up regular database backups
 - [ ] Configured rate limiting (already done: sign-in attempts are capped at
   10 failed tries per account+client and 50 per client within a 15-minute
-  window)
+  window, clients keyed by address with an IPv6 /64 counting as one client;
+  an account also refuses browsers with no known-device cookie for it
+  outright after 100 *consecutive* failures, until one succeeds or 24 hours
+  pass; a browser that has signed in to the account before, or completed a
+  password reset for it, gets its own 10-per-15-minute limit instead and is
+  exempt from the rest. Password-reset requests are capped at 3 emails per
+  account per hour, and only the 3 newest reset links stay valid.)
 - [ ] Reviewed audit logs regularly
 
 Support

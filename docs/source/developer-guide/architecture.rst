@@ -464,7 +464,7 @@ API Protection
 * **Input validation:** Zod schemas for all inputs
 * **MongoDB query-safety:** validated request bodies and literal query filters to avoid query selector injection
 * **XSS prevention:** React automatic escaping
-* **Cross-site request forgery:** no CSRF token. ``middleware.ts`` refuses any state-changing (POST/PUT/PATCH/DELETE) request to ``/api/*`` (excluding ``/api/auth/*``, which checks its own CSRF-equivalent) whose ``Origin`` header names a different host than the app itself, returning ``403``. An Origin-less request — real browsers always attach ``Origin`` on a cross-site write — is let through to the other defences: the NextAuth session cookie's ``SameSite=Lax`` attribute, which keeps it off cross-site POSTs, and route-level role/permission checks
+* **Cross-site request forgery:** no CSRF token. ``middleware.ts`` refuses any state-changing (POST/PUT/PATCH/DELETE) request to ``/api/*`` (excluding ``/api/auth/*``, which checks its own CSRF-equivalent) whose ``Origin`` header names a different *origin* — scheme, host **and port** all compared, not just the hostname — than the app's own (``NEXTAUTH_URL``, or the scheme/host/port the reverse proxy reports via ``X-Forwarded-Proto``/``X-Forwarded-Host``/``X-Forwarded-Port``), returning ``403``. This is why a reverse proxy in front of the app must forward those three headers accurately (see :doc:`../deployment/docker`). An Origin-less request — real browsers always attach ``Origin`` on a cross-site write — is let through to the other defences: the NextAuth session cookie's ``SameSite=Lax`` attribute, which keeps it off cross-site POSTs, and route-level role/permission checks
 
 See :doc:`../administration/authentication` for security details.
 

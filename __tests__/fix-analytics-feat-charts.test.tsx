@@ -111,23 +111,24 @@ describe('sampleMagnitudeTime', () => {
 
 describe('CumulativeReleaseChart', () => {
   const bins = [
-    { date: '2024-01-01', moment: 1.12e17, energy: 5.6e12, cumulativeMoment: 1.12e17, cumulativeEnergy: 5.6e12 },
-    { date: '2024-01-08', moment: 0, energy: 0, cumulativeMoment: 1.12e17, cumulativeEnergy: 5.6e12 },
+    { date: '2024-01-01', days: 7, moment: 1.12e17, energy: 5.6e12, cumulativeMoment: 1.12e17, cumulativeEnergy: 5.6e12 },
+    { date: '2024-01-08', days: 7, moment: 0, energy: 0, cumulativeMoment: 1.12e17, cumulativeEnergy: 5.6e12 },
   ];
 
-  it('plots cumulative moment in N·m with the equivalent single-event Mw', () => {
+  it('plots cumulative moment in N·m at each bin END, with the equivalent single-event Mw', () => {
     const option = build(<CumulativeReleaseChart data={bins} quantity="moment" />);
-    expect(option.series[0].data).toEqual([[Date.parse('2024-01-01'), 1.12e17], [Date.parse('2024-01-08'), 1.12e17]]);
+    // A running total is reached at the end of its bin: 8 and 15 January for these weeks.
+    expect(option.series[0].data).toEqual([[Date.parse('2024-01-08'), 1.12e17], [Date.parse('2024-01-15'), 1.12e17]]);
     expect(option.yAxis.name).toBe('Cumulative seismic moment (N·m)');
     const html = option.tooltip.formatter([{ dataIndex: 0 }]);
     // Mw = (log10 1.12e17 - 9.1) / 1.5 = 5.30
     expect(html).toContain('Mw 5.30');
-    expect(html).toContain('01 Jan 2024');
+    expect(html).toContain('01 Jan 2024 – 07 Jan 2024');
   });
 
   it('plots cumulative radiated energy in J', () => {
     const option = build(<CumulativeReleaseChart data={bins} quantity="energy" />);
-    expect(option.series[0].data[0]).toEqual([Date.parse('2024-01-01'), 5.6e12]);
+    expect(option.series[0].data[0]).toEqual([Date.parse('2024-01-08'), 5.6e12]);
     expect(option.yAxis.name).toBe('Cumulative radiated energy (J)');
     expect(option.tooltip.formatter([{ dataIndex: 0 }])).not.toContain('Mw');
   });

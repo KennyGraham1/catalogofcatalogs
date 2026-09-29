@@ -22,7 +22,7 @@ This document summarizes the comprehensive improvements made to ``lib/merge.ts``
 **Solution:** Implemented ``selectBestMagnitude()`` function using a
 size-dependent type preference (``getMagnitudePriority()``), not a single
 static order:
-- **Priority:** Mw always leads; below M5.5 the order is ML > mb/mB/mbLg > Ms > Md; from M5.5 up it is Ms > mB > ML > mb > Md
+- **Priority:** Mw always leads; below M6.2 (the group's median Mw-equivalent) the order is ML > mb/mB/mbLg > Ms > Md; from M6.2 up it is Ms > mB > ML > mb > Md
 - **Rationale:** Mw (moment magnitude) doesn't saturate; ML saturates above M~6.5; mb saturates above M~6.0, so which non-Mw scale is best calibrated depends on the earthquake's own size
 - **Fallback:** Uses simple magnitude field if QuakeML data unavailable
 
@@ -292,7 +292,7 @@ available quality metrics:
    azimuthalGap = 250  → 2.2 points   (10 × (1 - (250-180)/90))
    rmsResidual = 1.5   → 4 points     (<= 2.0 s tier)
    magnitudeUncertainty = 0.6 → 0 points (above the 0.5 tier)
-   magnitudeType = ML  → 12 points    (M4.5 is below M5.5, so ML ranks
+   magnitudeType = ML  → 12 points    (M4.5 is below M6.2, so ML ranks
                                         second here, behind Mw)
    evaluationStatus = preliminary → 2 points
    TOTAL = 33.1 points (poor quality)
@@ -334,6 +334,9 @@ All improvements include robust fallback logic for missing data:
    entirely, not scored as zero
 3. If a report in the group states no quality evidence at all,
    network-authority ranking decides instead of quality
+4. Network-authority ranking itself is not immune to ties: two equally
+   authoritative reports (the same rank, or neither ranked) are broken the
+   same common-metrics way as (1)-(2) above, not by an absolute score
 
 **Adaptive Thresholds**
 ^^^^^^^^^^^^^^^^^^^^^^^

@@ -213,19 +213,34 @@ export function validateDepth(depth: number | null): boolean {
  * - ISO 8601 / year-first: 2024-01-15T10:30:00.123456789Z, 2024-01-15 10:30,
  *   2024/01/15, 2024.01.15 10:30:00
  * - Day/month-first: DD/MM/YYYY or MM/DD/YYYY (slash or dash), DD.MM.YYYY; the order
- *   is decided by a day > 12, otherwise by `dateFormat` (DD/MM when absent). Slash
- *   and dot forms also take a two-digit year: the latest year with those digits that
- *   is not after the current year ('24' -> 2024, '95' -> 1995), as an origin time
- *   cannot be in the future.
- * - Month names: 15 Jan 2024 10:30:00, 15-JAN-24, Jan 15 2024, January 15, 2024 10:30,
- *   with an optional weekday (RFC 2822 'Mon, 15 Jan 2024 10:30:00 +1300')
+ *   is decided by a day > 12, otherwise by `dateFormat` (DD/MM when absent). Slash and
+ *   dot forms take a two-digit year only with `options.twoDigitYears` (a file whose
+ *   day/month/year order is declared or unambiguous: '20/05/17' is also YY/MM/DD), as
+ *   the latest year with those digits that is not after the current year ('24' -> 2024,
+ *   '95' -> 1995), since an origin time cannot be in the future.
+ * - A 12-hour clock with AM/PM (1/15/2024 10:30:00 AM, the US spreadsheet default)
+ * - Month names: 15 Jan 2024 10:30:00, 15-JAN-24 (DD-MON-YY, same two-digit-year rule),
+ *   Jan 15 2024, January 15, 2024 10:30, with an optional weekday (RFC 2822
+ *   'Mon, 15 Jan 2024 10:30:00 +1300'), and asctime/ctime 'Mon Jan 15 10:30:00 2024' or
+ *   Unix date 'Mon Jan 15 10:30:00 UTC 2024'
  * - Compact: YYYYMMDD, YYYYMMDD HHMMSS, YYYYMMDDHHMMSS, 20240115T103000Z
  * - Day of year: YYYY DDD HH:MM:SS, YYYY-DDD HH:MM:SS, YYYYDDDHHMMSS
- * - Unix epoch: numbers, or 10-digit (seconds) / 13-digit (milliseconds) strings
+ * - Unix epoch: numbers, or 10-digit (seconds) / 13-digit (milliseconds) strings; an
+ *   8-digit integer that is a date between 1800 and 2100 (JSON 20240115) is YYYYMMDD
  */
-export function normalizeTimestamp(time: string | number, dateFormat?: 'US' | 'International'): string | null {
+export function normalizeTimestamp(
+  time: string | number,
+  dateFormat?: 'US' | 'International',
+  options?: NormalizeTimestampOptions
+): string | null {
   if (typeof time === 'number') {
     if (!Number.isFinite(time)) return null;
+    // A JSON date written as the number 20240115 is YYYYMMDD, not 1970-08-23 as epoch
+    // seconds: no origin time is given as a 1970 epoch in that range.
+    if (Number.isInteger(time) && time >= 18000101 && time <= 21001231) {
+      const parts = checkedParts(Math.floor(time / 10000), Math.floor(time / 100) % 100, time % 100, 0, 0, 0, '');
+      if (parts !== 'invalid') return assembleUtcTimestamp(parts, 0);
+    }
     // Bare epoch number of unknown unit: seconds when the MAGNITUDE is below 1e11
     // (year 1000 is -3.06e10 s; 1e11 ms is only 1973-03-03), otherwise milliseconds.
     // The sign must not decide: a negative epoch (before 1970) was compared as
@@ -245,10 +260,12 @@ export function normalizeTimestamp(time: string | number, dateFormat?: 'US' | 'I
   }
 
   const trimmed = time.trim();
-  if (trimmed === '') return null;
+  // No supported shape is longer; a longer string is not a timestamp, and is never
+  // handed to the shape expressions.
+  if (trimmed === '' || trimmed.length > MAX_TIMESTAMP_LENGTH) return null;
 
   const zone = splitZoneDesignator(trimmed);
-  const parsed = parseCalendarParts(zone.body, dateFormat);
+  const parsed = parseCalendarParts(zone.body, dateFormat, options?.twoDigitYears === true);
   if (parsed === 'invalid') return null;
   if (parsed !== null) return assembleUtcTimestamp(parsed, zone.offsetMinutes);
 
@@ -259,13 +276,26 @@ export function normalizeTimestamp(time: string | number, dateFormat?: 'US' | 'I
   // applies. No other supported format is a bare 10- or 13-digit string once the
   // compact day-of-year form has had its (year-restricted) turn.
   if (zone.offsetMinutes === 0 && zone.body === trimmed && /^\d{10}$|^\d{13}$/.test(trimmed)) {
-    return normalizeTimestamp(Number(trimmed), dateFormat);
+    return normalizeTimestamp(Number(trimmed), dateFormat, options);
   }
 
   // No last-resort new Date(string): a shape none of the parsers above recognises is
   // rejected, so an origin time can never be read in the server's local time.
   return null;
 }
+
+/** Options of normalizeTimestamp. */
+export interface NormalizeTimestampOptions {
+  /**
+   * Read numeric dates with a two-digit year (05/03/24, 15.01.95). Only for a file whose
+   * day/month/year order is declared or unambiguous: '20/05/17' is DD/MM/YY 2017-05-20
+   * or YY/MM/DD 2020-05-17 alike, so a lone value is not read.
+   */
+  twoDigitYears?: boolean;
+}
+
+/** Longest string read as a timestamp (a weekday, a month name and a named zone fit). */
+const MAX_TIMESTAMP_LENGTH = 100;
 
 /** Earliest origin time accepted: year 1000 CE, a reasonable lower bound for historical seismology. */
 const MIN_VALID_TIME_MS = Date.UTC(1000, 0, 1);
@@ -292,8 +322,9 @@ const WEEKDAY_NAMES = new Set([
   'thursday', 'fri', 'friday', 'sat', 'saturday', 'sun', 'sunday',
 ]);
 
-// HH:MM[:SS[.fraction]] and the separator between a date and its time of day.
-const TIME_OF_DAY = '(\\d{1,2}):(\\d{1,2})(?::(\\d{1,2})(?:[.,](\\d+))?)?';
+// HH:MM[:SS[.fraction]] with an optional 12-hour AM/PM marker, and the separator
+// between a date and its time of day.
+const TIME_OF_DAY = '(\\d{1,2}):(\\d{1,2})(?::(\\d{1,2})(?:[.,](\\d+))?)?(?:\\s*([AaPp])\\.?[Mm]\\.?)?';
 const DATE_TIME_SEPARATOR = '(?:[Tt]|\\s+)';
 
 // 2024-01-15, 2024/01/15, 2024.01.15 (ISO 8601 and its year-first variants)
@@ -313,6 +344,12 @@ const COMPACT_DAY_OF_YEAR = /^(\d{4})(\d{3})(\d{2})(\d{2})(\d{2})(?:[.,](\d+))?$
 // [Weekday,] 15 Jan 2024 [time], 15-JAN-24
 const DAY_MONTHNAME_YEAR = new RegExp(
   `^(?:([A-Za-z]{3,9})\\.?,?\\s+)?(\\d{1,2})(?:\\s+|-)([A-Za-z]{3,9})\\.?(?:\\s+|-)(\\d{4}|\\d{2})(?:${DATE_TIME_SEPARATOR}${TIME_OF_DAY})?$`
+);
+// asctime/ctime and Unix date: [Weekday] Jan 15 10:30:00 [UTC] 2024. The zone, when
+// written, sits before the year; only a UTC designator is accepted there.
+const ASCTIME = new RegExp(
+  `^(?:([A-Za-z]{3,9}),?\\s+)?([A-Za-z]{3,9})\\.?\\s+(\\d{1,2})\\s+${TIME_OF_DAY}(?:\\s+(?:UTC|GMT|UT|Z))?\\s+(\\d{4})$`,
+  'i'
 );
 // [Weekday,] Jan 15 2024 [time], January 15, 2024 [time]
 const MONTHNAME_DAY_YEAR = new RegExp(
@@ -349,7 +386,11 @@ function splitZoneDesignator(value: string): { body: string; offsetMinutes: numb
  * Read the calendar parts of a zone-less timestamp. Returns null when no supported
  * shape matches, and 'invalid' when a shape matches but its values cannot be a date.
  */
-function parseCalendarParts(body: string, dateFormat?: 'US' | 'International'): CalendarParts | 'invalid' | null {
+function parseCalendarParts(
+  body: string,
+  dateFormat: 'US' | 'International' | undefined,
+  twoDigitYears: boolean
+): CalendarParts | 'invalid' | null {
   let m: RegExpMatchArray | null;
 
   if ((m = body.match(YEAR_FIRST))) {
@@ -357,12 +398,14 @@ function parseCalendarParts(body: string, dateFormat?: 'US' | 'International'): 
   }
 
   if ((m = body.match(DAY_MONTH_SLASH)) || (m = body.match(DAY_MONTH_DASH))) {
+    if (m[3].length === 2 && !twoDigitYears) return 'invalid';
     const order = resolveDayMonthOrder(Number(m[1]), Number(m[2]), dateFormat);
     if (!order) return 'invalid';
     return withTimeOfDay(expandYear(m[3]), order.month, order.day, m, 4);
   }
 
   if ((m = body.match(DAY_MONTH_DOT))) {
+    if (m[3].length === 2 && !twoDigitYears) return 'invalid';
     return withTimeOfDay(expandYear(m[3]), Number(m[2]), Number(m[1]), m, 4);
   }
 
@@ -396,6 +439,12 @@ function parseCalendarParts(body: string, dateFormat?: 'US' | 'International'): 
     return withTimeOfDay(expandYear(m[4]), month, Number(m[2]), m, 5);
   }
 
+  if ((m = body.match(ASCTIME))) {
+    const month = monthFromName(m[2]);
+    if (month === null || !isWeekdayOrAbsent(m[1])) return null;
+    return withTimeOfDay(Number(m[9]), month, Number(m[3]), m, 4);
+  }
+
   if ((m = body.match(MONTHNAME_DAY_YEAR))) {
     const month = monthFromName(m[2]);
     if (month === null || !isWeekdayOrAbsent(m[1])) return null;
@@ -405,11 +454,20 @@ function parseCalendarParts(body: string, dateFormat?: 'US' | 'International'): 
   return null;
 }
 
-/** Calendar parts from a date plus the optional TIME_OF_DAY groups starting at `index`. */
+/**
+ * Calendar parts from a date plus the optional TIME_OF_DAY groups starting at `index`
+ * (hour, minute, second, fraction, AM/PM). With AM/PM the hour is on the 12-hour clock:
+ * 12 AM is 00, 12 PM is 12, and an hour of 0 or above 12 is not a 12-hour time.
+ */
 function withTimeOfDay(year: number, month: number, day: number, m: RegExpMatchArray, index: number): CalendarParts | 'invalid' {
-  const hour = m[index] === undefined ? 0 : Number(m[index]);
+  let hour = m[index] === undefined ? 0 : Number(m[index]);
   const minute = m[index + 1] === undefined ? 0 : Number(m[index + 1]);
   const second = m[index + 2] === undefined ? 0 : Number(m[index + 2]);
+  const meridiem = m[index + 4];
+  if (meridiem !== undefined) {
+    if (hour < 1 || hour > 12) return 'invalid';
+    hour = (hour % 12) + (meridiem.toLowerCase() === 'p' ? 12 : 0);
+  }
   return checkedParts(year, month, day, hour, minute, second, m[index + 3] ?? '');
 }
 
@@ -462,14 +520,18 @@ function resolveDayMonthOrder(first: number, second: number, dateFormat?: 'US' |
 }
 
 /**
- * A four-digit year as written; a two-digit year is the latest year with those digits
- * that is not after the current one (an origin time is never in the future).
+ * A two-digit year as the latest year with those digits that is not after the current
+ * one ('24' -> 2024, '95' -> 1995): an origin time is never in the future.
  */
+export function expandTwoDigitYear(twoDigitYear: number): number {
+  const current = new Date().getUTCFullYear();
+  return current - ((((current - twoDigitYear) % 100) + 100) % 100);
+}
+
+/** A four-digit year as written; a two-digit year by expandTwoDigitYear. */
 function expandYear(text: string): number {
   const year = Number(text);
-  if (text.length !== 2) return year;
-  const current = new Date().getUTCFullYear();
-  return current - ((((current - year) % 100) + 100) % 100);
+  return text.length === 2 ? expandTwoDigitYear(year) : year;
 }
 
 function monthFromName(name: string): number | null {
@@ -514,6 +576,13 @@ export interface ParseFileDecisions {
    */
   dateFormat?: DateFormat;
   dateFormatSource?: 'declared' | 'detected';
+  /**
+   * Whether numeric dates with a two-digit year (05/03/24) were read: only when the
+   * file's day/month/year order was declared or unambiguous (see NormalizeTimestampOptions).
+   */
+  twoDigitYears?: boolean;
+  /** Origin times that had a date but no time of day, stored at 00:00:00 UTC. */
+  dateOnlyTimes?: number;
   /**
    * Unit the file reports depth in. For 'm' the depth and its length uncertainties
    * (depth, horizontal, min/max horizontal) were divided by 1000 to kilometres.
@@ -595,9 +664,21 @@ export function wrapLongitude(longitude: number): number {
   return longitude > 180 && longitude <= 360 ? longitude - 360 : longitude;
 }
 
+/**
+ * Longest column name whose wording is interpreted (units, magnitude scales). Only the end
+ * of a longer name is read, so no header, however long, can make a scan quadratic.
+ */
+export const MAX_HEADER_NAME_LENGTH = 64;
+
 /** The length unit a column name states ('Depth/km', 'depth_m'), or null when it states none. */
 export function lengthUnitFromColumnName(column: string | null | undefined): 'km' | 'm' | null {
-  const name = (column ?? '').toLowerCase().replace(/[\s)\]]+$/, '');
+  const text = column ?? '';
+  let name = (text.length > MAX_HEADER_NAME_LENGTH ? text.slice(-MAX_HEADER_NAME_LENGTH) : text).toLowerCase();
+  // Trailing spaces and closing brackets ('Depth (km)'), trimmed by a scan, not a regex
+  // anchored only at the end, which retries from every position.
+  let end = name.length;
+  while (end > 0 && (name[end - 1] === ')' || name[end - 1] === ']' || /\s/.test(name[end - 1]))) end -= 1;
+  name = name.slice(0, end);
   if (!name) return null;
   if (/(?:^|[^a-z])(?:km|kilomet(?:re|er)s?)$/.test(name)) return 'km';
   if (/(?:^|[^a-z])(?:m|met(?:re|er)s?)$/.test(name)) return 'm';
@@ -618,9 +699,21 @@ const MAGNITUDE_SCALE_CODES: Record<string, string> = {
  */
 export function inferMagnitudeTypeFromColumn(column: string | null | undefined): string | null {
   if (!column) return null;
-  const core = column.trim()
-    .replace(/^mag(?:nitude)?[\s_.(-]*/i, '')
-    .replace(/[\s_.(-]*(?:mag(?:nitude)?)?\)?$/i, '');
+  const trimmed = column.trim();
+  // A scale-named column is short; a longer name never is one.
+  if (trimmed.length > MAX_HEADER_NAME_LENGTH) return null;
+  // Leading 'mag'/'magnitude' and separators (an anchored, linear match), then from the
+  // end a ')', a 'mag'/'magnitude' and separators, by a scan: an expression anchored
+  // only at the end ('mag_ML', 'Mw_magnitude', 'mag(ML)') retried from every position
+  // and was quadratic in the length of a run of separators.
+  const lead = trimmed.replace(/^mag(?:nitude)?[\s_.(-]*/i, '');
+  let end = lead.length;
+  if (end > 0 && lead[end - 1] === ')') end -= 1;
+  const lower = lead.slice(0, end).toLowerCase();
+  if (lower.endsWith('magnitude')) end -= 'magnitude'.length;
+  else if (lower.endsWith('mag')) end -= 'mag'.length;
+  while (end > 0 && /[\s_.(-]/.test(lead[end - 1])) end -= 1;
+  const core = lead.slice(0, end);
   if (!core) return null;
   if (core === 'mB') return 'mB';
   return MAGNITUDE_SCALE_CODES[core.toLowerCase().replace(/[\s_-]/g, '')] ?? null;
@@ -658,7 +751,7 @@ export function normalizeMappedField(
     const hint = decisions?.dateFormat === 'US' || decisions?.dateFormat === 'International'
       ? decisions.dateFormat
       : undefined;
-    return { value: normalizeTimestamp(raw, hint), derived };
+    return { value: normalizeTimestamp(raw, hint, { twoDigitYears: decisions?.twoDigitYears === true }), derived };
   }
 
   if (NUMERIC_EVENT_FIELDS.has(target)) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { dbQueries } from '@/lib/db';
+import { dbQueries, type SavedFilterScope } from '@/lib/db';
 import { Logger, formatErrorResponse } from '@/lib/errors';
 import { requireViewer } from '@/lib/auth/middleware';
 import { UserRole } from '@/lib/auth/types';
@@ -14,8 +14,8 @@ const logger = new Logger('SavedFilterAPI');
  * recorded. Any signed-in account used to be able to read, overwrite or delete every
  * user's filters.
  */
-function ownerScope(user: { id: string; role?: string }): string | undefined {
-  return user.role === UserRole.ADMIN ? undefined : user.id;
+function ownerScope(user: { id: string; role?: string }): SavedFilterScope {
+  return user.role === UserRole.ADMIN ? { admin: true } : { ownerId: user.id };
 }
 
 const notFound = () => NextResponse.json({ error: 'Saved filter not found' }, { status: 404 });

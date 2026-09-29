@@ -15,6 +15,7 @@
  */
 
 import { normalizeTimestamp } from './earthquake-utils';
+import { metricsFromEvent, scoreQualityMetrics } from './quality-scoring';
 
 /** QuakeML 1.2 BED EventType enumeration (the 44 values of the BED XSD and ObsPy). */
 export const QUAKEML_EVENT_TYPES = [
@@ -269,4 +270,132 @@ export function eventFiltersToSearchParams(filters: EventFilters): URLSearchPara
     if (value !== undefined) params.set(key, String(value));
   }
   return params;
+}
+
+// ---------------------------------------------------------------------------
+// Matching rules shared by the server query (lib/db.ts buildEventFilterQuery) and the
+// client-side table filter (components/event-filters.tsx applyEventFilters). The table a
+// user sees and the file "Export filtered events" downloads must hold the same events,
+// so both sides take their rules from here, and eventMatchesFilters below applies them
+// exactly as MongoDB evaluates the server query.
+// ---------------------------------------------------------------------------
+
+function escapeRegExpSource(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** A value of a lower-case controlled vocabulary (event type, evaluation status/mode), in any case. */
+export function vocabularyPattern(value: string): RegExp {
+  return new RegExp(`^${escapeRegExpSource(value.trim())}$`, 'i');
+}
+
+// The broadband body-wave magnitude is written mB (ISC mB, SeisComP mB_BB) and is a
+// different scale from short-period mb; only this mixed-case spelling marks it (an
+// all-caps MB is short-period mb in upper case, and mB followed by Lg is the regional
+// mb_Lg). Same rule as lib/merge.ts getMagnitudeTypeCategory.
+const BROADBAND_BODY_WAVE = 'mB(?![_ ]?[lL][gG])';
+const isBroadbandAt = (type: string, i: number) =>
+  type[i] === 'm' && type[i + 1] === 'B' && !/^[_ ]?[lL][gG]/.test(type.slice(i + 2));
+
+/**
+ * The stored magnitude types that are the given one: the same code in any letter case
+ * (ML = Ml, Mw = MW, Mw(mB) = MW(mB)), except that the case-significant broadband mB
+ * matches only itself, so filtering by mb does not return mB events or the reverse.
+ */
+export function magnitudeTypePattern(type: string): RegExp {
+  const t = type.trim();
+  let source = '';
+  for (let i = 0; i < t.length; i++) {
+    if (isBroadbandAt(t, i)) {
+      source += 'mB';
+      i++;
+      continue;
+    }
+    const ch = t[i];
+    const lower = ch.toLowerCase();
+    const upper = ch.toUpperCase();
+    // An mb in any other case is short-period mb: it must not match a stored mB there.
+    if (lower === 'm' && (t[i + 1] ?? '').toLowerCase() === 'b') source += `(?!${BROADBAND_BODY_WAVE})`;
+    source += lower !== upper ? `[${lower}${upper}]` : escapeRegExpSource(ch);
+  }
+  return new RegExp(`^${source}$`);
+}
+
+/**
+ * Horizontal location uncertainty (km) exactly as the quality score reads it — the
+ * error-ellipse semi-major axis, else the circular value, else the larger lat/lon
+ * marginal converted to km; a value outside its valid range counts as absent — or null.
+ */
+export function eventHorizontalUncertaintyKm(event: unknown): number | null {
+  return metricsFromEvent(event).horizontalUncertainty ?? null;
+}
+
+/**
+ * The quality score Q a filter compares: the stored score, or for a row stored before
+ * scores were persisted the score computed with the same function inserts use. The
+ * server scores such rows before a minQuality query (lib/db.ts), so both sides agree.
+ */
+export function eventQualityScore(event: unknown): number {
+  const stored = event && typeof event === 'object' ? (event as { quality_score?: unknown }).quality_score : undefined;
+  if (typeof stored === 'number' && Number.isFinite(stored)) return stored;
+  return scoreQualityMetrics(metricsFromEvent(event)).overall;
+}
+
+/**
+ * Whether one event row passes `filters`, with the semantics MongoDB gives the server's
+ * query (lib/db.ts buildEventFilterQuery): a bound matches only a value of its own type
+ * (a number for numeric filters, a string for times, compared as stored), a missing
+ * value never passes, maxima of non-negative quantities need a value of at least 0,
+ * and a longitude range ending at +180 or -180 also takes the other spelling of the seam.
+ */
+export function eventMatchesFilters(event: object, filters: EventFilters): boolean {
+  const e = event as Record<string, unknown>;
+  const num = (v: unknown): v is number => typeof v === 'number';
+  const inRange = (v: unknown, lo?: number, hi?: number) =>
+    num(v) && (lo === undefined || v >= lo) && (hi === undefined || v <= hi);
+  const bound = (value: string | undefined) => (value ? normalizeTimestamp(value) ?? value : undefined);
+  const matchesPattern = (v: unknown, pattern: RegExp) => typeof v === 'string' && pattern.test(v);
+
+  if ((filters.minMagnitude !== undefined || filters.maxMagnitude !== undefined) &&
+      !inRange(e.magnitude, filters.minMagnitude, filters.maxMagnitude)) return false;
+  if ((filters.minDepth !== undefined || filters.maxDepth !== undefined) &&
+      !inRange(e.depth, filters.minDepth, filters.maxDepth)) return false;
+
+  const start = bound(filters.startTime);
+  const end = bound(filters.endTime);
+  if (start !== undefined || end !== undefined) {
+    const t = e.time;
+    if (typeof t !== 'string' || (start !== undefined && t < start) || (end !== undefined && t > end)) return false;
+  }
+
+  if (filters.eventType && !matchesPattern(e.event_type, vocabularyPattern(filters.eventType))) return false;
+  if (filters.magnitudeType && !matchesPattern(e.magnitude_type, magnitudeTypePattern(filters.magnitudeType))) return false;
+  if (filters.evaluationStatus && !matchesPattern(e.evaluation_status, vocabularyPattern(filters.evaluationStatus))) return false;
+  if (filters.evaluationMode && !matchesPattern(e.evaluation_mode, vocabularyPattern(filters.evaluationMode))) return false;
+
+  if (filters.maxAzimuthalGap !== undefined && !inRange(e.azimuthal_gap, 0, filters.maxAzimuthalGap)) return false;
+  if (filters.minUsedPhaseCount !== undefined && !inRange(e.used_phase_count, filters.minUsedPhaseCount)) return false;
+  if (filters.minUsedStationCount !== undefined && !inRange(e.used_station_count, filters.minUsedStationCount)) return false;
+  if (filters.maxStandardError !== undefined && !inRange(e.standard_error, 0, filters.maxStandardError)) return false;
+  if (filters.maxDepthUncertainty !== undefined && !inRange(e.depth_uncertainty, 0, filters.maxDepthUncertainty)) return false;
+  if (filters.maxTimeUncertainty !== undefined && !inRange(e.time_uncertainty, 0, filters.maxTimeUncertainty)) return false;
+  if (filters.maxMagnitudeUncertainty !== undefined && !inRange(e.magnitude_uncertainty, 0, filters.maxMagnitudeUncertainty)) return false;
+  if (filters.maxHorizontalUncertainty !== undefined) {
+    const horizontal = eventHorizontalUncertaintyKm(event);
+    if (horizontal === null || horizontal > filters.maxHorizontalUncertainty) return false;
+  }
+  if (filters.minQuality !== undefined && !(eventQualityScore(event) >= filters.minQuality)) return false;
+
+  if ((filters.minLatitude !== undefined || filters.maxLatitude !== undefined) &&
+      !inRange(e.latitude, filters.minLatitude, filters.maxLatitude)) return false;
+  const { minLongitude: west, maxLongitude: east } = filters;
+  if (west !== undefined && east !== undefined && west > east) {
+    // A box crossing the antimeridian: the two arcs either side of 180.
+    if (!(inRange(e.longitude, west) || inRange(e.longitude, undefined, east))) return false;
+  } else if (west !== undefined || east !== undefined) {
+    const onSeam = (west === -180 && e.longitude === 180) || (east === 180 && e.longitude === -180);
+    if (!inRange(e.longitude, west, east) && !onSeam) return false;
+  }
+
+  return true;
 }

@@ -95,7 +95,7 @@ Adding a New Mapping
 1. Click **Add Mapping** button
 2. Enter the **Source Field Pattern** (the field name to match in uploaded files; 200 characters or fewer)
 3. Select the **Target Field** from the dropdown (only fields a column can actually be mapped to are offered -- complex, assembled structures such as ``origins`` or ``picks`` are not)
-4. Optionally enable **Use regex pattern** for pattern matching (the pattern must compile as a valid regular expression, or the rule is rejected)
+4. Optionally enable **Use regex pattern** for pattern matching (the pattern must compile as a valid regular expression, or the rule is rejected). Two further safety limits apply at match time, since a Settings rule runs against every header of every upload: a pattern that repeats a group that itself repeats or alternates (``(\w+_?)*``, ``(a+)+``) can backtrack exponentially on a near miss, so such a pattern is recognised and never matches anything; and no regex pattern (safe or not) is ever run against a header longer than 64 characters.
 5. Set the **Priority** (an integer from 1-100, higher = checked first)
 6. Click **Add Mapping**
 
@@ -254,6 +254,16 @@ still explicitly remap or unmap it like any other column. Doing so changes
 which value becomes the *preferred* magnitude/magnitude type; the previous
 selection is not lost, it becomes an alternative (see *Magnitude columns*
 in :doc:`/developer-guide/implementation-notes/scientific-conventions`).
+
+The mapping UI distinguishes three cases by how locked-down they are. A column the
+parser *derives a value from* rather than reads directly -- a separate date and time
+column combined into one origin time, or the auto-assembled focal-mechanism columns --
+is shown fully read-only, with a badge such as "Origin Time (assembled by the parser)"
+and no dropdown at all: unlike the winning scale-named column above, there is no raw
+per-column value here to remap, since no single column holds it. A scale-named column
+that lost out to a higher-priority one in step 4 above (e.g. an ``ML`` column when the
+file also has ``Mw``) defaults to "Alternative magnitude (ML)" and, like the winning
+column, remains fully remappable if you want it read into a different field instead.
 
 One current gap: ``mb`` is not in the built-in alias table (see
 *Built-in Aliases* below), so it is not matched by the generic alias

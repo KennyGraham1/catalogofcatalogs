@@ -40,12 +40,11 @@ const NORMALIZE_CASES: Array<[string, Hint, string | null]> = [
   ['Mon, 15 Jan 2024 10:30:00 GMT', undefined, '2024-01-15T10:30:00.000Z'],
   ['2024-01-15T12:34:56 UTC', undefined, '2024-01-15T12:34:56.000Z'],
   ['2024-01-15T10:30:00+13', undefined, '2024-01-14T21:30:00.000Z'],
-  // Two-digit years, read with the file's day/month order
-  ['05/03/24 10:00:00', undefined, '2024-03-05T10:00:00.000Z'],
-  ['05/03/24 10:00:00', 'International', '2024-03-05T10:00:00.000Z'],
-  ['05/03/24 10:00:00', 'US', '2024-05-03T10:00:00.000Z'],
-  ['25/03/24 10:00:00', undefined, '2024-03-25T10:00:00.000Z'],
-  ['05/03/95 10:00:00', undefined, '1995-03-05T10:00:00.000Z'],
+  // A numeric date with a two-digit year is not read on its own ('25/03/24' is also
+  // YY/MM/DD); a file whose order is certain reads it (see the two-digit-year tests)
+  ['05/03/24 10:00:00', undefined, null],
+  ['05/03/24 10:00:00', 'International', null],
+  ['25/03/24 10:00:00', undefined, null],
   // Day/month-first without seconds
   ['3/4/2024 10:00', 'International', '2024-04-03T10:00:00.000Z'],
   ['3/4/2024 10:00', 'US', '2024-03-04T10:00:00.000Z'],
@@ -136,6 +135,17 @@ describe('normalizeTimestamp reads zone-less times as UTC', () => {
 
   it.each(CALENDAR_CONTROLS)('keeps the valid date %s', (input, expected) => {
     expect(normalizeTimestamp(input)).toBe(expected);
+  });
+
+  it('reads two-digit years when asked to, with the stated pivot', () => {
+    const read = (input: string, hint?: 'US' | 'International') => normalizeTimestamp(input, hint, { twoDigitYears: true });
+    expect(read('05/03/24 10:00:00')).toBe('2024-03-05T10:00:00.000Z');
+    expect(read('05/03/24 10:00:00', 'International')).toBe('2024-03-05T10:00:00.000Z');
+    expect(read('05/03/24 10:00:00', 'US')).toBe('2024-05-03T10:00:00.000Z');
+    expect(read('25/03/24 10:00:00')).toBe('2024-03-25T10:00:00.000Z');
+    expect(read('05/03/95 10:00:00')).toBe('1995-03-05T10:00:00.000Z');
+    // A named month leaves no doubt which field is the year (DD-MON-YY).
+    expect(normalizeTimestamp('15-JAN-24')).toBe('2024-01-15T00:00:00.000Z');
   });
 
   it('CSV and JSON uploads store the same UTC instants', () => {

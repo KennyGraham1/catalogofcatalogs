@@ -476,9 +476,72 @@ set by the server ([lib/db.ts:1248](lib/db.ts#L1248)).
 
 ## Gap-area findings
 
-_(Pending: follow-up reviews of the migration/maintenance scripts, the paper's figure
-generator and synthetic data, cross-path ingest parity, test oracles, and client
-state/settings.)_
+A second round reviewed five areas the first pass did not cover. It produced 37 findings,
+each independently verified (one verifier failed to run, so G33 is plausible rather than
+confirmed). Severities below are the verified ones; several duplicate first-pass findings
+and are marked so.
+
+**Maintenance and migration scripts**
+
+| # | Sev | Finding |
+|---|---|---|
+| G1 | Med | `migrate-uncertainty-units` selects rows by size (> 100), so legacy metre values ≤ 100 m stay 1000× too large and re-runs divide again |
+| G2 | Med | `fix-catalogue-event-counts` writes the capped read's length, which disables the export truncation check |
+| G3 | Low | `fix-missing-geo-bounds` tests `!== null`, so it skips the catalogues it exists to repair |
+| G4 | Med | Scripts that use the driver directly ignore the database named in `MONGODB_URI` |
+| G5 | Low | Several scripts print the full connection string, including the password |
+| G6 | Low | The `clean-*` scripts delete a SQLite file and call a deleted script |
+| G7 | Low | `migrate-auth-schema` matches the admin email case-sensitively, so it can create a duplicate admin |
+
+**Paper figure generator and test data**
+
+| # | Sev | Finding |
+|---|---|---|
+| G8 | High | The Python Gardner-Knopoff port lacks the platform's head reservation, so the paper's declustering numbers are not the platform's |
+| G9 | Med | The worked example's quality scores come from a gap-driven surrogate, not Eq. 1 (see M49) |
+| G10 | Med | Supplement S1/S2 show an artifact of a since-fixed binning bug (see M48) |
+| G11 | Low | The S3 caption contradicts its own screenshot |
+| G12 | Low | The "48,600 above Mc" step is never computed from the retained set |
+| G13 | Low | `generate_test_data.py` draws magnitudes from a Beta law, not Gutenberg-Richter |
+| G14 | Low | `import_test_catalogues_api.sh` cannot import anything |
+
+**Ingest-path parity**
+
+| # | Sev | Finding |
+|---|---|---|
+| G15 | High | The Quality merge strategy's winner depends on which ingestion path brought the GeoNet data |
+| G16 | Med | Averaging treats a missing σ as 1 km (duplicates M17) |
+| G17 | Med | GeoNet event identity is stored differently on each path |
+| G18 | Med | The platform's own JSON export cannot be re-imported (duplicates M27) |
+| G19 | Med | Seven or more fractional-second digits are parsed in local time (duplicates M8) |
+| G20 | Low | The GeoNet importer drops `preferredPlane` and ignores `preferredFocalMechanismID` |
+| G21 | Low | 0–360° longitudes are rejected by the GeoJSON and QuakeML parsers but accepted from CSV |
+| G22 | Low | Two valid QuakeML depth types can never be stored |
+
+**Test oracles and developer docs**
+
+| # | Sev | Finding |
+|---|---|---|
+| G23 | Med | Several date shapes are still parsed in local time, and the timezone suite runs in UTC, so it cannot detect this |
+| G24 | Med | `scientific-conventions.rst` claims per-file units and magnitude priority that the upload path overrides |
+| G25 | Med | An import test locks in erasing GeoNet's own event classifications |
+| G26 | Low | Both integration suites (44 tests) are always skipped |
+| G27 | Low | `data_validation_guide.rst` states wrong seismology and stale rules |
+| G28 | Low | The GeoNet QS appendix presents the in-house heuristic as the published method |
+| G29 | Low | A statistics test locks in an invented 0–0 km depth range |
+| G30 | Low | Magnitude class labels are non-standard ('Major' for M ≥ 8; 'Minor' for M < 3) |
+
+**Client state and settings**
+
+| # | Sev | Finding |
+|---|---|---|
+| G31 | Med | Client-side catalogue caches are never invalidated |
+| G32 | Low | A Settings mapping's priority is used as its match confidence |
+| G33 | Med | The field-mapping config is stored unvalidated; one malformed rule breaks every upload |
+| G34 | Low | The dashboard counts every catalogue as merged |
+| G35 | Low | Settings' JSON/QuakeML/GeoJSON mapping tabs never apply, and "Strict Schema Validation" is read nowhere |
+| G36 | Low | 16 settings controls are saved and read by nothing |
+| G37 | Low | Catalogue time-period fields are captured in local wall-clock time |
 
 ---
 
@@ -495,6 +558,8 @@ state/settings.)_
 
 ## Suggested fix order
 
+_(Written before the repairs; kept for the record. See **Repairs** below for what was done.)_
+
 1. **H1** (b-value): a small, contained change with the largest scientific impact. Then
    re-run the paper's worked example and regenerate supplement S1–S3 (**M48**).
 2. **H2 + H3** (upload mapping): stop re-deriving values from raw cells. This also fixes
@@ -508,3 +573,221 @@ state/settings.)_
    saved-filter ownership, the search limit, and cache invalidation.
 6. **Paper** (M49–M51 and the stale statements): align the text with the code, or
    implement the claimed features, before submission.
+
+---
+
+## Repairs — 25–29 September 2026
+
+Every finding above has a code fix, including all 37 gap findings. Each fix has a regression test that
+failed on the original code and exercises the real code path; only the database driver, `fetch` or the
+browser worker are mocked. Where the paper, white papers or Sphinx docs described a feature the code
+lacked, the feature was **implemented** (your decision). Text describing old or incorrect behaviour was
+**revised**. An independent second review of the fixes then found further problems, most of them
+introduced by the fixes; those are fixed too (see *Post-fix review*). Commit `59955b4` holds only the
+first repair pass. The post-fix review repairs and the final paper and docs updates came after it.
+
+### How the repairs were checked
+
+- **Static checks:** `tsc --noEmit` 0 errors; `next lint` clean; ESLint on `__tests__` clean.
+- **Tests:** 263 suites and 3,157 tests pass, none skipped (at `a879a00`: 119 suites, 1,627 tests, 44 of
+  them skipped). An earlier full run of the same suite also passed in-band with `--detectOpenHandles`
+  and under ten randomised test orders. The two integration suites that were always skipped under
+  jsdom now run. Commit `59955b4` alone passes its own 252 suites, but the 11 suites added after it
+  fail there (112 of their 131 tests).
+- **Production build:** `next build` passes in an isolated copy with no `.env` files and no network.
+  Pages render in the intended font now that the webpack cache override is gone.
+- **Disposable MongoDB 7 (single-node replica set, localhost only):**
+  - `init-database`, `create-indexes` and `ensure-indexes` in any order give identical index sets;
+  - `test:database`, the quality backfill and the orphan sweep run clean;
+  - `test:runtime` and `test:browser` pass (production CSP and every base-map layer), on both
+    `next start` and the standalone Docker-style server.
+- **End-to-end API checks (511 of 511 passed, re-run on 29 September against a fresh production build
+  of the final code):**
+  - CSV and QuakeML upload through the real upload flow;
+  - quality-strategy and Custom Order merges;
+  - every export format (the CSV `X-Export-Rows-SHA256` equals the body's hash; QuakeML validates
+    against QuakeML-BED-1.2 with lxml and ObsPy 1.5 reads it without warnings);
+  - the PATCH and DELETE lifecycle, saved-filter ownership, Origin checks and login throttling.
+    Three throttling checks written for the earlier per-window account rule were updated to the final
+    consecutive-failure rule. A separate run (6 of 6) confirmed that after 100 failures from 20
+    addresses a new browser gets `AccountProtected`, the owner's known-device cookie still signs in,
+    and that success lets new browsers in again.
+- **Paper:**
+  - The worked example now runs on the platform's own TypeScript engine.
+  - Supplement S1–S3 and the two merge figures were recaptured from the repaired app through its real
+    upload page; every value on screen matches the engine's expected values.
+  - `srl_paper.pdf` (43 pp), `srl_supplement.pdf` (6 pp), `main.pdf` (50 pp) and
+    `merge_strategies.pdf` (29 pp) were rebuilt with no errors or undefined references.
+- **Docs:** the Sphinx build has 852 warnings (876 before), none new.
+
+### High-severity findings
+
+| # | Repair |
+|---|---|
+| H1 b-value bias | The Utsu half-bin correction now comes from the magnitudes' **reporting step**: 0 for full precision (GeoNet), δ/2 for data rounded to δ (0.001–0.5), and share-weighted for mixed grids. Magnitudes within 2⁻²⁰ of a grid count as on it. The library and the worker are in exact parity. For a planted b = 1: continuous magnitudes 0.897 → 1.002. |
+| H2 mapping overwrote parsed values | Stored rows are the parser's events. Only explicit per-file changes apply, re-read from the raw cell with that file's date-order and unit decisions. "Do not map" removes the field. Columns the parser consumed are never auto-mapped. |
+| H3 wrong auto-mapping | The parser's own header resolution comes first and is shared with the UI. After that, only whole-word matches are accepted, and magnitude-scale and date/time-part columns are never guessed. `type` maps to event_type. |
+| H4 greedy association | One-to-one best match in increasing Δt/τ + d/δ, at most one report per catalogue per group, independent of input order. Close calls are flagged in the preview. |
+| H5 origin metadata mixed | Origin and depth metadata come only from the report whose solution was published. Averaged rows carry no borrowed origin fields. |
+| H6 QuakeML rewrote an agency's origin | Contributing origins are emitted untouched. The published hypocentre has its own origin (or reuses the contributor's own), and every `preferred*` reference resolves. |
+| H7 temporary-network times | FDSN times are parsed as UTC. **Catalogues already imported from an NZ-time machine must be re-imported** (see *Data repair*). |
+
+### Medium and low findings, by area
+
+- **Statistics and analytics:**
+  - Mc: the 50-event floor applies wherever Mc is estimated. The magnitude filter is an explicit
+    cut-off, and neither magnitude bound truncates the G-R/Mc fit.
+  - Pooled catalogues: physical totals are withheld.
+  - Depths and scales: null and negative depths are kept. A mixed-scale warning, a type table and a type
+    filter were added.
+  - Declustering: Gardner-Knopoff is O(N log N) and robust to unparseable times.
+  - Labels and bins: labels and tooltips corrected; partial time bins are scaled only against a known
+    period.
+- **Ingestion:**
+  - Dates and times:
+    - Day/month order is decided from the whole file.
+    - Nothing is ever parsed in local time; AM/PM and asctime are accepted.
+    - Two-digit years are read only when the order is unambiguous.
+    - Date and time columns are combined, including when the time column is recognised only by its values.
+  - Chunked uploads: the delimiter is mapped from its name and a BOM is stripped.
+  - Multi-file uploads: files are joined through a per-file token manifest. The server checks every
+    file's count and validates every row before writing anything.
+  - Responses and reports: upload responses are genuinely bounded, and the server's own counts are
+    shown.
+- **Merge:**
+  - Magnitude types: GeoNet's bare "M" is treated as the ML family.
+  - Strategies:
+    - "Most Recent Solution" uses the agency's determination time.
+    - Quality-based compares only the metrics every report states.
+    - Averaging uses 1/σ² only when every report states σ.
+    - Magnitude preference switches at M6.2.
+  - Selection: fixed depths are used last; agency identity is never taken from catalogue-name
+    substrings; Custom Order is implemented; focal mechanisms are united across reports.
+  - Inputs: merge inputs are read with a keyset cursor; duplicate source catalogues are rejected.
+- **Export:**
+  - BED types are mapped at export, and GeoNet event IDs survive into QuakeML.
+  - Blob values are type-, enumeration-, length- and date-checked, and illegal XML characters are
+    stripped.
+  - IDs are distinct per object.
+  - QuakeML is streamed.
+  - Exports return 409 while a catalogue is changing.
+  - The platform's own JSON and CSV exports can be re-imported.
+- **Quality, uncertainty and focal mechanisms:**
+  - Q is bounded to 0–100, stored on every insert, and backfillable.
+  - Legends are generated from the colour functions.
+  - The preferred focal mechanism is honoured, and faulting style comes from P/T/B plunges.
+  - Null-safe cross-field rules; a corrected station-distribution reference.
+- **GeoNet import:**
+  - Dates are read as UTC, and imports can target an existing catalogue with real update semantics.
+  - Agency-flagged records are excluded and counted, with the raw type kept.
+  - The NZ region crosses 180°. Circuit-breaker and accounting fixes.
+- **Security:**
+  - Sessions and redirects: the session route returns `{}` when signed out; post-sign-in redirects are
+    same-origin only.
+  - Sign-in throttling:
+    - per (account, client) and per client;
+    - a consecutive-failure cap for browsers without a signed known-device cookie, so the owner is
+      never locked out;
+    - reset links that cannot be invalidated by an attacker.
+  - Admin and access:
+    - role approvals are compare-and-set, and the last admin is protected;
+    - the CSP allows every base-map layer, and the Origin check compares full origins;
+    - saved filters are owner-scoped, search limits are clamped, and fault lookups are capped per user.
+  - Caches and audit: caches are invalidated through a shared generation, and privileged actions are
+    audit-logged with the client IP.
+- **Maintenance scripts:**
+  - Every script resolves the database as the app does, masks credentials and asks for confirmation.
+  - The unit migration works by provenance and is idempotent.
+  - Counts and bounds come from full reads.
+  - The reset script is guarded.
+- **Client state and settings:**
+  - Client caches really invalidate.
+  - Dashboard counts no longer double-count merged catalogues.
+  - Saved mapping rules are validated (no catastrophic regexes).
+  - 16 inert settings controls were removed.
+
+### Features implemented from the paper and docs
+
+- **Analysis page:**
+  - Mc: an adjustable MAXC correction (0–0.5); goodness-of-fit Mc (Wiemer & Wyss 2000, 95%/90%, with
+    MAXC fallback).
+  - Temporal tab: a seismicity-rate series above Mc; magnitude–time; cumulative moment and energy;
+    UTC Auto/Day/Week/Month bins.
+  - Filters: Q, azimuthal-gap and magnitude-type filters; agency-flagged records excluded by default.
+- **Maps:** colour by depth, quality, azimuthal gap or source catalogue. On-demand overlays draw
+  uncertainty ellipses (labelled "N% confidence" when stated) and beach balls.
+- **Quality:** Q and grade stored on import; a minimum-Q filter and uncertainty filters; per-event grades
+  and a catalogue-level distribution.
+- **Provenance:**
+  - Merged rows carry the strategy, parameters, source catalogue IDs, the selected report and Q at merge
+    time.
+  - Exports carry per-event lineage, the catalogue version and a SHA-256 checksum (past versions cannot
+    be retrieved from the platform).
+  - Filtered and declustered exports are available.
+- **Catalogue versions:** MAJOR.MINOR.PATCH following the paper's policy. The depositor's own label is
+  kept as `source_version`.
+- **Merge:** Custom Order (a designated primary catalogue); Most Recent Solution.
+- **GeoNet import:** import into an existing catalogue.
+
+### Post-fix review
+
+Six independent reviewers re-examined the fixed code and backed each claim with a probe. They found:
+
+- **Upload:** two high-severity regressions introduced by the fixes. An untouched upload could re-type
+  Mw values, and split date/time columns were truncated to midnight.
+- **Security:** a high-severity open redirect introduced by the new post-sign-in redirect. The
+  account-wide sign-in limit also still allowed owner lockout and a high guessing budget.
+- **Science and parsers:** medium issues including the GFT empty-bin sum, a declustering regression on
+  unparseable times, float-noise tolerance, a quadratic header regex, unbounded caches, and rejected
+  AM/PM times.
+- **Merge, database and exports:** a magnitude-preference switch at M5.5 that biased published
+  magnitudes low by up to 0.28, no-op saves bumping versions, table/export filter mismatches, QuakeML
+  ID collisions and blob-validation gaps.
+
+All of these are fixed with the reviewers' probes turned into regression tests.
+
+### Behaviour changes users and API clients will notice
+
+| Area | Change |
+|---|---|
+| Sessions and sign-in | `/api/auth/session` returns `{}` when signed out. Sign-in errors are codes, including `AccountProtected`. A wrong current password returns 400. |
+| Request checks | Writes to `/api` with a foreign `Origin` get 403. A stale role approval gets 409. Self-demotion gets 400. Removing the last admin gets 409. |
+| Upload | `POST /api/catalogues` takes a `pendingUploads` manifest. Upload and finalize responses are bounded previews. |
+| Export | Returns 409 while a catalogue is importing, being deleted or changing. |
+| Merge | The strategy labels changed: "Most Recent Solution", "Quality-Based". |
+| Parsing | Zone-less times are UTC. Unrecognised time formats, named local zones and ambiguous two-digit years are rejected. Out-of-range depths become unknown on every format. |
+| Settings | The settings page lost its 16 inert controls. |
+
+### Deployment and data repair
+
+- **Replica set:** saved merges use a MongoDB transaction and need a replica set (Atlas, or a local
+  single-node set; now documented in *Getting started*).
+- **Before enabling the repaired app:**
+  1. Run `npx tsx scripts/init-database.ts` (idempotent).
+  2. Run `npx tsx scripts/backfill-quality-scores.ts --apply`.
+  3. Run `npx tsx scripts/migrate-uncertainty-units.ts` as a dry run, then with `--write` if it reports
+     legacy metre values.
+- **Temporary-network catalogues** imported from a non-UTC machine are shifted by 12–13 h.
+  - Check: GeoNet event 2879335 (Darfield, ZU) must read `2010-09-03T16:35:46Z`.
+  - Repair: delete those seven catalogues, re-run `scripts/import-temp-networks.ts`, then the backfill,
+    then any merges built from them.
+- **Throttling behind a proxy:** set `TRUSTED_PROXY_HOPS`. `nginx/nginx.conf` overwrites
+  `X-Forwarded-For` and forwards `Host`, `X-Forwarded-Proto` and `X-Forwarded-Port`, which the Origin
+  check needs. `APP_BIND_ADDRESS=127.0.0.1` with the `with-nginx` compose profile keeps the app off the
+  public interface. `nginx -t` was not run here.
+- **Secret rotation:** rotating `NEXTAUTH_SECRET` forgets every known-device cookie.
+- **Node:** use Node 22 or 24. Verification ran on Node 20, with engine warnings.
+
+### Known limitations and open items
+
+- **Paper:** the worked example's scientific conclusions changed with the move to the real engine (see
+  the paper's §6). They need the authors' endorsement. The paper grew from 38 to 43 pages. The release
+  tag v0.1.0 points at pre-repair code.
+- **Magnitude averaging:** the Utsu correction for coarse steps (0.2–0.5) leaves b 2–10% low; Bender's
+  (1983) exact estimator would remove this.
+- **Merge:**
+  - The global authority table still ranks GeoNet first outside NZ.
+  - Stored origin/magnitude blobs on merged rows are supplementary copies from one report.
+  - Very large saved merges run in one MongoDB transaction and are subject to its 60 s lifetime.
+- **Unused code and files:** `SchemaMapper.tsx`, `FilterPanel.tsx`, `MapView.tsx`, `EnhancedMapView.tsx`,
+  an orphaned docs page, and four unreferenced screenshots in `paper/figures`.

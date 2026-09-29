@@ -98,14 +98,23 @@ export function parsedEventToDbFields(event: ParsedEvent): DbEventFields {
   if (event.magnitude_evaluation_status)     fields.magnitude_evaluation_status = String(event.magnitude_evaluation_status).toLowerCase().trim();
 
   // ── Origin quality metrics ────────────────────────────────────────────────
-  const azimuthalGap = event.azimuthal_gap ?? event.azimuthalGap;
-  if (azimuthalGap    != null) fields.azimuthal_gap    = Number(azimuthalGap);
+  // The parser's snake_case value decides when the field is there at all, null included:
+  // a sentinel (-1) it read as missing must not come back from the raw camelCase cell,
+  // which is only a fallback for events that never went through the parser, and there a
+  // negative count or gap is a sentinel too.
+  const qualityMetric = (parsed: unknown, fallback: unknown): number | null => {
+    if (parsed !== undefined) return parsed === null ? null : finiteOrSkip(parsed);
+    const value = finiteOrSkip(fallback);
+    return value !== null && value >= 0 ? value : null;
+  };
+  const azimuthalGap = qualityMetric(event.azimuthal_gap, event.azimuthalGap);
+  if (azimuthalGap    != null) fields.azimuthal_gap    = azimuthalGap;
 
-  const usedPhaseCount = event.used_phase_count ?? event.usedPhaseCount;
-  if (usedPhaseCount  != null) fields.used_phase_count = Number(usedPhaseCount);
+  const usedPhaseCount = qualityMetric(event.used_phase_count, event.usedPhaseCount);
+  if (usedPhaseCount  != null) fields.used_phase_count = usedPhaseCount;
 
-  const usedStationCount = event.used_station_count ?? event.usedStationCount;
-  if (usedStationCount != null) fields.used_station_count = Number(usedStationCount);
+  const usedStationCount = qualityMetric(event.used_station_count, event.usedStationCount);
+  if (usedStationCount != null) fields.used_station_count = usedStationCount;
 
   if (event.minimum_distance         != null) fields.minimum_distance         = Number(event.minimum_distance);
   if (event.maximum_distance         != null) fields.maximum_distance         = Number(event.maximum_distance);

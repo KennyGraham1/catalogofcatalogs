@@ -46,7 +46,8 @@ function matchValue(value: unknown, cond: any): boolean {
         case '$in': return (operand as unknown[]).some((o) => matchValue(value, o));
         case '$nin': return !(operand as unknown[]).some((o) => matchValue(value, o));
         case '$exists': return (value !== undefined) === Boolean(operand);
-        case '$type': return operand === 'string' ? typeof value === 'string' : true;
+        case '$type': return operand === 'string' ? typeof value === 'string' : operand === 'number' ? typeof value === 'number' : true;
+        case '$not': return !matchValue(value, operand);
         case '$regex': return typeof value === 'string' && new RegExp(operand as string).test(value);
         default: throw new Error(`fake mongo: unsupported operator ${op}`);
       }
@@ -726,6 +727,115 @@ describe('#62 / #122 / C13 :: PATCH /api/catalogues/[id]', () => {
     expect(response.status).toBe(200);
     expect(catalogueCache.get('catalogues:all=true')).toBeNull();
     expect(audit()).toEqual([expect.objectContaining({ action: 'cache.clear', actor_id: 'admin-1' })]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('#1 (review) :: saving the edit form unchanged is no change', () => {
+  /** Exactly what app/catalogues/[id]/edit/page.tsx sends when the user saves without editing. */
+  async function editFormPayload(id: string) {
+    const data: Doc = (await q.getCatalogueById(id))!;
+    const parseArray = (v: any) => (Array.isArray(v) ? v
+      : typeof v === 'string' ? (() => { try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; } })() : []);
+    const parseObject = (v: any, d: any) => (typeof v === 'object' && v !== null ? v
+      : typeof v === 'string' ? (() => { try { return JSON.parse(v); } catch { return d; } })() : d);
+    return {
+      name: data.name,
+      description: data.description || '', data_source: data.data_source || '', provider: data.provider || '',
+      geographic_region: data.geographic_region || '', time_period_start: data.time_period_start || '',
+      time_period_end: data.time_period_end || '',
+      data_quality: parseObject(data.data_quality, { completeness: '', accuracy: '', reliability: '' }),
+      quality_notes: data.quality_notes || '', contact_name: data.contact_name || '', contact_email: data.contact_email || '',
+      contact_organization: data.contact_organization || '', license: data.license || '', usage_terms: data.usage_terms || '',
+      citation: data.citation || '', doi: data.doi || '',
+      keywords: parseArray(data.keywords), reference_links: parseArray(data.reference_links), notes: data.notes || '',
+    };
+  }
+  const save = async (id: string, body: unknown) => (await patchCatalogue(
+    new NextRequest(`http://localhost/api/catalogues/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    { params: Promise.resolve({ id }) })).json();
+
+  it.each([
+    ['GeoNet-created (no metadata stored)', undefined],
+    ['merge-created (keywords and data quality stored as JSON text)', {
+      description: 'Merged NZ', keywords: JSON.stringify(['nz', 'merge']), data_quality: JSON.stringify({ completeness: 'high' }),
+    }],
+    ['upload-created with every field filled', {
+      description: 'd', data_source: 's', provider: 'p', geographic_region: 'r', quality_notes: 'q', contact_name: 'n',
+      contact_email: 'a@b.co', contact_organization: 'o', license: 'l', usage_terms: 'u', citation: 'c', doi: '10.1/x',
+      notes: 'x', keywords: ['k'], reference_links: ['https://x'], data_quality: { completeness: 'a', accuracy: 'b', reliability: 'c' },
+      time_period_start: '2024-01-01T00:00', time_period_end: '2024-12-31T23:59',
+    }],
+  ])('%s', async (_label, metadata) => {
+    await q.insertCatalogue('cat-f', 'F', '[]', '{}', 0, 'processing', metadata as any);
+    await q.updateCatalogueStatus('complete', 'cat-f');
+    const stored = JSON.stringify(catalogueDoc('cat-f'));
+    expect(await save('cat-f', await editFormPayload('cat-f'))).toEqual({ success: true, version: '1.0.0' });
+    expect(await save('cat-f', await editFormPayload('cat-f'))).toEqual({ success: true, version: '1.0.0' });
+    expect(JSON.stringify(catalogueDoc('cat-f'))).toBe(stored); // nothing written, modified_* not stamped
+  });
+
+  it('stores one canonical form, whatever shape the client sent', async () => {
+    await q.insertCatalogue('cat-c', 'C', '[]', '{}', 0, 'processing', {
+      keywords: ['nz', ''] as any, reference_links: [] as any, description: '',
+      data_quality: { reliability: 'low', completeness: 'high', accuracy: '' } as any,
+    });
+    expect(catalogueDoc('cat-c')).toMatchObject({ keywords: '["nz"]', data_quality: '{"completeness":"high","reliability":"low"}' });
+    expect(catalogueDoc('cat-c').reference_links).toBeUndefined();
+    expect(catalogueDoc('cat-c').description).toBeUndefined();
+    await q.updateCatalogueStatus('complete', 'cat-c');
+
+    // A real edit is stored canonically too, and bumps once.
+    await q.updateCatalogueMetadata('cat-c', { keywords: ['nz', 'kermadec'] as any, notes: '' });
+    expect(catalogueDoc('cat-c')).toMatchObject({ version: '1.0.1', keywords: '["nz","kermadec"]' });
+    // Clearing a field is a change; an empty value is stored as null.
+    await q.updateCatalogueMetadata('cat-c', { data_quality: { completeness: '', accuracy: '', reliability: '' } as any });
+    expect(catalogueDoc('cat-c')).toMatchObject({ version: '1.0.2', data_quality: null });
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('#3 (review) :: a quality filter judges legacy rows by their Q, as the table does', () => {
+  it('scores rows stored without a quality score before filtering, then keeps what the table keeps', async () => {
+    const rich = {
+      horizontal_uncertainty: 1, depth_uncertainty: 1, time_uncertainty: 0.1, azimuthal_gap: 40,
+      used_station_count: 40, used_phase_count: 60, standard_error: 0.2, magnitude_uncertainty: 0.1,
+      magnitude_station_count: 10, evaluation_mode: 'manual', evaluation_status: 'reviewed',
+    };
+    await releasedCatalogue('cat-l', 'L', [event('good', 'cat-l', rich), event('poor', 'cat-l'), event('stored', 'cat-l')]);
+    // Simulate rows written before scores were persisted.
+    for (const doc of collection(EVENTS).docs) {
+      if (doc.id !== 'stored') { delete doc.quality_score; delete doc.quality_grade; }
+    }
+    const legacy = collection(EVENTS).docs.map((d) => ({ ...d }));
+    const { applyEventFilters } = await import('@/components/event-filters');
+
+    const result = await q.getFilteredEvents('cat-l', { minQuality: 50 });
+
+    expect(result.events.map((e) => e.id).sort()).toEqual(applyEventFilters(legacy as any[], { minQuality: 50 }).map((e: Doc) => e.id).sort());
+    expect(result.events.map((e) => e.id)).toContain('good');
+    // The rows now carry the score an insert would have given them.
+    for (const doc of collection(EVENTS).docs) {
+      expect(doc.quality_score).toBe(calculateQualityScore(metricsFromEvent(doc)).overall);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('#9 (review) :: searching identifiers that contain a colon', () => {
+  it('treats an unknown name: prefix as part of the text to find', async () => {
+    await releasedCatalogue('cat-s', 'S', [
+      event('s1', 'cat-s', { source_id: 'GeoNet:2016p858000' }),
+      event('s2', 'cat-s', { event_public_id: 'smi:nz.org.geonet/2019p123456' }),
+    ]);
+    const ids = async (text: string) => (await q.searchEvents(text, 10)).map((r: Doc) => r.id);
+    expect(await ids('2016p858000')).toEqual(['s1']);
+    expect(await ids('GeoNet:2016p858000')).toEqual(['s1']);
+    expect(await ids('smi:nz.org.geonet/2019p123456')).toEqual(['s2']);
+    expect(await ids('id:GeoNet:2016p858000')).toEqual(['s1']);
+    // A recognised field is still a filter.
+    expect(await ids('mag:>=3 2016p858000')).toEqual(['s1']);
+    expect(await ids('mag:>=4 2016p858000')).toEqual([]);
   });
 });
 

@@ -1255,10 +1255,10 @@ implementation status.
   \endfoot
   Event association & Graph DSU \citep{Patton2016} & Union-find over candidate pairs from different \catalogs, joined closest first; one report per \catalog\ per group; groups of three or more need a common centre; failed groups split & Done \\
   Dense sequences & Nearest-neighbour $\eta$ \citep{Tanaka2022} & Adaptive windows; closest-first pairing; preview flags ambiguous pairings & Low \\
-  Magnitude conversion & GOR / non-linear, regionally calibrated \citep{Grunthal2016, ISCGEM2018} & None for published magnitudes; global relations \citep{Scordilis2006} and $M_\mathrm{L} \approx M_\mathrm{w}$ only in the consistency gate & \textbf{High} \\
+  Magnitude conversion & GOR / non-linear, regionally calibrated \citep{Grunthal2016, ISCGEM2018} & None for published magnitudes; global relations \citep{Scordilis2006} and $M_\mathrm{L} \approx M_\mathrm{w}$ only in the consistency gate and to size the event for the type preference & \textbf{High} \\
   Multi-estimate averaging & $\alpha$-trimmed median \citep{ISCGEM2018} or Bayesian \citep{Si2024} & Magnitude selected by type; epicentre $1/\sigma^2$-weighted (equal weights when a $\sigma$ is missing) & Medium \\
   Source provenance & All solutions retained (ISC model) & Every report kept per event, published one marked; exported per event & Done \\
-  Depth selection & Uncertainty-weighted \citep{Engdahl2020} & Best-constrained free depth; fixed depths only as a last resort & Low \\
+  Depth selection & Uncertainty-weighted \citep{Engdahl2020} & Best-constrained free depth, with its own depth type and uncertainty; fixed depths only as a last resort & Low \\
   Focal mechanism & GCMT $>$ regional CMT & All mechanisms united; GCMT $>$ USGS/NEIC $>$ GEOFON $>$ GeoNet $>$ INGV $>$ other MT $>$ first motion ($\geq 20$ polarities) $>$ automatic & Done \\
   QC flags & 13-flag model (\cref{tab:qcflags}) & 9 flags implemented & Low \\
   $M_c$ audit & Rolling 5-yr bins \citep{Wiemer2000} & Not implemented (rate above $M_c$ per bin for visual checks) & Medium \\
@@ -1270,7 +1270,8 @@ The single highest-priority gap is magnitude homogenisation.  The current
 implementation publishes each merged event's magnitude unconverted; it uses the
 global relations of \citet{Scordilis2006} for $m_\mathrm{b}$ and $M_\mathrm{s}$,
 and $M_\mathrm{L} \approx M_\mathrm{w}$, only to judge whether the magnitudes in
-a duplicate group are consistent.  A homogenised $M_\mathrm{w}$ \catalog\ needs
+a duplicate group are consistent and how large the earthquake is, which sets the
+magnitude-type preference described below.  A homogenised $M_\mathrm{w}$ \catalog\ needs
 GOR-derived \citep{Grunthal2016} or non-linear relations and, for the New Zealand
 region specifically, region-calibrated $M_\mathrm{L} \to M_\mathrm{w}$
 coefficients estimated from the overlap of the GeoNet \catalog\ with moment-tensor
@@ -1279,13 +1280,27 @@ solutions, in preference to global coefficients
 
 When it selects a magnitude for an averaged event, the current implementation
 also departs from the static ISC-GEM order of \cref{sec:maghierarchy}, on
-saturation and calibration grounds: $M_\mathrm{w}$ always ranks first (with proxy
-$M_\mathrm{w}$ types below true ones), but below $M5.5$ the regionally calibrated
-$M_\mathrm{L}$ ranks ahead of $m_\mathrm{b}$, $M_\mathrm{s}$ and $M_\mathrm{d}$,
-because short-period $m_\mathrm{b}$ is poorly calibrated for small local events,
-while from $M5.5$, where $M_\mathrm{L}$ and $m_\mathrm{b}$ begin to saturate,
-$M_\mathrm{s}$ and $m_\mathrm{B}$ rank ahead of them.  Rejected magnitudes are
-never selected.  The ISC-GEM order ranks $M_\mathrm{w}$ \emph{proxies} for
+saturation and calibration grounds, and publishes the chosen value as reported,
+not converted.  The order depends on the size of the earthquake, taken as the
+median of its reported magnitudes expressed as $M_\mathrm{w}$ ($M_\mathrm{L}$ as
+$M_\mathrm{w}$; $M_\mathrm{w} = 0.85\,m_\mathrm{b} + 1.03$; $M_\mathrm{w} =
+0.67\,M_\mathrm{s} + 2.07$ below $M_\mathrm{s}\,6.2$ and $0.99\,M_\mathrm{s} +
+0.08$ from it; \citealp{Scordilis2006}).  $M_\mathrm{w}$ always ranks first
+(the moment magnitudes $M_\mathrm{ww}$, $M_\mathrm{wc}$, $M_\mathrm{wb}$ and
+$M_\mathrm{wr}$ equally, and the proxies $M_\mathrm{w}(m_\mathrm{B})$ and
+$M_\mathrm{wp}$ just below them).  Below $M6.2$ the
+regionally calibrated $M_\mathrm{L}$ family (including GeoNet's summary
+magnitude $M$) ranks ahead of $m_\mathrm{b}$, $m_\mathrm{B}$ and
+$m_\mathrm{bLg}$, then $M_\mathrm{s}$, then $M_\mathrm{d}$, because short-period
+$m_\mathrm{b}$ is poorly calibrated for small local events and $M_\mathrm{s}$
+reads low there; from $M6.2$, where $M_\mathrm{L}$ approaches saturation and
+$m_\mathrm{b}$ has saturated, $M_\mathrm{s}$ ranks first, then $m_\mathrm{B}$,
+$M_\mathrm{L}$, $m_\mathrm{b}$ and $m_\mathrm{bLg}$, and $M_\mathrm{d}$.  The
+switch sits at 6.2 because there the $M_\mathrm{s}$ relation becomes one to one
+while $M_\mathrm{L}$ still approximates $M_\mathrm{w}$, so the published value
+stays within about 0.1 of $M_\mathrm{w}$ on either side of it.  Ties go to the
+smaller uncertainty, then to the agency's preferred magnitude, and rejected
+magnitudes are never selected.  The ISC-GEM order ranks $M_\mathrm{w}$ \emph{proxies} for
 conversion, which the implementation does not perform; a regionally calibrated
 conversion would make the distinction moot.
 
@@ -1293,8 +1308,9 @@ Event association has moved beyond the greedy forward sweep.  Candidate pairs
 from different \catalogs\ are joined with a union-find structure in increasing
 normalised space-time separation, so each report is claimed by its closest
 counterpart; unlike the plain connected-component approach of \cref{sec:graph},
-a group may not contain two reports from one \catalog, and a group of three or
-more must have a member within the matching window of every other, so reports
+a group may not contain two reports from one \catalog\ (and a merge request that
+names one \catalog\ twice is refused), and a group of three or more must have a
+member within the matching window of every other, so reports
 linked only through a chain of intermediate reports are not fused.  Groups that
 fail the consistency checks are split into their largest self-consistent
 sub-groups, as recommended in the failed-group recovery above.

@@ -34,6 +34,11 @@ export interface SeismologicalWorkerOptions {
   maxcCorrection?: number;
   /** Bin interval of the time series (default 'auto'). */
   interval?: RateIntervalOption;
+  /**
+   * The period the events are known to cover (UTC, ISO strings), against which the
+   * time series measures partial first and last bins.
+   */
+  period?: { start: string; end: string };
 }
 
 /**
@@ -51,8 +56,10 @@ export function useSeismologicalWorker<T>(
   const mcMethod = options?.mcMethod;
   const maxcCorrection = options?.maxcCorrection;
   const interval = options?.interval;
-  const request = useMemo(() => ({ type, events, enabled, minMagnitude, binWidth, mcMethod, maxcCorrection, interval }),
-    [type, events, enabled, minMagnitude, binWidth, mcMethod, maxcCorrection, interval]);
+  const periodStart = options?.period?.start;
+  const periodEnd = options?.period?.end;
+  const request = useMemo(() => ({ type, events, enabled, minMagnitude, binWidth, mcMethod, maxcCorrection, interval, periodStart, periodEnd }),
+    [type, events, enabled, minMagnitude, binWidth, mcMethod, maxcCorrection, interval, periodStart, periodEnd]);
   const pending: WorkerResult<T> = { data: null, loading: enabled && events.length > 0, error: null, cached: false };
   const [state, setState] = useState<WorkerResult<T> & { request: typeof request }>({ ...pending, request });
 
@@ -89,7 +96,8 @@ export function useSeismologicalWorker<T>(
       };
       // Send only the inputs the science algorithms use. Nested event details
       // otherwise incur an unnecessary structured clone for every tab change.
-      worker.postMessage({ type, minMagnitude, binWidth, mcMethod, maxcCorrection, interval, events: events.map(event => ({
+      const period = periodStart != null && periodEnd != null ? { start: periodStart, end: periodEnd } : undefined;
+      worker.postMessage({ type, minMagnitude, binWidth, mcMethod, maxcCorrection, interval, period, events: events.map(event => ({
         id: event.id, time: event.time, latitude: event.latitude, longitude: event.longitude,
         depth: event.depth, magnitude: event.magnitude, magnitude_type: event.magnitude_type,
       })) });
@@ -99,7 +107,7 @@ export function useSeismologicalWorker<T>(
       finish({ error: error instanceof Error ? error.message : 'Unable to start analysis worker' });
     }
     return () => { active = false; worker?.terminate(); };
-  }, [request, type, events, enabled, minMagnitude, binWidth, mcMethod, maxcCorrection, interval]);
+  }, [request, type, events, enabled, minMagnitude, binWidth, mcMethod, maxcCorrection, interval, periodStart, periodEnd]);
 
   // A queued message or an old result must never describe newly selected inputs.
   return state.request === request ? state : pending;
@@ -130,6 +138,8 @@ export function useSeismologicalAnalyses(
     mcMethod?: McMethod;
     maxcCorrection?: number;
     rateInterval?: RateIntervalOption;
+    /** Known coverage period of `events`, for the time series' partial bins. */
+    period?: { start: string; end: string };
   }
 ) {
   const fitEvents = options?.fitEvents ?? events;
@@ -147,7 +157,7 @@ export function useSeismologicalAnalyses(
     { mcMethod, maxcCorrection });
   const temporal = useSeismologicalWorker<any>('temporal', events, temporalEnabled);
   const timeSeries = useSeismologicalWorker<any>('time-series', events, temporalEnabled,
-    { minMagnitude: options?.minMagnitude, mcMethod, maxcCorrection, interval: options?.rateInterval });
+    { minMagnitude: options?.minMagnitude, mcMethod, maxcCorrection, interval: options?.rateInterval, period: options?.period });
   const moment = useSeismologicalWorker<any>('moment', events, momentEnabled);
 
   return {

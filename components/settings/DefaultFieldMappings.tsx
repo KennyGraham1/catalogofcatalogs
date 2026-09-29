@@ -724,7 +724,10 @@ export function DefaultFieldMappings({ onSave, readOnly = false }: DefaultFieldM
           <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
             <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5" />
             <div className="text-sm text-amber-700 dark:text-amber-400">
-              <p>These rules send a column to a different field than the parser&apos;s built-in alias does; the rule wins during upload.</p>
+              <p>
+                These rules send a column to a different field than the parser&apos;s built-in alias does. The parser&apos;s
+                mapping is kept for such a column during upload; change it in the upload&apos;s schema step if needed.
+              </p>
               <ul className="mt-1 text-xs list-disc pl-4">
                 {aliasOverrides.map(override => (
                   <li key={`${override.pattern}-${override.target}`}>

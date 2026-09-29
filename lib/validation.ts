@@ -160,11 +160,27 @@ export const mergeRequestSchema = z.object({
   metadata: mergeMetadataSchema.optional(),
   exportOnly: z.boolean().optional(),
 }).superRefine((request, ctx) => {
+  // Each source catalogue is merged once. A repeated catalogue shares its own source key, so
+  // its copies can never pair (one catalogue never contributes two reports of one event) and
+  // every one of its events would be written twice.
+  const listed = new Set<string>();
+  request.sourceCatalogues.forEach((catalogue, index) => {
+    const id = String(catalogue.id);
+    if (listed.has(id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['sourceCatalogues', index, 'id'],
+        message: `source catalogue "${id}" is listed more than once`,
+      });
+    }
+    listed.add(id);
+  });
+
   // A Custom Order ranking must rank the catalogues being merged, each once: an unknown or
   // repeated ID would silently fall back to the quality tie-break for every group.
   const order = request.config.priorityOrder;
   if (!order) return;
-  const sourceIds = new Set(request.sourceCatalogues.map((catalogue) => String(catalogue.id)));
+  const sourceIds = listed;
   const seen = new Set<string>();
   order.forEach((id, index) => {
     if (!sourceIds.has(id)) {

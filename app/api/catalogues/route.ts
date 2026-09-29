@@ -20,7 +20,13 @@ import {
 } from '@/lib/pending-uploads';
 import { quakemlEventToDbFields } from '@/lib/quakeml-to-db';
 import { parsedEventToDbFields } from '@/lib/parsed-event-to-db';
-import { normalizeMappedField, normalizeTimestamp, type ParseFileDecisions } from '@/lib/earthquake-utils';
+import {
+  lengthUnitFromColumnName,
+  normalizeMappedField,
+  normalizeTimestamp,
+  parseStrictNumber,
+  type ParseFileDecisions,
+} from '@/lib/earthquake-utils';
 import { isMappableTargetField, REQUIRED_EVENT_FIELDS } from '@/lib/field-definitions';
 import {
   ALLOWED_DEPTH_TYPE,
@@ -380,6 +386,26 @@ interface PendingUploadEntry {
   format?: string;
   mapping?: FileMapping;
   fileDecisions?: ParseFileDecisions;
+  /** Unit of each re-sourced length column whose name states none (see decideRemappedLengthUnits). */
+  lengthUnits?: Record<string, 'km' | 'm'>;
+}
+
+/** Fields stored in kilometres that a file may report in metres. */
+const LENGTH_TARGETS = new Set([
+  'depth', 'depth_uncertainty', 'horizontal_uncertainty', 'min_horizontal_uncertainty', 'max_horizontal_uncertainty',
+]);
+
+/**
+ * A cell as the file wrote it. The parser writes canonical fields into the same object,
+ * so a column named like one (`magnitude` next to `mw`, `depth` next to `depth_m`) holds
+ * the parser's value there; the original is kept in `_raw`.
+ */
+function rawCell(pendingEvent: ParsedEvent, column: string): unknown {
+  const raw = (pendingEvent as { _raw?: unknown })._raw;
+  if (raw && typeof raw === 'object' && Object.prototype.hasOwnProperty.call(raw, column)) {
+    return (raw as Record<string, unknown>)[column];
+  }
+  return pendingEvent[column];
 }
 
 function numberOrNull(value: unknown): number | null {
@@ -437,9 +463,11 @@ function applyExplicitMapping(
   pendingEvent: ParsedEvent,
   mapping: FileMapping | undefined,
   decisions: ParseFileDecisions | undefined,
-): Record<string, unknown> {
+  lengthUnits?: Record<string, 'km' | 'm'>,
+): { event: Record<string, unknown>; dropped: string[] } {
   const event: Record<string, unknown> = { ...pendingEvent };
-  if (!mapping || pendingEvent.quakeml) return event;
+  const dropped: string[] = [];
+  if (!mapping || pendingEvent.quakeml) return { event, dropped };
 
   const removeField = (target: string) => {
     delete event[target];
@@ -451,9 +479,13 @@ function applyExplicitMapping(
   const previousMagnitude = { value: numberOrNull(pendingEvent.magnitude), type: pendingEvent.magnitude_type };
   let magnitudeTypeFromColumn: unknown;
   for (const [target, sourceColumn] of Object.entries(mapping.set)) {
-    const { value, derived } = normalizeMappedField(target, pendingEvent[sourceColumn], decisions, sourceColumn);
+    const cell = rawCell(pendingEvent, sourceColumn);
+    const unit = lengthUnits?.[sourceColumn];
+    const columnDecisions = unit && LENGTH_TARGETS.has(target) ? { ...(decisions ?? {}), depthUnit: unit } : decisions;
+    const { value, derived } = normalizeMappedField(target, cell, columnDecisions, sourceColumn);
     removeField(target);
     if (value !== null && value !== undefined) event[target] = value;
+    else if (cell !== undefined && cell !== null && String(cell).trim() !== '') dropped.push(target);
     if (target === 'magnitude') magnitudeTypeFromColumn = derived.magnitude_type;
   }
 
@@ -470,7 +502,46 @@ function applyExplicitMapping(
     reconcileMagnitudeAlternatives(event, previousMagnitude);
   }
 
-  return event;
+  return { event, dropped };
+}
+
+/**
+ * The unit of each explicitly re-sourced length column whose name states none, decided
+ * the way the parser decides a depth column (inferDepthUnit): a 95th percentile above
+ * 1000 is impossible in kilometres, so the column is in metres. Otherwise a depth column
+ * is read in kilometres (the file's decision was made for another column); an
+ * uncertainty column keeps the file's decision. Reads the file only when needed.
+ */
+async function decideRemappedLengthUnits(
+  entry: PendingUploadEntry,
+  ownerId: string,
+): Promise<Record<string, 'km' | 'm'>> {
+  const columns = Object.entries(entry.mapping?.set ?? {})
+    .filter(([target, column]) => LENGTH_TARGETS.has(target) && lengthUnitFromColumnName(column) === null)
+    .map(([target, column]) => ({ target, column }));
+  if (columns.length === 0) return {};
+
+  const values: Record<string, number[]> = {};
+  for await (const batch of iteratePendingUploadEventBatches(entry.id, 1000, ownerId)) {
+    for (const pendingEvent of batch) {
+      if (pendingEvent.quakeml) continue;
+      for (const { column } of columns) {
+        const value = parseStrictNumber(rawCell(pendingEvent, column));
+        if (value === null) continue;
+        if (!values[column]) values[column] = [];
+        values[column].push(value);
+      }
+    }
+  }
+
+  const units: Record<string, 'km' | 'm'> = {};
+  for (const { target, column } of columns) {
+    const sorted = (values[column] ?? []).sort((a, b) => a - b);
+    const p95 = sorted.length > 0 ? sorted[Math.floor(0.95 * (sorted.length - 1))] : undefined;
+    if (p95 !== undefined && p95 > 1000) units[column] = 'm';
+    else if (target === 'depth') units[column] = 'km';
+  }
+  return units;
 }
 
 /**
@@ -479,7 +550,7 @@ function applyExplicitMapping(
  * the accepted -5..1000 km is dropped, never reinterpreted — the unit of a column is
  * decided once per file by the parser, not guessed per value here.
  */
-function validateCatalogueEvent(event: any): string[] {
+function validateCatalogueEvent(event: any, dropped: string[] = []): string[] {
   const errors: string[] = [];
 
   if (!event.time || (typeof event.time === 'string' && event.time.trim() === '')) {
@@ -524,6 +595,7 @@ function validateCatalogueEvent(event: any): string[] {
   if (event.depth !== undefined && event.depth !== null && event.depth !== '') {
     const depth = safeParseNumber(event.depth);
     event.depth = depth !== null && depth >= -5 && depth <= 1000 ? depth : undefined;
+    if (event.depth === undefined) dropped.push('depth');
   }
 
   return errors;
@@ -705,11 +777,15 @@ class ImportTally {
   private readonly seenSourceIds = new Set<string>();
 
   /** Validates and builds the row for one event; null when it is rejected or a duplicate. */
-  accept(event: any, build: () => InsertRow, file?: string): InsertRow | null {
+  /** Values of stored rows left empty because they were unreadable or out of range, by field. */
+  readonly droppedValues: Record<string, number> = {};
+
+  accept(event: any, build: () => InsertRow, file?: string, dropped: string[] = []): InsertRow | null {
     const index = this.totalSubmitted;
     this.totalSubmitted += 1;
 
-    const errors = validateCatalogueEvent(event);
+    const droppedHere = [...dropped];
+    const errors = validateCatalogueEvent(event, droppedHere);
     if (errors.length > 0) {
       this.failedValidation += 1;
       if (this.invalidEvents.length < 100) {
@@ -728,6 +804,9 @@ class ImportTally {
     }
 
     this.validEvents += 1;
+    for (const field of Array.from(new Set(droppedHere))) {
+      this.droppedValues[field] = (this.droppedValues[field] ?? 0) + 1;
+    }
     if (this.minLat === undefined || row.latitude < this.minLat) this.minLat = row.latitude;
     if (this.maxLat === undefined || row.latitude > this.maxLat) this.maxLat = row.latitude;
     this.longitudeArc.add(row.longitude);
@@ -751,6 +830,7 @@ class ImportTally {
         ? Math.round((successfullyImported / this.totalSubmitted) * 10000) / 100
         : 0,
       partialImport,
+      droppedValues: { ...this.droppedValues },
     };
   }
 }
@@ -758,8 +838,14 @@ class ImportTally {
 type ImportReport = ReturnType<ImportTally['report']>;
 
 function importMessageFor(report: ImportReport): string {
+  // Stored events whose value for a field was unreadable or out of range (a depth beyond
+  // 1000 km) keep the event with that field empty; say so rather than drop it silently.
+  const droppedNote = Object.entries(report.droppedValues)
+    .map(([field, count]) => `${count.toLocaleString()} ${field.replace(/_/g, ' ')} value${count === 1 ? ' was' : 's were'} unreadable or out of range and left empty.`)
+    .join(' ');
   if (!report.partialImport) {
-    return `Successfully imported all ${report.successfullyImported.toLocaleString()} events.`;
+    return [`Successfully imported all ${report.successfullyImported.toLocaleString()} events.`, droppedNote]
+      .filter(Boolean).join(' ');
   }
   return [
     `Imported ${report.successfullyImported.toLocaleString()} of ${report.totalSubmitted.toLocaleString()} events.`,
@@ -769,6 +855,7 @@ function importMessageFor(report: ImportReport): string {
     report.duplicatesSkipped > 0
       ? `${report.duplicatesSkipped.toLocaleString()} duplicate event${report.duplicatesSkipped === 1 ? '' : 's'} skipped.`
       : '',
+    droppedNote,
   ].filter(Boolean).join(' ');
 }
 
@@ -853,6 +940,7 @@ function buildUploadMergeConfig(entries: PendingUploadEntry[], report: ImportRep
       failedValidation: report.failedValidation,
       duplicatesSkipped: report.duplicatesSkipped,
       successRate: report.successRate,
+      ...(Object.keys(report.droppedValues).length > 0 ? { droppedValues: report.droppedValues } : {}),
     },
   });
 }
@@ -936,11 +1024,12 @@ async function streamPendingUploads(
         if (entry.expectedCount !== undefined && seq > entry.expectedCount) {
           throw pendingMismatch(`${entry.fileName ?? 'A file'} holds more events than its upload reported.`);
         }
-        const event = applyExplicitMapping(pendingEvent, entry.mapping, entry.fileDecisions);
+        const { event, dropped } = applyExplicitMapping(pendingEvent, entry.mapping, entry.fileDecisions, entry.lengthUnits);
         const row = tally.accept(
           event,
           () => buildInsertRow(event, catalogueId, { quakeml: pendingEvent.quakeml }),
           entry.fileName,
+          dropped,
         );
         if (row) rows.push(row);
       }
@@ -1198,6 +1287,12 @@ async function createCatalogue(
 async function createCatalogueFromPendingUploads(params: CreateCatalogueParams): Promise<NextResponse> {
   const { entries, user } = params;
   const catalogueId = createId();
+
+  // Units of re-sourced length columns that state none are decided from the whole
+  // column first, so the dry run and the insert read every row the same way.
+  for (const entry of entries) {
+    entry.lengthUnits = await decideRemappedLengthUnits(entry, user.id);
+  }
 
   // Dry run first: validates every file's count and every row before anything is
   // written, and yields the exact numbers the catalogue document is created with.

@@ -66,18 +66,15 @@ import { toast } from '@/hooks/use-toast';
 import {
   FIELD_ALIASES,
   FIELD_CATEGORIES,
-  DATE_TIME_COMPONENT_COLUMNS,
   DO_NOT_MAP,
   getFieldById,
   getFieldsByCategory,
   detectAllFieldMappings,
+  describeParserColumns,
   detectFieldMapping,
-  effectiveColumnMapping,
   isMappableTargetField,
   magnitudeScaleFromColumnName,
   missingRequiredFields,
-  normalizeFieldName,
-  parserMagnitudeCandidates,
   resolveParserFieldSources,
   type CustomFieldMapping,
 } from '@/lib/field-definitions';
@@ -135,6 +132,7 @@ interface MapperFile {
   isQuakeML: boolean;
   fields: string[];
   parserSources: Record<string, string>;
+  roles: ReturnType<typeof describeParserColumns>;
   sampleValues: Record<string, string[]>;
 }
 
@@ -154,7 +152,9 @@ function sampleValuesFor(result: any, fields: string[]): Record<string, string[]
   for (const field of fields) {
     const values: string[] = [];
     for (const event of events) {
-      const value = event?.[field];
+      // The cell as the file wrote it: the parser keeps cells it rewrote in `_raw`.
+      const raw = event?._raw && typeof event._raw === 'object' ? event._raw : null;
+      const value = raw && Object.prototype.hasOwnProperty.call(raw, field) ? raw[field] : event?.[field];
       if (value === undefined || value === null || value === '' || typeof value === 'object') continue;
       const text = String(value);
       if (!values.includes(text)) values.push(text);
@@ -244,12 +244,14 @@ export function EnhancedSchemaMapper({
         ? result.fields.filter((field: unknown): field is string => typeof field === 'string')
         : [];
       const format = fileFormat ?? toFileFormat(result?.format);
+      const parserSources = resolveParserFieldSources(fields, result?.resolvedFieldSources);
       return {
         fileName: String(result?.fileName ?? ''),
         format,
         isQuakeML: toFileFormat(result?.format) === 'quakeml',
         fields,
-        parserSources: resolveParserFieldSources(fields, result?.resolvedFieldSources),
+        parserSources,
+        roles: describeParserColumns(fields, parserSources),
         sampleValues: sampleValuesFor(result, fields),
       };
     });
@@ -270,12 +272,30 @@ export function EnhancedSchemaMapper({
   const parserMapping: Record<string, string> = useMemo(() => {
     const mapping: Record<string, string> = {};
     for (const file of mappableFiles) {
-      const resolved = effectiveColumnMapping(file.fields, file.parserSources, {});
-      for (const [column, target] of Object.entries(resolved)) {
+      for (const [column, target] of Object.entries(file.roles.mapped)) {
         if (!(column in mapping)) mapping[column] = target;
       }
     }
     return mapping;
+  }, [mappableFiles]);
+
+  // Everything else the parser did, across files: fields it filled (from one column,
+  // derived or assembled), columns it read, columns it combined into one field, and
+  // magnitude columns it kept as alternatives. Automatic mappings keep away from all of it.
+  const parserRoles = useMemo(() => {
+    const targets = new Set<string>();
+    const consumed = new Set<string>();
+    const assembled: Record<string, string> = {};
+    const alternatives = new Set<string>();
+    for (const file of mappableFiles) {
+      file.roles.targets.forEach(target => targets.add(target));
+      file.roles.consumed.forEach(column => consumed.add(column));
+      file.roles.alternatives.forEach(column => alternatives.add(column));
+      for (const [column, target] of Object.entries(file.roles.assembled)) {
+        if (!(column in assembled)) assembled[column] = target;
+      }
+    }
+    return { targets, consumed, assembled, alternatives };
   }, [mappableFiles]);
 
   const strictValidation = savedMappingConfig?.strictValidation === true;
@@ -294,8 +314,6 @@ export function EnhancedSchemaMapper({
       const nextSuggestions: Record<string, { target: string; confidence: number }> = {};
       try {
         if (autoMapping && autoDetectEnabled) {
-          const parserTargets = new Set(Object.values(parserMapping));
-
           for (const file of mappableFiles) {
             const rules = settingsRulesFor(savedMappingConfig, file.format);
             if (rules.length === 0) continue;
@@ -305,19 +323,21 @@ export function EnhancedSchemaMapper({
               minConfidence: threshold,
             });
             for (const [column, target] of Object.entries(ruled)) {
-              if (column in nextAuto || parserMapping[column] === target) continue;
-              // A rule never takes a field the parser filled from another column.
-              const takenByParser = Object.entries(parserMapping)
-                .some(([other, otherTarget]) => other !== column && otherTarget === target);
-              if (takenByParser || !isMappableTargetField(target)) continue;
+              // A rule only maps a column the parser did not read, onto a field it did not
+              // fill in any way (a derived magnitude type or an assembled date+time
+              // included): re-reading such a column would replace the parser's per-row value.
+              if (column in nextAuto || parserRoles.consumed.has(column) || parserRoles.targets.has(target) ||
+                  !isMappableTargetField(target)) {
+                continue;
+              }
               nextAuto[column] = target;
               nextSources[column] = 'settings';
             }
           }
 
-          const claimed = new Set([...Array.from(parserTargets), ...Object.values(nextAuto)]);
+          const claimed = new Set([...Array.from(parserRoles.targets), ...Object.values(nextAuto)]);
           for (const column of sourceFields) {
-            if (column in parserMapping || column in nextAuto || FM_AUTO_COLUMNS.has(column)) continue;
+            if (parserRoles.consumed.has(column) || column in nextAuto || FM_AUTO_COLUMNS.has(column)) continue;
             const detected = detectFieldMapping(column);
             if (!detected.targetField || !isMappableTargetField(detected.targetField) ||
                 claimed.has(detected.targetField)) {
@@ -347,7 +367,7 @@ export function EnhancedSchemaMapper({
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [configLoaded, autoMapping, autoDetectEnabled, threshold, savedMappingConfig, mappableFiles, parserMapping, sourceFields]);
+  }, [configLoaded, autoMapping, autoDetectEnabled, threshold, savedMappingConfig, mappableFiles, parserRoles, sourceFields]);
 
   // Explicit mapping: user edits win over automatic ones
   const explicitMappings: Record<string, string> = useMemo(
@@ -557,16 +577,10 @@ export function EnhancedSchemaMapper({
   }
 
   const quakemlFiles = files.filter(file => file.isQuakeML);
-  // Files whose origin time the parser assembles from split date/time columns
-  const timeAssembled = mappableFiles.some(file => {
-    const source = file.parserSources.time;
-    return Boolean(source) && !file.fields.includes(source) && source.includes('+');
-  });
-  const splitTimeColumns = timeAssembled
-    ? sourceFields.filter(field =>
-        DATE_TIME_COMPONENT_COLUMNS.has(normalizeFieldName(field)) && !(field in explicitMappings))
-    : [];
-  const magnitudeCandidates = new Set(mappableFiles.flatMap(file => parserMagnitudeCandidates(file.fields)));
+  // Columns the parser combines into one field (date + time, or year ... second)
+  const splitTimeColumns = sourceFields.filter(field =>
+    parserRoles.assembled[field] === 'time' && !(field in explicitMappings));
+  const magnitudeCandidates = parserRoles.alternatives;
 
   // Settings rules consulted for this upload, per format
   const formatsInUpload = Array.from(new Set(mappableFiles.map(file => file.format)));
@@ -887,7 +901,7 @@ export function EnhancedSchemaMapper({
                   )
                   .map((sourceField: string) => {
                     const isFmAuto = FM_AUTO_COLUMNS.has(sourceField);
-                    const isTimeComponent = splitTimeColumns.includes(sourceField) && !parserMapping[sourceField];
+                    const assembledInto = !(sourceField in explicitMappings) ? parserRoles.assembled[sourceField] : undefined;
                     const targetField = displayedMapping[sourceField];
                     const targetDef = targetField ? getFieldById(targetField) : null;
                     const replacedBy = supersededBy(sourceField);
@@ -907,7 +921,7 @@ export function EnhancedSchemaMapper({
                           : parserMapping[sourceField] ? 'mapped by the parser' : undefined;
                     const suggestion = suggestions[sourceField];
 
-                    if (isFmAuto || isTimeComponent) {
+                    if (isFmAuto || assembledInto) {
                       return (
                         <div key={sourceField} className="grid grid-cols-12 gap-3 items-center opacity-70">
                           <div className="col-span-5">
@@ -918,7 +932,9 @@ export function EnhancedSchemaMapper({
                           </div>
                           <div className="col-span-6">
                             <Badge variant="secondary" className="text-xs font-normal">
-                              {isFmAuto ? 'focal_mechanisms (auto-assembled)' : 'origin time (assembled from date/time columns)'}
+                              {isFmAuto
+                                ? 'focal_mechanisms (auto-assembled)'
+                                : `${describeTarget(assembledInto)} (assembled by the parser)`}
                             </Badge>
                           </div>
                         </div>

@@ -11,6 +11,8 @@ import { writeAuditLog } from '../audit';
 import { beginCredentialAttempt } from './login-rate-limit';
 import { toHeaders } from '../rate-limiter';
 import { AuthErrorCode } from './errors';
+import { normalizeEmail } from './normalize';
+import { rememberKnownDevice } from './known-device';
 
 // Validate NEXTAUTH_SECRET at module load time so the application fails fast if
 // the secret is not configured at runtime. The check is skipped during
@@ -62,13 +64,16 @@ export const authOptions: NextAuthOptions = {
           throw new Error(AuthErrorCode.MissingCredentials);
         }
 
-        const email = credentials.email.trim().toLowerCase();
+        const email = normalizeEmail(credentials.email);
         // Audit entries record the client address, resolved as the limiter resolves it.
         const client = { headers: toHeaders(request.headers) };
         // Check the shared quota before user lookup or expensive bcrypt work.
         const attempt = await beginCredentialAttempt(email, client.headers);
-        if (!attempt) {
+        if (attempt === 'too-many-attempts') {
           throw new Error(AuthErrorCode.TooManyAttempts);
+        }
+        if (attempt === 'account-protected') {
+          throw new Error(AuthErrorCode.AccountProtected);
         }
 
         const user = await getUserByEmail(email);
@@ -96,8 +101,10 @@ export const authOptions: NextAuthOptions = {
           throw new Error(AuthErrorCode.AccountDisabled);
         }
 
-        // Successful sign-ins are not counted against the quota.
+        // Successful sign-ins are not counted against the quota, and this browser is now
+        // a known device for the account (lib/auth/known-device.ts).
         await attempt.succeeded();
+        await rememberKnownDevice(client.headers.get('cookie'), email);
 
         // Update last login
         await updateLastLogin(user.id);

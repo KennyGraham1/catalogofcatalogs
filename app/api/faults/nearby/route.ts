@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getFaultSlipTypeName } from '@/lib/fault-data';
 import { requireViewer } from '@/lib/auth/middleware';
-import { applyRateLimit, readRateLimiter } from '@/lib/rate-limiter';
+import { applyRateLimit, rateLimit } from '@/lib/rate-limiter';
 
 // Force dynamic rendering for this API route
 export const dynamic = 'force-dynamic';
@@ -14,8 +14,13 @@ export const dynamic = 'force-dynamic';
  */
 const MAX_RADIUS_KM = 200;
 const MAX_LIMIT = 50;
-/** Lookups per client per minute: one per opened event popup. */
+/** Lookups per user per minute: one per opened event popup. */
 const RATE_LIMIT_PER_MINUTE = 30;
+/**
+ * A limiter of its own: on the shared readRateLimiter, the catalogue list's reads (limit
+ * 120) spent this route's budget, so browsing catalogues blocked fault lookups.
+ */
+const faultLookupLimiter = rateLimit({ interval: 60 * 1000, uniqueTokenPerInterval: 1000 });
 
 /** WFS page size: features fetched per bbox before distance ranking, independent of the display limit. */
 const WFS_FETCH_CAP = 2000;
@@ -43,8 +48,14 @@ export async function GET(request: NextRequest) {
       return authResult;
     }
 
-    // Each lookup fans out to the third-party GNS WFS, so throttle per client.
-    const rateLimitResult = applyRateLimit(request, readRateLimiter, RATE_LIMIT_PER_MINUTE);
+    // Each lookup fans out to the third-party GNS WFS, so throttle per signed-in user
+    // (whatever address they use).
+    const rateLimitResult = applyRateLimit(
+      request,
+      faultLookupLimiter,
+      RATE_LIMIT_PER_MINUTE,
+      `user:${authResult.user.id}`
+    );
     if (!rateLimitResult.success) {
       return NextResponse.json(
         {

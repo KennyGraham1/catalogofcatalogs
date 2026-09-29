@@ -59,6 +59,8 @@ function useCollections(map: Record<string, MockCollection>) {
     audit_logs: { insertOne: jest.fn().mockResolvedValue({ acknowledged: true }) },
     auth_rate_limits: {
       createIndex: jest.fn().mockResolvedValue('expires_at_1'),
+      findOneAndUpdate: jest.fn().mockResolvedValue({ attempts: 1 }),
+      findOne: jest.fn().mockResolvedValue(null),
       updateOne: jest.fn().mockResolvedValue({ matchedCount: 1 }),
       deleteOne: jest.fn().mockResolvedValue({ deletedCount: 1 }),
     },
@@ -379,8 +381,16 @@ describe('Password Reset Flow', () => {
   describe('Forgot Password', () => {
     it('should create reset token for valid email', async () => {
       // Arrange
+      const earlierLinks = [{ id: 'reset-old-1' }]; // beyond the newest three
+      const cursor: Record<'sort' | 'skip' | 'project' | 'toArray', jest.Mock> = {
+        sort: jest.fn(() => cursor),
+        skip: jest.fn(() => cursor),
+        project: jest.fn(() => cursor),
+        toArray: jest.fn().mockResolvedValue(earlierLinks),
+      };
       const tokens = {
-        deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }),
+        find: jest.fn(() => cursor),
+        deleteMany: jest.fn().mockResolvedValue({ deletedCount: 1 }),
         insertOne: jest.fn().mockResolvedValue({ acknowledged: true }),
       };
       useCollections({
@@ -401,6 +411,10 @@ describe('Password Reset Flow', () => {
         used_at: null,
         expires_at: expect.any(Date),
       }));
+      // Earlier links stay valid; only those beyond the newest three are removed.
+      expect(tokens.find).toHaveBeenCalledWith({ user_id: 'user-123' });
+      expect(cursor.skip).toHaveBeenCalledWith(3);
+      expect(tokens.deleteMany).toHaveBeenCalledWith({ id: { $in: ['reset-old-1'] } });
     });
 
     it('should not reveal if email exists', async () => {

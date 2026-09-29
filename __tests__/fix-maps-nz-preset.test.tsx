@@ -19,11 +19,11 @@ const mockAddLayer = jest.fn();
 jest.mock('react-leaflet', () => {
   const React = require('react');
   return {
-    MapContainer: React.forwardRef(({ children }: any, ref: any) => {
+    MapContainer: React.forwardRef(function MapContainer({ children }: any, ref: any) {
       React.useImperativeHandle(ref, () => ({ fitBounds: mockFitBounds }));
       return <div>{children}</div>;
     }),
-    FeatureGroup: React.forwardRef(({ children }: any, ref: any) => {
+    FeatureGroup: React.forwardRef(function FeatureGroup({ children }: any, ref: any) {
       React.useImperativeHandle(ref, () => ({ addLayer: mockAddLayer, removeLayer: jest.fn() }));
       return <div>{children}</div>;
     }),

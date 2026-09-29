@@ -1,4 +1,5 @@
 import { stripSpreadsheetFormulaGuard } from './export-utils';
+import { resolveHeaderAlias } from './field-definitions';
 
 /**
  * Delimiter detection and parsing utilities for text files
@@ -274,41 +275,91 @@ export function splitLeadingCommentLines(content: string): { comments: string[];
 }
 
 /**
+ * The leading comment line that names the columns: the last one at least two of whose
+ * cells are known field names (FDSN '#EventID|Time|...', an ISC-GEM '#  date , lat , ...'
+ * line), so a units line after it ('#UTC,deg,deg,km,ML') or a prose line is never taken
+ * for the header. Failing that, the last header-like comment line as wide as the data
+ * (a file whose own column names the alias table does not know). Null when neither.
+ */
+export function chooseCommentHeader(comments: string[], delimiter: Delimiter, dataWidth?: number): string[] | null {
+  const candidates = comments
+    .map((line) => parseLine(stripHeaderCommentMarker(line), delimiter, { strictQuotes: false }))
+    .filter(isHeaderLikeRecord);
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const known = new Set<string>();
+    for (const cell of candidates[i]) {
+      const target = resolveHeaderAlias(cell.trim());
+      if (target) known.add(target);
+    }
+    if (known.size >= 2) return candidates[i];
+  }
+  const last = candidates[candidates.length - 1];
+  return last && dataWidth !== undefined && last.length === dataWidth ? last : null;
+}
+
+/**
+ * Column names made unique: a repeated name gets a numeric suffix ('mm', 'mm_2'), so a
+ * row keeps every column. A repeated name used to collapse into one key whose last cell
+ * won: in 'yyyy mm dd hh mm ss' the minutes overwrote the month.
+ */
+export function uniqueHeaderNames(names: string[]): string[] {
+  const seen = new Set<string>();
+  return names.map((name) => {
+    let candidate = name;
+    for (let n = 2; seen.has(candidate); n++) candidate = `${name}_${n}`;
+    seen.add(candidate);
+    return candidate;
+  });
+}
+
+/** Header cells as written (comment marker stripped, trimmed) and as matched (lower case), both unique. */
+function headerNames(cells: string[]): { headers: string[]; writtenHeaders: string[] } {
+  const written = cells.map((h, i) => (i === 0 ? stripHeaderCommentMarker(h) : h).trim());
+  const headers = uniqueHeaderNames(written.map((h) => h.toLowerCase()));
+  // A suffix added to the lower-case name is added to the written one as well.
+  const writtenHeaders = written.map((h, i) => h + headers[i].slice(h.length));
+  return { headers, writtenHeaders };
+}
+
+/**
  * Parse entire content with the specified delimiter (RFC 4180-aware).
  *
- * A leading block of comment lines is skipped. The block's LAST line is the column
- * header when it reads as one and the first line after the block is data, which is the
- * FDSN event-text layout ('# Query complete' then '#EventID|Time|...') and the ISC-GEM
- * one; otherwise the first line after the block is the header. The first record used to
- * be the header unconditionally, so a file opening with '# Catalogue: ...' (this
- * platform's own CSV export with metadata=comments included) imported zero events.
- * `dataStartLine` is the 1-based line of the first data row.
+ * A leading block of comment lines is skipped. When the first line after the block is
+ * data, the block's column-naming line is the header (see chooseCommentHeader): the FDSN
+ * event-text layout ('# Query complete' then '#EventID|Time|...') and the ISC-GEM one;
+ * otherwise the first line after the block is the header. The first record used to be
+ * the header unconditionally, so a file opening with '# Catalogue: ...' (this platform's
+ * own CSV export with metadata=comments included) imported zero events.
+ * `headers` are lower case and unique; `writtenHeaders` are the same names as written
+ * (for anything read from the case, such as the magnitude scale 'mB'); `dataStartLine` is
+ * the 1-based line of the first data row.
  */
 export function parseWithDelimiter(content: string, delimiter: Delimiter): {
   headers: string[];
+  writtenHeaders: string[];
   rows: string[][];
   dataStartLine: number;
 } {
   const { comments, body, linesSkipped } = splitLeadingCommentLines(content);
   const all = tokenizeDelimited(body, delimiter);
-  const toHeaders = (cells: string[]) =>
-    cells.map((h, i) => (i === 0 ? stripHeaderCommentMarker(h) : h).trim().toLowerCase());
   // Undo our own CSV export's formula guard so exports re-import unchanged. Headers are
   // matched against known column names and are never guarded.
   const unguard = (rows: string[][]) => rows.map((row) => row.map(stripSpreadsheetFormulaGuard));
 
   if (comments.length > 0) {
-    const commentHeader = parseLine(stripHeaderCommentMarker(comments[comments.length - 1]), delimiter, { strictQuotes: false });
     const first = all[0];
-    if (isHeaderLikeRecord(commentHeader) && (!first || !isHeaderLikeRecord(first))) {
-      return { headers: toHeaders(commentHeader), rows: unguard(all), dataStartLine: linesSkipped + 1 };
+    const commentHeader = !first || !isHeaderLikeRecord(first)
+      ? chooseCommentHeader(comments, delimiter, first?.length)
+      : null;
+    if (commentHeader) {
+      return { ...headerNames(commentHeader), rows: unguard(all), dataStartLine: linesSkipped + 1 };
     }
   }
 
   if (all.length === 0) {
-    return { headers: [], rows: [], dataStartLine: linesSkipped + 2 };
+    return { headers: [], writtenHeaders: [], rows: [], dataStartLine: linesSkipped + 2 };
   }
-  return { headers: toHeaders(all[0]), rows: unguard(all.slice(1)), dataStartLine: linesSkipped + 2 };
+  return { ...headerNames(all[0]), rows: unguard(all.slice(1)), dataStartLine: linesSkipped + 2 };
 }
 
 /**

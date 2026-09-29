@@ -22,6 +22,8 @@ import {
   resolveHeaderAlias,
   resolveParserFieldSources,
   computeFileMappingChanges,
+  hasNestedQuantifier,
+  parseFieldMappingsConfig,
   type CustomFieldMapping,
 } from '@/lib/field-definitions';
 import { parseCSV, parseJSON } from '@/lib/parsers';
@@ -266,5 +268,39 @@ describe('the schema step resolves headers exactly as the parser does', () => {
     expect(computeFileMappingChanges(parsed.detectedFields, sources, {})).toEqual({ set: {}, unset: [] });
     // The metre annotation still drives the unit: 800 m -> 0.8 km.
     expect(parsed.events[0].horizontal_uncertainty).toBeCloseTo(0.8, 10);
+  });
+});
+
+describe('review #6: a Settings regex cannot freeze the upload tab', () => {
+  const catastrophic = { id: 'r1', sourcePattern: '^(\\w+_?)*$', targetField: 'depth', isRegex: true, priority: 50 };
+
+  it('refuses nested quantifiers when the configuration is saved or imported', () => {
+    const config = {
+      autoDetectEnabled: true,
+      strictValidation: false,
+      fuzzyMatchThreshold: 0.6,
+      formats: { csv: { enabled: true, mappings: [catastrophic] } },
+      customMappings: [],
+    };
+    const parsed = parseFieldMappingsConfig(config);
+    expect(parsed.ok).toBe(false);
+    expect(hasNestedQuantifier('^(\\w+_?)*$')).toBe(true);
+    expect(hasNestedQuantifier('(a+)+')).toBe(true);
+    expect(hasNestedQuantifier('(a|aa)*')).toBe(true);
+    expect(hasNestedQuantifier('^depth[_ ]?\\(?m\\)?$')).toBe(false);
+    expect(hasNestedQuantifier('^(lat|lon)_err$')).toBe(false);
+  });
+
+  it('never runs such a rule, or any rule on an overlong header, if one was saved before', () => {
+    const started = Date.now();
+    const result = detectAllFieldMappings(['a'.repeat(30) + '-'], 0.6, {
+      customMappings: [catastrophic],
+      useBuiltInAliases: false,
+    });
+    expect(result).toEqual({});
+    expect(Date.now() - started).toBeLessThan(200);
+    const plain = { id: 'r2', sourcePattern: '^x+$', targetField: 'depth', isRegex: true, priority: 50 };
+    expect(detectAllFieldMappings(['x'.repeat(65)], 0.6, { customMappings: [plain], useBuiltInAliases: false })).toEqual({});
+    expect(detectAllFieldMappings(['x'.repeat(10)], 0.6, { customMappings: [plain], useBuiltInAliases: false })).toEqual({ ['x'.repeat(10)]: 'depth' });
   });
 });

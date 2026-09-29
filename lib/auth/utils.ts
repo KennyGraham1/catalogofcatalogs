@@ -6,6 +6,7 @@
 import * as bcrypt from 'bcryptjs';
 import { getCollection, COLLECTIONS } from '../mongodb';
 import { User, SafeUser, UserRole, Permission, ROLE_PERMISSIONS, Session } from './types';
+import { normalizeEmail } from './normalize';
 
 /**
  * Hash a password using bcrypt
@@ -35,7 +36,7 @@ export function toSafeUser(user: User): SafeUser {
  */
 export async function getUserByEmail(email: string): Promise<User | null> {
   const collection = await getCollection(COLLECTIONS.USERS);
-  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedEmail = normalizeEmail(email);
 
   // Use case-insensitive regex match to handle legacy data with mixed case
   const escapedEmail = normalizedEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -72,7 +73,7 @@ export async function createUser(
   role: UserRole = UserRole.VIEWER
 ): Promise<SafeUser> {
   const collection = await getCollection(COLLECTIONS.USERS);
-  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedEmail = normalizeEmail(email);
 
   // Check if user already exists (case-insensitive)
   const existing = await getUserByEmail(normalizedEmail);

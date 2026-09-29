@@ -43,6 +43,7 @@ function matches(doc: Doc, filter: Doc): boolean {
     if (condition && typeof condition === 'object' && !(condition instanceof Date)) {
       if ('$regex' in condition) return typeof value === 'string' && new RegExp(condition.$regex).test(value);
       if ('$gt' in condition) return value > condition.$gt;
+      if ('$lte' in condition) return value <= condition.$lte;
       if ('$ne' in condition) return value !== condition.$ne;
       throw new Error(`fake collection: unsupported filter ${JSON.stringify(condition)}`);
     }

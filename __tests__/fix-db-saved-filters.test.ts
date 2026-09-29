@@ -13,13 +13,40 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 type Doc = Record<string, any>;
-const store: { docs: Doc[] } = { docs: [] };
-const matches = (doc: Doc, filter: Doc) => Object.entries(filter).every(([k, v]) => doc[k] === v);
+const store: { docs: Doc[]; slotIndex: boolean } = { docs: [], slotIndex: false };
+const matchValue = (value: unknown, cond: any) =>
+  cond && typeof cond === 'object' && '$exists' in cond ? (value !== undefined) === cond.$exists : value === cond;
+const matches = (doc: Doc, filter: Doc) => Object.entries(filter).every(([k, v]) => matchValue(doc[k], v));
+// Every operation yields first, so concurrent requests interleave as they would against a server.
+const tick = () => new Promise((resolve) => setImmediate(resolve));
 const savedFilters = {
-  insertOne: jest.fn(async (doc: Doc) => { store.docs.push({ ...doc }); return { acknowledged: true }; }),
-  find: jest.fn((filter: Doc) => {
-    const rows = store.docs.filter((d) => matches(d, filter));
-    const cursor = { sort: () => cursor, toArray: async () => rows.map((d) => ({ ...d })) };
+  createIndex: jest.fn(async (key: Doc, options: Doc) => {
+    if (options?.name === 'saved_filters_owner_slot_idx' && options.unique) store.slotIndex = true;
+    return options?.name;
+  }),
+  insertOne: jest.fn(async (doc: Doc) => {
+    await tick();
+    // The unique (owner_id, slot) index, for documents that carry a slot.
+    if (store.slotIndex && doc.slot !== undefined &&
+        store.docs.some((d) => d.slot !== undefined && d.owner_id === doc.owner_id && d.slot === doc.slot)) {
+      throw Object.assign(new Error('E11000 duplicate key error'), { code: 11000 });
+    }
+    store.docs.push({ ...doc });
+    return { acknowledged: true };
+  }),
+  find: jest.fn((filter: Doc, options: Doc = {}) => {
+    const cursor: any = {
+      sort: () => cursor,
+      limit: () => cursor,
+      toArray: async () => {
+        await tick();
+        return store.docs.filter((d) => matches(d, filter)).map((d) => {
+          if (!options.projection) return { ...d };
+          const keep = Object.keys(options.projection).filter((k) => options.projection[k] === 1);
+          return Object.fromEntries(keep.filter((k) => k in d).map((k) => [k, d[k]]));
+        });
+      },
+    };
     return cursor;
   }),
   findOne: jest.fn(async (filter: Doc) => store.docs.find((d) => matches(d, filter)) ?? null),
@@ -48,6 +75,7 @@ import { requireViewer } from '@/lib/auth/middleware';
 import { GET as list, POST as create } from '@/app/api/saved-filters/route';
 import { GET as getOne, PUT as update, DELETE as remove } from '@/app/api/saved-filters/[id]/route';
 import { MAX_SAVED_FILTERS_PER_USER } from '@/app/api/saved-filters/validation';
+import { dbQueries } from '@/lib/db';
 
 const alice = { id: 'alice', email: 'alice@example.test', role: 'viewer' };
 const mallory = { id: 'mallory', email: 'm@example.test', role: 'viewer' };
@@ -140,12 +168,39 @@ describe('#56 / #119 :: saved filters are personal', () => {
     expect(store.docs).toEqual([]);
   });
 
-  it('caps how many filters one user may keep', async () => {
+  it('caps how many filters one user may keep, and a deleted filter frees its place', async () => {
     for (let i = 0; i < MAX_SAVED_FILTERS_PER_USER; i++) {
-      store.docs.push({ id: `f${i}`, owner_id: 'alice', name: `f${i}`, filter_config: '{}' });
+      store.docs.push({ id: `f${i}`, owner_id: 'alice', slot: i, name: `f${i}`, filter_config: '{}' });
     }
     as(alice);
     const response = await create(req('/api/saved-filters', 'POST', { name: 'one more', filterConfig: { a: 1 } }));
     expect(response.status).toBe(409);
+    expect((await remove(req('/api/saved-filters/f7', 'DELETE'), ctx('f7'))).status).toBe(200);
+    expect((await create(req('/api/saved-filters', 'POST', { name: 'one more', filterConfig: { a: 1 } }))).status).toBe(201);
+    expect(store.docs.filter((d) => d.owner_id === 'alice')).toHaveLength(MAX_SAVED_FILTERS_PER_USER);
+  });
+
+  it('holds the cap when many requests arrive at once (no count-then-insert race)', async () => {
+    for (let i = 0; i < MAX_SAVED_FILTERS_PER_USER - 3; i++) {
+      store.docs.push({ id: `f${i}`, owner_id: 'alice', slot: i, name: `f${i}`, filter_config: '{}' });
+    }
+    as(alice);
+    const responses = await Promise.all(Array.from({ length: 10 }, (_, i) =>
+      create(req('/api/saved-filters', 'POST', { name: `burst ${i}`, filterConfig: { i } }))));
+    expect(responses.map((r) => r.status).sort()).toEqual([201, 201, 201, 409, 409, 409, 409, 409, 409, 409]);
+    const alices = store.docs.filter((d) => d.owner_id === 'alice');
+    expect(alices).toHaveLength(MAX_SAVED_FILTERS_PER_USER);
+    expect(new Set(alices.map((d) => d.slot)).size).toBe(MAX_SAVED_FILTERS_PER_USER);
+  });
+
+  it('never treats a missing owner as "every owner": the administrator scope must be explicit', async () => {
+    await aliceCreates();
+    const db = dbQueries!;
+    await expect(db.getSavedFilters(undefined as any)).rejects.toThrow(/owner/);
+    await expect(db.getSavedFilters({ ownerId: '' })).rejects.toThrow(/owner/);
+    await expect(db.getSavedFilterById('x', {} as any)).rejects.toThrow(/owner/);
+    await expect(db.updateSavedFilter('x', 'n', null, '{}', undefined as any)).rejects.toThrow(/owner/);
+    await expect(db.deleteSavedFilter('x', { ownerId: undefined } as any)).rejects.toThrow(/owner/);
+    expect(await db.getSavedFilters({ admin: true })).toHaveLength(1);
   });
 });

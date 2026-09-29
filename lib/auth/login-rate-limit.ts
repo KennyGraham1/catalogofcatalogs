@@ -1,23 +1,30 @@
 /**
- * Credential-login throttling for NextAuth's `authorize`.
+ * Credential-login throttling for NextAuth's `authorize`, and the per-account limit on
+ * password-reset emails.
  *
- * Shared, atomic MongoDB counters in fixed 15-minute windows, checked before the user
- * lookup and bcrypt so refused attempts cost almost nothing. Restarting a server or
- * switching instances cannot reset a quota.
+ * Shared, atomic MongoDB counters, checked before the user lookup and bcrypt so refused
+ * attempts cost almost nothing. Restarting a server or switching instances cannot reset
+ * a quota. Clients are keyed by address, an IPv6 /64 counting as one (clientKey in
+ * lib/rate-limiter.ts); accounts by normalised email (lib/auth/normalize.ts).
  *
- * - (account, client): 10 failed attempts. The hard limit on guessing one account's
- *   password; cleared when that client signs in to the account.
- * - client: 50 failed attempts across all accounts. Caps password spraying.
- * - account: failures from every client together. Anyone can raise this count, so it
- *   never locks the account. Above 100 (the ceiling in NIST SP 800-63B 5.2.2) it is
- *   logged, and until the window ends only clients that have signed in to the account
- *   before - or completed a password reset from there - may keep trying. That bounds
- *   guessing spread over many (or forged) addresses without shutting the owner out of
- *   the clients they use.
+ * A browser WITHOUT a known-device cookie for the account:
+ * - client: 50 failed attempts per 15-minute window, across accounts (caps spraying);
+ * - (account, client): 10 failed attempts per window (caps guessing from one client);
+ * - account: 100 consecutive failed attempts, from all such browsers together. The count
+ *   is reset by any successful sign-in and forgotten 24 hours after the last counted
+ *   failure (NIST SP 800-63B 5.2.2 caps consecutive failures at 100). Once it is
+ *   reached, such browsers are refused ("AccountProtected") before the password check.
+ *
+ * A browser WITH a known-device cookie for the account (lib/auth/known-device.ts,
+ * issued on a successful sign-in or password reset):
+ * - (account, device): 10 failed attempts per window, and no other limit. Anyone can
+ *   raise the account count, so it must not shut the owner out of their own browsers;
+ *   and those browsers' failures do not raise it.
  *
  * Each attempt is claimed before the password check, so concurrent guesses cannot race
  * past a limit, and handed back when the sign-in succeeds: successful logins are never
- * counted.
+ * counted. Unknown browsers can therefore make at most 100 password checks against an
+ * account between the owner's successful sign-ins, and at most 100 per 24 hours.
  *
  * Store failures: if the shared collection cannot be used, every instance enforces the
  * same limits from process memory and logs the fault until the store answers again.
@@ -31,17 +38,24 @@
 import { createHash } from 'crypto';
 import type { Collection } from 'mongodb';
 import { getCollection, COLLECTIONS } from '../mongodb';
-import { resolveClientIp, toHeaders } from '../rate-limiter';
+import { clientKey, resolveClientIp, toHeaders } from '../rate-limiter';
+import { normalizeEmail } from './normalize';
+import { knownDeviceId } from './known-device';
 
 const WINDOW_MS = 15 * 60 * 1000;
 /** Failed attempts per (account, client) per window. */
 const PAIR_LIMIT = 10;
 /** Failed attempts per client, across accounts, per window. */
 const CLIENT_LIMIT = 50;
-/** Failed attempts per account per window above which only known clients may continue. */
+/** Failed attempts per (account, known device) per window. */
+const DEVICE_LIMIT = 10;
+/** Consecutive failed attempts per account from unknown browsers before they are refused. */
 const ACCOUNT_STEP_UP = 100;
-/** How long a client stays known for an account after signing in to it. */
-const KNOWN_CLIENT_MS = 30 * 24 * 60 * 60 * 1000;
+/** The consecutive-failure count lapses this long after its last counted failure. */
+const CONSECUTIVE_TTL_MS = 24 * 60 * 60 * 1000;
+/** Password-reset emails per account per hour. */
+const RESET_EMAILS_PER_HOUR = 3;
+const RESET_WINDOW_MS = 60 * 60 * 1000;
 const INDEX_RETRY_MS = 10 * 60 * 1000;
 const FAULT_LOG_INTERVAL_MS = 60 * 1000;
 const MEMORY_MAX_ENTRIES = 10_000;
@@ -51,22 +65,26 @@ interface AttemptBucket { _id: string; attempts?: number; expires_at: Date }
 
 /** Counter storage: the shared collection, or process memory while it is unavailable. */
 interface BucketStore {
-  /** Add one attempt to a bucket, atomically, and return the new count. */
-  claim(id: string, expiresAt: Date): Promise<number>;
+  /**
+   * Add one to a bucket, atomically, and return the new count. The bucket expires at
+   * `expiresAt`: set when it is created, or on every claim if `renew` is set.
+   */
+  claim(id: string, expiresAt: Date, renew?: boolean): Promise<number>;
+  /** The bucket's count, 0 if it does not exist or has expired. */
+  count(id: string): Promise<number>;
   /** Hand one attempt back. */
   refund(id: string): Promise<void>;
   remove(id: string): Promise<void>;
-  mark(id: string, expiresAt: Date): Promise<void>;
-  isMarked(id: string): Promise<boolean>;
 }
 
 let indexReady = false;
 let indexAttemptedAt = -Infinity;
 
 /**
- * Expiry only cleans up: bucket ids carry their window, so counting is correct without
- * the TTL index. Failing to create it (e.g. the database role may not create indexes)
- * is therefore logged and retried later, never allowed to block a login.
+ * Expiry only cleans up: window buckets carry their window in their id, and counts are
+ * read with their expiry checked, so counting is correct without the TTL index. Failing
+ * to create it (e.g. the database role may not create indexes) is therefore logged and
+ * retried later, never allowed to block a login.
  */
 function ensureTtlIndex(collection: Collection<AttemptBucket>) {
   if (indexReady || Date.now() - indexAttemptedAt < INDEX_RETRY_MS) return;
@@ -83,27 +101,33 @@ function ensureTtlIndex(collection: Collection<AttemptBucket>) {
 
 function mongoStore(collection: Collection<AttemptBucket>): BucketStore {
   return {
-    async claim(id, expiresAt) {
+    async claim(id, expiresAt, renew = false) {
+      if (renew) {
+        // A renewed bucket's id carries no window: an expired document the TTL monitor
+        // has not removed yet (or never will, without the index) must start from zero,
+        // not keep counting and renewing forever.
+        await collection.deleteOne({ _id: id, expires_at: { $lte: new Date(Date.now()) } });
+      }
       const bucket = await collection.findOneAndUpdate(
         { _id: id },
-        { $inc: { attempts: 1 }, $setOnInsert: { expires_at: expiresAt } },
+        renew
+          ? { $inc: { attempts: 1 }, $set: { expires_at: expiresAt } }
+          : { $inc: { attempts: 1 }, $setOnInsert: { expires_at: expiresAt } },
         { upsert: true, returnDocument: 'after' },
       );
       if (!bucket) throw new Error('auth_rate_limits upsert returned no document');
       return bucket.attempts ?? 0;
+    },
+    async count(id) {
+      // The TTL monitor runs about once a minute, so check expiry here as well.
+      const bucket = await collection.findOne({ _id: id, expires_at: { $gt: new Date(Date.now()) } });
+      return bucket?.attempts ?? 0;
     },
     async refund(id) {
       await collection.updateOne({ _id: id, attempts: { $gt: 0 } }, { $inc: { attempts: -1 } });
     },
     async remove(id) {
       await collection.deleteOne({ _id: id });
-    },
-    async mark(id, expiresAt) {
-      await collection.updateOne({ _id: id }, { $set: { expires_at: expiresAt } }, { upsert: true });
-    },
-    async isMarked(id) {
-      // The TTL monitor runs about once a minute, so check expiry here as well.
-      return (await collection.findOne({ _id: id, expires_at: { $gt: new Date(Date.now()) } })) !== null;
     },
   };
 }
@@ -133,15 +157,20 @@ function makeMemoryRoom() {
 
 /** Same limits, held per process; single-threaded, so each operation is atomic. */
 const memoryStore: BucketStore = {
-  async claim(id, expiresAt) {
+  async claim(id, expiresAt, renew = false) {
     let entry = memoryEntry(id);
     if (!entry) {
       if (memoryBuckets.size >= MEMORY_MAX_ENTRIES) makeMemoryRoom();
       entry = { count: 0, expiresAt: expiresAt.getTime() };
       memoryBuckets.set(id, entry);
+    } else if (renew) {
+      entry.expiresAt = expiresAt.getTime();
     }
     entry.count += 1;
     return entry.count;
+  },
+  async count(id) {
+    return memoryEntry(id)?.count ?? 0;
   },
   async refund(id) {
     const entry = memoryEntry(id);
@@ -149,12 +178,6 @@ const memoryStore: BucketStore = {
   },
   async remove(id) {
     memoryBuckets.delete(id);
-  },
-  async mark(id, expiresAt) {
-    memoryBuckets.set(id, { count: 0, expiresAt: expiresAt.getTime() });
-  },
-  async isMarked(id) {
-    return memoryEntry(id) !== undefined;
   },
 };
 
@@ -190,73 +213,97 @@ function currentWindow() {
   return { window, end: new Date((window + 1) * WINDOW_MS) };
 }
 
-// A request that carries no client address (never the case behind Next.js, which fills
-// X-Forwarded-For in) is limited per account; it never shares a client bucket.
-const pairId = (window: number, account: string, client: string | null) =>
-  `${window}:${digest('pair', account, client ?? '')}`;
-const knownId = (account: string, client: string) => `known:${digest('known', account, client)}`;
-
-function requestKeys(email: string, rawHeaders: RawHeaders) {
-  return {
-    account: email.trim().toLowerCase(),
-    client: resolveClientIp({ headers: toHeaders(rawHeaders) }),
-  };
-}
-
 export interface CredentialAttempt {
   /**
-   * Record a successful sign-in: it is not counted, this client's count for the
-   * account starts again, and the client becomes known for the account.
+   * Record a successful sign-in: it is not counted, this client's (or device's) count
+   * for the account starts again, and so does the account's consecutive-failure count.
    */
   succeeded(): Promise<void>;
 }
 
+/** Why an attempt was refused: a per-client or per-device limit, or the account-wide one. */
+export type CredentialRefusal = 'too-many-attempts' | 'account-protected';
+
 /**
- * Claim one credential attempt before the password is checked. Returns null when the
- * attempt must be refused. An attempt that is never marked as succeeded stays counted
- * as a failure.
+ * Claim one credential attempt before the password is checked. An attempt that is
+ * never marked as succeeded stays counted as a failure.
  */
-export async function beginCredentialAttempt(email: string, rawHeaders: RawHeaders = {}): Promise<CredentialAttempt | null> {
-  const { account, client } = requestKeys(email, rawHeaders);
+export async function beginCredentialAttempt(
+  email: string,
+  rawHeaders: RawHeaders = {}
+): Promise<CredentialAttempt | CredentialRefusal> {
+  const headers = toHeaders(rawHeaders);
+  const account = normalizeEmail(email);
+  const address = resolveClientIp({ headers });
+  const client = address === null ? null : clientKey(address);
+  const device = knownDeviceId(headers.get('cookie'), account);
 
   return withStore(async store => {
     const { window, end } = currentWindow();
-    const clientBucket = client === null ? null : `${window}:${digest('client', client)}`;
-    const pairBucket = pairId(window, account, client);
-    const accountBucket = `${window}:${digest('account', account)}`;
+    const consecutive = `consecutive:${digest('account', account)}`;
+
+    if (device !== null) {
+      // A browser that has signed in to this account before: limited on its own, and
+      // outside the limits other clients' failures raise.
+      const deviceBucket = `${window}:${digest('device', account, device)}`;
+      if (await store.claim(deviceBucket, end) > DEVICE_LIMIT) return 'too-many-attempts';
+      return {
+        async succeeded() {
+          await settle([store.remove(deviceBucket), store.remove(consecutive)]);
+        },
+      };
+    }
 
     // Count the client first, so a blocked client cannot create unlimited account buckets.
-    if (clientBucket && await store.claim(clientBucket, end) > CLIENT_LIMIT) return null;
-    if (await store.claim(pairBucket, end) > PAIR_LIMIT) return null;
+    // A request with no client address (never the case behind Next.js, which fills
+    // X-Forwarded-For in) is limited per account; it never shares a client bucket.
+    const clientBucket = client === null ? null : `${window}:${digest('client', client)}`;
+    if (clientBucket && await store.claim(clientBucket, end) > CLIENT_LIMIT) return 'too-many-attempts';
+    const pairBucket = `${window}:${digest('pair', account, client ?? '')}`;
+    if (await store.claim(pairBucket, end) > PAIR_LIMIT) return 'too-many-attempts';
 
-    const accountFailures = await store.claim(accountBucket, end);
-    if (accountFailures > ACCOUNT_STEP_UP) {
-      if (accountFailures === ACCOUNT_STEP_UP + 1) {
-        console.warn(
-          `[Auth] ${ACCOUNT_STEP_UP} failed sign-ins for ${JSON.stringify(account)} in this ` +
-          '15-minute window; until it ends only clients that have signed in to this account ' +
-          'before may keep trying.'
-        );
-      }
-      if (client === null || !await store.isMarked(knownId(account, client))) return null;
+    const renewedExpiry = new Date(Date.now() + CONSECUTIVE_TTL_MS);
+    if (await store.count(consecutive) >= ACCOUNT_STEP_UP) {
+      // Refused attempts still move the count past the threshold (without renewing its
+      // expiry), which marks the first refusal for the log.
+      noteStepUp(account, await store.claim(consecutive, renewedExpiry));
+      return 'account-protected';
+    }
+    const failures = await store.claim(consecutive, renewedExpiry, true);
+    if (failures > ACCOUNT_STEP_UP) {
+      noteStepUp(account, failures);
+      return 'account-protected';
     }
 
     return {
       async succeeded() {
-        try {
-          await Promise.all([
-            clientBucket ? store.refund(clientBucket) : undefined,
-            store.refund(accountBucket),
-            store.remove(pairBucket),
-            client === null ? undefined : store.mark(knownId(account, client), new Date(Date.now() + KNOWN_CLIENT_MS)),
-          ]);
-        } catch (error) {
-          // Only means this sign-in stays counted as a failure.
-          reportStoreFault(error);
-        }
+        await settle([
+          clientBucket ? store.refund(clientBucket) : undefined,
+          store.remove(pairBucket),
+          store.remove(consecutive),
+        ]);
       },
     };
   });
+}
+
+/** Log the first refusal after the account-wide threshold is reached. */
+function noteStepUp(account: string, count: number) {
+  if (count !== ACCOUNT_STEP_UP + 1) return;
+  console.warn(
+    `[Auth] ${ACCOUNT_STEP_UP} consecutive failed sign-ins for ${JSON.stringify(account)}; until one ` +
+    'succeeds, or 24 hours pass without another, only browsers with a known-device cookie for ' +
+    'this account may try.'
+  );
+}
+
+async function settle(work: Array<Promise<void> | undefined>) {
+  try {
+    await Promise.all(work);
+  } catch (error) {
+    // Only means this sign-in stays counted as a failure.
+    reportStoreFault(error);
+  }
 }
 
 /**
@@ -264,23 +311,19 @@ export async function beginCredentialAttempt(email: string, rawHeaders: RawHeade
  * Callers that can tell a successful sign-in apart should use beginCredentialAttempt.
  */
 export async function allowCredentialAttempt(email: string, rawHeaders: RawHeaders = {}): Promise<boolean> {
-  return (await beginCredentialAttempt(email, rawHeaders)) !== null;
+  return typeof await beginCredentialAttempt(email, rawHeaders) !== 'string';
 }
 
 /**
- * Treat this client as known for the account and clear its failed attempts, as a
- * successful sign-in would. Call once a password reset has proved control of the
- * account, so its owner can sign in from there even while the account is under attack.
+ * Claim one password-reset email for the account: at most three per hour, however many
+ * clients ask. Counted for every address asked about, whether or not it has an account,
+ * so the answer does not depend on that.
  */
-export async function rememberCredentialClient(email: string, rawHeaders: RawHeaders = {}): Promise<void> {
-  const { account, client } = requestKeys(email, rawHeaders);
-  if (client === null) return;
-
-  await withStore(async store => {
-    const { window } = currentWindow();
-    await Promise.all([
-      store.mark(knownId(account, client), new Date(Date.now() + KNOWN_CLIENT_MS)),
-      store.remove(pairId(window, account, client)),
-    ]);
+export async function allowPasswordResetEmail(email: string): Promise<boolean> {
+  const account = normalizeEmail(email);
+  return withStore(async store => {
+    const hour = Math.floor(Date.now() / RESET_WINDOW_MS);
+    const bucket = `reset:${hour}:${digest('reset', account)}`;
+    return await store.claim(bucket, new Date((hour + 1) * RESET_WINDOW_MS)) <= RESET_EMAILS_PER_HOUR;
   });
 }

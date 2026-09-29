@@ -29,8 +29,8 @@ The platform also applies underlying algorithm improvements. Some run for **ever
 
 * **Date Line Normalisation** *(all strategies)*: Spatial matching near ±180° uses unit-vector averaging to avoid arithmetic errors in the Pacific region.
 * **Validation Gates** *(all strategies)*: Rejects physically inconsistent duplicate groups before any strategy is applied (e.g., an M4.0 matched against an M7.0, or a group spanning > 200 km).
-* **Magnitude Type Preference** *(Average strategy)*: Selects (never averages) a magnitude by a size-dependent type preference — Mw always leads; below M5.5 the order is ML > mb/mB/mbLg > Ms > Md, and from M5.5 up it is Ms > mB > ML > mb > Md — which avoids saturation errors from mixing incompatible scales. Other strategies keep the winning event's existing magnitude unchanged.
-* **Depth Uncertainty Selection** *(Average strategy)*: Selects the depth with the lowest reported uncertainty rather than a simple mean. Other strategies inherit depth directly from the winning event.
+* **Magnitude Type Preference** *(Average strategy)*: Selects (never averages) a magnitude by a size-dependent type preference — Mw always leads; below M6.2 (the group's median Mw-equivalent) the order is ML > mb/mB/mbLg > Ms > Md, and from M6.2 up it is Ms > mB > ML > mb > Md — which avoids saturation errors from mixing incompatible scales. Other strategies keep the winning event's existing magnitude unchanged.
+* **Depth Uncertainty Selection** *(Average strategy)*: Selects the depth from the best-constrained report that solved for depth (a fixed or operator-assigned depth is used only when no free depth exists), rather than a simple mean. Other strategies inherit depth directly from the winning event.
 
 Merge Process Overview
 ======================
@@ -220,8 +220,12 @@ catalogue:
 
 Whenever the preferred agency/solution is not present in a group (or, for
 Custom Order, when catalogues tie), the built-in network-authority ranking
-decides instead (GeoNet, GCMT, ISC, USGS, then other agencies), and quality
-score breaks any remaining tie.
+decides instead (GeoNet, GCMT, ISC, USGS, then other agencies). Reports
+that are equally authoritative (the same rank, or no ranking applies to
+either) are then compared the same way the Quality-Based strategy compares
+them: only the metrics every one of the tied reports states, never an
+absolute score that would penalise a report for a field the others simply
+didn't state.
 
 This approach follows the principle of network authority, where local
 networks are prioritized for regional events as recommended by Bondár &
@@ -301,8 +305,8 @@ Average Values Strategy
   otherwise every report is weighted equally rather than guessing an
   uncertainty for the ones that stated none
 * **Magnitude:** selected, not averaged, by a size-dependent type
-  preference — Mw first; below M5.5, ML ranks ahead of mb/mB/mbLg, then
-  Ms, then Md; from M5.5 up, Ms leads, then mB, then ML, then mb, then Md;
+  preference — Mw first; below M6.2, ML ranks ahead of mb/mB/mbLg, then
+  Ms, then Md; from M6.2 up, Ms leads, then mB, then ML, then mb, then Md;
   a magnitude an agency marked "rejected" is skipped
 * **Depth:** taken from the best-constrained report that actually solved
   for depth (a fixed/operator-assigned depth is used only when no report
@@ -311,7 +315,11 @@ Average Values Strategy
 * Origin metadata that belongs to one agency's solution alone (agency,
   method, azimuthal gap, station/phase counts, RMS, time uncertainty,
   evaluation status) is **not** carried onto the averaged row — an
-  averaged epicentre is not any single agency's solution
+  averaged epicentre is not any single agency's solution. The one
+  exception is depth: the published depth's own ``depth_type`` and
+  ``depth_uncertainty`` *are* carried over, from the specific report the
+  depth was selected from (never blended or reset), since the depth
+  itself is a single report's value, not an average.
 
 Statistical averaging and uncertainty propagation follow Bayesian 
 principles for combining independent seismic observations (Schorlemmer 
@@ -470,7 +478,7 @@ international standards for network performance and location accuracy
 * **Magnitude Type (15 pts)**: Rewards whichever type is best calibrated and
   unsaturated at the group's earthquake size — the same size-dependent
   preference the Average strategy uses to select a magnitude (Mw always
-  leads; below M5.5, ML > mb/mB/mbLg > Ms > Md; from M5.5 up,
+  leads; below M6.2, ML > mb/mB/mbLg > Ms > Md; from M6.2 up,
   Ms > mB > ML > mb > Md) — following the ISC-GEM approach to magnitude
   selection (Storchak et al., 2013).
 * **Review Status (10 pts)**: "Reviewed" or "Final" status adds points over 
@@ -612,6 +620,12 @@ Select two or more catalogues to merge:
 .. tip::
    Start with 2-3 catalogues. For complex merges, consider an iterative
    approach (merge two first, then add more).
+
+.. note::
+   The same catalogue cannot be selected twice: a repeated catalogue can
+   never pair with itself, so its events would just be written into the
+   merge twice. The request is rejected (``400 Bad Request``) if a source
+   catalogue is listed more than once.
 
 .. _configure-matching-rules:
 

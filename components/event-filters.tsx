@@ -31,8 +31,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Filter, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { resolveEventQuality } from '@/components/events/event-quality';
-import type { EventFilters as C4EventFilters } from '@/lib/event-filter-params';
+import { eventMatchesFilters, type EventFilters as C4EventFilters } from '@/lib/event-filter-params';
 
 /**
  * Extends the shared C4 filter contract (lib/event-filter-params.ts, owner H2a: magnitude,
@@ -610,83 +609,27 @@ export interface FilterableEvent {
   horizontal_uncertainty?: number | null;
   min_horizontal_uncertainty?: number | null;
   max_horizontal_uncertainty?: number | null;
+  latitude_uncertainty?: number | null;
+  longitude_uncertainty?: number | null;
   depth_uncertainty?: number | null;
   time_uncertainty?: number | null;
   magnitude_uncertainty?: number | null;
 }
 
 /**
- * Apply EventFilterValues to an already-loaded event array. Mirrors the semantics
- * lib/event-filter-params.ts / getFilteredEvents define for the server (C4), so the table a
- * user is looking at and the file "Export filtered events" downloads (C12, built with that
- * module's own eventFiltersToSearchParams) cover the same events even before every page
- * calls the server-side filtered-events route for its main event list.
+ * Apply EventFilterValues to an already-loaded event array, with exactly the rules the
+ * server applies (lib/event-filter-params.ts eventMatchesFilters, the same module
+ * lib/db.ts builds its query from), so the table a user is looking at and the file
+ * "Export filtered events" downloads (C12, built with that module's own
+ * eventFiltersToSearchParams) cover the same events. The rules used to be re-implemented
+ * here and drifted: a lat/lon-only horizontal uncertainty, a -999 sentinel, a legacy row
+ * without a stored Q, or an event on the other spelling of the 180-degree seam gave the
+ * table and the export different rows.
  *
  * maxFaultDistance/nearFaultsOnly are intentionally not applied here: fault proximity needs
  * the fault layer the map view loads, which this module does not have.
  */
 export function applyEventFilters<T extends FilterableEvent>(events: T[], filters: EventFilterValues): T[] {
-  const hasStart = typeof filters.startTime === 'string' && filters.startTime.length > 0;
-  const hasEnd = typeof filters.endTime === 'string' && filters.endTime.length > 0;
-  const start = hasStart ? Date.parse(filters.startTime as string) : NaN;
-  const end = hasEnd ? Date.parse(filters.endTime as string) : NaN;
-
-  return events.filter((event) => {
-    if (filters.minMagnitude != null && event.magnitude < filters.minMagnitude) return false;
-    if (filters.maxMagnitude != null && event.magnitude > filters.maxMagnitude) return false;
-    if (filters.minDepth != null && (event.depth == null || event.depth < filters.minDepth)) return false;
-    if (filters.maxDepth != null && (event.depth == null || event.depth > filters.maxDepth)) return false;
-
-    if (hasStart && !Number.isNaN(start)) {
-      const eventTime = Date.parse(event.time);
-      if (Number.isNaN(eventTime) || eventTime < start) return false;
-    }
-    if (hasEnd && !Number.isNaN(end)) {
-      const eventTime = Date.parse(event.time);
-      if (Number.isNaN(eventTime) || eventTime > end) return false;
-    }
-
-    if (filters.eventType && (event.event_type ?? '').toLowerCase() !== filters.eventType.toLowerCase()) return false;
-    if (filters.magnitudeType && (event.magnitude_type ?? '').toLowerCase() !== filters.magnitudeType.toLowerCase()) return false;
-    if (filters.evaluationStatus && (event.evaluation_status ?? '').toLowerCase() !== filters.evaluationStatus.toLowerCase()) return false;
-    if (filters.evaluationMode && (event.evaluation_mode ?? '').toLowerCase() !== filters.evaluationMode.toLowerCase()) return false;
-
-    if (filters.maxAzimuthalGap != null && (event.azimuthal_gap == null || event.azimuthal_gap > filters.maxAzimuthalGap)) return false;
-    if (filters.minUsedPhaseCount != null && (event.used_phase_count == null || event.used_phase_count < filters.minUsedPhaseCount)) return false;
-    if (filters.minUsedStationCount != null && (event.used_station_count == null || event.used_station_count < filters.minUsedStationCount)) return false;
-    if (filters.maxStandardError != null && (event.standard_error == null || event.standard_error > filters.maxStandardError)) return false;
-
-    // Horizontal uncertainty: the error-ellipse semi-major axis when present, else the plain
-    // circular column - the same precedence metricsFromEvent uses for Q's location dimension.
-    if (filters.maxHorizontalUncertainty != null) {
-      const horizontal = event.max_horizontal_uncertainty ?? event.horizontal_uncertainty;
-      if (horizontal == null || horizontal > filters.maxHorizontalUncertainty) return false;
-    }
-    if (filters.maxDepthUncertainty != null && (event.depth_uncertainty == null || event.depth_uncertainty > filters.maxDepthUncertainty)) return false;
-    if (filters.maxTimeUncertainty != null && (event.time_uncertainty == null || event.time_uncertainty > filters.maxTimeUncertainty)) return false;
-    if (filters.maxMagnitudeUncertainty != null && (event.magnitude_uncertainty == null || event.magnitude_uncertainty > filters.maxMagnitudeUncertainty)) return false;
-
-    if (filters.minQuality != null) {
-      const { score } = resolveEventQuality(event);
-      if (score < filters.minQuality) return false;
-    }
-
-    if (filters.minLatitude != null && event.latitude < filters.minLatitude) return false;
-    if (filters.maxLatitude != null && event.latitude > filters.maxLatitude) return false;
-    if (filters.minLongitude != null && filters.maxLongitude != null) {
-      // minLongitude > maxLongitude is a box crossing the antimeridian (RFC 7946 S5.2,
-      // matching lib/event-filter-params.ts), e.g. 177..-178 for the Kermadec arc.
-      const crossesAntimeridian = filters.minLongitude > filters.maxLongitude;
-      const inBounds = crossesAntimeridian
-        ? event.longitude >= filters.minLongitude || event.longitude <= filters.maxLongitude
-        : event.longitude >= filters.minLongitude && event.longitude <= filters.maxLongitude;
-      if (!inBounds) return false;
-    } else {
-      if (filters.minLongitude != null && event.longitude < filters.minLongitude) return false;
-      if (filters.maxLongitude != null && event.longitude > filters.maxLongitude) return false;
-    }
-
-    return true;
-  });
+  return events.filter((event) => eventMatchesFilters(event, filters));
 }
 

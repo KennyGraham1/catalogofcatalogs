@@ -2,7 +2,7 @@ import { dbQueries, MergedEvent, MergedCatalogue } from './db';
 import type { ClientSession } from './mongodb';
 import { createId } from './id';
 import { calculateDistance, calculateTimeDifference } from './earthquake-utils';
-import { horizontalUncertaintyKm, type SourceCatalogue, type MergeConfig } from './validation';
+import type { SourceCatalogue, MergeConfig } from './validation';
 import type { QuakeMLEvent, FocalMechanism, Origin } from './types/quakeml';
 import { extractBoundsFromEvents, NZ_NATIONAL_BOUNDS } from './geo-bounds-utils';
 import { metricsFromEvent, scoreQualityMetrics } from './quality-scoring';
@@ -2279,19 +2279,12 @@ function unionMergeFields(base: MergedEventData, events: EventData[]): MergedEve
     }
   }
 
-  // Depth metadata: fill ONLY from a source reporting the SAME depth value, for the same
-  // reason as the magnitude/location blocks above — an uncertainty or a "operator assigned"
-  // depth type belongs to the solution that produced it, not to whichever depth was selected.
-  const depthSource = result.depth != null
-    ? ranked.find(src => src.depth != null && src.depth === result.depth)
-    : undefined;
-  if (depthSource) {
-    for (const field of DEPTH_META_FIELDS) {
-      if (result[field] == null && (depthSource as any)[field] != null) {
-        (result as any)[field] = (depthSource as any)[field];
-      }
-    }
-  }
+  // Depth metadata (DEPTH_META_FIELDS) is never filled from another report, not even one
+  // stating the same depth value: fixed-depth conventions (10, 33 km) make equal depths
+  // common between different solutions, so a free 10 km ± 2 depth was published as another
+  // agency's "operator assigned", ± 0. It comes from the published report through the
+  // strategy's spread, or, for an averaged record, from the report mergeByAverage took the
+  // depth from.
 
   // Focal mechanisms: every mechanism any source stored is kept, ordered by the documented
   // authority hierarchy, and the best becomes the preferred one (finding #30).
@@ -2841,14 +2834,16 @@ function getMagnitudeTypeCategory(magType: string | undefined): MagnitudeType | 
 
 /**
  * Moment-magnitude PROXIES: Mw-scale values an agency derived from another measurement —
- * SeisComP/GeoNet Mw(mB) from the broadband body-wave magnitude, Mwp (and Mwpd) from the
- * P-wave displacement — rather than from a moment-tensor inversion. They are on the Mw
- * scale but carry that conversion's scatter, so they are not exact Mw and rank below it.
+ * SeisComP/GeoNet Mw(mB) from the broadband body-wave magnitude (also written Mw_mB or
+ * MwmB), Mwp (and Mwpd) from the P-wave displacement — rather than from a moment-tensor
+ * inversion. They are on the Mw scale but carry that conversion's scatter, so they are not
+ * exact Mw and rank below it. Moment-tensor variants (Mww, Mwc, Mwb, Mwr) are not proxies.
  */
 function isMwProxy(magType: string | undefined): boolean {
   if (!magType) return false;
   const lower = magType.trim().toLowerCase();
-  return lower.startsWith('mw') && (lower.includes('(') || /^mwp(d)?$/.test(lower));
+  if (!lower.startsWith('mw')) return false;
+  return lower.includes('(') || /^mwp(d)?$/.test(lower) || /^mw[_\-.:]?(mb|ms|ml|md|mwp)/.test(lower);
 }
 
 /** Typical scatter of an agency's Mw proxy about moment-tensor Mw. */
@@ -2970,13 +2965,17 @@ const MAGNITUDE_HIERARCHY: Array<{ priority: number; patterns: string[] }> = [
 ];
 
 /**
- * Magnitude at which the non-Mw preference changes. Below it (local and regional events,
- * most of the New Zealand catalogue) the local magnitude is the best-calibrated non-Mw
- * scale and short-period mb, measured teleseismically on a few stations, is poorer; from
- * it upward mb saturates (from about 5.5-6) before ML (about 6.5-7) and Ms (about 8), so
- * Ms then leads. 5.5 is also the lower bound the ISC-GEM hierarchy was built for.
+ * Magnitude at which the non-Mw preference changes, since the published value is the RAW
+ * value of the chosen scale and should read as close to Mw as the scales allow. Below it
+ * the local magnitude leads: this module relates ML to Mw one-to-one (unsaturated to about
+ * 6.5), while raw Ms under-reads Mw (Scordilis 2006: Mw = 0.67 Ms + 2.07 for Ms 3.0-6.1, so
+ * Ms 5.1 is Mw 5.5) and short-period mb does too (Mw = 0.85 mb + 1.03). From 6.2 Scordilis's
+ * relation is one-to-one (Mw = 0.99 Ms + 0.08, Ms 6.2-8.2), ML is approaching saturation and
+ * mb has saturated, so Ms leads. Switching where both scales read Mw keeps the published
+ * magnitude from stepping down when the group's size estimate crosses the switch; the
+ * earlier switch at 5.5 published raw Ms up to 0.3 below Mw between M5.5 and M6.2.
  */
-const LARGE_EVENT_MAGNITUDE = 5.5;
+const LARGE_EVENT_MAGNITUDE = 6.2;
 
 // ============================================================================
 // AGENCY IDENTITY
@@ -3253,7 +3252,7 @@ function getNetworkPriority(
 
 /**
  * Select best event from group based on network authority
- * Falls back to quality score if networks have same priority
+ * Falls back to the quality comparison (rankByQuality) if networks have same priority
  *
  * @param events - Array of events to select from
  * @param customHierarchy - Optional custom hierarchy
@@ -3270,26 +3269,19 @@ function selectByNetworkAuthority(
     return events[0];
   }
 
-  // Score events by network priority and quality.
-  // Each event uses its own location as the regional reference so that events
-  // on region boundaries get the correct hierarchy (e.g. an event just inside
-  // NZ bounds is ranked by the NZ hierarchy, not by its neighbour's region).
-  const scored = events.map(e => ({
-    event: e,
-    networkPriority: getNetworkPriority(e.source, e, customHierarchy),
-    qualityScore: calculateQualityScore(e),
-  }));
+  // Network priority of each event. Each event uses its own location as the regional
+  // reference so that events on region boundaries get the correct hierarchy (e.g. an event
+  // just inside NZ bounds is ranked by the NZ hierarchy, not by its neighbour's region).
+  const priorities = events.map(e => getNetworkPriority(e.source, e, customHierarchy));
+  const best = Math.min(...priorities);
+  const tied = events.filter((_, i) => priorities[i] === best);
+  if (tied.length === 1) return tied[0];
 
-  // Sort by network priority (lower = better), then quality (higher = better), then a
-  // fixed record order so the choice never depends on the order the catalogues were read.
-  scored.sort((a, b) => {
-    if (a.networkPriority !== b.networkPriority) {
-      return a.networkPriority - b.networkPriority;
-    }
-    return b.qualityScore - a.qualityScore || compareRecordOrder(a.event, b.event);
-  });
-
-  return scored[0].event;
+  // Equally authoritative sources are compared the way the quality strategy compares them
+  // (rankByQuality: only the metrics every one of them states, then populated fields, then a
+  // fixed record order). An absolute score counted a metric one source omits as zero, so the
+  // choice depended on which catalogue happened to carry more columns.
+  return rankByQuality(tied)[0];
 }
 
 /**
@@ -3298,8 +3290,8 @@ function selectByNetworkAuthority(
  * Without a reference magnitude this is the static type hierarchy (Mw, Mw proxies, Ms,
  * mb, ML, Md). With one — the size of the earthquake being described — the non-Mw scales
  * are ranked by which is not saturated and best calibrated at that size (finding #25):
- * below LARGE_EVENT_MAGNITUDE the local magnitude ML leads, then the body-wave scales,
- * then Ms; from it upward Ms leads, then broadband mB, then ML, then short-period mb.
+ * below LARGE_EVENT_MAGNITUDE (M6.2) the local magnitude ML leads, then the body-wave
+ * scales, then Ms; from it upward Ms leads, then broadband mB, then ML, then short-period mb.
  * Publishing a raw mb 3.26 ahead of the ML 3.8 of the same M3.8 earthquake (the static
  * order) biased the merged magnitude half a unit low, although both convert to Mw 3.80.
  */
@@ -3637,28 +3629,34 @@ function averageLongitudes(lons: number[]): number {
 }
 
 /**
- * A report's horizontal location uncertainty in km, or null when it states none: the
- * parsed QuakeML origin's error ellipse or circle (metres) when present, otherwise the
- * stored columns through the platform's single resolver (lib/validation
- * horizontalUncertaintyKm: ellipse semi-major axis, then circular radius, then the lat/lon
- * marginals with the cos(latitude) the old geometric-mean ×111 left out). An ellipse-only
- * origin used to count as undocumented. Non-positive values are not measurements.
+ * A report's horizontal location uncertainty in km, or null when it states none. The
+ * precedence is the platform's (lib/validation horizontalUncertaintyKm): the error-ellipse
+ * semi-major axis, then the circular radius, then the lat/lon marginals with cos(latitude)
+ * (the old geometric-mean ×111 left it out) — from the parsed QuakeML origin (metres) when
+ * present, else from the stored columns (km, degrees). For weighting, a non-positive value is
+ * not a measurement and is skipped at EACH level, so a placeholder 0 radius no longer hides
+ * the marginals the report does state (that resolver stops at the first field present).
  */
 function locationUncertaintyKm(event: EventData): number | null {
   const positive = (value: unknown): number | null =>
     typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+  const fromMarginals = (latDeg: number | null, lonDeg: number | null): number | null => {
+    if (latDeg == null && lonDeg == null) return null;
+    const cosLat = Math.cos(((Number.isFinite(event.latitude) ? event.latitude : 0) * Math.PI) / 180);
+    return Math.max((latDeg ?? 0) * 111, (lonDeg ?? 0) * 111 * cosLat);
+  };
   const origin = preferredQuakemlOrigin(event);
   if (origin) {
     const metres = positive(origin.uncertainty?.maxHorizontalUncertainty) ?? positive(origin.uncertainty?.horizontalUncertainty);
     if (metres != null) return metres / 1000;
-    const latDeg = positive(origin.latitude?.uncertainty);
-    const lonDeg = positive(origin.longitude?.uncertainty);
-    if (latDeg != null || lonDeg != null) {
-      const cosLat = Math.cos(((Number.isFinite(event.latitude) ? event.latitude : 0) * Math.PI) / 180);
-      return Math.max((latDeg ?? 0) * 111, (lonDeg ?? 0) * 111 * cosLat);
-    }
+    const fromOrigin = fromMarginals(positive(origin.latitude?.uncertainty), positive(origin.longitude?.uncertainty));
+    if (fromOrigin != null) return fromOrigin;
   }
-  return positive(horizontalUncertaintyKm(event));
+  return (
+    positive(event.max_horizontal_uncertainty) ??
+    positive(event.horizontal_uncertainty) ??
+    fromMarginals(positive(event.latitude_uncertainty), positive(event.longitude_uncertainty))
+  );
 }
 
 /**
@@ -3821,6 +3819,19 @@ function mergeByAverage(events: EventData[]): MergedEventData {
     for (const field of ORIGIN_META_FIELDS) (merged as any)[field] = null;
     (merged as { _averagedOrigin?: boolean })._averagedOrigin = true;
 
+    // The published depth's own type and uncertainty, from the report it was taken from
+    // (a non-positive uncertainty is no measurement, as in the depth selection).
+    if (depthChoice) {
+      const depthReport = events[depthChoice.index];
+      const depthOrigin = preferredQuakemlOrigin(depthReport);
+      const uncertaintyKm = depthOrigin?.depth?.uncertainty != null
+        ? depthOrigin.depth.uncertainty / 1000
+        : depthReport.depth_uncertainty;
+      merged.depth_type = depthOrigin?.depthType ?? depthReport.depth_type ?? null;
+      merged.depth_uncertainty =
+        typeof uncertaintyKm === 'number' && Number.isFinite(uncertaintyKm) && uncertaintyKm > 0 ? uncertaintyKm : null;
+    }
+
     // Provenance: which report each published quantity came from, and each report's share
     // of the averaged epicentre (inverse-variance, or equal when a report stated no σ).
     location.weights.forEach((weight, index) => {
@@ -3880,10 +3891,23 @@ function determinationTime(e: EventData): number | null {
     const stored = parseJsonColumn(e.origins);
     if (Array.isArray(stored) && stored.length > 0) {
       const list = stored.filter((o): o is Record<string, any> => o != null && typeof o === 'object');
+      // Only the origin the row PUBLISHES counts: the one it names as preferred, or one with
+      // exactly its origin time and epicentre. A merged row can carry other agencies'
+      // origins as supplementary solutions, and one of those lent its creation time to a
+      // published solution computed by someone else (e.g. ISC's 2023 relocation dating a
+      // GeoNet solution on re-merge).
+      const rowTime = Date.parse(e.time);
       origin =
         list.find(o => typeof e.preferred_origin_id === 'string' && o.publicID === e.preferred_origin_id) ??
-        list.find(o => o.latitude?.value === e.latitude && o.longitude?.value === e.longitude) ??
-        (list.length === 1 ? list[0] : undefined);
+        list.find(o =>
+          o.latitude?.value === e.latitude &&
+          o.longitude?.value === e.longitude &&
+          Number.isFinite(rowTime) &&
+          Date.parse(o.time?.value) === rowTime
+        ) ??
+        // A lone stored origin is the row's own only when the row is one agency's report,
+        // not a merged record combining several.
+        (list.length === 1 && contributingReports(e) <= 1 ? list[0] : undefined);
     }
   }
   const originTime = parseTime(origin?.creationInfo?.creationTime);
@@ -3897,6 +3921,13 @@ function determinationTime(e: EventData): number | null {
     (t): t is number => t != null
   );
   return times.length > 0 ? Math.max(...times) : null;
+}
+
+/** How many reports a row combines: several for a merged row, one for an agency's own. */
+function contributingReports(e: EventData): number {
+  if (Array.isArray(e.sourceEvents)) return e.sourceEvents.length;
+  const stored = parseJsonColumn(e.source_events);
+  return Array.isArray(stored) ? stored.length : 1;
 }
 
 /** Review stage of a solution: later analyses supersede earlier ones. */

@@ -95,21 +95,50 @@ function resolveStoredDateFormat(value: unknown): { ok: true; dateFormat?: DateF
   return dateFormat ? { ok: true, dateFormat } : { ok: false };
 }
 
+/** A failure's offending value, shortened when it is long (it is shown, not reprocessed). */
+function boundFailureValue<T extends { value?: unknown }>(failure: T): T {
+  if (failure.value === undefined || failure.value === null) return failure;
+  const text = typeof failure.value === 'string' ? failure.value : JSON.stringify(failure.value);
+  return text !== undefined && text.length > 200 ? { ...failure, value: `${text.slice(0, 200)}…` } : failure;
+}
+
+// Structures a preview never needs (the checks and the schema step read scalar fields)
+// and that can be many kilobytes per event: QuakeML picks, arrivals and so on.
+const PREVIEW_OMITTED_FIELDS = new Set([
+  'quakeml', 'picks', 'arrivals', 'amplitudes', 'station_magnitudes', 'origins', 'focal_mechanisms',
+]);
+/** Any other value longer than this (serialised) is left out of a preview event. */
+const PREVIEW_MAX_FIELD_CHARS = 2000;
+
+function previewEventOf(event: ParsedEvent): ParsedEvent {
+  const preview: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(event)) {
+    if (PREVIEW_OMITTED_FIELDS.has(key)) continue;
+    const size = typeof value === 'string' ? value.length
+      : value !== null && typeof value === 'object' ? JSON.stringify(value).length : 0;
+    if (size > PREVIEW_MAX_FIELD_CHARS) continue;
+    preview[key] = value;
+  }
+  return preview as ParsedEvent;
+}
+
 /**
- * An evenly spaced sample of the parsed events (QuakeML objects stripped), sized to fit
- * the byte budget, with each sample's position in the file.
+ * An evenly spaced sample of the parsed events, each stripped to what a preview needs,
+ * with its position in the file. The sample stops at the byte budget, counted on each
+ * event actually included, so no event shape can push the response past it.
  */
 function buildPreview(events: ParsedEvent[]): { previewEvents: ParsedEvent[]; previewIndices: number[] } {
-  if (events.length === 0) return { previewEvents: [], previewIndices: [] };
-  const strip = ({ quakeml: _quakeml, ...rest }: ParsedEvent) => rest as ParsedEvent;
-  const probe = events.slice(0, 50).map(strip);
-  const averageBytes = Math.max(1, JSON.stringify(probe).length / probe.length);
-  const count = Math.max(1, Math.min(events.length, PREVIEW_MAX_EVENTS, Math.floor(PREVIEW_MAX_BYTES / averageBytes)));
   const previewEvents: ParsedEvent[] = [];
   const previewIndices: number[] = [];
+  const count = Math.min(events.length, PREVIEW_MAX_EVENTS);
+  let bytes = 0;
   for (let i = 0; i < count; i++) {
     const index = Math.floor((i * events.length) / count);
-    previewEvents.push(strip(events[index]));
+    const preview = previewEventOf(events[index]);
+    const size = Buffer.byteLength(JSON.stringify(preview), 'utf8') + 1;
+    if (bytes + size > PREVIEW_MAX_BYTES) break;
+    bytes += size;
+    previewEvents.push(preview);
     previewIndices.push(index);
   }
   return { previewEvents, previewIndices };
@@ -149,7 +178,7 @@ function buildUploadResponse(params: {
       ? {
           validationReport: {
             ...validationReport,
-            failures: failures.slice(0, MAX_RESPONSE_FAILURES),
+            failures: failures.slice(0, MAX_RESPONSE_FAILURES).map(boundFailureValue),
             failuresTruncated: failures.length > MAX_RESPONSE_FAILURES,
           },
         }

@@ -39,6 +39,7 @@ beforeEach(() => {
 describe('sign-in errors', () => {
   it.each([
     ['TooManyAttempts', /too many sign-in attempts.*15 minutes/i],
+    ['AccountProtected', /browser you have used before, or reset your password/i],
     ['AccountDisabled', /disabled.*administrator/i],
     ['CredentialsSignin', /invalid email or password/i],
   ])('explains %s', async (code, message) => {
@@ -76,11 +77,43 @@ describe('callbackUrl', () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
   });
 
+  // Review follow-up: the URL parser collapses dot segments, so these passed the raw-string
+  // checks and came out as "//evil.example/phish", which the router follows off-site.
+  it.each([
+    '/.//evil.example/phish',
+    '/..//evil.example/phish',
+    '/%2e//evil.example/phish',
+    '/%2E%2E//evil.example/phish',
+    '/a/..//evil.example/phish',
+    '/profile/../..//evil.example/phish',
+    '/./\\evil.example/phish',
+  ])('ignores the dot-segment spelling %s', async (callbackUrl) => {
+    query = `callbackUrl=${encodeURIComponent(callbackUrl)}`;
+    await submit({ ok: true, status: 200, error: null, url: 'http://localhost/' });
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
+  });
+
   it('confirms a password change', () => {
     query = 'callbackUrl=%2Fprofile&passwordChanged=1';
     render(<LoginPage />);
 
     expect(screen.getByText(/password was changed/i)).toBeInTheDocument();
+  });
+});
+
+describe('safeCallbackPath never leaves the origin', () => {
+  it.each([
+    '/.//evil.com', '/..//evil.com', '/%2e//evil.com', '/%2E%2E//evil.com', '/a/..//evil.com',
+    '/profile/../..//evil.com/x', '/./\\evil.com', '/\\evil', '/%2F%2Fevil', '/%5C%5Cevil', '//evil',
+    '/\t/evil', '/ /evil', '/\u3000/evil', '/\uff0f/evil', '/profile?x=//evil', '/profile#//evil',
+    '/%2e%2e/%2e%2e//evil.com', '/profile/%2e%2e/%2e%2e//evil.com', 'https://evil.com', '\\\\evil.com',
+  ])('%s', (raw) => {
+    const path = safeCallbackPath(raw);
+
+    expect(path.startsWith('/')).toBe(true);
+    expect(path.startsWith('//')).toBe(false);
+    expect(new URL(path, 'https://app.example.org/login').origin).toBe('https://app.example.org');
   });
 });
 

@@ -3,7 +3,7 @@
  * Analyzes date patterns in uploaded files to detect US vs International format
  */
 
-import { normalizeTimestamp } from './earthquake-utils';
+import { expandTwoDigitYear, normalizeTimestamp } from './earthquake-utils';
 
 export type DateFormat = 'US' | 'International' | 'ISO' | 'Unknown';
 
@@ -13,6 +13,9 @@ export interface DateFormatDetectionResult {
   ambiguousCount: number;
   totalDatesAnalyzed: number;
   reasoning: string;
+  /** Dates that can only be MM/DD (second field > 12) and only DD/MM (first field > 12). */
+  usCount?: number;
+  internationalCount?: number;
 }
 
 /**
@@ -154,7 +157,9 @@ export function detectDateFormat(dateStrings: string[], maxSamples: number = 50)
     confidence,
     ambiguousCount,
     totalDatesAnalyzed: analyzedCount,
-    reasoning
+    reasoning,
+    usCount: usFormatCount,
+    internationalCount: internationalFormatCount,
   };
 }
 
@@ -168,6 +173,144 @@ export function detectDateFormat(dateStrings: string[], maxSamples: number = 50)
  */
 export function parseDateWithFormat(dateStr: string, format: DateFormat): Date | null {
   const hint = format === 'US' ? 'US' : format === 'International' ? 'International' : undefined;
-  const iso = normalizeTimestamp(dateStr, hint);
+  // A declared order also settles a two-digit year's place (see decideFileDateFormat).
+  const iso = normalizeTimestamp(dateStr, hint, { twoDigitYears: hint !== undefined });
   return iso === null ? null : new Date(iso);
+}
+
+/** An order a numeric date with a two-digit year can be read in. */
+export type TwoDigitYearOrder = 'DMY' | 'MDY' | 'YMD';
+
+const TWO_DIGIT_YEAR_DATE = /^(\d{1,2})([/.])(\d{1,2})\2(\d{2})(?![\d/.])/;
+
+function isCalendarDay(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  return day <= [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+}
+
+/**
+ * The orders in which a numeric date with a two-digit year names a real day, or null
+ * when the value is not such a date. '20/05/17' is 20 May 2017 or 17 May 2020;
+ * '25/12/99' can only be 25 December 1999. The dotted form is never month-first.
+ */
+export function twoDigitYearReadings(value: string): TwoDigitYearOrder[] | null {
+  const m = value.trim().match(TWO_DIGIT_YEAR_DATE);
+  if (!m) return null;
+  const first = Number(m[1]);
+  const second = Number(m[3]);
+  const last = Number(m[4]);
+  const readings: TwoDigitYearOrder[] = [];
+  if (isCalendarDay(expandTwoDigitYear(last), second, first)) readings.push('DMY');
+  if (m[2] === '/' && isCalendarDay(expandTwoDigitYear(last), first, second)) readings.push('MDY');
+  if (isCalendarDay(expandTwoDigitYear(first), second, last)) readings.push('YMD');
+  return readings;
+}
+
+/** How a two-digit year is read, for messages ('00-26 as 2000-2026, 27-99 as 1927-1999'). */
+export function twoDigitYearRule(): string {
+  const current = new Date().getUTCFullYear();
+  const yy = current % 100;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const recent = `00–${pad(yy)} as ${current - yy}–${current}`;
+  return yy === 99 ? recent : `${recent}, ${pad(yy + 1)}–99 as ${current - 99}–${current - yy - 1}`;
+}
+
+/** The day/month order a file is read with, decided once from all its time cells. */
+export interface FileDateFormatDecision {
+  dateFormat?: DateFormat;
+  dateFormatSource?: 'declared' | 'detected';
+  /** Whether numeric dates with a two-digit year are read (normalizeTimestamp twoDigitYears). */
+  twoDigitYears: boolean;
+  /** File-level messages: the detection's confidence, and how two-digit years were treated. */
+  warnings: string[];
+}
+
+/**
+ * Decide the day/month order ONCE for a whole file, from every non-empty cell of its
+ * time columns: the order is a property of the file, and one day > 12 anywhere settles it
+ * for every row (a sample of the first rows split a time-sorted US catalogue whose
+ * sequence reached day 13 after row 50 between two calendars).
+ *
+ * A numeric date with a two-digit year has a third reading, YY/MM/DD, so those dates are
+ * read only when the order is declared, or when the file's own two-digit-year dates rule
+ * out every order but one (and agree with its four-digit dates). Either way the file is
+ * told how they were read, or why they were not.
+ */
+export function decideFileDateFormat(cells: unknown[], declared?: DateFormat): FileDateFormatDecision {
+  const warnings: string[] = [];
+  const dateStrings = cells.filter((cell): cell is string => typeof cell === 'string' && cell.trim().length > 0);
+
+  // Two-digit-year dates are weighed separately: their first field may be the year.
+  let twoDigitCount = 0;
+  const possible = new Set<TwoDigitYearOrder>(['DMY', 'MDY', 'YMD']);
+  const otherDates: string[] = [];
+  for (const value of dateStrings) {
+    const readings = twoDigitYearReadings(value);
+    if (readings === null) {
+      otherDates.push(value);
+      continue;
+    }
+    twoDigitCount += 1;
+    possible.forEach((order) => { if (!readings.includes(order)) possible.delete(order); });
+  }
+
+  let dateFormat: DateFormat | undefined;
+  let dateFormatSource: 'declared' | 'detected' | undefined;
+  let detection: DateFormatDetectionResult | null = null;
+  if (declared && declared !== 'Unknown') {
+    dateFormat = declared;
+    dateFormatSource = 'declared';
+  } else if (otherDates.length > 0) {
+    detection = detectDateFormat(otherDates, otherDates.length);
+    dateFormat = detection.format;
+    dateFormatSource = 'detected';
+  }
+  const detectedEvidence = (detection?.usCount ?? 0) + (detection?.internationalCount ?? 0) > 0;
+
+  let twoDigitYears = false;
+  let twoDigitMessage: string | null = null;
+  if (twoDigitCount > 0) {
+    let order: 'DMY' | 'MDY' | null = null;
+    let reason = 'YY/MM/DD fits them as well as DD/MM/YY or MM/DD/YY';
+    if (dateFormatSource === 'declared') {
+      if (dateFormat === 'US' || dateFormat === 'International') order = dateFormat === 'US' ? 'MDY' : 'DMY';
+      else reason = 'the declared format does not say whether the day or the month comes first';
+    } else if (possible.size === 1 && !possible.has('YMD')) {
+      const only: 'DMY' | 'MDY' = possible.has('DMY') ? 'DMY' : 'MDY';
+      if (!detectedEvidence) {
+        // Nothing else in the file speaks to the order: the two-digit dates settle it.
+        order = only;
+        dateFormat = only === 'MDY' ? 'US' : 'International';
+        dateFormatSource = 'detected';
+        detection = null;
+      } else if ((only === 'MDY') === (dateFormat === 'US')) {
+        order = only;
+      } else {
+        reason = "their order disagrees with the file's four-digit dates";
+      }
+    } else if (possible.size === 0) {
+      reason = 'no single order fits all of them';
+    }
+    twoDigitYears = order !== null;
+    twoDigitMessage = order
+      ? `${twoDigitCount} date(s) with a two-digit year were read as ${order === 'DMY' ? 'DD/MM/YY' : 'MM/DD/YY'}; ` +
+        `a two-digit year is taken as the latest year with those digits that is not in the future (${twoDigitYearRule()}).`
+      : `${twoDigitCount} date(s) with a two-digit year were not read: the day, month and year order is not certain ` +
+        `(${reason}). Declare the date format (US or International) to read them as MM/DD/YY or DD/MM/YY.`;
+  }
+
+  if (detection) {
+    if (detection.confidence < 0.5) {
+      // Only a file with dates that depend on the order needs to hear about it.
+      if (detection.ambiguousCount > 0) {
+        warnings.push(`Low confidence date format detection (${Math.round(detection.confidence * 100)}%). ${detection.reasoning}`);
+      }
+    } else if (detection.format !== 'ISO' && detection.format !== 'Unknown') {
+      warnings.push(`Detected ${detection.format} date format. ${detection.reasoning}`);
+    }
+  }
+  if (twoDigitMessage) warnings.push(twoDigitMessage);
+
+  return { dateFormat, dateFormatSource, twoDigitYears, warnings };
 }

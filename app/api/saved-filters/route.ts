@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     if (!dbQueries) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
-    const filters = await dbQueries.getSavedFilters(authResult.user.id);
+    const filters = await dbQueries.getSavedFilters({ ownerId: authResult.user.id });
     return NextResponse.json(filters);
   } catch (error) {
     logger.error('Failed to fetch saved filters', error);
@@ -57,16 +57,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Database not available' }, { status: 500 });
     }
 
-    const ownerId = authResult.user.id;
-    if (await dbQueries.countSavedFilters(ownerId) >= MAX_SAVED_FILTERS_PER_USER) {
+    // The cap is enforced by the insert itself, atomically: counting first let
+    // concurrent requests all see room for one more.
+    const id = createId();
+    const inserted = await dbQueries.insertSavedFilter(id, name, description, filterConfigString, authResult.user.id, {
+      maxPerOwner: MAX_SAVED_FILTERS_PER_USER,
+    });
+    if (!inserted) {
       return NextResponse.json(
         { error: `A user may keep at most ${MAX_SAVED_FILTERS_PER_USER} saved filters; delete one first` },
         { status: 409 }
       );
     }
-
-    const id = createId();
-    await dbQueries.insertSavedFilter(id, name, description, filterConfigString, ownerId);
 
     logger.info('Saved filter created', { id, name });
 

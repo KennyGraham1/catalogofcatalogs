@@ -35,56 +35,75 @@ function buildCsp(nonce: string): string {
 
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-/** Whether `origin` names `host`, a Host-header value (which proxies often send without a port). */
-function sameHost(origin: URL, host: string): boolean {
+/** The origin (scheme, host and port) that `host` names under `scheme`, or null. */
+function hostOrigin(scheme: string | null, host: string | null, port: string | null): string | null {
+  const protocol = scheme?.split(',')[0].trim().toLowerCase().replace(/:$/, '');
+  const name = host?.split(',')[0].trim();
+  if (!name || (protocol !== 'http' && protocol !== 'https')) return null;
   try {
-    const expected = new URL(`http://${host}`);
-    if (origin.hostname !== expected.hostname) return false;
-    if (expected.port === '') return true;
-    // An Origin leaves out its scheme's default port.
-    return (origin.port || (origin.protocol === 'https:' ? '443' : '80')) === expected.port;
+    const url = new URL(`${protocol}://${name}`);
+    // A proxy that forwards the host without its port reports the port separately.
+    const forwardedPort = port?.split(',')[0].trim();
+    if (!url.port && forwardedPort && /^\d+$/.test(forwardedPort)) url.port = forwardedPort;
+    return url.origin;
   } catch {
-    return false;
+    return null;
   }
 }
 
 /**
  * CSRF defence in depth for the app's API routes: refuse a state-changing request whose
- * Origin names another host.
+ * Origin is not this site's own origin (scheme, host and port all compared).
  *
  * NextAuth's session cookie is SameSite=Lax, which keeps it off cross-site POSTs but not
- * off same-site ones from another origin (e.g. a sibling subdomain), and route handlers
- * parse text/plain bodies as JSON, so an HTML form could otherwise drive them. Browsers
- * send Origin on every POST/PUT/PATCH/DELETE; a request without one comes from a
- * non-browser client, which holds no ambient cookie, and is let through. NextAuth's own
- * /api/auth routes check their own CSRF token and are left to it.
+ * off same-site ones from another origin (a sibling subdomain, another port), and route
+ * handlers parse text/plain bodies as JSON, so an HTML form could otherwise drive them.
+ * Browsers send Origin on every POST/PUT/PATCH/DELETE; a request without one comes from a
+ * non-browser client, which holds no ambient cookie, and is let through.
+ *
+ * Our origin is NEXTAUTH_URL's, and the one the reverse proxy (or Next.js itself)
+ * reports in X-Forwarded-Proto / X-Forwarded-Host / X-Forwarded-Port. Only with neither
+ * is the request's own URL used, since behind a proxy its scheme is the internal hop's.
+ *
+ * All of /api/auth is outside this check (the matcher skips it). NextAuth's own routes
+ * there verify NextAuth's CSRF token. The app's four routes there do not, and need not:
+ * register and forgot-password act for no signed-in user, so a forged request can do no
+ * more than the attacker could by sending it directly (and both are throttled);
+ * reset-password needs the emailed token; change-password needs the session cookie,
+ * which SameSite=Lax keeps off cross-site requests, and the current password.
  */
 function isCrossOriginApiWrite(req: NextRequest): boolean {
   const path = req.nextUrl.pathname;
   if (!path.startsWith('/api/') || path.startsWith('/api/auth/')) return false;
   if (!STATE_CHANGING_METHODS.has(req.method)) return false;
 
-  const origin = req.headers.get('origin');
-  if (origin === null) return false;
-  let originUrl: URL;
+  const originHeader = req.headers.get('origin');
+  if (originHeader === null) return false;
+  let origin: string;
   try {
-    originUrl = new URL(origin);
+    origin = new URL(originHeader).origin;
   } catch {
     return true; // "null" (sandboxed or opaque contexts) or malformed
   }
 
-  // Our own host as the client addressed it: Host, the public host a reverse proxy
-  // reports, or the configured public URL.
-  const hosts = [req.headers.get('host'), req.headers.get('x-forwarded-host')?.split(',')[0]];
+  const allowed: Array<string | null> = [];
   const publicUrl = process.env.NEXTAUTH_URL;
   if (publicUrl) {
     try {
-      hosts.push(new URL(publicUrl).host);
+      allowed.push(new URL(publicUrl).origin);
     } catch {
       // Ignore a malformed NEXTAUTH_URL here; NextAuth reports it.
     }
   }
-  return !hosts.some(host => host && sameHost(originUrl, host.trim()));
+  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host');
+  const port = req.headers.get('x-forwarded-port');
+  const scheme = req.headers.get('x-forwarded-proto');
+  if (scheme) {
+    allowed.push(hostOrigin(scheme, host, port));
+  } else if (!publicUrl) {
+    allowed.push(hostOrigin(req.nextUrl.protocol, host, port));
+  }
+  return !allowed.includes(origin);
 }
 
 /**

@@ -18,7 +18,7 @@
 import { createHash } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries, normalizeCatalogueVersion } from '@/lib/db';
-import type { EventFilters } from '@/lib/db';
+import type { EventFilters, MergedCatalogue } from '@/lib/db';
 import {
   computeEventRowsChecksum,
   eventsToCSVChunks,
@@ -27,7 +27,7 @@ import {
   eventsToKMLChunks,
 } from '@/lib/exporters';
 import type { DeclusterTag, ExportDeclustering, ExportMetadata, ExportableEvent } from '@/lib/exporters';
-import { eventsToQuakeMLDocument } from '@/lib/quakeml-exporter';
+import { eventsToQuakeMLChunks } from '@/lib/quakeml-exporter';
 import { generateExportFilename, createDownloadHeaders } from '@/lib/export-utils';
 import { eventFiltersToSearchParams, hasEventFilters, parseEventFilterParams } from '@/lib/event-filter-params';
 import { gardnerKnopoffDeclustering, getGardnerKnopoffWindow } from '@/lib/seismological-analysis';
@@ -111,9 +111,39 @@ export async function GET(
       );
     }
 
+    // An export records the catalogue version it holds (C3), so it must hold exactly that
+    // version's rows. While an upload, GeoNet import or merge is running (status 'processing'),
+    // rows change under a version that is only released when the run completes, so an export
+    // taken then reported the pre-run version with a mid-run data state.
+    if (catalogue.status === 'processing' || (catalogue.status as string) === 'deleting') {
+      return NextResponse.json(
+        {
+          error: catalogue.status === 'processing'
+            ? 'This catalogue is being updated (an upload, import or merge is in progress). Export it when that completes.'
+            : 'This catalogue is being deleted.',
+          status: catalogue.status,
+        },
+        { status: 409 }
+      );
+    }
+
     const events: ExportableEvent[] = filters
       ? await getAllFilteredEventsForExport(catalogueId, filters)
       : await getAllEventsForExport(catalogueId, catalogue.event_count);
+
+    // Reading every row takes time (and several queries for a large catalogue). If the
+    // catalogue's version state moved meanwhile, the rows may mix two data states, so the
+    // export is refused rather than published under a version that does not describe it.
+    const afterRead = await dbQueries.getCatalogueById(catalogueId);
+    if (!afterRead || catalogueStateKey(afterRead) !== catalogueStateKey(catalogue)) {
+      return NextResponse.json(
+        {
+          error: 'The catalogue changed while it was being exported. Retry the export.',
+          version: afterRead ? normalizeCatalogueVersion(afterRead.version) : null,
+        },
+        { status: 409 }
+      );
+    }
 
     // An empty catalogue is valid — export an empty file rather than a 404
 
@@ -284,8 +314,7 @@ export async function GET(
         break;
 
       case 'quakeml':
-        // lib/quakeml-exporter has no chunked form yet, so this one is still built whole.
-        chunks = singleChunk(eventsToQuakeMLDocument(events, catalogue.name, metadata));
+        chunks = eventsToQuakeMLChunks(events, catalogue.name, metadata);
         fileExtension = 'xml';
         break;
 
@@ -345,7 +374,8 @@ async function getAllEventsForExport(catalogueId: string, expectedCount?: number
 
   // getEventsByCatalogueId() may be capped by UNPAGINATED_EVENTS_LIMIT. When
   // catalogue metadata indicates rows are missing, bypass that cap by using the
-  // paginated code path and collecting every page.
+  // paginated code path and collecting every page. (Offset pages are stable here because
+  // the caller refuses the export if the catalogue's state changed during the read.)
   if (expectedCount == null || firstEvents.length >= expectedCount) {
     return firstEvents;
   }
@@ -375,17 +405,51 @@ async function getAllEventsForExport(catalogueId: string, expectedCount?: number
  * Every event matching the filters, read page by page. A single getFilteredEvents call is
  * capped by FILTERED_EVENTS_LIMIT (it serves the interactive filter UI); an export must never
  * be silently truncated, so it keeps reading while the database reports more rows.
+ *
+ * Pages are anchored on the (time, id) sort key rather than on an absolute offset: each page
+ * asks for rows at or before the last origin time read (endTime is inclusive) and skips only
+ * the rows of that same instant already read, which come first in the newest-first, id-
+ * descending order. An absolute offset shifts when rows are inserted ahead of it, repeating or
+ * skipping rows, and costs a scan of every skipped row on each page.
  */
 async function getAllFilteredEventsForExport(catalogueId: string, filters: EventFilters): Promise<any[]> {
   if (!dbQueries) return [];
   const pageSize = 5000;
   const allEvents: any[] = [];
-  for (let offset = 0; ; offset += pageSize) {
-    const page = await dbQueries.getFilteredEvents(catalogueId, filters, { limit: pageSize, offset });
+  let anchorTime: string | null = null;
+  let readAtAnchor = 0;
+  for (;;) {
+    const pageFilters: EventFilters = anchorTime === null ? filters : { ...filters, endTime: anchorTime };
+    const page = await dbQueries.getFilteredEvents(catalogueId, pageFilters, {
+      limit: pageSize,
+      offset: anchorTime === null ? 0 : readAtAnchor,
+    });
     for (const event of page.events) allEvents.push(event);
     if (!page.truncated || page.events.length === 0) break;
+
+    const lastTime = String(page.events[page.events.length - 1].time);
+    let atLastTime = 0;
+    for (let i = page.events.length - 1; i >= 0 && String(page.events[i].time) === lastTime; i--) atLastTime++;
+    // A page wholly inside one instant (a day-precision catalogue) extends the same anchor.
+    readAtAnchor = lastTime === anchorTime ? readAtAnchor + atLastTime : atLastTime;
+    anchorTime = lastTime;
   }
   return allEvents;
+}
+
+/**
+ * The parts of a catalogue that change whenever its rows do: version bookkeeping (C3), the
+ * event count and the modification stamp. Equal before and after the rows are read means the
+ * export holds one data state.
+ */
+function catalogueStateKey(catalogue: MergedCatalogue): string {
+  return JSON.stringify([
+    catalogue.status,
+    normalizeCatalogueVersion(catalogue.version),
+    catalogue.version_updated_at ?? null,
+    catalogue.event_count ?? null,
+    catalogue.modified_at ?? null,
+  ]);
 }
 
 /**
@@ -460,11 +524,6 @@ function nodeSha256() {
 /** Header values must be ByteStrings; ids are ASCII in practice, but never let one throw. */
 function asciiHeaderValue(value: string): string {
   return /^[\x20-\x7e]*$/.test(value) ? value : encodeURIComponent(value);
-}
-
-/** Wrap a single already-built document as a one-chunk stream. */
-function* singleChunk(content: string): Generator<string> {
-  yield content;
 }
 
 /**

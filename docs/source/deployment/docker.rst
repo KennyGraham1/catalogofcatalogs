@@ -236,6 +236,16 @@ choose its own rate-limit bucket, so two things close that off:
 * ``APP_BIND_ADDRESS=127.0.0.1`` keeps the app reachable only through
   nginx, so clients cannot bypass the proxy and talk to the app directly.
 
+The same shipped config also forwards the headers the app's CSRF defence
+needs (see :doc:`../developer-guide/architecture`, which compares a
+state-changing request's ``Origin`` against the app's own scheme, host
+**and port**): ``Host`` (with its port, via the ``$public_host`` map so a
+default port is filled in from ``$host`` when the browser didn't send one),
+``X-Forwarded-Host``, ``X-Forwarded-Proto`` and ``X-Forwarded-Port``. If
+you write your own reverse-proxy config instead of the shipped
+``nginx/nginx.conf``, forward all four accurately or same-origin API
+writes through the proxy will be refused.
+
 Other defaults worth knowing:
 
 * nginx listens on port 80 only by default. A commented-out ``443 ssl``

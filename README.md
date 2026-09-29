@@ -44,13 +44,25 @@ A web application for managing, analyzing, and visualizing earthquake catalogue 
     duplicates or conflicting indexes prevent creation, setup fails: back up and repair
     those records/index definitions before retrying. Setup does not delete duplicate data.
 
-    Credential login uses shared MongoDB counters in 15-minute windows: 10 failed
-    attempts per account from one client, and 50 per client across accounts. Successful
-    sign-ins are not counted. Failures from other clients never lock an account: above
-    100 in a window they are logged, and only clients that have signed in to that
-    account before (or reset its password) may keep trying. The application creates a
-    TTL index on `auth_rate_limits` to expire old counters; if its database role cannot
-    create indexes this is logged and sign-in still works.
+    Credential login is throttled with shared MongoDB counters (`auth_rate_limits`),
+    checked before the password. Clients are keyed by address, an IPv6 /64 counting as
+    one; accounts by email, case- and Unicode-(NFKC-)folded. Successful sign-ins are
+    never counted.
+    *   A browser without a known-device cookie for the account: each client may make
+        10 failed attempts per account, and 50 across all accounts, in each 15-minute
+        window. Once an account has had 100 consecutive failed attempts from such
+        browsers (reset by any successful sign-in, forgotten 24 hours after the last
+        one), they are refused for that account.
+    *   A browser that has signed in to the account before, or completed a password
+        reset for it, holds a known-device cookie (httpOnly, 90 days, signed with
+        `NEXTAUTH_SECRET`; rotating the secret forgets all devices). It is limited to 10
+        failed attempts per 15 minutes on its own and is exempt from the other limits,
+        so failures from elsewhere cannot lock the owner out of their browsers.
+    *   Password-reset emails: at most 3 per account per hour; the 3 newest links stay
+        valid.
+
+    The application creates a TTL index on `auth_rate_limits` to expire old counters;
+    if its database role cannot create indexes this is logged and sign-in still works.
 
     These limits identify clients by `X-Forwarded-For`, so run the app behind a reverse
     proxy that overwrites that header with the peer address and that clients cannot

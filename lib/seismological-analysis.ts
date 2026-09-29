@@ -57,9 +57,9 @@ export interface GutenbergRichterResult {
   /** Number of events at or above the cut-off: the N behind b and sigma_b. */
   eventsAboveMc: number;
   /**
-   * Step the complete sample's magnitudes are reported at (0.1, 0.05, 0.01, 0.001),
-   * or 0 when they are continuous. For a sample mixing steps, the step most of it
-   * is reported at.
+   * Step the complete sample's magnitudes are reported at (0.5, 0.25, 0.2, 0.1, 0.05,
+   * 0.01, 0.001), or 0 when they are continuous. For a sample mixing steps, the step
+   * most of it is reported at.
    */
   magnitudeResolution: number;
   /**
@@ -104,10 +104,15 @@ export interface CompletenessResult {
 
 export interface TemporalAnalysisResult {
   totalEvents: number;
+  /** Events without a parseable origin time: left out of the span, rates and bins. */
+  untimedEvents: number;
   timeSpanDays: number;
   eventsPerDay: number;
   eventsPerMonth: number;
   eventsPerYear: number;
+  /** Length of the time-series bins in days: 1 (UTC days) or 7 (ISO weeks). */
+  binDays: 1 | 7;
+  /** Occupied bins, keyed by their first UTC day; cumulativeCount runs to the bin's end. */
   timeSeries: { date: string; count: number; cumulativeCount: number }[];
   clusters: SeismicCluster[];
 }
@@ -213,13 +218,38 @@ function maxOf(values: number[]): number {
 }
 
 /**
- * Absorbs IEEE-754 representation error when locating a magnitude bin.
+ * Tolerance (magnitude units) of every grid, bin and threshold test on a magnitude.
+ * It absorbs representation error, not measurement: a 0.1-rounded magnitude stored as
+ * float32 (2.0999999046) is off its decimal by at most 4.8e-7 below M16, one printed
+ * to 8 significant digits (2.0999999) by 1e-7, and 2.3 - 0.1 is 2.1999999999999997;
+ * a genuine full-precision magnitude such as 7.820379 lies 3.8e-4 from the nearest
+ * multiple of 0.001. At 1e-9 (the previous value) float32 0.1-grid magnitudes read as
+ * continuous, which dropped the Utsu correction and biased b high by ~8%, and fell
+ * into the bin below their own. It is 2^-20 (9.5e-7) rather than 1e-6 because no
+ * magnitude printed to fewer than 20 decimals lies exactly that far from a grid
+ * line: at 1e-6, a 6-decimal value such as 2.299999 sat on the edge of the test and
+ * went either way with rounding, so shifting a catalogue changed its b.
  */
-const BIN_EPSILON = 1e-9;
+export const MAGNITUDE_TOLERANCE = 2 ** -20;
+
+/** True when `magnitude` is at or above `threshold`, within MAGNITUDE_TOLERANCE. */
+export function magnitudeAtOrAbove(magnitude: number, threshold: number): boolean {
+  return magnitude >= threshold - MAGNITUDE_TOLERANCE;
+}
+
+/** True when `magnitude` is at or below `threshold`, within MAGNITUDE_TOLERANCE. */
+export function magnitudeAtOrBelow(magnitude: number, threshold: number): boolean {
+  return magnitude <= threshold + MAGNITUDE_TOLERANCE;
+}
 
 /** Lower edge of the magnitude bin containing `magnitude`. */
 function binLowerEdge(magnitude: number, binWidth: number): number {
-  return Math.floor(magnitude / binWidth + BIN_EPSILON) * binWidth;
+  return Math.floor((magnitude + MAGNITUDE_TOLERANCE) / binWidth) * binWidth;
+}
+
+/** Lower edge of the highest bin a sample whose largest magnitude is `max` needs. */
+function topBinEdge(max: number, binWidth: number): number {
+  return Math.ceil((max - MAGNITUDE_TOLERANCE) / binWidth) * binWidth;
 }
 
 /**
@@ -242,46 +272,48 @@ function binKey(edge: number): number {
 const REPORTING_GRIDS = [0.1, 0.05, 0.01, 0.001];
 
 /**
- * Absolute tolerance (magnitude units) for a value to count as lying on a grid. It
- * only has to absorb floating-point error: `Math.round(m / 0.1) * 0.1` is off its
- * decimal by ~1e-16, while a full-precision magnitude such as 7.820379 is 3.8e-4
- * away from the nearest multiple of 0.001.
+ * Steps coarser than 0.1 that historical and intensity-derived magnitudes are reported
+ * at (half and quarter units, and 0.2), coarsest first. They cannot join the unmixing
+ * of REPORTING_GRIDS: they do not nest with it (0.25 is not a multiple of 0.1), and the
+ * exponential FMD crowds the low residues, so about 30% of b = 1 magnitudes reported to
+ * 0.1 are multiples of 0.5, not the 20% that unmixing by chance would allow for. A
+ * sample is therefore taken to be reported at a coarse step only when at least
+ * COARSE_GRID_SHARE of it lies on that step. The likeliest confusion, a b = 1 sample
+ * reported to 0.1 lying that much on the 0.2 grid, has a probability of about 0.3% at
+ * 10 events and below 1e-9 at 50.
  */
-const GRID_TOLERANCE = 1e-9;
+const COARSE_REPORTING_GRIDS = [0.5, 0.25, 0.2];
+const COARSE_GRID_SHARE = 0.95;
 
 function isOnGrid(magnitude: number, step: number): boolean {
-  return Math.abs(magnitude - Math.round(magnitude / step) * step) < GRID_TOLERANCE;
+  return Math.abs(magnitude - Math.round(magnitude / step) * step) < MAGNITUDE_TOLERANCE;
 }
 
 /** Smallest multiple of `step` at or above `magnitude`. */
 function ceilToGrid(magnitude: number, step: number): number {
-  return Math.ceil(magnitude / step - GRID_TOLERANCE / step) * step;
+  return Math.ceil((magnitude - MAGNITUDE_TOLERANCE) / step) * step;
+}
+
+/** Share of `magnitudes` lying on each grid of `grids` (index-aligned). */
+function onGridShares(magnitudes: number[], grids: number[]): number[] {
+  const n = magnitudes.length;
+  return grids.map(step => {
+    let count = 0;
+    for (const m of magnitudes) if (isOnGrid(m, step)) count++;
+    return n > 0 ? count / n : 0;
+  });
 }
 
 /**
- * Share of a sample reported at each step of REPORTING_GRIDS (index-aligned); the
- * rest of the sample is continuous.
+ * Share of a sample reported at each step of REPORTING_GRIDS (index-aligned), from the
+ * share of it lying on each of those grids; the rest of the sample is continuous.
  *
  * Lying on a grid does not by itself mean a value was rounded to it: a tenth of all
  * 0.01-resolution magnitudes are multiples of 0.1 by chance. The shares are therefore
  * unmixed from the finest grid up, removing from each coarser grid the hits expected
  * by chance from the finer resolutions already accounted for (a value reported at
- * step g_j lands on the coarser grid g_k with probability g_j / g_k).
- */
-function reportingShares(magnitudes: number[]): number[] {
-  const n = magnitudes.length;
-  const onGrid = REPORTING_GRIDS.map(step => {
-    let count = 0;
-    for (const m of magnitudes) if (isOnGrid(m, step)) count++;
-    return n > 0 ? count / n : 0;
-  });
-  return unmixReportingShares(onGrid);
-}
-
-/**
- * The unmixing step of reportingShares, from the share of the sample lying on each
- * grid. Split out so the goodness-of-fit test can reuse it for every candidate cut-off
- * from running counts instead of rescanning the sample.
+ * step g_j lands on the coarser grid g_k with probability g_j / g_k). The goodness-of-
+ * fit test calls this for every candidate cut-off, from running counts.
  */
 function unmixReportingShares(onGrid: number[]): number[] {
   const last = REPORTING_GRIDS.length - 1;
@@ -315,10 +347,36 @@ function unmixReportingShares(onGrid: number[]): number[] {
  * the MLE for the mixture.
  */
 function sampleLowerBound(mc: number, magsAboveMc: number[]): { lowerBound: number; resolution: number } {
-  return lowerBoundFromShares(mc, reportingShares(magsAboveMc));
+  return lowerBoundFromGridShares(
+    mc,
+    onGridShares(magsAboveMc, REPORTING_GRIDS),
+    onGridShares(magsAboveMc, COARSE_REPORTING_GRIDS)
+  );
 }
 
-/** sampleLowerBound given the sample's reporting shares (see reportingShares). */
+/**
+ * sampleLowerBound from the sample's share on each grid of REPORTING_GRIDS (`fineOnGrid`)
+ * and of COARSE_REPORTING_GRIDS (`coarseOnGrid`). A sample at least COARSE_GRID_SHARE on
+ * a coarse step takes that step's half-step for its on-grid share; the rest, and every
+ * other sample, the unmixed fine resolutions.
+ */
+function lowerBoundFromGridShares(
+  mc: number,
+  fineOnGrid: number[],
+  coarseOnGrid: number[]
+): { lowerBound: number; resolution: number } {
+  const fine = lowerBoundFromShares(mc, unmixReportingShares(fineOnGrid));
+  const coarse = COARSE_REPORTING_GRIDS.findIndex((_, k) => coarseOnGrid[k] >= COARSE_GRID_SHARE);
+  if (coarse < 0) return fine;
+  const step = COARSE_REPORTING_GRIDS[coarse];
+  const share = coarseOnGrid[coarse];
+  return {
+    lowerBound: share * (ceilToGrid(mc, step) - step / 2) + (1 - share) * fine.lowerBound,
+    resolution: step,
+  };
+}
+
+/** The lower bound given the sample's unmixed REPORTING_GRIDS shares. */
 function lowerBoundFromShares(mc: number, shares: number[]): { lowerBound: number; resolution: number } {
   let continuousShare = 1;
   let lowerBound = 0;
@@ -364,7 +422,7 @@ export function calculateMFD(
   let magnitudes = events.map(e => e.magnitude).filter(m => m != null && !isNaN(m));
 
   if (minMagnitude !== undefined) {
-    magnitudes = magnitudes.filter(m => m >= minMagnitude);
+    magnitudes = magnitudes.filter(m => magnitudeAtOrAbove(m, minMagnitude));
   }
 
   if (magnitudes.length === 0) {
@@ -381,7 +439,7 @@ export function calculateMFD(
   }
 
   const minMag = binLowerEdge(minOf(magnitudes), binWidth);
-  const maxMag = Math.ceil(maxOf(magnitudes) / binWidth - BIN_EPSILON) * binWidth;
+  const maxMag = topBinEdge(maxOf(magnitudes), binWidth);
 
   // Create histogram bins. Index-based so that repeated `mag += binWidth`
   // accumulation cannot drift and drop the top bin.
@@ -536,11 +594,14 @@ interface McEstimate {
  * b from the events at or above Mi, with the reporting-resolution correction the
  * b-value fit uses (lowerBoundFromShares), and a = log10 N(>= Mi) + b Mi. That law
  * predicts the cumulative count S_j = N(>= Mi) 10^(-b (M_j - Mi)) at every bin edge
- * M_j >= Mi, and
+ * M_j >= Mi up to the bin holding the largest magnitude, and
  *   R = 100 - 100 * sum_j |B_j - S_j| / sum_j B_j
  * is the share of the observed cumulative counts B_j it reproduces. Mc is the lowest
  * cut-off with R >= 95%, else the lowest with R >= 90%. A candidate below the b-value
- * fitting floors (10 events, 3 populated bins) is not tried.
+ * fitting floors (10 events, 3 populated bins) is not tried. The sums stop at the last
+ * populated bin, as Wiemer & Wyss's run to Mmax: the histogram of full-precision
+ * magnitudes ends in an empty bin above the largest one, whose B = 0 against S > 0 used
+ * to lower R by up to ~3 points and move Mc in small catalogues.
  */
 function goodnessOfFitMc(magnitudes: number[], sortedBins: Array<[number, number]>): GoodnessOfFitOutcome {
   const sorted = [...magnitudes].sort((a, b) => a - b);
@@ -549,11 +610,12 @@ function goodnessOfFitMc(magnitudes: number[], sortedBins: Array<[number, number
   // O(1) (its sum, and how many of its values lie on each reporting grid) instead of
   // being rescanned for every candidate.
   const suffixSum = new Float64Array(n + 1);
-  const suffixOnGrid = REPORTING_GRIDS.map(() => new Float64Array(n + 1));
+  const grids = [...REPORTING_GRIDS, ...COARSE_REPORTING_GRIDS];
+  const suffixOnGrid = grids.map(() => new Float64Array(n + 1));
   for (let i = n - 1; i >= 0; i--) {
     suffixSum[i] = suffixSum[i + 1] + sorted[i];
-    for (let k = 0; k < REPORTING_GRIDS.length; k++) {
-      suffixOnGrid[k][i] = suffixOnGrid[k][i + 1] + (isOnGrid(sorted[i], REPORTING_GRIDS[k]) ? 1 : 0);
+    for (let k = 0; k < grids.length; k++) {
+      suffixOnGrid[k][i] = suffixOnGrid[k][i + 1] + (isOnGrid(sorted[i], grids[k]) ? 1 : 0);
     }
   }
   const nBins = sortedBins.length;
@@ -561,9 +623,13 @@ function goodnessOfFitMc(magnitudes: number[], sortedBins: Array<[number, number
   const populatedFrom = new Array<number>(nBins);
   let running = 0;
   let populated = 0;
+  let lastPopulated = -1;
   for (let j = nBins - 1; j >= 0; j--) {
     running += sortedBins[j][1];
-    if (sortedBins[j][1] > 0) populated++;
+    if (sortedBins[j][1] > 0) {
+      populated++;
+      if (lastPopulated < 0) lastPopulated = j;
+    }
     cumulative[j] = running;
     populatedFrom[j] = populated;
   }
@@ -571,17 +637,19 @@ function goodnessOfFitMc(magnitudes: number[], sortedBins: Array<[number, number
   const curve: GoodnessOfFitPoint[] = [];
   for (let i = 0; i < nBins; i++) {
     const cutoff = sortedBins[i][0];
-    const start = firstIndexAtOrAfter(sorted, cutoff - GRID_TOLERANCE);
+    const start = firstIndexAtOrAfter(sorted, cutoff - MAGNITUDE_TOLERANCE);
     const count = n - start;
     // Both floors only fall as the cut-off rises, so no later candidate can meet them.
     if (count < MIN_EVENTS_ABOVE_MC || populatedFrom[i] < MIN_POPULATED_BINS) break;
-    const shares = unmixReportingShares(suffixOnGrid.map(onGrid => onGrid[start] / count));
-    const { lowerBound } = lowerBoundFromShares(cutoff, shares);
+    const shareOn = suffixOnGrid.map(onGrid => onGrid[start] / count);
+    const { lowerBound } = lowerBoundFromGridShares(
+      cutoff, shareOn.slice(0, REPORTING_GRIDS.length), shareOn.slice(REPORTING_GRIDS.length)
+    );
     const bValue = Math.LOG10E / (suffixSum[start] / count - lowerBound);
     if (!Number.isFinite(bValue) || bValue <= 0) continue;
     let misfit = 0;
     let observed = 0;
-    for (let j = i; j < nBins; j++) {
+    for (let j = i; j <= lastPopulated; j++) {
       misfit += Math.abs(cumulative[j] - count * Math.pow(10, -bValue * (sortedBins[j][0] - cutoff)));
       observed += cumulative[j];
     }
@@ -646,7 +714,7 @@ export function calculateGutenbergRichter(
   // Filter events by minimum magnitude if specified. The cut tolerates float noise
   // so that a value on the reporting grid equal to the cut-off is never dropped.
   const filteredEvents = minMagnitude != null
-    ? events.filter(e => e.magnitude >= minMagnitude - GRID_TOLERANCE)
+    ? events.filter(e => magnitudeAtOrAbove(e.magnitude, minMagnitude))
     : events;
 
   if (filteredEvents.length < 10) {
@@ -665,7 +733,7 @@ export function calculateGutenbergRichter(
   // Bin magnitudes
   const filteredMagnitudes = filteredEvents.map(e => e.magnitude);
   const minMag = binLowerEdge(minOf(filteredMagnitudes), binWidth);
-  const maxMag = Math.ceil(maxOf(filteredMagnitudes) / binWidth - BIN_EPSILON) * binWidth;
+  const maxMag = topBinEdge(maxOf(filteredMagnitudes), binWidth);
 
   const bins: Map<number, number> = new Map();
   // Index-based iteration so floating-point drift in `mag += binWidth` cannot drop
@@ -711,7 +779,7 @@ export function calculateGutenbergRichter(
     estimate = estimateMcFromBins(filteredMagnitudes, sortedBins, resolvedMcOptions);
     mc = estimate.mc;
   }
-  const magsAboveMc = filteredEvents.map(e => e.magnitude).filter(m => m >= mc - GRID_TOLERANCE);
+  const magsAboveMc = filteredEvents.map(e => e.magnitude).filter(m => magnitudeAtOrAbove(m, mc));
   // Hard floor: fewer than 10 events above Mc means the estimate is WITHHELD, not
   // reported (paper, sec:mc). The previous guard fell back to the catalogue floor,
   // which anchored the Aki-Utsu MLE at a magnitude the catalogue is demonstrably
@@ -743,7 +811,7 @@ export function calculateGutenbergRichter(
   const aValue = Math.log10(magsAboveMc.length) + bValue * mc;
 
   // R-squared of the MLE line against the observed cumulative FMD (diagnostic).
-  const fittedCounts = cumulativeCounts.filter(p => p.magnitude >= mc);
+  const fittedCounts = cumulativeCounts.filter(p => magnitudeAtOrAbove(p.magnitude, mc));
   const meanY = fittedCounts.reduce((sum, p) => sum + p.logCount, 0) / fittedCounts.length;
   const ssTotal = fittedCounts.reduce((sum, p) => sum + Math.pow(p.logCount - meanY, 2), 0);
   const ssResidual = fittedCounts.reduce((sum, p) => {
@@ -780,7 +848,7 @@ export function calculateGutenbergRichter(
     magnitudeResolution: resolution,
     // Snap float noise to 0; a real negative value means an off-grid cut-off sits
     // below the first grid value kept, i.e. the sample starts above the cut-off.
-    binningCorrection: Math.abs(mc - lowerBound) < GRID_TOLERANCE ? 0 : mc - lowerBound,
+    binningCorrection: Math.abs(mc - lowerBound) < MAGNITUDE_TOLERANCE ? 0 : mc - lowerBound,
     dataPoints: cumulativeCounts,
     fittedLine
   };
@@ -805,7 +873,7 @@ export function estimateCompletenessMagnitude(
   // Bin magnitudes
   const eventMagnitudes = events.map(e => e.magnitude);
   const minMag = binLowerEdge(minOf(eventMagnitudes), binWidth);
-  const maxMag = Math.ceil(maxOf(eventMagnitudes) / binWidth - BIN_EPSILON) * binWidth;
+  const maxMag = topBinEdge(maxOf(eventMagnitudes), binWidth);
 
   const bins: Map<number, number> = new Map();
   const nBins = Math.round((maxMag - minMag) / binWidth) + 1;
@@ -831,9 +899,10 @@ export function estimateCompletenessMagnitude(
   );
   const mc = estimate.mc;
 
-  // Share of events at or above Mc (see CompletenessResult.confidence).
+  // Share of events at or above Mc (see CompletenessResult.confidence), under the same
+  // tolerant test as the G-R fit and the rate series, so all three count the same events.
   const totalEvents = events.length;
-  const eventsAboveMc = events.filter(e => e.magnitude >= mc).length;
+  const eventsAboveMc = events.filter(e => magnitudeAtOrAbove(e.magnitude, mc)).length;
   const confidence = eventsAboveMc / totalEvents;
 
   return {
@@ -973,6 +1042,22 @@ export function declusterGardnerKnopoff(
 }
 
 /**
+ * Order in which Gardner-Knopoff heads claim their windows: the larger magnitude first;
+ * equal magnitudes by origin time, an unparseable time last; then input order.
+ */
+function compareHeads(
+  a: { event: { magnitude: number }; time: number; index: number },
+  b: { event: { magnitude: number }; time: number; index: number }
+): number {
+  if (a.event.magnitude !== b.event.magnitude) return b.event.magnitude - a.event.magnitude;
+  const aTimed = Number.isFinite(a.time);
+  const bTimed = Number.isFinite(b.time);
+  if (aTimed !== bTimed) return aTimed ? -1 : 1;
+  if (aTimed && a.time !== b.time) return a.time - b.time;
+  return a.index - b.index;
+}
+
+/**
  * The window pass of the Gardner-Knopoff method: the events in time order, the
  * cluster (head id -> head and dependents) of every head that gathered dependents,
  * and the ids no larger event's window took.
@@ -987,12 +1072,16 @@ function gardnerKnopoffWindows(events: EarthquakeEvent[]): {
   // time to T(M) later, found by binary search. Rescanning the whole catalogue for
   // every head and re-parsing each ISO string per comparison (the previous loop)
   // was O(N^2): 21.7 s at 10k events, hours for a national catalogue.
-  const byTime = events
-    .map(event => ({ event, time: new Date(event.time).getTime() }))
-    .sort((a, b) => a.time - b.time);
-  const sortedEvents = byTime.map(entry => entry.event);
-  // An unparseable origin time falls in no window; such an event stays independent.
-  const windowed = byTime.filter(entry => Number.isFinite(entry.time));
+  // Only finite times are sorted: one NaN in a sort comparator makes the whole order
+  // inconsistent, and the binary search then misses window members (one unparseable
+  // time put hundreds of other events of a 3,000-event catalogue in the wrong
+  // cluster). An unparseable time falls in no window; such an event stays independent.
+  const parsed = events.map((event, index) => ({ event, time: new Date(event.time).getTime(), index }));
+  const windowed = parsed
+    .filter(entry => Number.isFinite(entry.time))
+    .sort((a, b) => a.time - b.time || a.index - b.index);
+  const untimed = parsed.filter(entry => !Number.isFinite(entry.time));
+  const sortedEvents = [...windowed, ...untimed].map(entry => entry.event);
   const windowedTimes = windowed.map(entry => entry.time);
 
   // Track which events are clustered and their cluster assignments
@@ -1000,8 +1089,8 @@ function gardnerKnopoffWindows(events: EarthquakeEvent[]): {
   const clusters: Map<number | string, EarthquakeEvent[]> = new Map();
   const mainshockCandidates: Set<number | string> = new Set(sortedEvents.map(e => e.id));
 
-  // Consider larger events first; equal magnitudes retain time order.
-  const headsByMagnitude = [...byTime].sort((a, b) => b.event.magnitude - a.event.magnitude);
+  // Consider larger events first; equal magnitudes in time order, then input order.
+  const headsByMagnitude = [...parsed].sort(compareHeads);
 
   for (const { event: potentialMainshock, time: mainshockTime } of headsByMagnitude) {
     // Skip if already assigned to a cluster
@@ -1304,9 +1393,16 @@ export function reasenbergDeclustering(
   const p1 = params.p1 ?? 0.95;
   const xk = params.xk ?? 0.5;
 
-  const sorted = [...events].sort(
-    (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
-  );
+  // Only events with a parseable origin time can be linked. Sorting them with the rest
+  // fed NaN to the comparator, which scrambles the whole order, and an unparseable time
+  // passed every `dt > tau` test, so it was linked to every cluster it lay near. It
+  // stays independent, after the timed events.
+  const parsed = events.map((event, index) => ({ event, time: new Date(event.time).getTime(), index }));
+  const sorted = parsed
+    .filter(entry => Number.isFinite(entry.time))
+    .sort((a, b) => a.time - b.time || a.index - b.index)
+    .map(entry => entry.event);
+  const untimed = parsed.filter(entry => !Number.isFinite(entry.time)).map(entry => entry.event);
   const xmeff = params.xmeff ?? minOf(sorted.map((e) => e.magnitude));
 
   const DAY = 1000 * 60 * 60 * 24;
@@ -1405,7 +1501,7 @@ export function reasenbergDeclustering(
     });
   });
 
-  const mainshocks = sorted.filter((e) => !dependentIds.has(e.id));
+  const mainshocks = [...sorted.filter((e) => !dependentIds.has(e.id)), ...untimed];
   const clusterInfo = buildClusterInfo(clusters);
   return { mainshocks, clusters, clusterInfo };
 }
@@ -1423,29 +1519,38 @@ export function analyzeTemporalPattern(
     throw new Error('No events provided for temporal analysis');
   }
 
-  // Sort events by time, parsing each origin time once rather than per comparison.
-  const sortedEvents = events
-    .map(event => ({ event, time: new Date(event.time).getTime() }))
-    .sort((a, b) => a.time - b.time)
-    .map(entry => entry.event);
+  // Parse each origin time once and sort the parseable ones. An unparseable time has
+  // no place in the series (toISOString() threw "Invalid time value" on it, failing the
+  // whole analysis, and as NaN it scrambled the sort); it is counted and left out.
+  const parsed = events.map((event, index) => ({ event, time: new Date(event.time).getTime(), index }));
+  const timed = parsed
+    .filter(entry => Number.isFinite(entry.time))
+    .sort((a, b) => a.time - b.time || a.index - b.index);
+  const untimedEvents = parsed.length - timed.length;
+  if (timed.length === 0) {
+    throw new Error('No events with a valid origin time for temporal analysis');
+  }
+  // Declustering input: the timed events in time order, then the untimed (which the
+  // declusterers leave independent).
+  const sortedEvents = [
+    ...timed.map(entry => entry.event),
+    ...parsed.filter(entry => !Number.isFinite(entry.time)).map(entry => entry.event),
+  ];
 
-  const startTime = new Date(sortedEvents[0].time);
-  const endTime = new Date(sortedEvents[sortedEvents.length - 1].time);
-  const timeSpanMs = endTime.getTime() - startTime.getTime();
+  const timeSpanMs = timed[timed.length - 1].time - timed[0].time;
   const timeSpanDays = Math.max(timeSpanMs / (1000 * 60 * 60 * 24), 1);
 
-  // Calculate rates
-  const eventsPerDay = events.length / timeSpanDays;
+  // Calculate rates over the events placed in time.
+  const eventsPerDay = timed.length / timeSpanDays;
   const eventsPerMonth = eventsPerDay * 30.44;
   const eventsPerYear = eventsPerDay * 365.25;
 
   // Create time series (daily bins, or weekly if span > 365 days)
   const useWeeklyBins = timeSpanDays > 365;
-  const binSize = useWeeklyBins ? 7 : 1;
 
   const dailyBins: Map<string, number> = new Map();
-  sortedEvents.forEach(event => {
-    const eventDate = new Date(event.time);
+  timed.forEach(({ time }) => {
+    const eventDate = new Date(time);
     // Both branches emit a parseable ISO calendar date: the event's UTC day, or
     // the Monday starting its ISO week. (Weekly bins were keyed "YYYY-Www", which
     // no date formatter can parse.)
@@ -1491,10 +1596,12 @@ export function analyzeTemporalPattern(
 
   return {
     totalEvents: events.length,
+    untimedEvents,
     timeSpanDays,
     eventsPerDay,
     eventsPerMonth,
     eventsPerYear,
+    binDays: useWeeklyBins ? 7 : 1,
     timeSeries,
     clusters
   };
@@ -1552,9 +1659,10 @@ function momentEligibility(magType: string | null | undefined): 'exact' | 'assum
   // An UNTYPED magnitude (plain CSV, historical bulletins) is almost always a local
   // magnitude; treat it like ML - counted under the assumption, never silently exact
   // and never silently dropped, since dropping it would empty the moment tab for the
-  // catalogues this platform exists to serve.
-  if (!magType) return 'assumed';
-  const t = magType.trim().toLowerCase();
+  // catalogues this platform exists to serve. Blank text is untyped too, as the
+  // magnitude-type table (summariseMagnitudeTypes) counts it; it used to be excluded.
+  const t = (magType ?? '').trim().toLowerCase();
+  if (!t) return 'assumed';
   if (t.startsWith('mw')) return 'exact';
   // ML, MLv and GeoNet's bare 'M' (the SeisComP summary magnitude, which for most of
   // the NZ catalogue is a network-weighted local magnitude) share the ML assumption.
@@ -1644,13 +1752,18 @@ export interface RateBin {
   count: number;
   /** Length of the bin in days: 1, 7, or the length of the month. */
   days: number;
-  /** Days of the bin inside the analysed span, when fewer than `days` (a partial first or last bin). */
+  /**
+   * Days of the bin inside the covered span, when fewer than `days` (a partial first or
+   * last bin): exact, possibly fractional, against a known period; whole days otherwise.
+   */
   coveredDays?: number;
 }
 
 export interface ReleaseBin {
   /** Same bin grid as the rate series. */
   date: string;
+  /** Length of the bin in days; the cumulative totals run to its end, `days` after `date`. */
+  days: number;
   /** Seismic moment (N m) of the moment-eligible events in the bin. */
   moment: number;
   /** Radiated energy (J) of the same events, from log10 E = 1.5 M + 4.8. */
@@ -1669,15 +1782,33 @@ export interface SeismicityTimeSeriesOptions {
   maxcCorrection?: number;
   /** Magnitude bin width for estimating Mc (default 0.1). */
   binWidth?: number;
+  /**
+   * The period [start, end) the events are known to cover (UTC instants or ISO strings;
+   * `end` exclusive): the active time-filter window, or the catalogue's declared
+   * time_period_start/end. A first or last bin is partial when this period covers only
+   * part of it, measured exactly. Without it, coverage can only be read off the first
+   * and last events, whose bins hold an event by construction, so scaling such a bin to
+   * a full one overstates its rate (`coverage: 'events'` in the result).
+   */
+  period?: { start: string | number; end: string | number };
 }
 
 export interface SeismicityTimeSeriesResult {
   /** The interval binned at ('auto' resolved to 'day' or 'week'). */
   interval: RateInterval;
   requestedInterval: RateIntervalOption;
-  /** UTC days of the first and last analysed events: the span the bins cover. */
+  /**
+   * First and last UTC days the bins cover: the known period (widened to any event
+   * outside it), else the first and last events' days.
+   */
   startDate: string;
   endDate: string;
+  /**
+   * What `coveredDays` is measured against: 'period', a known coverage period, so a
+   * partial bin's count can be scaled to its full length; or 'events', the first and
+   * last events, so a partial bin's count is a lower-edge count that must not be scaled.
+   */
+  coverage: 'period' | 'events';
   /** Events without a parseable origin time, which no bin can hold. */
   untimedEvents: number;
   rate: {
@@ -1731,6 +1862,31 @@ function monthStartDay(monthIndex: number): number {
   return Math.round(date.getTime() / MS_PER_DAY);
 }
 
+/** A coverage period [start, end) in UTC ms, or null when missing, unparseable or empty. */
+function resolvePeriod(period: { start: string | number; end: string | number } | undefined): { start: number; end: number } | null {
+  if (!period) return null;
+  const toMs = (value: string | number) => (typeof value === 'number' ? value : Date.parse(value));
+  const start = toMs(period.start);
+  const end = toMs(period.end);
+  return Number.isFinite(start) && Number.isFinite(end) && end > start ? { start, end } : null;
+}
+
+/**
+ * The instants [start, end) the bins cover: a known period, widened to the whole UTC day
+ * of any event outside it; else the whole UTC days from the first to the last event.
+ * Coverage against a period is exact, in fractional days: counted in whole days, a
+ * period starting at noon credited its first bin with half a day it never observed and
+ * scaled that bin's count some 25% low.
+ */
+function coverageWindow(first: number, last: number, period: { start: number; end: number } | null): { start: number; end: number } {
+  const dayStart = (ms: number) => Math.floor(ms / MS_PER_DAY) * MS_PER_DAY;
+  if (!period) return { start: dayStart(first), end: dayStart(last) + MS_PER_DAY };
+  return {
+    start: first < period.start ? dayStart(first) : period.start,
+    end: last >= period.end ? dayStart(last) + MS_PER_DAY : period.end,
+  };
+}
+
 /**
  * The calendar bins (UTC) spanning days firstDay..lastDay: every day, every ISO week
  * (Monday to Sunday), or every month touching the span, empty ones included, with
@@ -1772,8 +1928,11 @@ function calendarBins(interval: RateInterval, firstDay: number, lastDay: number)
  * the rule analyzeTemporalPattern uses). The threshold is the caller's explicit
  * cut-off, else the Mc estimated from these events as estimateCompletenessMagnitude
  * would; with fewer than 50 events Mc cannot be estimated and every event is counted
- * (`note` says so). The bins cover the span of all the events' UTC days, empty bins
- * included; a first or last bin the span only partly covers carries `coveredDays`.
+ * (`note` says so). The bins cover the UTC days of `options.period`, the period the
+ * catalogue is known to cover, widened to any event outside it, or else of the events
+ * themselves; empty bins are included, and a first or last bin the span only partly
+ * covers carries `coveredDays`. Only against a known period is that a coverage a
+ * partial count can be scaled by (`coverage` says which).
  *
  * Release: on the same bins, the seismic moment M0 = 10^(1.5 Mw + 9.1) N m and the
  * radiated energy log10 E = 1.5 M + 4.8 (E in J; Gutenberg & Richter, 1956, which for
@@ -1806,8 +1965,12 @@ export function analyzeSeismicityTimeSeries(
   if (untimedEvents === events.length) {
     throw new Error('No events with a valid origin time for time-series analysis');
   }
+  // A known coverage period (widened to any event outside it) sets the span; without
+  // one the span runs over the whole days from the first to the last event.
+  const period = resolvePeriod(options.period);
+  const cover = coverageWindow(first, last, period);
   const interval: RateInterval = requestedInterval !== 'auto' ? requestedInterval
-    : Math.max((last - first) / MS_PER_DAY, 1) > 365 ? 'week' : 'day';
+    : Math.max((period ? cover.end - cover.start : last - first) / MS_PER_DAY, 1) > 365 ? 'week' : 'day';
 
   // The magnitude threshold of the rate series.
   let threshold: number | null = null;
@@ -1834,8 +1997,8 @@ export function analyzeSeismicityTimeSeries(
     note = `Mc needs at least ${MIN_EVENTS_FOR_MC} events to estimate and ${events.length} were analysed, so every event is counted`;
   }
 
-  const firstDay = utcDayIndex(first);
-  const lastDay = utcDayIndex(last);
+  const firstDay = utcDayIndex(cover.start);
+  const lastDay = utcDayIndex(cover.end - 1);
   const { starts, lengths, binOf } = calendarBins(interval, firstDay, lastDay);
   const nBins = starts.length;
   const counts = new Array<number>(nBins).fill(0);
@@ -1848,7 +2011,7 @@ export function analyzeSeismicityTimeSeries(
   events.forEach((event, i) => {
     if (!Number.isFinite(times[i])) return;
     const bin = binOf(utcDayIndex(times[i]));
-    if (threshold == null || event.magnitude >= threshold - GRID_TOLERANCE) {
+    if (threshold == null || magnitudeAtOrAbove(event.magnitude, threshold)) {
       counts[bin]++;
       eventCount++;
     }
@@ -1866,16 +2029,18 @@ export function analyzeSeismicityTimeSeries(
   let cumulativeEnergy = 0;
   for (let b = 0; b < nBins; b++) {
     const date = utcDayString(starts[b]);
-    const covered = Math.min(starts[b] + lengths[b] - 1, lastDay) - Math.max(starts[b], firstDay) + 1;
+    const covered = (Math.min((starts[b] + lengths[b]) * MS_PER_DAY, cover.end) -
+      Math.max(starts[b] * MS_PER_DAY, cover.start)) / MS_PER_DAY;
+    const coveredDays = Math.round(covered * 1e6) / 1e6; // exact days; microsecond noise dropped
     rateBins.push({
       date,
       count: counts[b],
       days: lengths[b],
-      ...(covered < lengths[b] && { coveredDays: covered }),
+      ...(coveredDays < lengths[b] && { coveredDays }),
     });
     cumulativeMoment += moments[b];
     cumulativeEnergy += energies[b];
-    releaseBins.push({ date, moment: moments[b], energy: energies[b], cumulativeMoment, cumulativeEnergy });
+    releaseBins.push({ date, days: lengths[b], moment: moments[b], energy: energies[b], cumulativeMoment, cumulativeEnergy });
   }
 
   return {
@@ -1883,6 +2048,7 @@ export function analyzeSeismicityTimeSeries(
     requestedInterval,
     startDate: utcDayString(firstDay),
     endDate: utcDayString(lastDay),
+    coverage: period ? 'period' : 'events',
     untimedEvents,
     rate: {
       threshold,

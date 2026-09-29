@@ -51,6 +51,10 @@ const sha256 = (text: string) => createHash('sha256').update(text, 'utf8').diges
 let storedEvents: any[] = [];
 const mockFindOne = jest.fn();
 const findQueries: Array<Record<string, unknown>> = [];
+/** Every skip() the export asked the database for. */
+const skipsUsed: number[] = [];
+/** Runs after each events query, e.g. to simulate rows another writer inserts meanwhile. */
+let afterEventsQuery: (() => void) | null = null;
 
 /** The subset of MongoDB query semantics the export's queries use. */
 function matches(doc: any, query: Record<string, unknown>): boolean {
@@ -71,7 +75,7 @@ function cursorOver(docs: any[]) {
   const cursor: any = {
     sort: () => cursor,
     project: () => cursor,
-    skip: (n: number) => { items = items.slice(n); return cursor; },
+    skip: (n: number) => { skipsUsed.push(n); items = items.slice(n); return cursor; },
     limit: (n: number) => { items = items.slice(0, n); return cursor; },
     toArray: async () => items,
   };
@@ -113,11 +117,15 @@ function csvRecords(csv: string): Array<Record<string, string>> {
 beforeEach(() => {
   jest.clearAllMocks();
   findQueries.length = 0;
+  skipsUsed.length = 0;
+  afterEventsQuery = null;
   (getCollection as jest.Mock).mockResolvedValue({
     findOne: mockFindOne,
     find: jest.fn((query: Record<string, unknown>) => {
       findQueries.push(query);
-      return cursorOver(storedEvents.filter(doc => matches(doc, query)));
+      const cursor = cursorOver(storedEvents.filter(doc => matches(doc, query)));
+      afterEventsQuery?.();
+      return cursor;
     }),
     countDocuments: jest.fn(async (query: Record<string, unknown>) => storedEvents.filter(doc => matches(doc, query)).length),
   });
@@ -273,5 +281,96 @@ describe('declustered exports (C7)', () => {
     const response = await exportCatalogue('format=csv&decluster=reasenberg');
     expect(response.status).toBe(400);
     expect((await response.json()).error).toMatch(/decluster/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review R5 #7 — an export's version identifies exactly one data state
+// ---------------------------------------------------------------------------
+
+describe('R5 #7 exports are refused while the catalogue is changing', () => {
+  it.each([['processing'], ['deleting']])('returns 409 while its status is %s', async (status) => {
+    mockFindOne.mockResolvedValue({ id: 'cat-123', name: 'Export Test', event_count: 3, status, version: '1.2.0' });
+    const response = await exportCatalogue('format=csv');
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toMatch(/being (updated|deleted)/);
+  });
+
+  it('exports a released catalogue (complete, or error after a failed run)', async () => {
+    for (const status of ['complete', 'error']) {
+      mockFindOne.mockResolvedValue({ id: 'cat-123', name: 'Export Test', event_count: 3, status, version: '1.2.0' });
+      expect((await exportCatalogue('format=csv')).status).toBe(200);
+    }
+  });
+
+  it('returns 409 when the catalogue\'s version changes while its rows are read', async () => {
+    const before = { id: 'cat-123', name: 'Export Test', event_count: 3, status: 'complete', version: '1.2.0', version_updated_at: '2026-09-01T00:00:00.000Z' };
+    const after = { ...before, event_count: 5, version: '1.3.0', version_updated_at: '2026-09-02T00:00:00.000Z' };
+    mockFindOne.mockResolvedValueOnce(before).mockResolvedValue(after);
+
+    const response = await exportCatalogue('format=json');
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: expect.stringMatching(/changed while it was being exported/), version: '1.3.0' });
+  });
+});
+
+describe('R5 #7 filtered exports page by the (time, id) key, not by absolute offset', () => {
+  const dayPrecision = (i: number) => new Date(Date.UTC(2020, 0, 1 + Math.floor(i / 3000))).toISOString();
+
+  beforeEach(() => {
+    mockFindOne.mockResolvedValue({ id: 'cat-123', name: 'Export Test', event_count: 12_000, status: 'complete' });
+  });
+
+  it('reads every row exactly once when thousands share one origin time', async () => {
+    // A day-precision catalogue: four blocks of 3,000 events at midnight, wider than no page
+    // (5,000 rows) and narrower than none.
+    store(Array.from({ length: 12_000 }, (_, i) => makeEvent(i, { time: dayPrecision(i), magnitude: 3 })));
+    const response = await exportCatalogue('format=json&minMagnitude=2');
+    expect(response.status).toBe(200);
+    const ids = (await response.json()).events.map((e: any) => e.id);
+    expect(ids).toHaveLength(12_000);
+    expect(new Set(ids).size).toBe(12_000);
+    // Only rows of the anchoring instant are ever skipped, never whole earlier pages.
+    expect(Math.max(0, ...skipsUsed)).toBeLessThanOrEqual(3_000);
+  }, 60_000);
+
+  it('rows inserted ahead of the read position are neither repeated nor shift the pages', async () => {
+    store(Array.from({ length: 12_000 }, (_, i) => makeEvent(i, { magnitude: 3 })));
+    const original = new Set(storedEvents.map(e => e.id));
+    let inserted = false;
+    afterEventsQuery = () => {
+      if (inserted) return;
+      inserted = true;
+      // Another writer adds 50 rows newer than anything read so far.
+      store(storedEvents.concat(Array.from({ length: 50 }, (_, i) => makeEvent(20_000 + i, { magnitude: 3 }))));
+    };
+
+    const body = await (await exportCatalogue('format=json&minMagnitude=2')).json();
+    const ids: string[] = body.events.map((e: any) => e.id);
+    expect(new Set(ids).size).toBe(ids.length); // no row read twice
+    expect(ids.filter(id => original.has(id))).toHaveLength(12_000); // none skipped
+  }, 60_000);
+});
+
+describe('R5 #8 the QuakeML export is streamed', () => {
+  it('arrives in several body chunks and is a complete document', async () => {
+    store(Array.from({ length: 1_000 }, (_, i) => makeEvent(i, { region: 'Wellington region, with some descriptive text' })));
+    mockFindOne.mockResolvedValue({ id: 'cat-123', name: 'Export Test', event_count: 1_000, status: 'complete' });
+    const response = await exportCatalogue('format=quakeml');
+    expect(response.status).toBe(200);
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let chunks = 0;
+    let text = '';
+    for (let step = await reader.read(); !step.done; step = await reader.read()) {
+      chunks++;
+      text += decoder.decode(step.value, { stream: true });
+    }
+    expect(chunks).toBeGreaterThan(1);
+    expect(text.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
+    expect(text.endsWith('</q:quakeml>')).toBe(true);
+    expect((text.match(/<event publicID=/g) || []).length).toBe(1_000);
+    expect(text).toContain(`Event Rows SHA-256: ${response.headers.get('X-Export-Rows-SHA256')}`);
   });
 });

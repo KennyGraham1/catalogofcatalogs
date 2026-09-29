@@ -69,8 +69,9 @@ describe('PATCH /api/users/[id] — is_active validation', () => {
     const res = await PATCH(patchRequest({ is_active: false }), params);
 
     expect(res.status).toBe(200);
+    // The write is a compare-and-set on the state that was read.
     expect(collection.updateOne).toHaveBeenCalledWith(
-      { id: 'u1' },
+      expect.objectContaining({ id: 'u1' }),
       { $set: expect.objectContaining({ is_active: false }) },
     );
   });

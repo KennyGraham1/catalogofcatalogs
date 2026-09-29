@@ -26,11 +26,14 @@ import {
 import { normalizeTimestamp } from './earthquake-utils';
 import { boundsOverlap, unionBounds, type GeographicBounds } from './geo-bounds-utils';
 import { decodeEventCursor, encodeEventCursor } from './event-cursor';
+import { SAVED_FILTER_SLOT_INDEX } from './event-indexes';
 import {
   EVALUATION_MODES,
   EVALUATION_STATUSES,
   NON_BED_EVENT_TYPES,
   QUAKEML_EVENT_TYPES,
+  magnitudeTypePattern,
+  vocabularyPattern,
   type EventFilters,
 } from './event-filter-params';
 import { AppError, ValidationError } from './errors';
@@ -416,15 +419,19 @@ export interface DbQueries {
   // Search method
   searchEvents: (query: string, limit: number, catalogueId?: string) => Promise<any[]>;
 
-  // Saved filter methods. `ownerId` scopes the operation to that owner's filters;
-  // omitting it (admin override) addresses any filter.
-  insertSavedFilter: (id: string, name: string, description: string | null, filterConfig: string, ownerId?: string) => Promise<void>;
-  getSavedFilters: (ownerId?: string) => Promise<SavedFilter[]>;
+  // Saved filter methods. Every read and write names its scope: one owner's filters, or
+  // (administrators only) every filter. insertSavedFilter resolves to false when the
+  // owner already has maxPerOwner filters.
+  insertSavedFilter: (
+    id: string, name: string, description: string | null, filterConfig: string,
+    ownerId: string, options?: { maxPerOwner?: number }
+  ) => Promise<boolean>;
+  getSavedFilters: (scope: SavedFilterScope) => Promise<SavedFilter[]>;
   countSavedFilters: (ownerId: string) => Promise<number>;
-  getSavedFilterById: (id: string, ownerId?: string) => Promise<SavedFilter | undefined>;
+  getSavedFilterById: (id: string, scope: SavedFilterScope) => Promise<SavedFilter | undefined>;
   // Resolve to whether a filter matched.
-  updateSavedFilter: (id: string, name: string, description: string | null, filterConfig: string, ownerId?: string) => Promise<boolean>;
-  deleteSavedFilter: (id: string, ownerId?: string) => Promise<boolean>;
+  updateSavedFilter: (id: string, name: string, description: string | null, filterConfig: string, scope: SavedFilterScope) => Promise<boolean>;
+  deleteSavedFilter: (id: string, scope: SavedFilterScope) => Promise<boolean>;
 }
 
 // Import history interface
@@ -459,9 +466,26 @@ export interface SavedFilter {
   filter_config: string; // JSON string
   /** Session user who saved it. Filters saved before ownership existed have none and are visible to admins only. */
   owner_id?: string | null;
+  /** Which of the owner's numbered places this filter holds (see insertSavedFilter). */
+  slot?: number;
   created_at: string;
   updated_at: string;
 }
+
+/**
+ * Whose saved filters an operation may address. There is no default: an administrator
+ * override has to be asked for explicitly, never implied by a missing owner.
+ */
+export type SavedFilterScope = { ownerId: string } | { admin: true };
+
+function savedFilterScopeQuery(scope: SavedFilterScope): Record<string, unknown> {
+  const given = (scope ?? {}) as { admin?: unknown; ownerId?: unknown };
+  if (given.admin === true) return {};
+  if (typeof given.ownerId === 'string' && given.ownerId) return { owner_id: given.ownerId };
+  throw new Error('A saved-filter operation needs an owner, or an explicit administrator scope');
+}
+
+let savedFilterSlotIndex: Promise<void> | null = null;
 
 // ============================================================================
 // EVENT VALIDATION
@@ -794,10 +818,6 @@ export type { EventFilters };
 /** Kilometres per degree of latitude, as the quality score converts lat/lon marginals. */
 const KM_PER_DEGREE = 111;
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /**
  * The MongoDB predicate for one catalogue's events under `filters` (contract C4).
  * Exported so a caller that pages or streams (filtered exports) applies exactly the
@@ -835,14 +855,13 @@ export function buildEventFilterQuery(catalogueId: string, filters: EventFilters
   range('magnitude', num('minMagnitude'), num('maxMagnitude'));
   range('depth', num('minDepth'), num('maxDepth'));
   range('time', filters.startTime || undefined, filters.endTime || undefined);
-  if (filters.eventType) query.event_type = filters.eventType;
-  // Agencies disagree on the case of magnitude types (ML/Ml, Mw/MW), so match the
-  // exact type case-insensitively rather than by byte equality.
-  if (filters.magnitudeType) {
-    query.magnitude_type = new RegExp(`^${escapeRegExp(filters.magnitudeType)}$`, 'i');
-  }
-  if (filters.evaluationStatus) query.evaluation_status = filters.evaluationStatus;
-  if (filters.evaluationMode) query.evaluation_mode = filters.evaluationMode;
+  // Matching rules shared with the client-side table filter (lib/event-filter-params.ts),
+  // so the table and a filtered export hold the same events. Vocabulary values match in
+  // any case; magnitude types too, except the case-significant broadband mB.
+  if (filters.eventType) query.event_type = vocabularyPattern(filters.eventType);
+  if (filters.magnitudeType) query.magnitude_type = magnitudeTypePattern(filters.magnitudeType);
+  if (filters.evaluationStatus) query.evaluation_status = vocabularyPattern(filters.evaluationStatus);
+  if (filters.evaluationMode) query.evaluation_mode = vocabularyPattern(filters.evaluationMode);
   nonNegativeMax('azimuthal_gap', num('maxAzimuthalGap'));
   const minPhases = num('minUsedPhaseCount');
   if (minPhases !== undefined) query.used_phase_count = { $gte: minPhases };
@@ -853,24 +872,33 @@ export function buildEventFilterQuery(catalogueId: string, filters: EventFilters
   nonNegativeMax('time_uncertainty', num('maxTimeUncertainty'));
   nonNegativeMax('magnitude_uncertainty', num('maxMagnitudeUncertainty'));
   const minQuality = num('minQuality');
-  // Rows stored before quality scores were persisted carry none and so cannot be
-  // shown to meet a threshold; scripts/backfill-quality-scores.ts scores them.
+  // Compares the stored score. getFilteredEvents first scores any row stored before
+  // scores were persisted (ensureCatalogueQualityScores), exactly as the client computes
+  // Q for such rows, so no row is dropped for lacking a stored score.
   if (minQuality !== undefined) query.quality_score = { $gte: minQuality };
 
   // Horizontal uncertainty in km, taken the way the quality score takes it
   // (lib/quality-scoring.ts metricsFromEvent): the error-ellipse semi-major axis,
   // else the circular horizontal uncertainty, else the larger lat/lon marginal
-  // (degrees) converted to km at the event's latitude.
+  // (degrees) converted to km at the event's latitude. A value outside its valid range
+  // (a -999 sentinel, a legacy 150 km ellipse) counts as absent there, so each fallback
+  // applies when the fields before it are not VALID, not only when they are null.
   const maxHorizontal = num('maxHorizontalUncertainty');
   if (maxHorizontal !== undefined) {
+    const validRange = (field: keyof typeof QUALITY_INPUT_RANGES) => {
+      const [min, max] = QUALITY_INPUT_RANGES[field];
+      return { $gte: min, $lte: max };
+    };
+    const valid = (field: 'max_horizontal_uncertainty' | 'horizontal_uncertainty') => ({ [field]: validRange(field) });
+    const [, horizontalCeiling] = QUALITY_INPUT_RANGES.horizontal_uncertainty;
+    const reported = { $gte: 0, $lte: Math.min(maxHorizontal, horizontalCeiling) };
     orGroups.push([
-      { max_horizontal_uncertainty: { $gte: 0, $lte: maxHorizontal } },
-      { max_horizontal_uncertainty: null, horizontal_uncertainty: { $gte: 0, $lte: maxHorizontal } },
+      { max_horizontal_uncertainty: reported },
+      { $nor: [valid('max_horizontal_uncertainty')], horizontal_uncertainty: reported },
       {
-        max_horizontal_uncertainty: null,
-        horizontal_uncertainty: null,
-        latitude_uncertainty: { $gte: 0 },
-        longitude_uncertainty: { $gte: 0 },
+        $nor: [valid('max_horizontal_uncertainty'), valid('horizontal_uncertainty')],
+        latitude_uncertainty: validRange('latitude_uncertainty'),
+        longitude_uncertainty: validRange('longitude_uncertainty'),
         $expr: {
           $lte: [
             {
@@ -1007,6 +1035,11 @@ const EVENT_TIME_SORT_DESC = { time: -1, id: -1 } as const;
 
 /** Most results one event search may return (GET /api/events/search). */
 export const MAX_SEARCH_RESULTS = 100;
+/** Field names the event search reads as `name:value` filters. */
+const SEARCH_TOKEN_FIELDS = new Set([
+  'id', 'public', 'type', 'event', 'region', 'loc', 'location',
+  'mag', 'magnitude', 'depth', 'date', 'time', 'catalogue', 'source',
+]);
 const SEARCH_RESULT_PROJECTION = {
   _id: 0, id: 1, catalogue_id: 1, event_public_id: 1, time: 1, latitude: 1, longitude: 1,
   depth: 1, magnitude: 1, magnitude_type: 1, event_type: 1, region: 1, location_name: 1,
@@ -1256,9 +1289,12 @@ async function applyCatalogueChange(
     let version = normalizeCatalogueVersion(doc.version);
     let released = false;
     // An edit form re-sends every field; saving it unchanged edits nothing, so it
-    // neither writes nor bumps the version (nor restamps modified_at).
+    // neither writes nor bumps the version (nor restamps modified_at). Values are compared
+    // in their canonical stored form, so '' against a field never stored, or a keyword
+    // list against the same list stored as JSON text, is no change.
     const changed = Object.keys(fields).filter(
-      (field) => !CHANGE_BOOKKEEPING_FIELDS.has(field) && !sameStoredValue(doc[field], fields[field])
+      (field) => !CHANGE_BOOKKEEPING_FIELDS.has(field) &&
+        !sameStoredValue(canonicalCatalogueValue(field, doc[field]), canonicalCatalogueValue(field, fields[field]))
     );
     if (Object.keys(fields).length > 0 && changed.length === 0) return { version, released };
     if (doc.version_state === 'initial') {
@@ -1363,6 +1399,39 @@ export function eventQualityFields(row: Record<string, unknown>): { quality_scor
     ? Math.round(given)
     : scoreQualityMetrics(metricsFromEvent(row)).overall;
   return { quality_score: score, quality_grade: scoreToGrade(score) };
+}
+
+/**
+ * Score every event of a catalogue that has no stored quality score (rows stored before
+ * scores were persisted), exactly as an insert scores a row. A minQuality filter compares
+ * stored scores, while the event table computes Q for such rows with the same function
+ * (lib/event-filter-params.ts eventQualityScore); scoring them first makes the
+ * filtered-events endpoint and filtered exports keep exactly the rows the table keeps,
+ * instead of silently dropping every legacy row. Idempotent: once a catalogue is scored
+ * it finds nothing. Q is derived data, so no catalogue version changes.
+ */
+export async function ensureCatalogueQualityScores(catalogueId: string, batchSize = 1000): Promise<number> {
+  const events = await getCollection(COLLECTIONS.EVENTS);
+  const unscored = { catalogue_id: catalogueId, quality_score: { $not: { $type: 'number' } } };
+  const projection: Record<string, 1> = { _id: 1 };
+  for (const field of QUALITY_INPUT_FIELDS) projection[field] = 1;
+  const seen = new Set<string>();
+  let scored = 0;
+  for (;;) {
+    const rows = await events.find(unscored, { projection }).limit(batchSize).toArray();
+    // Rows already scored by this pass never count twice, whatever the store returns.
+    const fresh = rows.filter((row) => !seen.has(String(row._id)));
+    if (fresh.length === 0) break;
+    await events.bulkWrite(fresh.map((row) => {
+      seen.add(String(row._id));
+      const { quality_score, quality_grade } = eventQualityFields({ ...row, quality_score: undefined });
+      return { updateOne: { filter: { _id: row._id }, update: { $set: { quality_score, quality_grade } } } };
+    }), { ordered: false });
+    scored += fresh.length;
+    if (rows.length < batchSize) break;
+  }
+  if (scored > 0) await afterCatalogueWrite(catalogueId, false);
+  return scored;
 }
 
 /** Canonical depth type and quality fields for a row about to be inserted. */
@@ -1486,6 +1555,49 @@ const CATALOGUE_METADATA_FIELDS = [
 ] as const;
 /** Written once, by the creating upload, and not editable afterwards. */
 const CATALOGUE_CREATION_ONLY_FIELDS = ['validation_summary', 'validation_report', 'validation_timestamp'] as const;
+
+const JSON_LIST_METADATA_FIELDS = new Set(['keywords', 'reference_links']);
+const DATA_QUALITY_KEYS = ['completeness', 'accuracy', 'reliability'];
+
+const isBlank = (value: unknown) => value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+
+/**
+ * The one stored form of a catalogue metadata value. Clients send the same content in
+ * different shapes: the edit page sends '' for an empty text field, [] for no keywords
+ * and {completeness: '', ...} for an empty quality block, and merges store keywords as
+ * JSON text. Every write stores this form and every "did the edit change anything?"
+ * comparison uses it, so saving an edit form unchanged is recognised as unchanged:
+ *  - empty text, an empty list and an empty data-quality block are all "not given" (null);
+ *  - keywords, reference_links and data_quality are JSON text (the declared column type,
+ *    and what merges write), with the data-quality members in a fixed order;
+ *  - coverage times are ISO 8601 UTC (see normalizeTimePeriodFields).
+ * A value that cannot be interpreted (e.g. legacy free text in a list column) is kept.
+ */
+function canonicalCatalogueValue(field: string, value: unknown): unknown {
+  if (isBlank(value)) return null;
+  if (field === 'time_period_start' || field === 'time_period_end') {
+    return typeof value === 'string' ? normalizeTimestamp(value) ?? value : value;
+  }
+  const parsed = (() => {
+    if (typeof value !== 'string') return value;
+    try { return JSON.parse(value); } catch { return undefined; }
+  })();
+  if (JSON_LIST_METADATA_FIELDS.has(field)) {
+    if (!Array.isArray(parsed)) return value;
+    const items = parsed.filter((item) => !isBlank(item));
+    return items.length > 0 ? JSON.stringify(items) : null;
+  }
+  if (field === 'data_quality') {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return value;
+    const source = parsed as Record<string, unknown>;
+    const ordered: Record<string, unknown> = {};
+    for (const key of [...DATA_QUALITY_KEYS, ...Object.keys(source).filter((k) => !DATA_QUALITY_KEYS.includes(k)).sort()]) {
+      if (!isBlank(source[key])) ordered[key] = source[key];
+    }
+    return Object.keys(ordered).length > 0 ? JSON.stringify(ordered) : null;
+  }
+  return value;
+}
 
 /**
  * Coverage bounds are stored as ISO 8601 UTC ('...Z'), like every origin time on the
@@ -1654,12 +1766,14 @@ if (typeof window === 'undefined') {
       // the client's metadata object through.
       if (metadata) {
         const source = metadata as Record<string, unknown>;
+        const times = normalizeTimePeriodFields(source);
+        // Stored in canonical form; a field given as empty is not stored at all.
         for (const field of [...CATALOGUE_METADATA_FIELDS, ...CATALOGUE_CREATION_ONLY_FIELDS]) {
-          if (source[field] !== undefined) {
-            doc[field] = source[field];
+          const value = field in times ? times[field] : canonicalCatalogueValue(field, source[field]);
+          if (value !== null && value !== undefined) {
+            doc[field] = value;
           }
         }
-        Object.assign(doc, normalizeTimePeriodFields(source));
         // The upload form's free-text "Version" is the depositor's own release label.
         if (doc.source_version === undefined && typeof source.version === 'string' && source.version.trim()) {
           doc.source_version = source.version.trim();
@@ -2306,7 +2420,7 @@ if (typeof window === 'undefined') {
       const updates: Record<string, unknown> = {};
       for (const field of CATALOGUE_METADATA_FIELDS) {
         if (source[field] !== undefined) {
-          updates[field] = source[field];
+          updates[field] = canonicalCatalogueValue(field, source[field]);
         }
       }
       Object.assign(updates, normalizeTimePeriodFields(source));
@@ -2483,6 +2597,17 @@ if (typeof window === 'undefined') {
       }
       const cap = requestedLimit ?? FILTERED_EVENTS_LIMIT;
 
+      // A minQuality filter compares stored scores: score any legacy row first (once per
+      // query, on its first page), so such rows are judged by their Q, not dropped.
+      if (filters.minQuality !== undefined && offset === 0) {
+        try {
+          await ensureCatalogueQualityScores(catalogueId);
+        } catch (error) {
+          console.warn(`[Database] Could not score legacy events of catalogue ${catalogueId}; rows without a stored score are left out of this quality filter:`,
+            error instanceof Error ? error.message : error);
+        }
+      }
+
       let cursor = collection.find(query).sort(EVENT_TIME_SORT_DESC);
       if (offset > 0) cursor = cursor.skip(offset);
 
@@ -2582,26 +2707,69 @@ if (typeof window === 'undefined') {
 
     // Saved filter methods. Saved filters are personal: every lookup and write is
     // scoped to the owner it is given. Only an administrator's request omits the owner.
-    insertSavedFilter: async (id: string, name: string, description: string | null, filterConfig: string, ownerId?: string): Promise<void> => {
-      if (!id || !name || !filterConfig) {
+    // A cap on an owner's filters cannot be enforced by counting before inserting: two
+    // concurrent requests both see room for one more. Instead each filter takes one of
+    // the owner's maxPerOwner numbered slots, and a unique (owner_id, slot) index lets
+    // only one request take a given slot; the loser retries with the next free one.
+    // Deleting a filter frees its slot.
+    insertSavedFilter: async (
+      id: string, name: string, description: string | null, filterConfig: string,
+      ownerId: string, options: { maxPerOwner?: number } = {}
+    ): Promise<boolean> => {
+      if (!id || !name || !filterConfig || !ownerId) {
         throw new Error('Missing required fields for saved filter');
       }
 
       const collection = await getCollection(COLLECTIONS.SAVED_FILTERS);
-      await collection.insertOne({
+      const now = new Date().toISOString();
+      const doc = {
         id,
         name,
         description,
         filter_config: filterConfig,
-        owner_id: ownerId ?? null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      } as any);
+        owner_id: ownerId,
+        created_at: now,
+        updated_at: now,
+      };
+      const cap = options.maxPerOwner;
+      if (cap === undefined) {
+        await collection.insertOne(doc as any);
+        return true;
+      }
+
+      if (!savedFilterSlotIndex) {
+        savedFilterSlotIndex = Promise.resolve()
+          .then(() => collection.createIndex(SAVED_FILTER_SLOT_INDEX.key, SAVED_FILTER_SLOT_INDEX.options))
+          .then(() => undefined, (error) => {
+            savedFilterSlotIndex = null;
+            console.error('[Database] Could not create the saved-filter slot index; the per-user cap is not enforced atomically until it exists:',
+              error instanceof Error ? error.message : error);
+          });
+      }
+      await savedFilterSlotIndex;
+
+      for (let attempt = 0; attempt <= cap; attempt++) {
+        const taken = new Set(
+          (await collection.find({ owner_id: ownerId, slot: { $exists: true } }, { projection: { _id: 0, slot: 1 } }).toArray())
+            .map((row) => row.slot)
+        );
+        let slot = 0;
+        while (slot < cap && taken.has(slot)) slot++;
+        if (slot >= cap) return false;
+        try {
+          await collection.insertOne({ ...doc, slot } as any);
+          return true;
+        } catch (error) {
+          // Another request took this slot first: look again.
+          if ((error as { code?: number })?.code !== 11000) throw error;
+        }
+      }
+      return false;
     },
 
-    getSavedFilters: async (ownerId?: string): Promise<SavedFilter[]> => {
+    getSavedFilters: async (scope: SavedFilterScope): Promise<SavedFilter[]> => {
       const collection = await getCollection(COLLECTIONS.SAVED_FILTERS);
-      const docs = await collection.find(ownerId !== undefined ? { owner_id: ownerId } : {}).sort({ created_at: -1 }).toArray();
+      const docs = await collection.find(savedFilterScopeQuery(scope)).sort({ created_at: -1 }).toArray();
       return toPlainArray<SavedFilter>(docs);
     },
 
@@ -2610,31 +2778,31 @@ if (typeof window === 'undefined') {
       return collection.countDocuments({ owner_id: ownerId });
     },
 
-    getSavedFilterById: async (id: string, ownerId?: string): Promise<SavedFilter | undefined> => {
+    getSavedFilterById: async (id: string, scope: SavedFilterScope): Promise<SavedFilter | undefined> => {
       const collection = await getCollection(COLLECTIONS.SAVED_FILTERS);
-      const doc = await collection.findOne(ownerId !== undefined ? { id, owner_id: ownerId } : { id });
+      const doc = await collection.findOne({ id, ...savedFilterScopeQuery(scope) });
       return toPlainObject<SavedFilter>(doc);
     },
 
-    updateSavedFilter: async (id: string, name: string, description: string | null, filterConfig: string, ownerId?: string): Promise<boolean> => {
+    updateSavedFilter: async (id: string, name: string, description: string | null, filterConfig: string, scope: SavedFilterScope): Promise<boolean> => {
       if (!id || !name || !filterConfig) {
         throw new Error('Missing required fields for saved filter');
       }
 
       const collection = await getCollection(COLLECTIONS.SAVED_FILTERS);
-      const result = await collection.updateOne(ownerId !== undefined ? { id, owner_id: ownerId } : { id }, {
+      const result = await collection.updateOne({ id, ...savedFilterScopeQuery(scope) }, {
         $set: { name, description, filter_config: filterConfig, updated_at: new Date().toISOString() }
       });
       return result.matchedCount > 0;
     },
 
-    deleteSavedFilter: async (id: string, ownerId?: string): Promise<boolean> => {
+    deleteSavedFilter: async (id: string, scope: SavedFilterScope): Promise<boolean> => {
       if (!id) {
         throw new Error('Missing filter ID');
       }
 
       const collection = await getCollection(COLLECTIONS.SAVED_FILTERS);
-      const result = await collection.deleteOne(ownerId !== undefined ? { id, owner_id: ownerId } : { id });
+      const result = await collection.deleteOne({ id, ...savedFilterScopeQuery(scope) });
       return result.deletedCount > 0;
     },
 
@@ -2829,16 +2997,22 @@ if (typeof window === 'undefined') {
 
       const tokenRegex = /(\w+):("(?:[^"\\]|\\.)*"|\S+)/g;
       const tokens: Array<{ field: string; value: string }> = [];
-      const normalizedQuery = searchTerm.replace(tokenRegex, ' ');
+      // Only a recognised field name makes `name:value` a filter. Anything else with a
+      // colon is an identifier to search for (GeoNet:2016p858000, the QuakeML public ID
+      // smi:nz.org.geonet/2019p123456), and it used to be dropped as an unknown filter.
+      const normalizedQuery = searchTerm.replace(tokenRegex, (whole: string, field: string) =>
+        SEARCH_TOKEN_FIELDS.has(field.toLowerCase()) ? ' ' : whole);
       let match: RegExpExecArray | null;
 
       tokenRegex.lastIndex = 0;
       while ((match = tokenRegex.exec(searchTerm)) !== null) {
+        const field = match[1].toLowerCase();
+        if (!SEARCH_TOKEN_FIELDS.has(field)) continue;
         const rawValue = match[2];
         const value = rawValue.startsWith('"') && rawValue.endsWith('"')
           ? rawValue.slice(1, -1)
           : rawValue;
-        tokens.push({ field: match[1].toLowerCase(), value });
+        tokens.push({ field, value });
       }
 
       const terms = normalizedQuery.split(/\s+/).filter(Boolean);

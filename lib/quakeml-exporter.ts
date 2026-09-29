@@ -4,9 +4,11 @@
  */
 
 import {
+  coalesce,
   describeDeclustering,
   eventLineage,
   exportChecksumOf,
+  joinChunks,
   parseSourceEvents,
   publishedSolutionMember,
   sameHypocentre,
@@ -84,14 +86,33 @@ function xmlBoolean(value: unknown): 'true' | 'false' | null {
   return null;
 }
 
-// xs:dateTime lexical space (the zone designator is optional in XML Schema).
-const XS_DATE_TIME = /^-?\d{4,}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/;
+// xs:dateTime lexical form (the zone designator is optional in XML Schema), captured so the
+// value can be checked against the calendar: the lexical pattern alone let
+// "2019-13-45T25:61:61Z" through, which made the whole document schema-invalid.
+const XS_DATE_TIME = /^(-?\d{4,})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))?$/;
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
-/** An xs:dateTime string from a stored blob; null for anything else. */
+/** An xs:dateTime string from a stored blob, valid as a calendar date and time; null otherwise. */
 function xmlDateTime(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const text = value.trim();
-  return XS_DATE_TIME.test(text) ? text : null;
+  const parts = text.match(XS_DATE_TIME);
+  if (!parts) return null;
+  const year = Number(parts[1]);
+  const month = Number(parts[2]);
+  const day = Number(parts[3]);
+  // XML Schema 1.0 has no year 0000. Leap years are proleptic Gregorian; a negative year
+  // counts BCE with no year zero, so -0001 is astronomical year 0.
+  if (year === 0 || month < 1 || month > 12 || day < 1) return null;
+  const astronomical = year > 0 ? year : year + 1;
+  const leap = (astronomical % 4 === 0 && astronomical % 100 !== 0) || astronomical % 400 === 0;
+  if (day > (month === 2 && leap ? 29 : DAYS_IN_MONTH[month - 1])) return null;
+  if (Number(parts[4]) > 23 || Number(parts[5]) > 59 || Number(parts[6]) > 59) return null;
+  if (parts[7]) {
+    const offsetMinutes = Number(parts[8]) * 60 + Number(parts[9]);
+    if (Number(parts[9]) > 59 || offsetMinutes > 14 * 60) return null;
+  }
+  return text;
 }
 
 /**
@@ -160,6 +181,91 @@ function parseBlobObject<T>(value: unknown): T | null {
 function textElement(indent: string, tag: string, value: unknown): string {
   if (value === null || value === undefined || value === '' || typeof value === 'object') return '';
   return `${indent}<${tag}>${escapeXml(value)}</${tag}>\n`;
+}
+
+// ---------------------------------------------------------------------------
+// Values the schema constrains beyond their base type. A stored blob (or a free-form scalar
+// column) may hold a value outside those constraints — "Manual", "Point", an 80-character
+// agency ID — and one such value made the WHOLE multi-event document XSD-invalid. They are
+// normalised here, and whatever cannot be represented is recorded in a comment on the
+// nearest object that carries comments (`notes`), so nothing is silently lost.
+// ---------------------------------------------------------------------------
+
+/** QuakeML-BED-1.2.xsd enumerations (besides EventType / OriginDepthType, handled above). */
+const BED_ENUMERATIONS = {
+  EventDescriptionType: ['felt report', 'Flinn-Engdahl region', 'local time', 'tectonic summary', 'nearest cities', 'earthquake name', 'region name'],
+  EventTypeCertainty: ['known', 'suspected'],
+  OriginType: ['hypocenter', 'centroid', 'amplitude', 'macroseismic', 'rupture start', 'rupture end'],
+  OriginUncertaintyDescription: ['horizontal uncertainty', 'uncertainty ellipse', 'confidence ellipsoid'],
+  EvaluationMode: ['manual', 'automatic'],
+  EvaluationStatus: ['preliminary', 'confirmed', 'reviewed', 'final', 'rejected'],
+  AmplitudeCategory: ['point', 'mean', 'duration', 'period', 'integral', 'other'],
+  AmplitudeUnit: ['m', 's', 'm/s', 'm/(s*s)', 'm*s', 'dimensionless', 'other'],
+  PickOnset: ['emergent', 'impulsive', 'questionable'],
+  PickPolarity: ['positive', 'negative', 'undecidable'],
+  DataUsedWaveType: ['P waves', 'body waves', 'surface waves', 'mantle waves', 'combined', 'unknown'],
+  MomentTensorCategory: ['teleseismic', 'regional'],
+  MTInversionType: ['general', 'zero trace', 'double couple'],
+  SourceTimeFunctionType: ['box car', 'triangle', 'trapezoid', 'unknown'],
+} as const;
+type BedEnumeration = keyof typeof BED_ENUMERATIONS;
+
+const ENUMERATION_BY_LOWERCASE = {} as Record<BedEnumeration, Map<string, string>>;
+(Object.keys(BED_ENUMERATIONS) as BedEnumeration[]).forEach(name => {
+  ENUMERATION_BY_LOWERCASE[name] = new Map<string, string>(
+    (BED_ENUMERATIONS[name] as readonly string[]).map(value => [value.toLowerCase(), value] as [string, string])
+  );
+});
+
+/**
+ * The BED spelling of an enumerated value, matched case-insensitively ("Manual" -> "manual",
+ * "Region Name" -> "region name"); null (and a note) when it is not a value of the enumeration.
+ */
+function enumerationValue(enumeration: BedEnumeration, value: unknown, label: string, notes?: string[]): string | null {
+  const text = typeof value === 'object' ? null : textOrNull(value);
+  if (text === null) return null;
+  const canonical = ENUMERATION_BY_LOWERCASE[enumeration].get(text.replace(/\s+/g, ' ').toLowerCase());
+  if (canonical !== undefined) return canonical;
+  notes?.push(`${label}="${text}" (not a QuakeML ${enumeration} value; dropped)`);
+  return null;
+}
+
+function enumerationElement(indent: string, tag: string, value: unknown, enumeration: BedEnumeration, notes?: string[]): string {
+  const canonical = enumerationValue(enumeration, value, tag, notes);
+  return canonical === null ? '' : `${indent}<${tag}>${escapeXml(canonical)}</${tag}>\n`;
+}
+
+/**
+ * Text within a maxLength facet of the schema (counted in characters, i.e. code points), cut to
+ * the limit when longer, with the full value kept in a note.
+ */
+function limitedText(value: unknown, maxLength: number, label: string, notes?: string[]): string | null {
+  const text = typeof value === 'object' ? null : textOrNull(value);
+  if (text === null) return null;
+  const characters = Array.from(text);
+  if (characters.length <= maxLength) return text;
+  notes?.push(`${label}="${text}" (longer than the schema's ${maxLength}-character limit; shortened)`);
+  return characters.slice(0, maxLength).join('');
+}
+
+function limitedTextElement(indent: string, tag: string, value: unknown, maxLength: number, notes?: string[]): string {
+  const text = limitedText(value, maxLength, tag, notes);
+  return text === null ? '' : `${indent}<${tag}>${escapeXml(text)}</${tag}>\n`;
+}
+
+/** A timestamp element; an invalid stored value is dropped and noted. */
+function notedDateTimeElement(indent: string, tag: string, value: unknown, notes?: string[]): string {
+  const time = xmlDateTime(value);
+  if (time === null && value !== null && value !== undefined && value !== '') {
+    notes?.push(`${tag}="${typeof value === 'object' ? JSON.stringify(value) : String(value)}" (not a valid date-time; dropped)`);
+  }
+  return time === null ? '' : `${indent}<${tag}>${escapeXml(time)}</${tag}>\n`;
+}
+
+/** One comment recording the values an object could not carry (see the section note above). */
+function notesComment(notes: string[], indent: string): string {
+  if (notes.length === 0) return '';
+  return formatComment({ text: `Stored values not representable in QuakeML 1.2 BED: ${notes.join('; ')}` }, indent);
 }
 
 function numberElement(indent: string, tag: string, value: unknown): string {
@@ -336,42 +442,45 @@ function bedDepthType(label: unknown): { value: OriginDepthType | null; note: Co
 
 // ---------------------------------------------------------------------------
 // Element formatters. Each returns the element followed by a newline, or '' when omitted.
+// `notes` collects stored values an element could not carry (see limitedText and
+// enumerationValue); the object that owns them writes them as one comment.
 // ---------------------------------------------------------------------------
 
-function formatCreationInfo(info: unknown, indent: string): string {
+/** CreationInfo, with the schema's maxLength limits on agencyID, author and version. */
+function formatCreationInfo(info: unknown, indent: string, notes?: string[]): string {
   if (!info || typeof info !== 'object') return '';
   const ci = info as CreationInfo;
   const inner = indent + '  ';
   const body =
-    textElement(inner, 'agencyID', ci.agencyID) +
+    limitedTextElement(inner, 'agencyID', ci.agencyID, 64, notes) +
     referenceElement(inner, 'agencyURI', ci.agencyURI, 'agency') +
-    textElement(inner, 'author', ci.author) +
+    limitedTextElement(inner, 'author', ci.author, 128, notes) +
     referenceElement(inner, 'authorURI', ci.authorURI, 'author') +
-    dateTimeElement(inner, 'creationTime', ci.creationTime) +
-    textElement(inner, 'version', ci.version);
+    notedDateTimeElement(inner, 'creationTime', ci.creationTime, notes) +
+    limitedTextElement(inner, 'version', ci.version, 64, notes);
   return body ? `${indent}<creationInfo>\n${body}${indent}</creationInfo>\n` : '';
 }
 
-function formatComment(comment: Comment, indent: string): string {
+function formatComment(comment: Comment, indent: string, notes?: string[]): string {
   // QuakeML BED 1.2 Comment: text (+ optional creationInfo) are the only child
   // elements; the identifier is the `id` ATTRIBUTE (type ResourceReference).
   const idAttr = textOrNull(comment.id) ? ` id="${escapeXml(toResourceID(comment.id, 'comment'))}"` : '';
   const text = typeof comment.text === 'object' ? '' : comment.text;
   return `${indent}<comment${idAttr}>\n` +
     `${indent}  <text>${escapeXml(text)}</text>\n` +
-    formatCreationInfo(comment.creationInfo, indent + '  ') +
+    formatCreationInfo(comment.creationInfo, indent + '  ', notes) +
     `${indent}</comment>\n`;
 }
 
-function formatComments(comments: unknown, indent: string): string {
-  return parseBlobArray<Comment>(comments).map(comment => formatComment(comment, indent)).join('');
+function formatComments(comments: unknown, indent: string, notes?: string[]): string {
+  return parseBlobArray<Comment>(comments).map(comment => formatComment(comment, indent, notes)).join('');
 }
 
-function formatEventDescription(description: EventDescription, indent: string): string {
+function formatEventDescription(description: EventDescription, indent: string, notes?: string[]): string {
   const text = typeof description.text === 'object' ? '' : description.text;
   return `${indent}<description>\n` +
     `${indent}  <text>${escapeXml(text)}</text>\n` +
-    textElement(indent + '  ', 'type', description.type) +
+    enumerationElement(indent + '  ', 'type', description.type, 'EventDescriptionType', notes) +
     `${indent}</description>\n`;
 }
 
@@ -387,7 +496,7 @@ function formatCompositeTime(compositeTime: CompositeTime, indent: string): stri
     `${indent}</compositeTime>\n`;
 }
 
-function formatOriginQuality(quality: unknown, indent: string): string {
+function formatOriginQuality(quality: unknown, indent: string, notes?: string[]): string {
   if (!quality || typeof quality !== 'object') return '';
   const q = quality as OriginQuality;
   const inner = indent + '  ';
@@ -404,7 +513,7 @@ function formatOriginQuality(quality: unknown, indent: string): string {
     numberElement(inner, 'maximumDistance', q.maximumDistance) +
     numberElement(inner, 'medianDistance', q.medianDistance) +
     numberElement(inner, 'secondaryAzimuthalGap', q.secondaryAzimuthalGap) +
-    textElement(inner, 'groundTruthLevel', q.groundTruthLevel) +
+    limitedTextElement(inner, 'groundTruthLevel', q.groundTruthLevel, 32, notes) +
     numberElement(inner, 'standardError', q.standardError);
   return body ? `${indent}<quality>\n${body}${indent}</quality>\n` : '';
 }
@@ -418,7 +527,7 @@ const CONFIDENCE_ELLIPSOID_FIELDS = [
   'majorAxisRotation',
 ] as const;
 
-function formatOriginUncertainty(uncertainty: unknown, indent: string): string {
+function formatOriginUncertainty(uncertainty: unknown, indent: string, notes?: string[]): string {
   if (!uncertainty || typeof uncertainty !== 'object') return '';
   const u = uncertainty as OriginUncertainty;
   const inner = indent + '  ';
@@ -435,7 +544,7 @@ function formatOriginUncertainty(uncertainty: unknown, indent: string): string {
       CONFIDENCE_ELLIPSOID_FIELDS.map(field => numberElement(inner + '  ', field, ellipsoid[field])).join('') +
       `${inner}</confidenceEllipsoid>\n`;
   }
-  body += textElement(inner, 'preferredDescription', u.preferredDescription);
+  body += enumerationElement(inner, 'preferredDescription', u.preferredDescription, 'OriginUncertaintyDescription', notes);
   body += numberElement(inner, 'confidenceLevel', u.confidenceLevel);
   return body ? `${indent}<originUncertainty>\n${body}${indent}</originUncertainty>\n` : '';
 }
@@ -465,16 +574,18 @@ function originUncertaintyFromEvent(event: ExportableEvent): OriginUncertainty |
 
 /**
  * An origin exactly as stored, with `arrivals` as its phase set (its own, or the flat arrivals
- * column when that is attributed to it; see planOrigins).
+ * column when that is attributed to it; see planOrigins). Its publicID must already be the
+ * distinct identifier planOrigins assigned.
  */
 function formatOrigin(origin: Origin, indent: string, arrivals: Arrival[]): string {
   const publicID = toResourceID(origin.publicID, 'origin');
   const inner = indent + '  ';
+  const notes: string[] = [];
   const depthType = bedDepthType(origin.depthType);
   const comments = parseBlobArray<Comment>(origin.comment).concat(depthType.note ? [depthType.note] : []);
 
   let xml = `${indent}<origin publicID="${escapeXml(publicID)}">\n`;
-  xml += comments.map(comment => formatComment(comment, inner)).join('');
+  xml += comments.map(comment => formatComment(comment, inner, notes)).join('');
   xml += parseBlobArray<CompositeTime>(origin.compositeTime).map(ct => formatCompositeTime(ct, inner)).join('');
   xml += quantityElement(inner, 'time', origin.time, 'time');
   xml += quantityElement(inner, 'latitude', origin.latitude, 'real');
@@ -486,27 +597,29 @@ function formatOrigin(origin: Origin, indent: string, arrivals: Arrival[]): stri
   xml += referenceElement(inner, 'referenceSystemID', origin.referenceSystemID, 'referenceSystem');
   xml += referenceElement(inner, 'methodID', origin.methodID, 'method');
   xml += referenceElement(inner, 'earthModelID', origin.earthModelID, 'earthModel');
-  xml += formatOriginQuality(origin.quality, inner);
-  xml += formatOriginUncertainty(origin.uncertainty, inner);
-  xml += textElement(inner, 'type', origin.type);
-  xml += textElement(inner, 'region', origin.region);
-  xml += textElement(inner, 'evaluationMode', origin.evaluationMode);
-  xml += textElement(inner, 'evaluationStatus', origin.evaluationStatus);
-  xml += formatCreationInfo(origin.creationInfo, inner);
+  xml += formatOriginQuality(origin.quality, inner, notes);
+  xml += formatOriginUncertainty(origin.uncertainty, inner, notes);
+  xml += enumerationElement(inner, 'type', origin.type, 'OriginType', notes);
+  xml += limitedTextElement(inner, 'region', origin.region, 128, notes);
+  xml += enumerationElement(inner, 'evaluationMode', origin.evaluationMode, 'EvaluationMode', notes);
+  xml += enumerationElement(inner, 'evaluationStatus', origin.evaluationStatus, 'EvaluationStatus', notes);
+  xml += formatCreationInfo(origin.creationInfo, inner, notes);
   // Arrivals are child elements of Origin in QuakeML.
   arrivals.forEach((arrival, index) => {
     xml += formatArrival(arrival, inner, publicID, index);
   });
+  xml += notesComment(notes, inner);
   xml += `${indent}</origin>\n`;
   return xml;
 }
 
 function formatMagnitude(magnitude: Magnitude, indent: string): string {
   const inner = indent + '  ';
+  const notes: string[] = [];
   let xml = `${indent}<magnitude publicID="${escapeXml(toResourceID(magnitude.publicID, 'magnitude'))}">\n`;
-  xml += formatComments(magnitude.comment, inner);
+  xml += formatComments(magnitude.comment, inner, notes);
   xml += quantityElement(inner, 'mag', magnitude.mag, 'real');
-  xml += textElement(inner, 'type', magnitude.type);
+  xml += limitedTextElement(inner, 'type', magnitude.type, 32, notes);
   xml += integerElement(inner, 'stationCount', magnitude.stationCount);
   xml += numberElement(inner, 'azimuthalGap', magnitude.azimuthalGap);
   xml += referenceElement(inner, 'originID', magnitude.originID, 'origin');
@@ -518,22 +631,28 @@ function formatMagnitude(magnitude: Magnitude, indent: string): string {
     xml += numberElement(inner + '  ', 'weight', contribution.weight);
     xml += `${inner}</stationMagnitudeContribution>\n`;
   });
-  xml += textElement(inner, 'evaluationMode', magnitude.evaluationMode);
-  xml += textElement(inner, 'evaluationStatus', magnitude.evaluationStatus);
-  xml += formatCreationInfo(magnitude.creationInfo, inner);
+  xml += enumerationElement(inner, 'evaluationMode', magnitude.evaluationMode, 'EvaluationMode', notes);
+  xml += enumerationElement(inner, 'evaluationStatus', magnitude.evaluationStatus, 'EvaluationStatus', notes);
+  xml += formatCreationInfo(magnitude.creationInfo, inner, notes);
+  xml += notesComment(notes, inner);
   xml += `${indent}</magnitude>\n`;
   return xml;
 }
 
-function formatWaveformID(waveformID: WaveformStreamID, indent: string): string {
+/** A WaveformStreamID; its SEED codes are limited to 8 characters by the schema. */
+function formatWaveformID(waveformID: WaveformStreamID, indent: string, notes?: string[]): string {
+  const code = (value: unknown, name: string) => limitedText(value, 8, name, notes);
+  // networkCode and stationCode are required attributes, so they are written even when empty.
   let xml = `${indent}<waveformID`;
-  xml += ` networkCode="${escapeXml(waveformID.networkCode)}"`;
-  xml += ` stationCode="${escapeXml(waveformID.stationCode)}"`;
-  if (waveformID.locationCode) {
-    xml += ` locationCode="${escapeXml(waveformID.locationCode)}"`;
+  xml += ` networkCode="${escapeXml(code(waveformID.networkCode, 'networkCode') ?? '')}"`;
+  xml += ` stationCode="${escapeXml(code(waveformID.stationCode, 'stationCode') ?? '')}"`;
+  const locationCode = code(waveformID.locationCode, 'locationCode');
+  if (locationCode !== null) {
+    xml += ` locationCode="${escapeXml(locationCode)}"`;
   }
-  if (waveformID.channelCode) {
-    xml += ` channelCode="${escapeXml(waveformID.channelCode)}"`;
+  const channelCode = code(waveformID.channelCode, 'channelCode');
+  if (channelCode !== null) {
+    xml += ` channelCode="${escapeXml(channelCode)}"`;
   }
   if (waveformID.resourceURI) {
     xml += `>${escapeXml(toResourceID(waveformID.resourceURI, 'waveform'))}</waveformID>\n`;
@@ -545,24 +664,26 @@ function formatWaveformID(waveformID: WaveformStreamID, indent: string): string 
 
 function formatPick(pick: Pick, indent: string): string {
   const inner = indent + '  ';
+  const notes: string[] = [];
   let xml = `${indent}<pick publicID="${escapeXml(toResourceID(pick.publicID, 'pick'))}">\n`;
-  xml += formatComments(pick.comment, inner);
+  xml += formatComments(pick.comment, inner, notes);
   // Time and waveformID are required.
   xml += quantityElement(inner, 'time', pick.time, 'time');
   if (pick.waveformID && typeof pick.waveformID === 'object') {
-    xml += formatWaveformID(pick.waveformID, inner);
+    xml += formatWaveformID(pick.waveformID, inner, notes);
   }
   xml += referenceElement(inner, 'filterID', pick.filterID, 'filter');
   xml += referenceElement(inner, 'methodID', pick.methodID, 'method');
   xml += referenceElement(inner, 'slownessMethodID', pick.slownessMethodID, 'slownessMethod');
   xml += quantityElement(inner, 'horizontalSlowness', pick.horizontalSlowness, 'real');
   xml += quantityElement(inner, 'backazimuth', pick.backazimuth, 'real');
-  xml += textElement(inner, 'onset', pick.onset);
+  xml += enumerationElement(inner, 'onset', pick.onset, 'PickOnset', notes);
   xml += textElement(inner, 'phaseHint', pick.phaseHint);
-  xml += textElement(inner, 'polarity', pick.polarity);
-  xml += textElement(inner, 'evaluationMode', pick.evaluationMode);
-  xml += textElement(inner, 'evaluationStatus', pick.evaluationStatus);
-  xml += formatCreationInfo(pick.creationInfo, inner);
+  xml += enumerationElement(inner, 'polarity', pick.polarity, 'PickPolarity', notes);
+  xml += enumerationElement(inner, 'evaluationMode', pick.evaluationMode, 'EvaluationMode', notes);
+  xml += enumerationElement(inner, 'evaluationStatus', pick.evaluationStatus, 'EvaluationStatus', notes);
+  xml += formatCreationInfo(pick.creationInfo, inner, notes);
+  xml += notesComment(notes, inner);
   xml += `${indent}</pick>\n`;
   return xml;
 }
@@ -570,6 +691,7 @@ function formatPick(pick: Pick, indent: string): string {
 /** An arrival of the origin `originID`, at position `index` in that origin's phase list. */
 function formatArrival(arrival: Arrival, indent: string, originID: string, index: number): string {
   const inner = indent + '  ';
+  const notes: string[] = [];
   // BED requires Arrival.publicID. One stored without it (parser output, JSON/CSV blobs) is
   // given a deterministic id derived from its origin instead of being written as a bare
   // <arrival>, which failed schema validation.
@@ -577,7 +699,7 @@ function formatArrival(arrival: Arrival, indent: string, originID: string, index
     ? toResourceID(arrival.publicID, 'arrival')
     : childResourceID(originID, `arrival-${index + 1}`, 'arrival');
   let xml = `${indent}<arrival publicID="${escapeXml(publicID)}">\n`;
-  xml += formatComments(arrival.comment, inner);
+  xml += formatComments(arrival.comment, inner, notes);
   // PickID and phase are required.
   xml += `${inner}<pickID>${escapeXml(toResourceID(arrival.pickID, 'pick'))}</pickID>\n`;
   xml += `${inner}<phase>${escapeXml(typeof arrival.phase === 'object' ? '' : arrival.phase)}</phase>\n`;
@@ -592,20 +714,22 @@ function formatArrival(arrival: Arrival, indent: string, originID: string, index
   xml += numberElement(inner, 'horizontalSlownessWeight', arrival.horizontalSlownessWeight);
   xml += numberElement(inner, 'backazimuthWeight', arrival.backazimuthWeight);
   xml += referenceElement(inner, 'earthModelID', arrival.earthModelID, 'earthModel');
-  xml += formatCreationInfo(arrival.creationInfo, inner);
+  xml += formatCreationInfo(arrival.creationInfo, inner, notes);
+  xml += notesComment(notes, inner);
   xml += `${indent}</arrival>\n`;
   return xml;
 }
 
 function formatAmplitude(amplitude: Amplitude, indent: string): string {
   const inner = indent + '  ';
+  const notes: string[] = [];
   let xml = `${indent}<amplitude publicID="${escapeXml(toResourceID(amplitude.publicID, 'amplitude'))}">\n`;
-  xml += formatComments(amplitude.comment, inner);
+  xml += formatComments(amplitude.comment, inner, notes);
   // GenericAmplitude (required)
   xml += quantityElement(inner, 'genericAmplitude', amplitude.genericAmplitude, 'real');
-  xml += textElement(inner, 'type', amplitude.type);
-  xml += textElement(inner, 'category', amplitude.category);
-  xml += textElement(inner, 'unit', amplitude.unit);
+  xml += limitedTextElement(inner, 'type', amplitude.type, 32, notes);
+  xml += enumerationElement(inner, 'category', amplitude.category, 'AmplitudeCategory', notes);
+  xml += enumerationElement(inner, 'unit', amplitude.unit, 'AmplitudeUnit', notes);
   xml += referenceElement(inner, 'methodID', amplitude.methodID, 'method');
   xml += referenceElement(inner, 'filterID', amplitude.filterID, 'filter');
   xml += quantityElement(inner, 'period', amplitude.period, 'real');
@@ -622,31 +746,34 @@ function formatAmplitude(amplitude: Amplitude, indent: string): string {
   }
   xml += referenceElement(inner, 'pickID', amplitude.pickID, 'pick');
   if (amplitude.waveformID && typeof amplitude.waveformID === 'object') {
-    xml += formatWaveformID(amplitude.waveformID, inner);
+    xml += formatWaveformID(amplitude.waveformID, inner, notes);
   }
   xml += quantityElement(inner, 'scalingTime', amplitude.scalingTime, 'time');
-  xml += textElement(inner, 'magnitudeHint', amplitude.magnitudeHint);
-  xml += textElement(inner, 'evaluationMode', amplitude.evaluationMode);
-  xml += textElement(inner, 'evaluationStatus', amplitude.evaluationStatus);
-  xml += formatCreationInfo(amplitude.creationInfo, inner);
+  xml += limitedTextElement(inner, 'magnitudeHint', amplitude.magnitudeHint, 32, notes);
+  xml += enumerationElement(inner, 'evaluationMode', amplitude.evaluationMode, 'EvaluationMode', notes);
+  xml += enumerationElement(inner, 'evaluationStatus', amplitude.evaluationStatus, 'EvaluationStatus', notes);
+  xml += formatCreationInfo(amplitude.creationInfo, inner, notes);
+  xml += notesComment(notes, inner);
   xml += `${indent}</amplitude>\n`;
   return xml;
 }
 
 function formatStationMagnitude(stationMag: StationMagnitude, indent: string): string {
   const inner = indent + '  ';
+  const notes: string[] = [];
   let xml = `${indent}<stationMagnitude publicID="${escapeXml(toResourceID(stationMag.publicID, 'stationMagnitude'))}">\n`;
-  xml += formatComments(stationMag.comment, inner);
+  xml += formatComments(stationMag.comment, inner, notes);
   xml += referenceElement(inner, 'originID', stationMag.originID, 'origin');
   // Magnitude value (required)
   xml += quantityElement(inner, 'mag', stationMag.mag, 'real');
-  xml += textElement(inner, 'type', stationMag.type);
+  xml += limitedTextElement(inner, 'type', stationMag.type, 32, notes);
   xml += referenceElement(inner, 'amplitudeID', stationMag.amplitudeID, 'amplitude');
   xml += referenceElement(inner, 'methodID', stationMag.methodID, 'method');
   if (stationMag.waveformID && typeof stationMag.waveformID === 'object') {
-    xml += formatWaveformID(stationMag.waveformID, inner);
+    xml += formatWaveformID(stationMag.waveformID, inner, notes);
   }
-  xml += formatCreationInfo(stationMag.creationInfo, inner);
+  xml += formatCreationInfo(stationMag.creationInfo, inner, notes);
+  xml += notesComment(notes, inner);
   xml += `${indent}</stationMagnitude>\n`;
   return xml;
 }
@@ -674,6 +801,7 @@ const TENSOR_COMPONENTS = ['Mrr', 'Mtt', 'Mpp', 'Mrt', 'Mrp', 'Mtp'] as const;
 /** A moment tensor of the focal mechanism `focalMechanismID`. */
 function formatMomentTensor(mt: MomentTensor, indent: string, focalMechanismID: string): string {
   const inner = indent + '  ';
+  const notes: string[] = [];
   // BED requires MomentTensor.publicID; CSV rows with Mxx..Mzz columns build tensors without one.
   const publicID = textOrNull(mt.publicID)
     ? toResourceID(mt.publicID, 'momentTensor')
@@ -700,18 +828,24 @@ function formatMomentTensor(mt: MomentTensor, indent: string, focalMechanismID: 
   xml += referenceElement(inner, 'greensFunctionID', mt.greensFunctionID, 'greensFunction');
   xml += referenceElement(inner, 'filterID', mt.filterID, 'filter');
   const stf = mt.sourceTimeFunction as unknown as Record<string, unknown> | undefined;
-  // SourceTimeFunction requires type and duration.
-  if (stf && typeof stf === 'object' && textOrNull(stf.type) && finiteNumber(stf.duration) !== null) {
-    xml += `${inner}<sourceTimeFunction>\n`;
-    xml += textElement(inner + '  ', 'type', stf.type);
-    xml += numberElement(inner + '  ', 'duration', stf.duration);
-    xml += numberElement(inner + '  ', 'riseTime', stf.riseTime);
-    xml += numberElement(inner + '  ', 'decayTime', stf.decayTime);
-    xml += `${inner}</sourceTimeFunction>\n`;
+  if (stf && typeof stf === 'object') {
+    // SourceTimeFunction requires a type from its enumeration and a duration.
+    const stfType = enumerationValue('SourceTimeFunctionType', stf.type, 'sourceTimeFunction type', notes);
+    if (stfType !== null && finiteNumber(stf.duration) !== null) {
+      xml += `${inner}<sourceTimeFunction>\n`;
+      xml += `${inner}  <type>${escapeXml(stfType)}</type>\n`;
+      xml += numberElement(inner + '  ', 'duration', stf.duration);
+      xml += numberElement(inner + '  ', 'riseTime', stf.riseTime);
+      xml += numberElement(inner + '  ', 'decayTime', stf.decayTime);
+      xml += `${inner}</sourceTimeFunction>\n`;
+    }
   }
   parseBlobArray<DataUsed>(mt.dataUsed).forEach(dataUsed => {
+    // DataUsed requires a waveType from its enumeration.
+    const waveType = enumerationValue('DataUsedWaveType', dataUsed.waveType, 'dataUsed waveType', notes);
+    if (waveType === null) return;
     xml += `${inner}<dataUsed>\n`;
-    xml += `${inner}  <waveType>${escapeXml(typeof dataUsed.waveType === 'object' ? '' : dataUsed.waveType)}</waveType>\n`;
+    xml += `${inner}  <waveType>${escapeXml(waveType)}</waveType>\n`;
     xml += integerElement(inner + '  ', 'stationCount', dataUsed.stationCount);
     xml += integerElement(inner + '  ', 'componentCount', dataUsed.componentCount);
     xml += numberElement(inner + '  ', 'shortestPeriod', dataUsed.shortestPeriod);
@@ -719,9 +853,10 @@ function formatMomentTensor(mt: MomentTensor, indent: string, focalMechanismID: 
     xml += `${inner}</dataUsed>\n`;
   });
   xml += referenceElement(inner, 'methodID', mt.methodID, 'method');
-  xml += textElement(inner, 'category', mt.category);
-  xml += textElement(inner, 'inversionType', mt.inversionType);
-  xml += formatCreationInfo(mt.creationInfo, inner);
+  xml += enumerationElement(inner, 'category', mt.category, 'MomentTensorCategory', notes);
+  xml += enumerationElement(inner, 'inversionType', mt.inversionType, 'MTInversionType', notes);
+  xml += formatCreationInfo(mt.creationInfo, inner, notes);
+  xml += notesComment(notes, inner);
   xml += `${indent}</momentTensor>\n`;
   return xml;
 }
@@ -764,12 +899,13 @@ function liftSimplifiedFocalMechanism(fm: FocalMechanism): FocalMechanism {
 
 function formatFocalMechanism(fm: FocalMechanism, indent: string): string {
   const inner = indent + '  ';
+  const notes: string[] = [];
   const publicID = toResourceID(fm.publicID, 'focalMechanism');
   let xml = `${indent}<focalMechanism publicID="${escapeXml(publicID)}">\n`;
-  xml += formatComments(fm.comment, inner);
+  xml += formatComments(fm.comment, inner, notes);
   xml += referenceElement(inner, 'triggeringOriginID', fm.triggeringOriginID, 'origin');
   parseBlobArray<WaveformStreamID>(fm.waveformID).forEach(waveformID => {
-    xml += formatWaveformID(waveformID, inner);
+    xml += formatWaveformID(waveformID, inner, notes);
   });
 
   // Nodal planes
@@ -813,9 +949,10 @@ function formatFocalMechanism(fm: FocalMechanism, indent: string): string {
   if (fm.momentTensor && typeof fm.momentTensor === 'object') {
     xml += formatMomentTensor(fm.momentTensor, inner, publicID);
   }
-  xml += textElement(inner, 'evaluationMode', fm.evaluationMode);
-  xml += textElement(inner, 'evaluationStatus', fm.evaluationStatus);
-  xml += formatCreationInfo(fm.creationInfo, inner);
+  xml += enumerationElement(inner, 'evaluationMode', fm.evaluationMode, 'EvaluationMode', notes);
+  xml += enumerationElement(inner, 'evaluationStatus', fm.evaluationStatus, 'EvaluationStatus', notes);
+  xml += formatCreationInfo(fm.creationInfo, inner, notes);
+  xml += notesComment(notes, inner);
   xml += `${indent}</focalMechanism>\n`;
   return xml;
 }
@@ -938,6 +1075,28 @@ function eventTypeComment(
 // Origins
 // ---------------------------------------------------------------------------
 
+/**
+ * Stored objects of one kind with distinct identifiers within their event: each keeps its
+ * stored publicID, and one stored without an id, or repeating an id already used, gets a
+ * deterministic one derived from the owning row and its position ("<row id>-origin-2"). A
+ * missing id used to become ".../unknown" for every such object, so two origins shared one
+ * publicID, the arrival ids derived from it collided, and a <preferredOriginID> resolved to the
+ * wrong origin. The ids assigned here are the ones every formatter and reference then uses.
+ */
+function withDistinctIDs<T extends { publicID?: unknown }>(items: T[], kind: string, owner: string): T[] {
+  const used = new Set<string>();
+  return items.map((item, index) => {
+    const stored = typeof item.publicID === 'object' ? null : textOrNull(item.publicID);
+    let id = stored === null ? null : toResourceID(stored, kind);
+    if (id === null || used.has(id)) {
+      id = uniqueResourceID(toResourceID(`${owner}-${kind}-${index + 1}`, kind), used);
+    } else {
+      used.add(id);
+    }
+    return { ...item, publicID: id };
+  });
+}
+
 /** Whether a stored origin carries exactly the hypocentre of a row (depth: metres vs km). */
 function originCarries(origin: Origin, row: ExportableEvent | Record<string, unknown>): boolean {
   const depthMetres = finiteNumber(origin.depth?.value);
@@ -966,6 +1125,7 @@ function scalarOriginXml(
 ): string {
   const indent = '    ';
   const inner = indent + '  ';
+  const notes: string[] = [];
   const depthType = bedDepthType(record.depth_type);
   const comments = options.comments.concat(depthType.note ? [depthType.note] : []);
 
@@ -1000,22 +1160,23 @@ function scalarOriginXml(
       minimumDistance: record.minimum_distance,
       maximumDistance: record.maximum_distance,
       standardError: record.standard_error,
-    } as OriginQuality, inner);
+    } as OriginQuality, inner, notes);
   }
 
-  xml += formatOriginUncertainty(originUncertaintyFromEvent(record), inner);
+  xml += formatOriginUncertainty(originUncertaintyFromEvent(record), inner, notes);
 
   if (!options.restricted) {
-    xml += textElement(inner, 'evaluationMode', record.evaluation_mode);
-    xml += textElement(inner, 'evaluationStatus', record.evaluation_status);
+    xml += enumerationElement(inner, 'evaluationMode', record.evaluation_mode, 'EvaluationMode', notes);
+    xml += enumerationElement(inner, 'evaluationStatus', record.evaluation_status, 'EvaluationStatus', notes);
     // Fallback creationInfo from scalar agency/author fields
-    xml += formatCreationInfo({ agencyID: record.agency_id ?? undefined, author: record.author ?? undefined }, inner);
+    xml += formatCreationInfo({ agencyID: record.agency_id ?? undefined, author: record.author ?? undefined }, inner, notes);
   }
 
   // Arrivals (child elements of Origin in QuakeML)
   options.arrivals.forEach((arrival, index) => {
     xml += formatArrival(arrival, inner, originID, index);
   });
+  xml += notesComment(notes, inner);
   xml += `${indent}</origin>\n`;
   return xml;
 }
@@ -1062,7 +1223,7 @@ function planOrigins(
   mergeStrategy: string | null
 ): OriginPlan {
   const merged = members.length > 1;
-  const allStored = parseBlobArray<Origin>(event.origins);
+  const allStored = withDistinctIDs(parseBlobArray<Origin>(event.origins), 'origin', String(event.id));
   const stored = allStored.filter(hasRequiredOriginValues);
   const omittedIDs = allStored
     .filter(origin => !hasRequiredOriginValues(origin))
@@ -1131,7 +1292,11 @@ function planOrigins(
   const ownerRow = owner?.originalData ?? null;
   if (owner && ownerRow) {
     // The published hypocentre is this contributor's own solution: emit it with its identity.
-    const ownOrigins = parseBlobArray<Origin>(ownerRow.origins).filter(hasRequiredOriginValues);
+    const ownOrigins = withDistinctIDs(
+      parseBlobArray<Origin>(ownerRow.origins),
+      'origin',
+      textOrNull(ownerRow.id) ?? `${event.id}-contributor`
+    ).filter(hasRequiredOriginValues);
     const ownPreference = textOrNull(ownerRow.preferred_origin_id)
       ? toResourceID(ownerRow.preferred_origin_id, 'origin')
       : null;
@@ -1201,9 +1366,10 @@ function matchesScalarMagnitude(magnitude: Magnitude, event: ExportableEvent): b
  */
 function scalarMagnitudeXml(event: ExportableEvent, magnitudeID: string, merged: boolean, originID: string | null): string {
   const inner = '      ';
+  const notes: string[] = [];
   let xml = `    <magnitude publicID="${escapeXml(magnitudeID)}">\n`;
   xml += quantityElement(inner, 'mag', { value: event.magnitude, uncertainty: event.magnitude_uncertainty }, 'real');
-  xml += textElement(inner, 'type', event.magnitude_type);
+  xml += limitedTextElement(inner, 'type', event.magnitude_type, 32, notes);
   xml += integerElement(inner, 'stationCount', event.magnitude_station_count);
   if (originID) {
     xml += `${inner}<originID>${escapeXml(originID)}</originID>\n`;
@@ -1212,13 +1378,14 @@ function scalarMagnitudeXml(event: ExportableEvent, magnitudeID: string, merged:
   // Prefer magnitude-specific evaluation fields; fall back to origin-level fields.
   const magEvalMode = event.magnitude_evaluation_mode || (!merged ? event.evaluation_mode : undefined);
   const magEvalStatus = event.magnitude_evaluation_status || (!merged ? event.evaluation_status : undefined);
-  xml += textElement(inner, 'evaluationMode', magEvalMode);
-  xml += textElement(inner, 'evaluationStatus', magEvalStatus);
+  xml += enumerationElement(inner, 'evaluationMode', magEvalMode, 'EvaluationMode', notes);
+  xml += enumerationElement(inner, 'evaluationStatus', magEvalStatus, 'EvaluationStatus', notes);
   // For a merge these fields identify the origin's agency, which may differ from
   // the selected magnitude's agency. An unknown donor must remain unattributed.
   if (!merged) {
-    xml += formatCreationInfo({ agencyID: event.agency_id ?? undefined, author: event.author ?? undefined }, inner);
+    xml += formatCreationInfo({ agencyID: event.agency_id ?? undefined, author: event.author ?? undefined }, inner, notes);
   }
+  xml += notesComment(notes, inner);
   xml += `    </magnitude>\n`;
   return xml;
 }
@@ -1244,8 +1411,10 @@ export interface EventToQuakeMLOptions {
 export function eventToQuakeML(event: ExportableEvent, options: EventToQuakeMLOptions = {}): string {
   const members = parseSourceEvents(event.source_events);
   const merged = members.length > 1;
-  const lineage = eventLineage(event, options.catalogueMergeStrategy);
+  const lineage = eventLineage(event, options.catalogueMergeStrategy, members);
   const publicID = eventPublicID(event, members, options.usedEventIDs);
+  // Stored event-level values the schema cannot carry (see notesComment).
+  const eventNotes: string[] = [];
 
   let xml = `  <event publicID="${escapeXml(publicID)}">\n`;
 
@@ -1256,13 +1425,13 @@ export function eventToQuakeML(event: ExportableEvent, options: EventToQuakeMLOp
   // Descriptions — use stored JSON if available, otherwise synthesise from scalar fields.
   const descriptions = parseBlobArray<EventDescription>(event.event_descriptions);
   descriptions.forEach(description => {
-    xml += formatEventDescription(description, '    ');
+    xml += formatEventDescription(description, '    ', eventNotes);
   });
   // When no structured descriptions exist, emit region / location_name as a
   // "region name" description (QuakeML EventDescriptionType = "region name").
   if (descriptions.length === 0 && (event.region || event.location_name)) {
     const regionText = event.region || event.location_name || '';
-    xml += formatEventDescription({ text: regionText, type: 'region name' }, '    ');
+    xml += formatEventDescription({ text: regionText, type: 'region name' }, '    ', eventNotes);
   }
 
   // Origins are planned first: the scalar magnitude refers to the preferred origin, and an
@@ -1283,20 +1452,19 @@ export function eventToQuakeML(event: ExportableEvent, options: EventToQuakeMLOp
     });
   }
   comments.forEach(comment => {
-    xml += formatComment(comment, '    ');
+    xml += formatComment(comment, '    ', eventNotes);
   });
 
-  // Focal Mechanisms (schema order: 3rd group, before amplitudes/magnitudes/origins)
-  parseBlobArray<FocalMechanism>(event.focal_mechanisms).forEach((fm, index) => {
-    const lifted = liftSimplifiedFocalMechanism(fm);
-    // A mechanism stored without an id (GeoNet enrichment) gets a deterministic one
-    // so two of them cannot both export as ".../unknown".
-    if (!lifted.publicID) lifted.publicID = `${event.id}-focalMechanism-${index + 1}`;
-    xml += formatFocalMechanism(lifted, '    ');
+  // Focal Mechanisms (schema order: 3rd group, before amplitudes/magnitudes/origins). A
+  // mechanism stored without an id (GeoNet enrichment) gets a deterministic one so two of them
+  // cannot both export as ".../unknown".
+  const mechanisms = parseBlobArray<FocalMechanism>(event.focal_mechanisms).map(liftSimplifiedFocalMechanism);
+  withDistinctIDs(mechanisms, 'focalMechanism', String(event.id)).forEach(fm => {
+    xml += formatFocalMechanism(fm, '    ');
   });
 
   // Amplitudes (schema order: 4th group, before magnitudes/origins)
-  parseBlobArray<Amplitude>(event.amplitudes).forEach(amplitude => {
+  withDistinctIDs(parseBlobArray<Amplitude>(event.amplitudes), 'amplitude', String(event.id)).forEach(amplitude => {
     xml += formatAmplitude(amplitude, '    ');
   });
 
@@ -1309,10 +1477,10 @@ export function eventToQuakeML(event: ExportableEvent, options: EventToQuakeMLOp
   if (storedMagnitudes.length > 0) {
     // Entries without an id (e.g. alternatives kept from a flat CSV import) get a
     // deterministic one so two of them cannot collapse onto "unknown".
-    const withIds = storedMagnitudes.map((magnitude, index) => ({
-      ...magnitude,
-      publicID: magnitude.publicID || `${event.id}-magnitude-${index + 1}`,
-    }));
+    const withIds = withDistinctIDs(storedMagnitudes, 'magnitude', String(event.id));
+    const preferenceID = event.preferred_magnitude_id
+      ? toResourceID(event.preferred_magnitude_id, 'magnitude', event.id)
+      : null;
     // Keep source measurements intact. Rewriting an ML entry with a selected Mw
     // also rewrote its identity while retaining the ML agency's creationInfo.
     withIds.forEach(magnitude => {
@@ -1320,14 +1488,14 @@ export function eventToQuakeML(event: ExportableEvent, options: EventToQuakeMLOp
     });
     if (event.magnitude != null) {
       const matching = withIds.filter(magnitude => matchesScalarMagnitude(magnitude, event));
-      const selected = matching.find(magnitude => magnitude.publicID === event.preferred_magnitude_id)
+      const selected = matching.find(magnitude => magnitude.publicID === preferenceID)
         ?? (matching.length === 1 ? matching[0] : undefined);
       if (selected) {
-        preferredMagnitudeExportId = toResourceID(selected.publicID, 'magnitude', event.id);
+        preferredMagnitudeExportId = selected.publicID;
       } else {
         // The selected measurement may not be in the stored alternatives. Emit it
         // separately, without borrowing a different measurement's ID or provenance.
-        const usedIds = new Set(withIds.map(m => toResourceID(m.publicID, 'magnitude', event.id)));
+        const usedIds = new Set(withIds.map(m => m.publicID));
         let magnitudeID = toResourceID(event.preferred_magnitude_id || `${event.id}-magnitude-preferred`, 'magnitude', event.id);
         let suffix = 0;
         while (usedIds.has(magnitudeID)) {
@@ -1345,15 +1513,16 @@ export function eventToQuakeML(event: ExportableEvent, options: EventToQuakeMLOp
   }
 
   // Station Magnitudes (schema order: 6th group, before origins)
-  parseBlobArray<StationMagnitude>(event.station_magnitudes).forEach(stationMag => {
-    xml += formatStationMagnitude(stationMag, '    ');
-  });
+  withDistinctIDs(parseBlobArray<StationMagnitude>(event.station_magnitudes), 'stationMagnitude', String(event.id))
+    .forEach(stationMag => {
+      xml += formatStationMagnitude(stationMag, '    ');
+    });
 
   // Origins (schema order: 7th group, after magnitudes)
   xml += origins.xml;
 
   // Picks (schema order: 8th group, after origins)
-  parseBlobArray<Pick>(event.picks).forEach(pick => {
+  withDistinctIDs(parseBlobArray<Pick>(event.picks), 'pick', String(event.id)).forEach(pick => {
     xml += formatPick(pick, '    ');
   });
 
@@ -1370,11 +1539,14 @@ export function eventToQuakeML(event: ExportableEvent, options: EventToQuakeMLOp
 
   // Event type (schema order: after preferredIDs)
   xml += textElement('    ', 'type', eventType.value);
-  xml += textElement('    ', 'typeCertainty', event.event_type_certainty);
+  xml += enumerationElement('    ', 'typeCertainty', event.event_type_certainty, 'EventTypeCertainty', eventNotes);
 
   // Creation info (schema order: last)
-  xml += formatCreationInfo(parseBlobObject<CreationInfo>(event.creation_info), '    ');
+  xml += formatCreationInfo(parseBlobObject<CreationInfo>(event.creation_info), '    ', eventNotes);
 
+  // Event children may come in any order (QuakeML-BED-1.2.xsd: an unbounded choice), so the
+  // note on values the event could not carry follows the elements that produced it.
+  xml += notesComment(eventNotes, '    ');
   xml += `  </event>`;
   return xml;
 }
@@ -1387,13 +1559,62 @@ export function eventsToQuakeMLDocument(
   catalogueName?: string,
   metadata?: ExportMetadata
 ): string {
+  return joinChunks(eventsToQuakeMLChunks(events, catalogueName, metadata));
+}
+
+/**
+ * Streaming form of eventsToQuakeMLDocument(): yields the same bytes in chunks, one event at a
+ * time, so a whole-catalogue export never has to exist as a single JS string. Built whole, the
+ * document reached V8's 536,870,888-character string limit near 100,000 richly merged events
+ * (an opaque 500), and no byte could be sent before the last event was formatted.
+ */
+export function eventsToQuakeMLChunks(
+  events: ExportableEvent[],
+  catalogueName?: string,
+  metadata?: ExportMetadata
+): Generator<string> {
+  return coalesce(quakemlParts(events, catalogueName, metadata));
+}
+
+function* quakemlParts(
+  events: ExportableEvent[],
+  catalogueName?: string,
+  metadata?: ExportMetadata
+): Generator<string> {
+  yield quakemlDocumentHead(events, catalogueName, metadata);
+
+  const mergeConfig = metadata?.mergeConfig as Record<string, unknown> | undefined;
+  const catalogueMergeStrategy = mergeConfig && typeof mergeConfig === 'object'
+    ? textOrNull(mergeConfig.mergeStrategy) ?? textOrNull(mergeConfig.strategy)
+    : null;
+  const tags = metadata?.declustering && metadata.declustering.algorithm !== 'none'
+    ? metadata.declustering.tags ?? null
+    : null;
+  const usedEventIDs = new Set<string>();
+  for (const event of events) {
+    yield eventToQuakeML(event, {
+      catalogueMergeStrategy,
+      declusterTag: tags ? tags.get(event.id) ?? null : null,
+      declusteringAlgorithm: metadata?.declustering?.algorithm,
+      usedEventIDs,
+    }) + '\n';
+  }
+
+  yield '  </eventParameters>\n</q:quakeml>';
+}
+
+/** Everything before the first <event>: declaration, root, catalogue description and comments. */
+function quakemlDocumentHead(
+  events: ExportableEvent[],
+  catalogueName?: string,
+  metadata?: ExportMetadata
+): string {
   const timestamp = rowDateTime(metadata?.generatedAt) ?? new Date().toISOString();
   const publicID = `smi:local/eventParameters/${Date.now()}`;
 
   let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
   xml += '<q:quakeml xmlns="http://quakeml.org/xmlns/bed/1.2" xmlns:q="http://quakeml.org/xmlns/quakeml/1.2">\n';
   xml += `  <eventParameters publicID="${escapeXml(publicID)}">\n`;
-
   // Build comprehensive description
   const descParts: string[] = [];
   if (catalogueName) descParts.push(`Catalogue: ${catalogueName}`);
@@ -1479,29 +1700,8 @@ export function eventsToQuakeMLDocument(
   xml += `      <agencyID>CatalogueOfCatalogues</agencyID>\n`;
   xml += `      <creationTime>${escapeXml(timestamp)}</creationTime>\n`;
   // User-entered free text; "1 & 2" unescaped produced a malformed document.
-  xml += textElement('      ', 'version', metadata?.version);
+  xml += limitedTextElement('      ', 'version', metadata?.version, 64);
   xml += `    </creationInfo>\n`;
-
-  // Add all events
-  const mergeConfig = metadata?.mergeConfig as Record<string, unknown> | undefined;
-  const catalogueMergeStrategy = mergeConfig && typeof mergeConfig === 'object'
-    ? textOrNull(mergeConfig.mergeStrategy) ?? textOrNull(mergeConfig.strategy)
-    : null;
-  const tags = metadata?.declustering && metadata.declustering.algorithm !== 'none'
-    ? metadata.declustering.tags ?? null
-    : null;
-  const usedEventIDs = new Set<string>();
-  events.forEach(event => {
-    xml += eventToQuakeML(event, {
-      catalogueMergeStrategy,
-      declusterTag: tags ? tags.get(event.id) ?? null : null,
-      declusteringAlgorithm: metadata?.declustering?.algorithm,
-      usedEventIDs,
-    }) + '\n';
-  });
-
-  xml += '  </eventParameters>\n';
-  xml += '</q:quakeml>';
 
   return xml;
 }

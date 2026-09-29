@@ -4,7 +4,7 @@ import { getCollection, COLLECTIONS } from '@/lib/mongodb';
 import { getUserById, hashPassword } from '@/lib/auth/utils';
 import { Logger } from '@/lib/errors';
 import { applyRateLimit, authRateLimiter } from '@/lib/rate-limiter';
-import { rememberCredentialClient } from '@/lib/auth/login-rate-limit';
+import { knownDeviceCookie } from '@/lib/auth/known-device';
 import { writeAuditLog } from '@/lib/audit';
 import type { PasswordResetToken } from '@/lib/auth/types';
 
@@ -106,16 +106,13 @@ export async function POST(request: NextRequest) {
       metadata: { tokenId: tokenDoc.id },
     }, request);
 
-    // The reset proved control of the account: let this client sign in even if the
-    // account is being guessed at from elsewhere (see lib/auth/login-rate-limit.ts).
-    // Best effort - the password has already been changed.
-    await rememberCredentialClient(user.email, request.headers).catch(error => {
-      logger.warn('Could not mark the resetting client as known', {
-        error: error instanceof Error ? error.message : error,
-      });
-    });
-
-    return NextResponse.json({ message: 'Password reset successfully' });
+    const response = NextResponse.json({ message: 'Password reset successfully' });
+    // The reset proved control of the account: this browser becomes a known device for it,
+    // so it can sign in even while failed attempts from elsewhere are holding unknown
+    // browsers back (lib/auth/login-rate-limit.ts).
+    const device = knownDeviceCookie(request.headers.get('cookie'), user.email);
+    if (device) response.cookies.set(device.name, device.value, device.options);
+    return response;
   } catch (error) {
     logger.error('Failed to reset password', error);
     return NextResponse.json(

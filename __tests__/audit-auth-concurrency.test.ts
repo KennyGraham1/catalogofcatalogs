@@ -19,6 +19,17 @@ const limits = {
     buckets.set(_id, attempts);
     return { attempts };
   }),
+  // Counts are read (never expired in these tests), handed back and cleared by the limiter.
+  findOne: jest.fn(async ({ _id }: { _id: string }) => (buckets.has(_id) ? { attempts: buckets.get(_id) } : null)),
+  updateOne: jest.fn(async ({ _id }: { _id: string }) => {
+    if (!buckets.get(_id)) return { matchedCount: 0 };
+    buckets.set(_id, buckets.get(_id)! - 1);
+    return { matchedCount: 1 };
+  }),
+  deleteOne: jest.fn(async ({ _id, expires_at }: { _id: string; expires_at?: unknown }) => {
+    if (expires_at !== undefined) return { deletedCount: 0 };
+    return { deletedCount: buckets.delete(_id) ? 1 : 0 };
+  }),
 };
 beforeEach(() => {
   jest.clearAllMocks();

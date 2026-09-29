@@ -67,6 +67,8 @@ import {
   type RateInterval,
   type SeismicityTimeSeriesResult,
   DEFAULT_MAXC_CORRECTION,
+  magnitudeAtOrAbove,
+  magnitudeAtOrBelow,
 } from '@/lib/seismological-analysis';
 import { type MergedCatalogue } from '@/lib/db';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
@@ -181,6 +183,8 @@ const GAP_SLIDER: [number, number] = [0, 360];
 
 // MAXC corrections the Mc settings offer, within lib MAXC_CORRECTION_RANGE (0-0.5).
 const MAXC_CORRECTION_CHOICES = [0, 0.1, 0.2, 0.3, 0.4, 0.5];
+
+const DAY_MS = 86_400_000;
 
 /**
  * Agency event types that say a record is not a real, located earthquake (SeisComP,
@@ -668,16 +672,33 @@ export default function AnalyticsPage() {
     return count;
   }, [events]);
 
-  // Every filter except the magnitude lower bound. The G-R and Mc fits take this set
-  // and treat the lower bound as an explicit cut-off (see useSeismologicalAnalyses).
+  // The time filter's window, [now - week/month/year, now], fixed when the filter is
+  // chosen, so the filter and the time series' coverage period are the same window.
+  const timeWindow = useMemo(() => {
+    if (timeFilter === 'all') return null;
+    const end = new Date();
+    const start = new Date(end);
+    switch (timeFilter) {
+      case 'week':
+        start.setDate(end.getDate() - 7);
+        break;
+      case 'month':
+        start.setMonth(end.getMonth() - 1);
+        break;
+      case 'year':
+        start.setFullYear(end.getFullYear() - 1);
+        break;
+    }
+    return { start: start.getTime(), end: end.getTime() };
+  }, [timeFilter]);
+
+  // Every filter except the magnitude bounds. The G-R and Mc fits take this set and
+  // treat the lower bound as an explicit cut-off (see useSeismologicalAnalyses). The
+  // upper bound stays out too: the maximum-likelihood b and Mc assume the distribution
+  // runs on above them, and fitting a set cut at M3 returned b = 1.34 for b = 1.
   // Events are already filtered by catalogue on load, so no need to filter again
   const fitEarthquakes = useMemo(() => {
     let filtered = events;
-
-    // Magnitude upper bound (using deferred values)
-    if (magnitudeCeiling != null) {
-      filtered = filtered.filter(eq => eq.magnitude <= magnitudeCeiling);
-    }
 
     // Depth filter, only once narrowed. An event of unknown depth cannot be placed
     // inside a depth range, so it is dropped then, and only then.
@@ -722,32 +743,28 @@ export default function AnalyticsPage() {
     }
 
     // Time filter
-    if (timeFilter !== 'all') {
-      const now = new Date();
-      const cutoff = new Date();
-
-      switch (timeFilter) {
-        case 'week':
-          cutoff.setDate(now.getDate() - 7);
-          break;
-        case 'month':
-          cutoff.setMonth(now.getMonth() - 1);
-          break;
-        case 'year':
-          cutoff.setFullYear(now.getFullYear() - 1);
-          break;
-      }
-
-      filtered = filtered.filter(eq => new Date(eq.time) >= cutoff);
+    if (timeWindow) {
+      filtered = filtered.filter(eq => Date.parse(eq.time) >= timeWindow.start);
     }
 
     return filtered;
-  }, [events, selectedCatalogue, magnitudeCeiling, depthFloor, depthCeiling, selectedRegions, selectedCataloguesFilter, timeFilter,
+  }, [events, selectedCatalogue, depthFloor, depthCeiling, selectedRegions, selectedCataloguesFilter, timeWindow,
     includeFlagged, minQuality, eventQuality, maxGap, selectedMagnitudeTypes]);
 
-  // The events every view on the page draws: all filters, magnitude lower bound included.
-  const filteredEarthquakes = useMemo(
-    () => magnitudeCutoff == null ? fitEarthquakes : fitEarthquakes.filter(eq => eq.magnitude >= magnitudeCutoff),
+  // The events every view on the page draws: all filters, both magnitude bounds
+  // included, under the engine's tolerant comparison (so the displayed set above a
+  // cut-off is exactly the set the G-R fit counts).
+  const filteredEarthquakes = useMemo(() => {
+    if (magnitudeCutoff == null && magnitudeCeiling == null) return fitEarthquakes;
+    return fitEarthquakes.filter(eq =>
+      (magnitudeCutoff == null || magnitudeAtOrAbove(eq.magnitude, magnitudeCutoff)) &&
+      (magnitudeCeiling == null || magnitudeAtOrBelow(eq.magnitude, magnitudeCeiling)));
+  }, [fitEarthquakes, magnitudeCutoff, magnitudeCeiling]);
+
+  // The events the G-R fit uses: the fit set at or above an explicit cut-off, as the
+  // worker selects them, else the whole fit set.
+  const grFitSample = useMemo(
+    () => magnitudeCutoff == null ? fitEarthquakes : fitEarthquakes.filter(eq => magnitudeAtOrAbove(eq.magnitude, magnitudeCutoff)),
     [fitEarthquakes, magnitudeCutoff]
   );
 
@@ -759,25 +776,51 @@ export default function AnalyticsPage() {
     tab === 'gutenberg-richter' || tab === 'completeness' ? fitCatalogueCount
       : tab === 'temporal' || tab === 'moment' ? filteredCatalogueCount : 1;
 
-  // Magnitude types of the set the active tab analyses: the fit sample on the G-R and Mc
-  // tabs (also behind their MixedScaleWarning), the filtered events elsewhere.
+  // Magnitude types of the set the active tab analyses (also behind the G-R and Mc tabs'
+  // MixedScaleWarning): on the G-R tab the events actually fitted, at or above any
+  // cut-off; on the Mc tab the untruncated sample Mc is estimated from; elsewhere the
+  // filtered events.
   const analysesFitSample = activeTab === 'gutenberg-richter' || activeTab === 'completeness';
-  const analysedMagnitudeTypes = useMemo(
-    () => summariseMagnitudeTypes(analysesFitSample ? fitEarthquakes : filteredEarthquakes),
-    [analysesFitSample, fitEarthquakes, filteredEarthquakes]
-  );
+  const analysedSample = activeTab === 'gutenberg-richter' ? grFitSample
+    : activeTab === 'completeness' ? fitEarthquakes : filteredEarthquakes;
+  const analysedSampleScope = activeTab === 'gutenberg-richter'
+    ? (magnitudeCutoff != null ? `the G-R fit sample (M ≥ ${magnitudeCutoff.toFixed(1)})` : 'the G-R fit sample')
+    : activeTab === 'completeness' ? 'the Mc estimation sample' : 'the filtered events';
+  const analysedMagnitudeTypes = useMemo(() => summariseMagnitudeTypes(analysedSample), [analysedSample]);
   const fitMagnitudeTypes = analysesFitSample ? analysedMagnitudeTypes : null;
+
+  // The period the analysed events are known to cover, against which the time series
+  // measure partial first and last bins: the time filter's window, intersected with the
+  // catalogue's declared time_period_start/end when the events come from one catalogue
+  // that declares it. Without either, a partial bin's coverage could only be read off
+  // its first or last event, so it is shown at its raw count instead of scaled.
+  const analysisPeriod = useMemo(() => {
+    const windows: { start: number; end: number }[] = [];
+    if (timeWindow) windows.push(timeWindow);
+    if (filteredCatalogueCount === 1 && filteredEarthquakes.length > 0) {
+      const catalogue = catalogues.find(c => c.id === filteredEarthquakes[0].catalogueId);
+      const start = Date.parse(catalogue?.time_period_start ?? '');
+      let end = Date.parse(catalogue?.time_period_end ?? '');
+      // The period is end-exclusive; a declared end at 00:00 UTC is a date, and the
+      // catalogue covers that whole day.
+      if (Number.isFinite(end) && end % DAY_MS === 0) end += DAY_MS;
+      if (Number.isFinite(start) && Number.isFinite(end) && end > start) windows.push({ start, end });
+    }
+    if (windows.length === 0) return undefined;
+    const start = Math.max(...windows.map(w => w.start));
+    const end = Math.min(...windows.map(w => w.end));
+    return end > start ? { start: new Date(start).toISOString(), end: new Date(end).toISOString() } : undefined;
+  }, [timeWindow, filteredCatalogueCount, filteredEarthquakes, catalogues]);
 
   // Magnitude types present in the loaded events, for the filter's checkboxes.
   const availableMagnitudeTypes = useMemo(() => summariseMagnitudeTypes(events).types, [events]);
 
   // The filters in force, named for the analysis tabs' scope notes. The G-R and Mc fits
-  // take the magnitude filter's lower bound as their cut-off, not as a filter.
-  const describeFilters = (includeMagnitudeLowerBound: boolean): string[] => {
+  // take neither magnitude bound as a filter (the lower one is the G-R cut-off).
+  const describeFilters = (includeMagnitudeBounds: boolean): string[] => {
     const labels: string[] = [];
-    const magnitudeBounds: number[] = [includeMagnitudeLowerBound ? magnitudeRange[0] : MAGNITUDE_SLIDER[0], magnitudeRange[1]];
-    const magnitude = describeRange(magnitudeBounds, MAGNITUDE_SLIDER, value => value.toFixed(1), '');
-    if (magnitude !== 'all') labels.push(`M ${magnitude}`);
+    const magnitude = describeRange(magnitudeRange, MAGNITUDE_SLIDER, value => value.toFixed(1), '');
+    if (includeMagnitudeBounds && magnitude !== 'all') labels.push(`M ${magnitude}`);
     const depth = describeRange(depthRange, DEPTH_SLIDER, value => String(value), ' km');
     if (depth !== 'all') labels.push(`depth ${depth}`);
     if (timeFilter !== 'all') labels.push(`last ${timeFilter}`);
@@ -883,11 +926,14 @@ export default function AnalyticsPage() {
   }, [filteredEarthquakes, activeTab]);
 
   const { data: timeSeriesData, daysPerBin: timelineDaysPerBin } = useMemo(
-    () => activeTab === 'timeline' ? aggregateEventTimeline(filteredEarthquakes, MAX_TIMELINE_POINTS) : { data: [], daysPerBin: 1 },
-    [filteredEarthquakes, activeTab]
+    () => activeTab === 'timeline'
+      ? aggregateEventTimeline(filteredEarthquakes, MAX_TIMELINE_POINTS, { period: analysisPeriod })
+      : { data: [], daysPerBin: 1 },
+    [filteredEarthquakes, activeTab, analysisPeriod]
   );
   const timelineSeriesName = timelineDaysPerBin === 1 ? 'Events per Day' : `Events per ${timelineDaysPerBin} Days`;
   const timelinePartialDays = timeSeriesData[timeSeriesData.length - 1]?.coveredDays;
+  const timelinePartialCount = timeSeriesData.filter(bin => bin.coveredDays != null).length;
 
   const handleResetFilters = useCallback(() => {
     startTransition(() => {
@@ -1022,6 +1068,7 @@ export default function AnalyticsPage() {
       mcMethod,
       maxcCorrection,
       rateInterval,
+      period: analysisPeriod,
     }
   );
 
@@ -1517,10 +1564,7 @@ export default function AnalyticsPage() {
       )}
 
       {eventsLoaded && (
-        <MagnitudeTypeTable
-          summary={analysedMagnitudeTypes}
-          scope={analysesFitSample ? 'the G-R and Mc fit sample' : 'the filtered events'}
-        />
+        <MagnitudeTypeTable summary={analysedMagnitudeTypes} scope={analysedSampleScope} />
       )}
 
       {/* Main Content */}
@@ -1947,13 +1991,16 @@ export default function AnalyticsPage() {
               <AxisLegendHints
                 axes="X: date (UTC). Y: event count."
                 legend={`Each point shows totals over ${timelineDaysPerBin} ${timelineDaysPerBin === 1 ? 'day' : 'days'}.` +
-                  (timelinePartialDays != null
-                    ? ` The last point covers only ${timelinePartialDays} ${timelinePartialDays === 1 ? 'day' : 'days'} of data, so it is scaled to ${timelineDaysPerBin} days and drawn dashed with a hollow marker.`
-                    : '')}
+                  (timelinePartialCount > 0 && analysisPeriod
+                    ? ` ${timelinePartialCount === 1 ? 'A point' : 'Points'} the analysed period covers only in part ${timelinePartialCount === 1 ? 'is' : 'are'} scaled to ${timelineDaysPerBin} days and drawn dashed with a hollow marker; the tooltip gives the raw count and the days covered.`
+                    : timelinePartialDays != null
+                      ? ` The last point covers only ${timelinePartialDays} ${timelinePartialDays === 1 ? 'day' : 'days'} up to the last event and is drawn dashed with a hollow marker at its raw count: without a known catalogue period (a time filter, or the catalogue's declared time period) its coverage cannot be measured, so it is not scaled and may understate the rate.`
+                      : '')}
               />
             </CardHeader>
             <CardContent>
-              <EventTimelineChart data={timeSeriesData} seriesName={timelineSeriesName} daysPerBin={timelineDaysPerBin} height={400} />
+              <EventTimelineChart data={timeSeriesData} seriesName={timelineSeriesName} daysPerBin={timelineDaysPerBin}
+                partialBins={analysisPeriod ? 'scale' : 'mark'} height={400} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -2184,9 +2231,14 @@ export default function AnalyticsPage() {
                     analysed={fitEarthquakes.length}
                     total={events.length}
                     filters={describeFilters(false)}
-                    detail={magnitudeCutoff != null
-                      ? `Fitted above the magnitude filter's lower bound, M ≥ ${magnitudeCutoff.toFixed(1)}, used as the cut-off.`
-                      : undefined}
+                    detail={[
+                      magnitudeCutoff != null
+                        ? `Fitted above the magnitude filter's lower bound, M ≥ ${magnitudeCutoff.toFixed(1)}, used as the cut-off.`
+                        : '',
+                      magnitudeCeiling != null
+                        ? `The magnitude filter's upper bound (M ≤ ${magnitudeCeiling.toFixed(1)}) is not applied: the maximum-likelihood b-value needs the distribution's upper tail.`
+                        : '',
+                    ].filter(Boolean).join(' ') || undefined}
                   />
                 </div>
               </div>
@@ -2436,8 +2488,8 @@ export default function AnalyticsPage() {
                     analysed={fitEarthquakes.length}
                     total={events.length}
                     filters={describeFilters(false)}
-                    detail={magnitudeCutoff != null
-                      ? `The magnitude filter's lower bound (M ≥ ${magnitudeCutoff.toFixed(1)}) is not applied: Mc estimation needs the untruncated distribution.`
+                    detail={magnitudeCutoff != null || magnitudeCeiling != null
+                      ? `The magnitude filter (${describeRange(magnitudeRange, MAGNITUDE_SLIDER, value => value.toFixed(1), '')}) is not applied: Mc estimation needs the untruncated distribution.`
                       : undefined}
                   />
                 </div>
@@ -2758,6 +2810,9 @@ export default function AnalyticsPage() {
                       <p className="text-xs text-muted-foreground">
                         {timeSeriesAnalysis.rate.bins.length.toLocaleString()} bins of one {describeRateInterval(timeSeriesAnalysis.interval)},
                         {' '}{timeSeriesAnalysis.startDate} to {timeSeriesAnalysis.endDate}
+                        {timeSeriesAnalysis.coverage === 'period'
+                          ? ' (the analysed period)'
+                          : ' (first to last event: no time filter or declared catalogue period)'}
                         {timeSeriesAnalysis.untimedEvents > 0 && `; ${timeSeriesAnalysis.untimedEvents.toLocaleString()} events without a valid origin time are not placed`}
                       </p>
                     )}
@@ -2777,7 +2832,10 @@ export default function AnalyticsPage() {
                       )}
                       <AxisLegendHints
                         axes="X: bin start date (UTC). Y: events at or above the threshold in the bin."
-                        legend="Sudden rate changes often mark network upgrades, station outages or processing changes. A first or last bin the data span covers only in part is scaled to a full bin and drawn dashed with a hollow marker; its tooltip gives the raw count and the days covered."
+                        legend={'Sudden rate changes often mark network upgrades, station outages or processing changes. ' +
+                          (timeSeriesAnalysis?.coverage === 'period'
+                            ? 'A first or last bin the analysed period covers only in part is scaled to a full bin and drawn dashed with a hollow marker; its tooltip gives the raw count and the days covered.'
+                            : 'A first or last bin cut by the first or last event is drawn dashed with a hollow marker at its raw count, not scaled: without a time filter or the catalogue\'s declared time period its coverage cannot be measured, so the count may understate the rate.')}
                       />
                     </CardHeader>
                     <CardContent>
@@ -2788,6 +2846,7 @@ export default function AnalyticsPage() {
                           seriesName={rateSeriesName(timeSeriesAnalysis)}
                           exportName="seismicity-rate"
                           ariaLabel="Seismicity rate"
+                          partialBins={timeSeriesAnalysis.coverage === 'period' ? 'scale' : 'mark'}
                           height={360}
                         />
                       ) : (
@@ -2804,10 +2863,15 @@ export default function AnalyticsPage() {
                         <CardDescription>
                           Temporal evolution of seismicity showing cumulative events over time
                         </CardDescription>
-                        <AxisLegendHints axes="X: time bin (calendar day, or ISO week for catalogues spanning more than a year). Y: cumulative events." />
+                        <AxisLegendHints
+                          axes="X: end of each time bin (UTC calendar day, or ISO week for catalogues spanning more than a year). Y: cumulative events up to that point."
+                          legend={temporalAnalysis.untimedEvents > 0
+                            ? `${temporalAnalysis.untimedEvents.toLocaleString()} events without a valid origin time are left out of the time series and rates.`
+                            : undefined}
+                        />
                       </CardHeader>
                       <CardContent>
-                        <TemporalSeriesChart data={temporalAnalysis.timeSeries} height={420} />
+                        <TemporalSeriesChart data={temporalAnalysis.timeSeries} binDays={temporalAnalysis.binDays ?? 1} height={420} />
                       </CardContent>
                     </Card>
                   )}
@@ -2870,7 +2934,7 @@ export default function AnalyticsPage() {
                           {describeReleaseEligibility(timeSeriesAnalysis.release)}
                         </p>
                       )}
-                      <AxisLegendHints axes={`X: bin start date (UTC). Y: cumulative ${releaseQuantity === 'moment' ? 'seismic moment (N·m)' : 'radiated energy (J)'}.`} />
+                      <AxisLegendHints axes={`X: end of each time bin (UTC). Y: cumulative ${releaseQuantity === 'moment' ? 'seismic moment (N·m)' : 'radiated energy (J)'} up to that point.`} />
                     </CardHeader>
                     <CardContent>
                       {timeSeriesAnalysis ? (

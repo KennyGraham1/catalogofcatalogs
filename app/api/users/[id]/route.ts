@@ -18,44 +18,65 @@ interface Actor { id: string; name?: string | null; email?: string | null }
 
 type UsersCollection = Awaited<ReturnType<typeof getCollection>>;
 
-/** Documents without the flag count as active (see getSessionUserState). */
-const ACTIVE_ADMIN = { role: UserRole.ADMIN, is_active: { $ne: false } };
+/**
+ * Admins who can sign in. Login refuses any account whose is_active is not true
+ * (lib/auth/config.ts), so only these count towards keeping an administrator.
+ */
+const ACTIVE_ADMIN = { role: UserRole.ADMIN, is_active: true };
 
 function isActiveAdmin(user: Record<string, unknown>): boolean {
-  return user.role === UserRole.ADMIN && user.is_active !== false;
+  return user.role === UserRole.ADMIN && user.is_active === true;
+}
+
+/** Whether writing `fields` could take admin rights away from an account. */
+function mayRemoveAdmin(fields: Record<string, unknown>): boolean {
+  return (fields.role !== undefined && fields.role !== UserRole.ADMIN) || fields.is_active === false;
+}
+
+/** Matches the account only while its role and active state are still as `user` read them. */
+function asRead(id: string, user: Record<string, unknown>) {
+  return { id, role: user.role, is_active: user.is_active === true ? true : { $ne: true } };
 }
 
 const LAST_ADMIN_ERROR = 'At least one active administrator must remain. Promote another user to admin first.';
 const CHANGED_ERROR = 'This account was changed by someone else in the meantime. Reload and try again.';
 
+async function changedOrGone(collection: UsersCollection, id: string): Promise<NextResponse> {
+  return (await collection.findOne({ id }))
+    ? NextResponse.json({ error: CHANGED_ERROR }, { status: 409 })
+    : NextResponse.json({ error: 'User not found' }, { status: 404 });
+}
+
 /**
- * Take admin rights away from `id` without ever leaving the system with no active
- * admin, even when two admins demote, deactivate or delete each other at once.
+ * Called after a write that took admin rights away from `id`: if that left no active
+ * admin, undo it and refuse.
  *
- * The update applies only if the account is still the active admin that was read,
- * then the remaining active admins are counted and the update is reverted if none are
- * left. Whatever the interleaving, the last request to finish its count sees the
- * others' updates, so the invariant holds once all have finished. (A transaction would
- * not be enough: two snapshot transactions demoting different admins do not conflict.)
- * `revert` restores the fields as read, and applies only while our write is the latest.
+ * Such writes are made only against the state that was read (asRead), so no removal
+ * is decided on a stale read, and each is counted after it lands. Whatever the
+ * interleaving of concurrent removals, the last to count sees the others' writes, so
+ * once all have finished an active admin remains. (A transaction would not be enough:
+ * two snapshot transactions demoting different admins do not conflict.)
+ *
+ * The undo restores role and is_active only while they still hold the values written:
+ * a later change to them has its own checks and stands. Unrelated writes in between,
+ * such as a sign-in updating last_login, do not stop it.
  */
-async function revokeAdmin(
+async function undoIfNoAdminLeft(
   collection: UsersCollection,
   id: string,
-  changes: Record<string, unknown> & { updated_at: string },
-  revert: Record<string, unknown>
+  written: Record<string, unknown>,
+  before: Record<string, unknown>
 ): Promise<NextResponse | null> {
-  const result = await collection.updateOne({ id, ...ACTIVE_ADMIN }, { $set: changes });
-  if (result.matchedCount === 0) {
-    return (await collection.findOne({ id }))
-      ? NextResponse.json({ error: CHANGED_ERROR }, { status: 409 })
-      : NextResponse.json({ error: 'User not found' }, { status: 404 });
+  if (await collection.countDocuments(ACTIVE_ADMIN) > 0) return null;
+  const fields = ['role', 'is_active'].filter(field => written[field] !== undefined);
+  const undone = await collection.updateOne(
+    { id, ...Object.fromEntries(fields.map(field => [field, written[field]])) },
+    { $set: { ...Object.fromEntries(fields.map(field => [field, before[field]])), updated_at: new Date().toISOString() } }
+  );
+  if (undone.matchedCount === 0 && await collection.countDocuments(ACTIVE_ADMIN) === 0) {
+    logger.error('No active administrator remains; restore one with scripts/promote-to-admin.ts', { userId: id });
   }
-  if (await collection.countDocuments(ACTIVE_ADMIN) === 0) {
-    await collection.updateOne({ id, updated_at: changes.updated_at }, { $set: revert });
-    return NextResponse.json({ error: LAST_ADMIN_ERROR }, { status: 409 });
-  }
-  return null;
+  return NextResponse.json({ error: LAST_ADMIN_ERROR }, { status: 409 });
 }
 
 /**
@@ -201,30 +222,21 @@ export async function PATCH(
       );
     }
 
-    const removesAdmin = isActiveAdmin(before) && (
-      (updateFields.role !== undefined && updateFields.role !== UserRole.ADMIN) ||
-      updateFields.is_active === false
+    // A write that could take admin rights away is made only while the account is as
+    // read, so the check below cannot be passed on a stale read (e.g. the account was
+    // promoted to admin in the meantime). Other writes need no such condition.
+    const guarded = mayRemoveAdmin(updateFields);
+    const result = await collection.updateOne(
+      guarded ? asRead(id, before) : { id: id },
+      { $set: updateFields }
     );
+    if (result.matchedCount === 0) {
+      return changedOrGone(collection, id);
+    }
 
-    if (removesAdmin) {
-      const revert: Record<string, unknown> = { updated_at: before.updated_at };
-      for (const field of Object.keys(updateFields)) {
-        if (field !== 'updated_at') revert[field] = before[field] ?? (field === 'is_active' ? true : null);
-      }
-      const refused = await revokeAdmin(collection, id, updateFields, revert);
+    if (guarded && isActiveAdmin(before)) {
+      const refused = await undoIfNoAdminLeft(collection, id, updateFields, before);
       if (refused) return refused;
-    } else {
-      const result = await collection.updateOne(
-        { id: id },
-        { $set: updateFields }
-      );
-      
-      if (result.matchedCount === 0) {
-        return NextResponse.json(
-          { error: 'User not found' },
-          { status: 404 }
-        );
-      }
     }
     
     logger.info('User updated', { userId: id, actorId: authResult.user.id, updates: updateFields });
@@ -299,25 +311,29 @@ export async function DELETE(
     }
     
     const target = await collection.findOne({ id: id });
-    if (target && isActiveAdmin(target)) {
-      // Deactivate first, guarded like a demotion, so the last active admin cannot be
-      // deleted - not even by two admins deleting each other at the same moment.
-      const refused = await revokeAdmin(
-        collection,
-        id,
-        { is_active: false, updated_at: new Date().toISOString() },
-        { is_active: target.is_active ?? true, updated_at: target.updated_at }
-      );
-      if (refused) return refused;
-    }
-
-    const result = target ? await collection.deleteOne({ id: id }) : { deletedCount: 0 };
-    
-    if (!target || result.deletedCount === 0) {
+    if (!target) {
       return NextResponse.json(
         { error: 'User not found' },
         { status: 404 }
       );
+    }
+
+    // Delete only the account as read. An active admin is first deactivated, the guarded
+    // way, so that deleting cannot remove the last one - not even two admins deleting
+    // each other at the same moment.
+    let deletable: Record<string, unknown> = asRead(id, target);
+    if (isActiveAdmin(target)) {
+      const deactivation = { is_active: false, updated_at: new Date().toISOString() };
+      const deactivated = await collection.updateOne(asRead(id, target), { $set: deactivation });
+      if (deactivated.matchedCount === 0) return changedOrGone(collection, id);
+      const refused = await undoIfNoAdminLeft(collection, id, deactivation, target);
+      if (refused) return refused;
+      deletable = { id, role: UserRole.ADMIN, is_active: false };
+    }
+
+    const result = await collection.deleteOne(deletable);
+    if (result.deletedCount === 0) {
+      return changedOrGone(collection, id);
     }
     
     logger.info('User deleted', { userId: id, actorId: authResult.user.id });

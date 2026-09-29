@@ -33,6 +33,16 @@ export interface IndexDefinition {
   };
 }
 
+/**
+ * Unique per owner and slot: makes the per-user saved-filter cap hold under concurrent
+ * requests (lib/db.ts insertSavedFilter, which also creates it on first use). Filters
+ * saved before slots existed carry none and are exempt.
+ */
+export const SAVED_FILTER_SLOT_INDEX = {
+  key: { owner_id: 1, slot: 1 } as Record<string, 1>,
+  options: { name: 'saved_filters_owner_slot_idx', unique: true, partialFilterExpression: { slot: { $exists: true } } },
+};
+
 const unique = { unique: true } as const;
 const idIndex = (collection: string): IndexDefinition => ({ collection, name: 'idx_id', key: { id: 1 }, options: unique });
 
@@ -75,6 +85,12 @@ export const DATABASE_INDEXES: ReadonlyArray<IndexDefinition> = [
 
   idIndex(COLLECTIONS.SAVED_FILTERS),
   { collection: COLLECTIONS.SAVED_FILTERS, name: 'saved_filters_owner_idx', key: { owner_id: 1, created_at: -1 } },
+  {
+    collection: COLLECTIONS.SAVED_FILTERS,
+    name: SAVED_FILTER_SLOT_INDEX.options.name,
+    key: SAVED_FILTER_SLOT_INDEX.key,
+    options: { unique: true, partialFilterExpression: SAVED_FILTER_SLOT_INDEX.options.partialFilterExpression },
+  },
 
   idIndex(COLLECTIONS.USERS),
   { collection: COLLECTIONS.USERS, name: 'idx_email', key: { email: 1 }, options: unique },

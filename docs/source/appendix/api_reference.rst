@@ -43,10 +43,10 @@ window, and each endpoint compares that shared count with its own limit.
      - Shared counter
    * - ``GET /api/catalogues``
      - 120 per minute
-     - read (with ``GET /api/faults/nearby``)
+     - read
    * - ``GET /api/faults/nearby``
-     - 30 per minute
-     - read (with ``GET /api/catalogues``)
+     - 30 per minute per signed-in user
+     - its own counter, keyed by user rather than address
    * - ``POST /api/catalogues``
      - 30 per minute
      - api (with ``GET /api/events/search``)
@@ -59,10 +59,23 @@ window, and each endpoint compares that shared count with its own limit.
      - auth (all four)
 
 Credential sign-in has its own limiter, backed by MongoDB so that it is shared across
-server instances: 10 failed attempts per account and client, and 50 per client, in a
-15-minute window. Above 100 failed attempts on one account in a window, only clients
-that have previously signed in to that account (or completed a password reset) may
-continue. The limits above are held in memory by each server instance. Endpoints not
+server instances, and checked before the account is looked up. Clients are keyed by
+address (IPv6 grouped by /64) and accounts by normalised email; successful sign-ins
+never count.
+
+- A browser without a known-device cookie for the account may make 10 failed attempts
+  per account, and 50 across all accounts, in each 15-minute window. After 100
+  consecutive failed attempts on an account from such browsers, further attempts from
+  them are refused (``AccountProtected``) until any successful sign-in, or for 24 hours
+  after the last counted failure.
+- A browser that has signed in to the account, or completed a password reset for it,
+  holds a known-device cookie (httpOnly, 90 days, signed with ``NEXTAUTH_SECRET``). It
+  may make 10 failed attempts per window and is not affected by the account-wide limit,
+  so the account owner cannot be locked out from their own browsers.
+- Password-reset emails are limited to 3 per account per hour; the 3 newest unused
+  links stay valid.
+
+The other limits above are held in memory by each server instance. Endpoints not
 listed have no application-level rate limit; apply one at the reverse proxy if needed.
 
 When a limit is exceeded, the API returns ``429 Too Many Requests`` with these headers:
@@ -1066,7 +1079,9 @@ for the global search box.
      - Maximum results, default 20. Must be a whole number >= 1 (``400`` otherwise);
        values above 100 are silently capped at 100
 
-**Search token grammar** (space-separated ``field:value`` terms within ``q``):
+**Search token grammar** (space-separated ``field:value`` terms within ``q``; a term whose
+prefix is not one of the fields below, such as ``GeoNet:2016p858000`` or
+``smi:nz.org.geonet/2016p858000``, is searched as plain text):
 
 .. list-table::
    :header-rows: 1
@@ -1671,7 +1686,10 @@ join it (already in the group from the same catalogue, or too far from the rest)
 closest match was still kept, but a reviewer should confirm it.
 
 **Error Responses**:
-- ``400 Bad Request``: Request failed schema validation, or fewer than 2 source catalogues
+
+- ``400 Bad Request``: Request failed schema validation (including a source catalogue
+  listed more than once, or a Custom Order ``priorityOrder`` entry that is unknown or
+  repeated), or fewer than 2 source catalogues
 - ``500 Internal Server Error``: A source catalogue was not found, or the preview failed
 
 
@@ -1800,9 +1818,17 @@ is not possible — only the current data can be exported, tagged with whatever 
 it currently carries.
 
 **Error Responses**:
+
 - ``400 Bad Request``: Invalid ``format``, invalid ``decluster``, or an invalid filter parameter
 - ``404 Not Found``: Catalogue does not exist
+- ``409 Conflict``: The catalogue is being imported (``processing``) or deleted, or it
+  changed while the export was being read; retry once it is stable, so that every export
+  holds exactly one catalogue version
 - ``500 Internal Server Error``: Export failed
+
+QuakeML exports normalise stored values the schema cannot represent (enumerations are
+matched case-insensitively, over-length strings are shortened, impossible dates are
+dropped); anything dropped or shortened is recorded in a comment on the owning object.
 
 
 

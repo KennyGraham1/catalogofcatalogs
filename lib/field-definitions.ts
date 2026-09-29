@@ -1151,6 +1151,40 @@ export interface FieldMappingOptions {
 /** Longest source pattern (and header) a Settings rule is evaluated on. */
 export const MAX_MAPPING_PATTERN_LENGTH = 200;
 
+/** Longest header a regular-expression rule is run against (bounds any backtracking). */
+export const MAX_REGEX_HEADER_LENGTH = 64;
+
+/**
+ * True when a regular expression repeats a group that itself repeats or alternates
+ * ('(\w+_?)*', '(a+)+', '(a|aa)*'): the shape that backtracks exponentially on a near
+ * miss. Settings rules run against every header of every upload in the browser, so such
+ * a pattern is refused.
+ */
+export function hasNestedQuantifier(pattern: string): boolean {
+  // One flag per open group: does it contain a repetition or an alternation?
+  const groups: boolean[] = [];
+  let inClass = false;
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === '\\') { i += 1; continue; }
+    if (inClass) { if (ch === ']') inClass = false; continue; }
+    if (ch === '[') { inClass = true; continue; }
+    if (ch === '(') { groups.push(false); continue; }
+    if (ch === ')') {
+      const inner = groups.pop() ?? false;
+      const next = pattern[i + 1];
+      const repeated = next === '*' || next === '+' || next === '{';
+      if (inner && repeated) return true;
+      if (groups.length > 0 && (inner || repeated)) groups[groups.length - 1] = true;
+      continue;
+    }
+    if ((ch === '*' || ch === '+' || ch === '{' || ch === '|') && groups.length > 0) {
+      groups[groups.length - 1] = true;
+    }
+  }
+  return false;
+}
+
 /**
  * Check if a source field matches a custom mapping pattern. A malformed rule (missing or
  * non-string pattern, invalid or oversized regex) matches nothing instead of throwing:
@@ -1163,6 +1197,9 @@ function matchesCustomMapping(sourceField: string, mapping: CustomFieldMapping):
   }
   if (typeof sourceField !== 'string' || sourceField.length > MAX_MAPPING_PATTERN_LENGTH) return false;
   if (mapping.isRegex) {
+    // A saved pattern that could backtrack exponentially is never run, and no pattern
+    // runs on an overlong header, so a rule cannot freeze the upload tab.
+    if (sourceField.length > MAX_REGEX_HEADER_LENGTH || hasNestedQuantifier(pattern)) return false;
     try {
       const regex = new RegExp(pattern, 'i');
       return regex.test(sourceField);
@@ -1451,7 +1488,13 @@ const HEADER_UNIT_KIND: Record<string, keyof typeof HEADER_UNITS> = {
   time: 'zone',
 };
 
-const resolvedHeaderCache = new Map<string, string | null>();
+/**
+ * Resolved names, least recently used first. Bounded, and unresolved names are not kept:
+ * a JSON upload whose records carry unique keys resolves hundreds of thousands of names,
+ * and a process-wide cache of all of them was never released.
+ */
+const RESOLVED_HEADER_CACHE_LIMIT = 1000;
+const resolvedHeaderCache = new Map<string, string>();
 
 /**
  * The field the parser maps a column or key name to, resolved exactly as lib/parsers.ts
@@ -1465,15 +1508,22 @@ const resolvedHeaderCache = new Map<string, string | null>();
 export function resolveHeaderAlias(name: string): string | undefined {
   if (typeof name !== 'string' || name === '') return undefined;
   const cached = resolvedHeaderCache.get(name);
-  if (cached !== undefined) return cached ?? undefined;
+  if (cached !== undefined) {
+    resolvedHeaderCache.delete(name);
+    resolvedHeaderCache.set(name, cached);
+    return cached;
+  }
 
   const lookup = getParserAliasLookup();
+  // A name longer than any field name or alias is only looked up as written; the
+  // normalised and bracketed-unit forms are not worked out for it.
+  const interpret = name.length <= MAX_REGEX_HEADER_LENGTH;
   const byName = (candidate: string): string | null =>
     lookup.get(candidate) ?? lookup.get(candidate.toLowerCase()) ??
-    getNormalizedParserAliasLookup().get(normalizeFieldName(candidate)) ?? null;
+    (interpret ? getNormalizedParserAliasLookup().get(normalizeFieldName(candidate)) : undefined) ?? null;
 
   let target = byName(name);
-  if (!target) {
+  if (!target && interpret) {
     const annotated = name.match(/^(.*?\S)\s*[([]\s*([^()[\]]*?)\s*[)\]]\s*$/);
     if (annotated) {
       const base = byName(annotated[1]);
@@ -1481,7 +1531,12 @@ export function resolveHeaderAlias(name: string): string | undefined {
       if (base && kind && HEADER_UNITS[kind].test(annotated[2])) target = base;
     }
   }
-  resolvedHeaderCache.set(name, target);
+  if (target) {
+    resolvedHeaderCache.set(name, target);
+    if (resolvedHeaderCache.size > RESOLVED_HEADER_CACHE_LIMIT) {
+      resolvedHeaderCache.delete(resolvedHeaderCache.keys().next().value as string);
+    }
+  }
   return target ?? undefined;
 }
 
@@ -1540,8 +1595,74 @@ export function resolveParserFieldSources(
  */
 export function parserMagnitudeCandidates(fields: string[]): string[] {
   const named = fields.filter(field => MW_MAGNITUDE_KEYS.includes(field) || ML_MAGNITUDE_KEYS.includes(field));
-  if (named.length === 0) return [];
-  return [...named, ...fields.filter(field => GENERIC_MAGNITUDE_KEYS.includes(field))];
+  const generic = named.length > 0 ? fields.filter(field => GENERIC_MAGNITUDE_KEYS.includes(field)) : [];
+  // Every other scale-named column (mb, Ms, Md ...) is kept as a further measurement,
+  // as lib/parsers.ts otherMagnitudeScaleColumns does: not a column the alias table sends
+  // elsewhere, and not 'mn'/'ms' (minute, millisecond) in a file with split date parts.
+  const lower = new Set(fields.map(field => field.toLowerCase()));
+  const hasDateParts = ['year', 'yr', 'yyyy', 'yy'].some(name => lower.has(name)) &&
+    ['day', 'dy', 'dd', 'dom'].some(name => lower.has(name));
+  const otherScales = fields.filter(field => {
+    if (named.includes(field) || generic.includes(field)) return false;
+    if (hasDateParts && ['mn', 'ms'].includes(field.toLowerCase())) return false;
+    if (!magnitudeScaleFromColumnName(field)) return false;
+    const target = resolveHeaderAlias(field);
+    return target === undefined || target === 'magnitude';
+  });
+  return [...named, ...generic, ...otherScales];
+}
+
+export interface ParserColumnRoles {
+  /** Column -> the field the parser filled from it. */
+  mapped: Record<string, string>;
+  /** Columns the parser combined into one field ('date+time' -> time). */
+  assembled: Record<string, string>;
+  /** Scale-named or generic magnitude columns the parser kept as alternatives. */
+  alternatives: string[];
+  /** Every field the parser filled: from one column, derived from one, or assembled. */
+  targets: string[];
+  /** Every column the parser read. An automatic mapping never touches these. */
+  consumed: string[];
+}
+
+/**
+ * What the parser did with each column of one file, for display and for keeping
+ * automatic mappings away from anything the parser already handled. A field it filled
+ * in any way (from one column, derived like the Mw scale, or assembled like 'date+time')
+ * is claimed; a column it read (for any field, as a part of an assembled field, or as an
+ * alternative magnitude) is consumed.
+ */
+export function describeParserColumns(fields: string[], parserSources: Record<string, string>): ParserColumnRoles {
+  const mapped = effectiveColumnMapping(fields, parserSources, {});
+  const findColumn = (name: string) => fields.find(field => field === name) ??
+    fields.find(field => field.toLowerCase() === name.toLowerCase());
+
+  const assembled: Record<string, string> = {};
+  for (const [target, source] of Object.entries(parserSources)) {
+    if (typeof source !== 'string' || !source.includes('+')) continue;
+    for (const part of source.split('+')) {
+      const column = findColumn(part.trim());
+      if (column && !(column in mapped)) assembled[column] = target;
+    }
+  }
+
+  // Next to a scale-named magnitude column, the file's type column types the rows whose
+  // magnitude is the generic one: the parser reads it, so it is shown as mapped.
+  if (parserSources.magnitude_type && parserSources.magnitude_type === parserSources.magnitude) {
+    const typeColumn = aliasColumnFor(fields, 'magnitude_type');
+    if (typeColumn && !(typeColumn in mapped) && !(typeColumn in assembled)) mapped[typeColumn] = 'magnitude_type';
+  }
+
+  const alternatives = parserMagnitudeCandidates(fields).filter(field => !(field in mapped));
+  const targets = Object.keys(parserSources);
+  const claimed = new Set(targets);
+  const consumed = new Set<string>([...Object.keys(mapped), ...Object.keys(assembled), ...alternatives]);
+  for (const field of fields) {
+    const target = resolveHeaderAlias(field);
+    if (target && claimed.has(target)) consumed.add(field);
+  }
+
+  return { mapped, assembled, alternatives, targets, consumed: Array.from(consumed) };
 }
 
 /**
@@ -1688,6 +1809,14 @@ const savedMappingEntrySchema = z.object({
     new RegExp(mapping.sourcePattern, 'i');
   } catch {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['sourcePattern'], message: 'is not a valid regular expression' });
+    return;
+  }
+  if (hasNestedQuantifier(mapping.sourcePattern)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['sourcePattern'],
+      message: 'repeats a repeated or alternating group, which can take exponential time; simplify the pattern',
+    });
   }
 });
 
@@ -1788,7 +1917,8 @@ export function findConflictingMappingRules(config: {
 
 /**
  * Rules that send a column the parser already resolves through its built-in aliases to
- * a different field. They are valid (an explicit rule wins), but worth knowing about.
+ * a different field. They are valid, but have no effect on such a column: the upload
+ * keeps the parser's mapping for every column it already read.
  */
 export function findBuiltInAliasOverrides(
   rules: Array<{ sourcePattern?: unknown; targetField?: unknown; isRegex?: unknown }>,

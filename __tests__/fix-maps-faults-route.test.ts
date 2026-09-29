@@ -140,7 +140,8 @@ describe('access control', () => {
     expect(limited.headers.get('Retry-After')).toBeTruthy();
     expect(upstream).toHaveLength(before);
 
-    // Another client still has its own budget.
+    // The budget is per signed-in user, so another viewer still has their own.
+    (requireViewer as jest.Mock).mockImplementationOnce(async () => ({ session: {}, user: { id: 'another-viewer', role: 'viewer' } }));
     expect((await request('203.0.113.78')).status).toBe(200);
   });
 });

@@ -333,8 +333,19 @@ Security Best Practices
 2. **Use a strong secret** - Generate ``NEXTAUTH_SECRET`` with ``openssl rand -base64 32``
 3. **Change default passwords** - Never use default admin credentials in production
 4. **Implement rate limiting** - Already configured for API routes, including
-   dedicated credential-login throttling (10 failed attempts per
-   account+client and 50 per client within a 15-minute window)
+   dedicated credential-login throttling: 10 failed attempts per
+   account+client and 50 per client within a 15-minute window, clients keyed
+   by address (an IPv6 /64 counts as one client). Separately, an account
+   that has had 100 *consecutive* failed attempts from browsers with no
+   known-device cookie for it is refused outright ("AccountProtected") until
+   one succeeds or 24 hours pass with no further failure. A browser that has
+   signed in to the account before (or completed a password reset for it)
+   carries a known-device cookie (httpOnly, 90 days, HMAC-signed with
+   ``NEXTAUTH_SECRET``) and is limited to 10 failed attempts per 15 minutes
+   on its own, exempt from the other limits, so failures elsewhere can never
+   lock the owner out of their own browsers. Password-reset requests are
+   capped at 3 emails per account per hour, and only the 3 most recently
+   issued reset links stay valid.
 5. **Regular security audits** - Review user permissions and access logs
 6. **Password requirements** - Minimum 8 characters (enforced in registration)
 

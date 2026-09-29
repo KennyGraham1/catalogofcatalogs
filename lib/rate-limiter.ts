@@ -267,6 +267,54 @@ export function getClientIp(request: Request): string {
   return resolveClientIp(request) ?? 'unknown';
 }
 
+/** The eight 16-bit groups of an IPv6 address, or null if `address` is not one. */
+function ipv6Groups(address: string): number[] | null {
+  let value = address.trim().toLowerCase();
+  if (value.startsWith('[') && value.endsWith(']')) value = value.slice(1, -1);
+  value = value.split('%')[0]; // zone id
+  if (!value.includes(':')) return null;
+
+  // An embedded IPv4 tail (e.g. ::ffff:192.0.2.1) supplies the last two groups.
+  const tail: number[] = [];
+  const v4 = /^(.*:)(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(value);
+  if (v4) {
+    const bytes = v4.slice(2).map(Number);
+    if (bytes.some(byte => byte > 255)) return null;
+    tail.push((bytes[0] << 8) | bytes[1], (bytes[2] << 8) | bytes[3]);
+    value = v4[1].endsWith('::') ? v4[1] : v4[1].slice(0, -1);
+  }
+
+  const halves = value.split('::');
+  if (halves.length > 2) return null;
+  const parts = (half: string) => (half === '' ? [] : half.split(':'));
+  const head = parts(halves[0]);
+  const rest = halves.length === 2 ? parts(halves[1]) : [];
+  if ([...head, ...rest].some(group => !/^[0-9a-f]{1,4}$/.test(group))) return null;
+  const elided = 8 - tail.length - head.length - rest.length;
+  if (halves.length === 2 ? elided < 1 : elided !== 0) return null;
+  return [
+    ...head.map(group => parseInt(group, 16)),
+    ...new Array<number>(halves.length === 2 ? elided : 0).fill(0),
+    ...rest.map(group => parseInt(group, 16)),
+    ...tail,
+  ];
+}
+
+/**
+ * Rate-limit key for a client address. An IPv6 address counts by its /64 prefix: a
+ * subscriber or LAN is normally given a whole /64, so keyed per address a single client
+ * could rotate through as many budgets as it liked. IPv4-mapped addresses count as the
+ * IPv4 address; anything else is used as it is.
+ */
+export function clientKey(address: string): string {
+  const groups = ipv6Groups(address);
+  if (!groups) return address.trim();
+  if (groups.slice(0, 5).every(group => group === 0) && groups[5] === 0xffff) {
+    return [groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff].join('.');
+  }
+  return `${groups.slice(0, 4).map(group => group.toString(16)).join(':')}::/64`;
+}
+
 /** Node-style header records (as NextAuth hands to `authorize`) as a Headers object. */
 export function toHeaders(raw: Headers | Record<string, string | string[] | undefined> = {}): Headers {
   if (raw instanceof Headers) return raw;
@@ -283,6 +331,8 @@ export function toHeaders(raw: Headers | Record<string, string | string[] | unde
  * @param request - Next.js request object
  * @param limiter - Rate limiter instance
  * @param limit - Maximum requests allowed
+ * @param key - Bucket key to count against instead of the client address (e.g. a
+ *   user id); a route with its own limit should also have its own limiter instance
  * @returns Rate limit result with headers
  *
  * @example
@@ -310,10 +360,11 @@ export function toHeaders(raw: Headers | Record<string, string | string[] | unde
 export function applyRateLimit(
   request: Request,
   limiter: ReturnType<typeof rateLimit>,
-  limit: number
+  limit: number,
+  key?: string
 ): RateLimitResult & { headers: Record<string, string> } {
-  const ip = getClientIp(request);
-  const result = limiter.check(limit, ip);
+  const token = key ?? clientKey(getClientIp(request));
+  const result = limiter.check(limit, token);
 
   // Create standard rate limit headers
   const headers: Record<string, string> = {

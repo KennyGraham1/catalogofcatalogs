@@ -31,7 +31,8 @@ export default async function RootLayout({
             <Layout nonce={nonce}>
               {children}
             </Layout>
-            <Analytics />
+            {/* The insights script is served only on Vercel; self-hosted deployments would 404. */}
+            {process.env.VERCEL ? <Analytics /> : null}
           </ErrorBoundary>
         </SessionProvider>
       </body>
