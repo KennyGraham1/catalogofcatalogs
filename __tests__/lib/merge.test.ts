@@ -579,8 +579,9 @@ describe('Weighted Location Averaging', () => {
 
 describe('Network Authority Hierarchy', () => {
   describe('getNetworkPriority', () => {
-    it('should return 999 for undefined source', () => {
-      expect(getNetworkPriority(undefined)).toBe(999);
+    it('should rank a report without a source below every unlisted network', () => {
+      // The default table's lowest entry is IGN (10); unlisted networks rank 11.
+      expect(getNetworkPriority(undefined)).toBe(12);
     });
 
     it('should return priority 1 for GeoNet (NZ authoritative)', () => {
@@ -604,9 +605,9 @@ describe('Network Authority Hierarchy', () => {
       expect(getNetworkPriority('NEIC')).toBe(4);
     });
 
-    it('should return 100 for unknown networks', () => {
-      expect(getNetworkPriority('UnknownNetwork')).toBe(100);
-      expect(getNetworkPriority('RandomSource')).toBe(100);
+    it('should rank unknown networks just below the lowest listed one', () => {
+      expect(getNetworkPriority('UnknownNetwork')).toBe(11);
+      expect(getNetworkPriority('RandomSource')).toBe(11);
     });
 
     it('should use regional priority for NZ events', () => {

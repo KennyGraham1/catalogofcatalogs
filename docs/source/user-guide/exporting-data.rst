@@ -113,7 +113,8 @@ Every CSV export has the same fixed header row, grouped below in emission order:
   reported it, before any mapping onto the platform's own controlled vocabulary
 * **Lineage and provenance** (per event): ``SourceCatalogueIDs``, ``MergeStrategy``,
   ``MergeParameters``, ``SelectedSource``, ``SelectedSourceCatalogueID``, ``QualityScore``,
-  ``QualityGrade``
+  ``QualityGrade``, ``ReviewStatus`` (``pending`` or ``resolved`` for a row that was
+  held for merge review, empty otherwise — see :ref:`review-holds`)
 * **Catalogue version:** ``CatalogueVersion`` — the catalogue's MAJOR.MINOR.PATCH version
   this row was exported from, carried on every row so it survives filtering and
   concatenating several exports
@@ -128,7 +129,7 @@ appended after ``CatalogueVersion``: ``ClusterID`` and ``IsMainshock``.
 **Source column:** for a plain (non-merged) event, ``Source`` is simply the event's own
 data source. For a merged event it is: the source (or agency) of the contributing member
 the merge selected to publish that event's solution, when one was selected; ``merged``
-when the row came from an Average-strategy merge with no single selected member; and
+when the row came from an Average- or Median-strategy merge with no single selected member; and
 otherwise the source whose agency label qualifies the row's ``SourceID`` (in the form
 ``<source>:<id>``), falling back to whichever contributing member's own stored solution
 matches the row's published hypocentre.
@@ -204,7 +205,9 @@ large catalogue does not need memory proportional to its size.
 * Per-event lineage — contributing source catalogues, merge strategy, selected source,
   quality score/grade and, when the export was declustered, the cluster tag — is recorded
   as an XML comment on the event: a ``Lineage: {...}`` JSON blob. Any event-type
-  relabelling applied to fit the QuakeML BED vocabulary is recorded in a separate comment.
+  relabelling applied to fit the QuakeML BED vocabulary is recorded in a separate comment,
+  and a merged event still awaiting merge review carries a further comment,
+  ``Merge review: pending — <reasons>`` (see :ref:`review-holds`).
 * Arrivals and moment tensors stored without their own ID get a derived, deterministic ID
   (an ``#arrival-N``-style fragment of their parent's ID, and similarly for moment
   tensors), so re-exporting the same event produces the same IDs.
@@ -544,8 +547,8 @@ Ensure exports include:
 * Uncertainty values
 * Evaluation metadata
 * Processing history
-* Lineage and provenance (source catalogues, merge strategy, quality score) for merged
-  catalogues
+* Lineage and provenance (source catalogues, merge strategy, quality score, review
+  status) for merged catalogues
 * The catalogue version and rows checksum, if you need to verify data integrity later
 
 -----------------

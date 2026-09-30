@@ -99,11 +99,41 @@ const requiredEventFieldsSchema = earthquakeEventSchema.pick({
   magnitude: true,
 });
 
+const catalogueIdRuleField = z.string().min(1).max(255).optional();
+// Each rule object says which report supplies that quantity. A 'catalogue' rule needs its
+// catalogueId; the other rules ignore it, so the transform drops it from them and the
+// config recorded on every merged row (merge_parameters) names only what was used.
+const fieldRuleWithCatalogue = <T extends [string, ...string[]]>(rules: T) =>
+  z
+    .object({ rule: z.enum(rules), catalogueId: catalogueIdRuleField })
+    .superRefine((value, ctx) => {
+      if (value.rule === 'catalogue' && !value.catalogueId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['catalogueId'],
+          message: "rule 'catalogue' requires a catalogueId",
+        });
+      }
+    })
+    .transform((value): { rule: T[number]; catalogueId?: string } => {
+      // z.enum over a generic tuple does not narrow for TypeScript; the parse has checked it.
+      const rule = value.rule as T[number];
+      return rule === 'catalogue' ? { rule, catalogueId: value.catalogueId } : { rule };
+    });
+
+export const mergeFieldRulesSchema = z.object({
+  depth: fieldRuleWithCatalogue(['strategy', 'best-constrained', 'quality', 'authority', 'newest', 'catalogue']).optional(),
+  magnitude: fieldRuleWithCatalogue(['strategy', 'type-preference', 'quality', 'authority', 'newest', 'catalogue']).optional(),
+  mechanism: fieldRuleWithCatalogue(['hierarchy', 'strategy', 'catalogue']).optional(),
+});
+
+export type MergeFieldRules = z.infer<typeof mergeFieldRulesSchema>;
+
 // Merge configuration schema
 export const mergeConfigSchema = z.object({
   timeThreshold: z.number().min(0).max(3600), // Max 1 hour
   distanceThreshold: z.number().min(0).max(1000), // Max 1000 km
-  mergeStrategy: z.enum(['priority', 'average', 'newest', 'complete', 'quality']),
+  mergeStrategy: z.enum(['priority', 'average', 'median', 'newest', 'complete', 'quality']),
   // An option name ('newest', 'geonet', 'custom', ...) or an agency name. Bounded because the
   // effective config is stored on every merged event (merge_parameters, contract C2).
   priority: z.string().max(100),
@@ -111,6 +141,14 @@ export const mergeConfigSchema = z.object({
   // order decides which record is kept; remaining ties are broken by quality. Only meaningful
   // with priority 'custom'; mergeRequestSchema checks the IDs against the sources.
   priorityOrder: z.array(z.string().min(1).max(255)).max(50).optional(),
+  // Per-field resolution rules (contract M1) layered on top of the strategy: each quantity may
+  // be taken from a differently chosen report than the epicentre. Omitted / 'strategy'
+  // ('hierarchy' for the mechanism) is exactly the strategy's own behaviour. Rule 'catalogue'
+  // names a source catalogue; mergeRequestSchema checks the id against the sources.
+  fieldRules: mergeFieldRulesSchema.optional(),
+  // 'hold' keeps a flagged group's provisional solution out of circulation until a reviewer
+  // resolves it (review_status 'pending'); 'resolve' (the default) publishes it as today.
+  onConflict: z.enum(['resolve', 'hold']).optional(),
 });
 
 export type MergeConfig = z.infer<typeof mergeConfigSchema>;
@@ -176,11 +214,27 @@ export const mergeRequestSchema = z.object({
     listed.add(id);
   });
 
+  // A field rule pinned to a catalogue must name one being merged; otherwise every group
+  // would silently fall back to the strategy and the rule would be recorded but never applied.
+  const sourceIds = listed;
+  const fieldRules = request.config.fieldRules;
+  if (fieldRules) {
+    (['depth', 'magnitude', 'mechanism'] as const).forEach((field) => {
+      const rule = fieldRules[field];
+      if (rule?.rule === 'catalogue' && rule.catalogueId && !sourceIds.has(rule.catalogueId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['config', 'fieldRules', field, 'catalogueId'],
+          message: `fieldRules.${field} names catalogue "${rule.catalogueId}", which is not one of the source catalogues`,
+        });
+      }
+    });
+  }
+
   // A Custom Order ranking must rank the catalogues being merged, each once: an unknown or
   // repeated ID would silently fall back to the quality tie-break for every group.
   const order = request.config.priorityOrder;
   if (!order) return;
-  const sourceIds = listed;
   const seen = new Set<string>();
   order.forEach((id, index) => {
     if (!sourceIds.has(id)) {

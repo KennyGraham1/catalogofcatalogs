@@ -1535,8 +1535,8 @@ Requires the Editor role or higher.
      - Match window, km. 0-1000
    * - ``mergeStrategy``
      - string
-     - One of ``quality``, ``priority``, ``newest``, ``complete``, ``average`` (see
-       below)
+     - One of ``quality``, ``priority``, ``newest``, ``complete``, ``average``,
+       ``median`` (see below)
    * - ``priority``
      - string
      - Up to 100 chars. Meaning depends on ``mergeStrategy``/context — see *Merge
@@ -1546,6 +1546,16 @@ Requires the Editor role or higher.
      - Optional. Up to 50 catalogue IDs (each 1-255 chars), highest priority first.
        Every id must be one of ``sourceCatalogues[].id``, each listed at most once.
        Used only for the "Custom Order" priority (``priority: "custom"``)
+   * - ``fieldRules``
+     - object
+     - Optional. Per-field resolution rules applied on top of the strategy:
+       ``depth``, ``magnitude`` and ``mechanism``, each an optional object
+       ``{ "rule": "...", "catalogueId": "..." }`` (see *Per-Field Rules*).
+       ``catalogueId`` (1-255 chars) is required by, and only meaningful for, the
+       ``catalogue`` rule, and must be one of ``sourceCatalogues[].id``
+   * - ``onConflict``
+     - string
+     - Optional. ``resolve`` (default) or ``hold`` (see *Conflict Handling*)
 
 ``sourceCatalogues`` takes 2-50 entries. ``exportOnly`` (optional, default ``false``):
 when ``true``, nothing is written to the database (no catalogue is created, and the
@@ -1562,6 +1572,12 @@ directly instead of a ``catalogueId``.
   source/agency name (e.g. ``"geonet"``), falling back to network authority when no
   event matches it.
 - ``"average"``: Weighted-average location, magnitude hierarchy selection, lowest-uncertainty depth.
+- ``"median"``: Component-wise median of the reports' latitudes and longitudes
+  (longitudes unwrapped around the date line first) and the median origin time (for
+  two reports, their mean); magnitude and depth as for ``"average"`` (type-preference
+  selection; best-constrained depth with its own type and uncertainty); single-agency
+  origin metadata cleared as for ``"average"``. The event's ``source`` is ``merged``
+  and no report is ``selected``.
 - ``"newest"`` (**Most Recent Solution**): keeps the solution whose reporting agency
   computed it last — QuakeML ``creationInfo.creationTime``, else the latest of a
   stored ``creation_info`` creation/modification timestamp — **not** upload time and
@@ -1572,6 +1588,70 @@ directly instead of a ``catalogueId``.
   quality ranking as the ``"quality"`` strategy. A solution its agency marked
   ``rejected`` never wins while another candidate is available.
 - ``"complete"``: Keep the event with the most populated fields.
+
+**Per-Field Rules** (``config.fieldRules``):
+
+Each rule chooses which report supplies one field, independently of which report's
+solution the strategy publishes. Omitting a rule, or ``"strategy"`` (for
+``mechanism``: ``"hierarchy"``), is exactly the strategy's own behaviour.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 16 30 54
+
+   * - Field
+     - Allowed ``rule`` values
+     - Meaning
+   * - ``depth``
+     - ``strategy``, ``best-constrained``, ``quality``, ``authority``, ``newest``,
+       ``catalogue``
+     - ``strategy``: the best-constrained depth for ``average``/``median``, else the
+       base report's own depth. ``best-constrained``: the freely-solved depth with the
+       smallest uncertainty (fixed only when none solved for depth). ``quality`` /
+       ``authority`` / ``newest``: the depth of the report ranked first by quality
+       score / network authority / most recent solution. ``catalogue``: the named
+       catalogue's report. The published depth always carries its own
+       ``depth_uncertainty`` and ``depth_type``; a report with no depth cannot supply
+       it (falls back to ``strategy``)
+   * - ``magnitude``
+     - ``strategy``, ``type-preference``, ``quality``, ``authority``, ``newest``,
+       ``catalogue``
+     - ``strategy``: type-preference selection for ``average``/``median``, else the
+       base report's own magnitude. ``type-preference``: the size-dependent type
+       preference over the whole group. The others pick a report as for ``depth`` and
+       publish its own preferred magnitude (value, magnitude metadata,
+       ``preferred_magnitude_id``)
+   * - ``mechanism``
+     - ``hierarchy``, ``strategy``, ``catalogue``
+     - ``hierarchy``: every report's mechanisms united, preferred one by authority
+       hierarchy. ``strategy``: only the base report's own mechanisms and preferred
+       ID. ``catalogue``: only the named catalogue's report's mechanisms. A chosen
+       report with no mechanism falls back to ``hierarchy``
+
+A ``catalogue`` rule whose catalogue has no report in a group falls back to
+``strategy`` (``hierarchy`` for ``mechanism``). Reports superseded by a newer vintage
+of the same agency's solution (see *Preview Merge*) take no part in any rule. The
+report a rule chose is flagged in the stored ``source_events`` entry —
+``depthSelected``, ``magnitudeSelected`` or ``mechanismSelected`` — and the rules are
+recorded in ``merge_parameters.fieldRules``.
+
+**Conflict Handling** (``config.onConflict``):
+
+- ``"resolve"`` (default): every duplicate group is resolved by the strategy.
+- ``"hold"``: a group the preview flags (``isSuspicious``: regrouped after failed
+  validation, ambiguous association, a failed validation gate, a magnitude-consistency
+  reason or a depth-range warning) is still written with the strategy's provisional
+  solution, but with ``review_status: "pending"`` and ``review_reasons`` set to the
+  group's ``validationWarnings``. Every other row carries ``review_status: null``.
+  Held rows are resolved through the *Review Held Events* endpoints below.
+
+Every merged event stores five review columns — ``review_status`` (``pending``,
+``resolved`` or ``null``), ``review_reasons`` (array of strings, or ``null``),
+``reviewed_by``, ``reviewed_at`` (ISO 8601 UTC) and ``review_choice`` (``keep`` or
+``report:<index into source_events>``) — ``null`` unless the row was held.
+``merge_parameters`` also records ``onConflict`` and ``authority``: ``"default"`` for
+the built-in network-authority table or ``"custom@<updatedAt>"`` for a table saved via
+*Merge Authority Settings*.
 
 **Response**: ``200 OK``
 
@@ -1592,7 +1672,11 @@ directly instead of a ``catalogueId``.
    carries an ``events`` array (the full merged event records, not persisted). Each
    stored or exported event's ``source_events`` provenance array marks the report the
    merge published with ``"selected": true`` on that entry; an averaged event (the
-   ``"average"`` strategy) selects no single report, so none of its entries are marked.
+   ``"average"`` or ``"median"`` strategy) selects no single report, so none of its
+   entries are marked. An entry may also carry ``"superseded": true`` (an older
+   vintage of the same agency's solution, kept for provenance only) and
+   ``"depthSelected"``, ``"magnitudeSelected"`` or ``"mechanismSelected"`` on the
+   report whose depth, magnitude or focal mechanism was published.
 
 **Error Responses**:
 
@@ -1604,7 +1688,9 @@ directly instead of a ``catalogueId``.
      - Meaning
    * - 400
      - Request failed schema validation (``code: "VALIDATION_ERROR"``, ``details``: an
-       array of ``"path: message"`` strings); fewer than 2 source catalogues
+       array of ``"path: message"`` strings — including a ``fieldRules`` ``catalogue``
+       rule without a ``catalogueId``, or one naming a catalogue outside
+       ``sourceCatalogues``); fewer than 2 source catalogues
        (``INSUFFICIENT_CATALOGUES``); or an empty catalogue name (``MISSING_NAME``)
    * - 409
      - A source catalogue cannot be written to in its current state
@@ -1658,7 +1744,10 @@ only ``sourceCatalogues`` and ``config`` affect the result.
          ],
          "selectedEventIndex": 0,
          "isSuspicious": false,
-         "validationWarnings": []
+         "validationWarnings": [],
+         "heldForReview": false,
+         "supersededEventIndexes": [],
+         "separated": false
        }
      ],
      "statistics": {
@@ -1666,7 +1755,10 @@ only ``sourceCatalogues`` and ``config`` affect the result.
        "totalEventsAfter": 17250,
        "duplicateGroupsCount": 1423,
        "duplicatesRemoved": 1423,
-       "suspiciousGroupsCount": 12
+       "suspiciousGroupsCount": 12,
+       "heldForReviewCount": 0,
+       "supersededReportsCount": 3,
+       "separatedReportsCount": 5
      },
      "catalogueColors": {
        "550e8400-e29b-41d4-a716-446655440000": "#ef4444",
@@ -1676,8 +1768,21 @@ only ``sourceCatalogues`` and ``config`` affect the result.
 
 ``events`` in each group is every matched report, in match order (not deduplicated).
 ``selectedEventIndex`` is the index, within that group's ``events``, of the report the
-merge would publish — ``-1`` for a group the ``"average"`` strategy would resolve to an
-averaged epicentre, since no single report is "selected". ``isSuspicious`` and
+merge would publish — ``-1`` for a group the ``"average"`` or ``"median"`` strategy
+would resolve to a computed epicentre, since no single report is "selected".
+``supersededEventIndexes`` lists the indexes of reports that are older vintages of the
+same agency's solution as another report in the group (they are kept in the group's
+lineage but take no part in selection); ``statistics.supersededReportsCount`` totals
+them. Two reports of one agency carrying *different* agency event identifiers are a
+validation failure (warning ``Two different <agency> events in one group``) and are
+split like any other failed group. A report that such a split leaves on its own is
+returned as a one-report group with ``separated: true`` (``isSuspicious`` stays
+``false``: it is not a merge) and a warning giving the reason the group failed;
+``statistics.separatedReportsCount`` totals them. ``heldForReview`` is ``true`` only when
+the request has ``onConflict: "hold"`` and the group is flagged or separated;
+``statistics.heldForReviewCount``
+totals such groups and equals the number of ``review_status: "pending"`` rows an actual
+merge with the same request would write. ``isSuspicious`` and
 ``validationWarnings`` flag a group for reviewer attention; the warnings include large
 magnitude disagreement or depth range within the group, a cluster that was split
 because it failed consistency validation, and **ambiguous association** — a report in
@@ -1691,6 +1796,197 @@ closest match was still kept, but a reviewer should confirm it.
   listed more than once, or a Custom Order ``priorityOrder`` entry that is unknown or
   repeated), or fewer than 2 source catalogues
 - ``500 Internal Server Error``: A source catalogue was not found, or the preview failed
+
+
+
+Review Held Events
+^^^^^^^^^^^^^^^^^^
+
+
+List the merged events of a catalogue that were held for review (``onConflict:
+"hold"``), or already resolved.
+
+**Endpoint**: ``GET /api/catalogues/{id}/review``
+
+Requires the Viewer role or higher.
+
+**Query Parameters**:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 15 65
+
+   * - Parameter
+     - Type
+     - Description
+   * - ``status``
+     - string
+     - ``pending`` or ``resolved``
+   * - ``limit``
+     - integer
+     - Page size (default 50)
+   * - ``after``
+     - string
+     - Keyset cursor from a previous response's ``nextCursor``
+
+**Response**: ``200 OK``
+
+.. code-block:: json
+
+   {
+     "events": [
+       {
+         "id": "evt-001",
+         "time": "2024-10-24T12:34:56.789Z",
+         "latitude": -41.2865,
+         "longitude": 174.7762,
+         "depth": 33.0,
+         "magnitude": 5.2,
+         "magnitude_type": "ML",
+         "review_status": "pending",
+         "review_reasons": ["Magnitude spread 1.1 exceeds tolerance 0.8"],
+         "reviewed_by": null,
+         "reviewed_at": null,
+         "review_choice": null,
+         "merge_strategy": "quality",
+         "source_events": [
+           { "catalogueId": "550e8400-e29b-41d4-a716-446655440000", "source": "geonet", "selected": true, "originalData": {} },
+           { "catalogueId": "660e8400-e29b-41d4-a716-446655440001", "source": "usgs", "originalData": {} }
+         ]
+       }
+     ],
+     "nextCursor": "2024-10-24T12:34:56.789Z|evt-001",
+     "pendingCount": 12,
+     "resolvedCount": 3
+   }
+
+Events are ordered by time, then id; ``source_events`` is returned parsed (not as a
+JSON string). ``nextCursor`` is ``null`` on the last page.
+
+**Error Responses**:
+
+- ``404 Not Found``: Catalogue does not exist
+
+Resolve a held event by publishing one of its contributing reports or keeping the
+provisional solution.
+
+**Endpoint**: ``POST /api/catalogues/{id}/review/{eventId}``
+
+Requires the Editor role or higher.
+
+**Request Body**:
+
+.. code-block:: json
+
+   { "choice": "keep" }
+
+or
+
+.. code-block:: json
+
+   { "choice": { "report": 1 } }
+
+``report`` is an index into the event's ``source_events``. With ``"keep"`` the row is
+left as the strategy produced it (``review_choice: "keep"``, catalogue version PATCH
+bump). With ``{ "report": i }`` report *i*'s solution is published wholesale — its
+time, latitude, longitude, depth and magnitude with all of their metadata, focal
+mechanisms per the merge's stored ``mechanism`` rule — the ``source_events`` flags are
+rewritten (that report becomes ``selected`` and supplies the depth and magnitude;
+``superseded`` flags are kept), quality score and grade are recomputed and
+``review_choice`` becomes ``report:<i>``; the catalogue version gets a MAJOR bump when
+the published time, latitude, longitude, depth or magnitude changed, else PATCH. In
+both cases ``review_status`` becomes ``resolved`` with ``reviewed_by`` and
+``reviewed_at`` set, and the action is audit-logged as ``merge.review``.
+
+**Response**: ``200 OK``
+
+.. code-block:: json
+
+   {
+     "event": { "id": "evt-001", "review_status": "resolved", "review_choice": "report:1" },
+     "pendingCount": 11
+   }
+
+``event`` is the full updated merged event.
+
+**Error Responses**:
+
+- ``400 Bad Request``: Malformed body, a ``report`` index outside ``source_events``,
+  or a report flagged ``superseded``
+- ``404 Not Found``: Catalogue or event does not exist
+- ``409 Conflict``: The event is not ``pending``
+
+
+
+Merge Authority Settings
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+The network-authority table used by the merge engine (Priority-Based fallback,
+Quality-Based tie-breaks and the ``authority`` field rule): a global hierarchy plus
+regional overrides. A merge loads the table once when it starts and records
+``authority: "default"`` or ``"custom@<updatedAt>"`` in each event's
+``merge_parameters``.
+
+**Endpoint**: ``GET /api/settings/merge-authority``
+
+Requires the Viewer role or higher. Returns the effective table: the saved custom
+table, or the built-in default when none is saved (or the saved one is invalid).
+
+**Response**: ``200 OK``
+
+.. code-block:: json
+
+   {
+     "hierarchy": [
+       { "patterns": ["geonet", "gns"], "priority": 1, "agency": "geonet", "description": "GeoNet (NZ authoritative)", "region": "NZ" }
+     ],
+     "regions": [
+       {
+         "name": "New Zealand",
+         "bounds": { "minLat": -53, "maxLat": -28, "minLon": 165, "maxLon": -175 },
+         "hierarchy": [ { "patterns": ["geonet", "gns"], "priority": 1, "agency": "geonet" } ]
+       }
+     ],
+     "source": "default",
+     "updatedAt": null
+   }
+
+``source`` is ``default`` or ``custom``; ``updatedAt`` is the ISO 8601 time the custom
+table was last saved (``null`` for the default). A region whose ``minLon`` exceeds its
+``maxLon`` crosses the date line.
+
+**Endpoint**: ``PUT /api/settings/merge-authority``
+
+Requires the Admin role. The body is ``{ "hierarchy": [...], "regions": [...] }`` in
+the shape above (``source`` and ``updatedAt`` are ignored).
+
+**Validation rules**:
+
+- ``hierarchy``: 1-50 entries. Each entry: ``patterns`` 1-10 lower-case words (letters
+  and digits, up to 40 chars; lower-cased and de-duplicated on save), ``priority`` an
+  integer 1-1000, optional ``agency`` from the recognised set (``geonet``, ``gcmt``,
+  ``isc``, ``usgs``, ``emsc``, ``jma``, ``geofon``, ``iris``, ``ingv``, ``ign``,
+  ``bgr``), ``description`` up to 120 chars, optional ``region``
+- ``regions``: up to 20 entries. Each: ``name`` up to 60 chars, ``bounds`` with
+  latitudes in −90..90 and longitudes in −180..180, and its own ``hierarchy`` of 1-50
+  entries (``patterns``, ``priority``, optional ``agency``)
+
+**Response**: ``200 OK`` — the saved table, with ``source: "custom"`` and ``updatedAt``
+set to the save time. The change is audit-logged as ``settings.merge_authority``.
+
+**Endpoint**: ``DELETE /api/settings/merge-authority``
+
+Requires the Admin role. Deletes the custom table so that the built-in default applies
+again.
+
+**Response**: ``200 OK``
+
+**Error Responses** (all three endpoints):
+
+- ``400 Bad Request``: The ``PUT`` body failed validation (the response names the
+  offending field)
+- ``403 Forbidden``: The caller lacks the required role
 
 
 .. END MERGE API
@@ -1811,7 +2107,10 @@ Every export carries the catalogue id and version, ``version_updated_at``, the e
 timestamp (UTC), the ``X-Export-Rows-SHA256`` checksum, the filter applied (if any) and
 the declustering applied (algorithm, parameters and counts, or ``"none"``) — both in
 the response headers above and, for JSON/GeoJSON/QuakeML, embedded in the file's own
-metadata block; every CSV row also carries its ``CatalogueVersion``. The downloaded
+metadata block; every CSV row also carries its ``CatalogueVersion``. The per-event
+lineage in CSV, JSON and GeoJSON exports includes the merge review status
+(``ReviewStatus`` column in CSV; ``reviewStatus`` in the JSON/GeoJSON lineage) — empty
+(or ``null``) unless the row was held for merge review (see *Merge API*). The downloaded
 filename includes the catalogue version and, when a filter was applied, a
 ``_filtered`` suffix. There is no snapshot store: retrieving a *past* catalogue version
 is not possible — only the current data can be exported, tagged with whatever version
@@ -1829,6 +2128,10 @@ it currently carries.
 QuakeML exports normalise stored values the schema cannot represent (enumerations are
 matched case-insensitively, over-length strings are shortened, impossible dates are
 dropped); anything dropped or shortened is recorded in a comment on the owning object.
+A merged event still awaiting merge review carries an additional event-level
+``comment`` with the text ``Merge review: pending — <reasons joined by '; '>`` (just
+``Merge review: pending`` when no reason was stored); no such comment is written for
+any other event.
 
 
 

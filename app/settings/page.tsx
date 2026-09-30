@@ -7,11 +7,12 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DefaultFieldMappings } from '@/components/settings/DefaultFieldMappings';
+import { MergeAuthoritySettings } from '@/components/settings/MergeAuthoritySettings';
 import { useAuth } from '@/lib/auth/hooks';
 import { UserRole } from '@/lib/auth/types';
 import { getMagnitudeColor } from '@/lib/earthquake-utils';
 import { DepthLegendItems, MagnitudeLegendItems } from '@/components/map/MapLegend';
-import { Settings, Database, Map, Lock } from 'lucide-react';
+import { Settings, Database, Map, Lock, GitMerge } from 'lucide-react';
 
 /**
  * gc#5: this page used to offer 16 General/Visualization/Advanced controls (batch
@@ -58,7 +59,7 @@ export default function SettingsPage() {
             <Lock className="h-4 w-4" />
             <AlertTitle>View-only settings</AlertTitle>
             <AlertDescription>
-              Only administrators can change schema mapping settings. Log in with an Admin account to make updates.
+              Only administrators can change schema mapping and merge authority settings. Log in with an Admin account to make updates.
             </AlertDescription>
           </Alert>
         )}
@@ -67,6 +68,7 @@ export default function SettingsPage() {
           <TabsList>
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="schema">Schema Mapping</TabsTrigger>
+            <TabsTrigger value="merge">Merge Authority</TabsTrigger>
             <TabsTrigger value="visualization">Visualization Reference</TabsTrigger>
           </TabsList>
 
@@ -108,6 +110,24 @@ export default function SettingsPage() {
               </CardHeader>
               <CardContent>
                 <DefaultFieldMappings readOnly={isReadOnly} />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="merge" className="space-y-4">
+            <Card className="shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <GitMerge className="h-4 w-4" />
+                  Merge authority
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  The network hierarchy and regional overrides catalogue merging uses to rank
+                  reports of one earthquake (applied to new merges and previews)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <MergeAuthoritySettings readOnly={isReadOnly} />
               </CardContent>
             </Card>
           </TabsContent>

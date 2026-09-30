@@ -68,6 +68,14 @@ export const DATABASE_INDEXES: ReadonlyArray<IndexDefinition> = [
   { collection: COLLECTIONS.EVENTS, name: 'catalogue_event_type_idx', key: { catalogue_id: 1, event_type: 1 } },
   // Filtering by the stored quality score (minQuality) and sorting by it.
   { collection: COLLECTIONS.EVENTS, name: 'catalogue_quality_idx', key: { catalogue_id: 1, quality_score: -1 } },
+  // The merge review queue and its counts (M3): only rows that carry the column, i.e.
+  // merged rows; imported rows never do.
+  {
+    collection: COLLECTIONS.EVENTS,
+    name: 'catalogue_review_status_idx',
+    key: { catalogue_id: 1, review_status: 1 },
+    options: { partialFilterExpression: { review_status: { $exists: true } } },
+  },
   // The cross-catalogue event search sorts by {time: -1, id: -1} with no catalogue
   // prefix; without this index that sort is a blocking in-memory sort.
   { collection: COLLECTIONS.EVENTS, name: 'time_id_idx', key: { time: -1, id: -1 } },

@@ -152,6 +152,9 @@ export type ExportableEvent = MergedEvent & {
   source_catalogue_ids?: string[] | string | null;
   source_event_type?: string | null;
   confidence_level?: number | null;
+  // Merge review (M3/M5): 'pending' while a held group awaits a reviewer's decision.
+  review_status?: 'pending' | 'resolved' | null;
+  review_reasons?: string[] | string | null;
 };
 
 /** Checksum recorded by every export format (see computeEventRowsChecksum). */
@@ -211,6 +214,8 @@ export interface EventLineage {
   mergeParameters: string | null;
   qualityScore: number | null;
   qualityGrade: string | null;
+  /** 'pending' | 'resolved' for a group held for merge review (M5); null for every other row. */
+  reviewStatus: string | null;
   members: SourceEventMember[];
 }
 
@@ -345,9 +350,13 @@ function attributedSource(
   const selected = members.find(member => member.selected);
   if (selected?.source) return selected.source;
   if (members.length <= 1) return members[0]?.source || 'unknown';
-  // An averaged hypocentre is no single source's solution (C2 selects no member for it),
-  // although lib/merge.ts still qualifies the kept source_id by the base event's agency.
-  if (strategy === 'average') return 'merged';
+  // A merged row the engine stamped with its provenance (C1/C2) marks the member whose
+  // solution it published `selected`; when it marks none, the hypocentre was computed from
+  // several reports (an averaged or median epicentre, or any later computed solution) and
+  // is no single source's, although lib/merge.ts still qualifies the kept source_id by the
+  // base event's agency. A row stored before C2 records neither, and only the catalogue's
+  // strategy can say its solution was averaged.
+  if (textOrNull(event.merge_strategy) !== null || strategy === 'average') return 'merged';
   // lib/merge.ts qualifies a merged row's source_id by the agency whose record (and so whose
   // solution) the strategy kept: "<source>:<id>". Longest label first, so "GeoNet NZ" wins
   // over a "GeoNet" that merely prefixes it.
@@ -405,6 +414,7 @@ export function eventLineage(
     mergeParameters,
     qualityScore: finiteOrNull(event.quality_score),
     qualityGrade: textOrNull(event.quality_grade),
+    reviewStatus: textOrNull(event.review_status),
     members,
   };
 }
@@ -548,6 +558,7 @@ function lineageProperties(event: ExportableEvent, context: EventExportContext):
     selectedSourceCatalogueId: lineage.selectedSourceCatalogueId,
     qualityScore: lineage.qualityScore,
     qualityGrade: lineage.qualityGrade,
+    reviewStatus: lineage.reviewStatus,
     catalogueVersion: context.catalogueVersion,
   };
   if (context.tags) {
@@ -1331,6 +1342,9 @@ export const CSV_EVENT_HEADERS: readonly string[] = [
   'SelectedSourceCatalogueID',
   'QualityScore',
   'QualityGrade',
+  // Merge review state (M5): 'pending' for a held group, 'resolved' once decided, else empty.
+  // Sits with the other lineage columns; CatalogueVersion stays the last fixed column.
+  'ReviewStatus',
   // The catalogue version this row was exported from (C3): a plain CSV has no other place
   // to carry it, and a per-row value survives filtering and concatenating exports.
   'CatalogueVersion',
@@ -1484,6 +1498,7 @@ function* csvBodyParts(
       lineage.selectedSourceCatalogueId,
       n(lineage.qualityScore),
       lineage.qualityGrade,
+      lineage.reviewStatus,
       context.catalogueVersion,
     ];
     if (context.tags) {

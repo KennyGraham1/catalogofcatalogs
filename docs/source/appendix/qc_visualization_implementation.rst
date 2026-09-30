@@ -201,7 +201,7 @@ Implemented a comprehensive Quality Control (QC) visualization feature for earth
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - Set time threshold, distance threshold
-- Choose merge strategy (quality, priority, average, newest, complete)
+- Choose merge strategy (quality, priority, average, median, newest, complete)
 - Configure metadata
 
 **Step 3: Preview Merge (NEW!)**

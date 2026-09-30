@@ -139,7 +139,7 @@ constrained events stand out rather than blending into the same red as a
 **Source Catalogue** — a categorical palette, one colour per contributing
 catalogue. For a merged event the colour follows whichever source's solution
 was actually published (the ``source_events`` member marked *selected*); if
-none is marked selected (an *average*-strategy merge), every contributing
+none is marked selected (an *average*- or *median*-strategy merge), every contributing
 catalogue shares one "Merged (N sources)" category rather than guessing a
 single contributor. A pooled multi-catalogue view (e.g. the Analytics page
 loading several catalogues at once) colours each event by its own catalogue.

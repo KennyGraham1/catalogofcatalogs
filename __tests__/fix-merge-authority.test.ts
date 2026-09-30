@@ -28,6 +28,9 @@ const nz = (id: string, source: string, extra: Record<string, unknown> = {}): an
   latitude: -41.5, longitude: 174.5, depth: 20, magnitude: 4.5, magnitude_type: 'ML', ...extra,
 });
 
+// A network the default table does not list ranks just below its lowest entry (IGN, 10).
+const UNLISTED = 11;
+
 describe('#28 agency identity is never a substring of a display name', () => {
   it.each([
     ['USGS ComCat NZ region', 4],
@@ -37,10 +40,10 @@ describe('#28 agency identity is never a substring of a display name', () => {
     ['San Francisco Bay (USGS)', 4],
     ['GeoNet - Automated Import', 1],
     ['GNS Science', 1],
-    ['Merged NZ Catalogue', 100],
-    ['Misc catalogue', 100],
-    ['Design test', 100],
-    ['Mainz network', 100],
+    ['Merged NZ Catalogue', UNLISTED],
+    ['Misc catalogue', UNLISTED],
+    ['Design test', UNLISTED],
+    ['Mainz network', UNLISTED],
   ])('%s has network priority %i', (name, priority) => {
     expect(getNetworkPriority(name as string)).toBe(priority);
     expect(getNetworkPriority(name as string, nz('e', name as string))).toBe(priority);

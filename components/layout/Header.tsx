@@ -104,13 +104,16 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
       isScrolled ? 'bg-background/95 backdrop-blur-md border-b py-3' : 'bg-transparent py-4'
     )}>
       <div className="container flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2">
+        <Link href="/" className="flex shrink-0 items-center gap-2 whitespace-nowrap">
           <Activity className="h-6 w-6 text-primary" />
           <span className="font-bold text-lg">EarthQuake Catalogue</span>
         </Link>
 
-        {/* Desktop Navigation */}
-        <nav className="hidden md:flex items-center gap-6">
+        {/* Desktop Navigation. Signed out, the full row (logo, seven links with labels, three
+            icon buttons, Login and Sign Up) is about 1,340 px wide, so: below lg the menu
+            button; from lg icons with tooltips; from xl labels at a tighter spacing; from
+            2xl the roomy spacing. Each step fits its narrowest viewport with a scrollbar. */}
+        <nav className="hidden lg:flex items-center gap-4 2xl:gap-6 text-sm 2xl:text-base">
           {navItems.map((item) => (
             <Link
               key={item.href}
@@ -126,7 +129,7 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
               title={item.ariaLabel || item.label}
             >
               <item.icon className="h-4 w-4" aria-hidden="true" />
-              {item.label && item.showLabel !== false && <span>{item.label}</span>}
+              {item.label && item.showLabel !== false && <span className="hidden xl:inline">{item.label}</span>}
             </Link>
           ))}
           {onShowSearch && (
@@ -212,7 +215,6 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
                     size="sm"
                     onClick={() => router.push('/login')}
                   >
-                    <LogIn className="mr-2 h-4 w-4" />
                     Login
                   </Button>
                   <Button
@@ -220,7 +222,6 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
                     size="sm"
                     onClick={() => router.push('/register')}
                   >
-                    <UserPlus className="mr-2 h-4 w-4" />
                     Sign Up
                   </Button>
                 </div>
@@ -230,7 +231,7 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
         </nav>
 
         {/* Mobile Menu Button */}
-        <div className="flex md:hidden items-center gap-2">
+        <div className="flex lg:hidden items-center gap-2">
           <ThemeToggle />
 
           {/* Mobile User Menu */}
@@ -306,7 +307,7 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
 
       {/* Mobile Menu */}
       {mobileMenuOpen && (
-        <div id="mobile-nav" className="md:hidden bg-background border-b">
+        <div id="mobile-nav" className="lg:hidden bg-background border-b">
           <div className="container py-4">
             <nav className="flex flex-col gap-4">
               {navItems.map((item) => (

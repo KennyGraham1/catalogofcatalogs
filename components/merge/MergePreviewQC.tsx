@@ -34,12 +34,18 @@ interface EventData {
   depth_uncertainty?: number | null;
 }
 
+// heldForReview / supersededEventIndexes and the two counts are optional so a preview from
+// a server that predates them (contract M4) still renders.
 interface DuplicateGroup {
   id: string;
   events: EventData[];
   selectedEventIndex: number;
   isSuspicious: boolean;
   validationWarnings: string[];
+  heldForReview?: boolean;
+  supersededEventIndexes?: number[];
+  /** A report the association matched but the validity gate split off: published alone. */
+  separated?: boolean;
 }
 
 interface PreviewData {
@@ -50,19 +56,24 @@ interface PreviewData {
     duplicateGroupsCount: number;
     duplicatesRemoved: number;
     suspiciousGroupsCount: number;
+    heldForReviewCount?: number;
+    supersededReportsCount?: number;
+    separatedReportsCount?: number;
   };
   catalogueColors: Record<string, string>;
 }
 
 interface MergePreviewQCProps {
   previewData: PreviewData;
+  /** True when the merge will hold flagged groups for review (config.onConflict 'hold'). */
+  holdForReview?: boolean;
   onProceedWithMerge: () => void;
   onCancel: () => void;
 }
 
-export function MergePreviewQC({ previewData, onProceedWithMerge, onCancel }: MergePreviewQCProps) {
+export function MergePreviewQC({ previewData, holdForReview = false, onProceedWithMerge, onCancel }: MergePreviewQCProps) {
   const [selectedGroup, setSelectedGroup] = useState<DuplicateGroup | null>(null);
-  const [filterView, setFilterView] = useState<'all' | 'duplicates' | 'suspicious'>('duplicates');
+  const [filterView, setFilterView] = useState<'all' | 'duplicates' | 'suspicious' | 'separated'>('duplicates');
 
   const { duplicateGroups, statistics, catalogueColors } = previewData;
 
@@ -79,6 +90,7 @@ export function MergePreviewQC({ previewData, onProceedWithMerge, onCancel }: Me
     if (filterView === 'all') return true;
     if (filterView === 'duplicates') return group.events.length > 1;
     if (filterView === 'suspicious') return group.isSuspicious;
+    if (filterView === 'separated') return group.separated === true;
     return true;
   });
 
@@ -98,7 +110,7 @@ export function MergePreviewQC({ previewData, onProceedWithMerge, onCancel }: Me
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <div className={`grid grid-cols-2 gap-4 ${holdForReview ? 'md:grid-cols-6' : 'md:grid-cols-5'}`}>
             <div className="text-center p-4 bg-blue-50 dark:bg-blue-950/50 rounded-lg border border-blue-200 dark:border-blue-800">
               <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">{statistics.totalEventsBefore.toLocaleString()}</div>
               <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">Events Before</div>
@@ -119,7 +131,31 @@ export function MergePreviewQC({ previewData, onProceedWithMerge, onCancel }: Me
               <div className="text-2xl font-bold text-red-700 dark:text-red-300">{statistics.suspiciousGroupsCount.toLocaleString()}</div>
               <div className="text-xs text-red-600 dark:text-red-400 mt-1">Suspicious Matches</div>
             </div>
+            {/* Only meaningful when the merge holds flagged groups: otherwise the count is 0 by
+                construction and the tile would only distract. */}
+            {holdForReview && (
+              <div className="text-center p-4 bg-amber-50 dark:bg-amber-950/50 rounded-lg border border-amber-200 dark:border-amber-800">
+                <div className="text-2xl font-bold text-amber-700 dark:text-amber-300">{(statistics.heldForReviewCount ?? 0).toLocaleString()}</div>
+                <div className="text-xs text-amber-600 dark:text-amber-400 mt-1">Held for review</div>
+              </div>
+            )}
           </div>
+
+          {(statistics.supersededReportsCount ?? 0) > 0 && (
+            <p className="mt-3 text-sm text-muted-foreground">
+              {statistics.supersededReportsCount!.toLocaleString()} superseded {statistics.supersededReportsCount === 1 ? 'report' : 'reports'} (older vintages of one agency&apos;s solution)
+            </p>
+          )}
+
+          {/* Reports the windows matched but the validity gate split apart are published on
+              their own; without this line the split would look like unrelated events. */}
+          {(statistics.separatedReportsCount ?? 0) > 0 && (
+            <p className="mt-3 text-sm text-muted-foreground">
+              {statistics.separatedReportsCount!.toLocaleString()} {statistics.separatedReportsCount === 1 ? 'report was' : 'reports were'} matched
+              but kept apart because {statistics.separatedReportsCount === 1 ? 'its group' : 'their groups'} failed validation;
+              each is published on its own (see Separated).
+            </p>
+          )}
 
           {statistics.suspiciousGroupsCount > 0 && (
             <Alert className="mt-4 border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-950/50">
@@ -162,6 +198,11 @@ export function MergePreviewQC({ previewData, onProceedWithMerge, onCancel }: Me
                 <TabsTrigger value="suspicious">
                   Suspicious ({statistics.suspiciousGroupsCount})
                 </TabsTrigger>
+                {(statistics.separatedReportsCount ?? 0) > 0 && (
+                  <TabsTrigger value="separated">
+                    Separated ({statistics.separatedReportsCount})
+                  </TabsTrigger>
+                )}
                 <TabsTrigger value="all">
                   All ({duplicateGroups.length})
                 </TabsTrigger>

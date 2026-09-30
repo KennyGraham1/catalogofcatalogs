@@ -9,7 +9,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import { MergeActions } from '@/components/merge/MergeActions';
 import { MergeMetadataForm, MergeMetadata } from '@/components/merge/MergeMetadataForm';
 import { MergeProgressIndicator, MergeStep } from '@/components/merge/MergeProgressIndicator';
@@ -110,6 +113,105 @@ const MERGE_STRATEGY_LABELS: Record<string, string> = {
   average: 'Average Values',
   newest: 'Most Recent Solution',
   complete: 'Most Complete Record',
+  median: 'Median Values',
+};
+
+// Per-field resolution rules (lib/validation.ts fieldRules). The defaults reproduce the
+// strategy's own behaviour, so a request that only uses defaults omits fieldRules entirely
+// and keeps the shape older merges recorded in merge_parameters.
+type FieldRuleName = 'depth' | 'magnitude' | 'mechanism';
+type FieldRuleChoice = { rule: string; catalogueId: string };
+type FieldRuleChoices = Record<FieldRuleName, FieldRuleChoice>;
+type ConflictHandling = 'resolve' | 'hold';
+
+const DEFAULT_FIELD_RULE: Record<FieldRuleName, string> = {
+  depth: 'strategy',
+  magnitude: 'strategy',
+  mechanism: 'hierarchy',
+};
+
+const DEFAULT_FIELD_RULE_CHOICES: FieldRuleChoices = {
+  depth: { rule: 'strategy', catalogueId: '' },
+  magnitude: { rule: 'strategy', catalogueId: '' },
+  mechanism: { rule: 'hierarchy', catalogueId: '' },
+};
+
+// Option labels, as the field-rule selects and the merge summary show them.
+const FIELD_RULE_LABELS: Record<FieldRuleName, Record<string, string>> = {
+  depth: {
+    strategy: 'Follow the strategy',
+    'best-constrained': 'Best constrained',
+    quality: 'Quality-based',
+    authority: 'Network authority',
+    newest: 'Most recent solution',
+    catalogue: 'A chosen catalogue',
+  },
+  magnitude: {
+    strategy: 'Follow the strategy',
+    'type-preference': 'Magnitude type preference',
+    quality: 'Quality-based',
+    authority: 'Network authority',
+    newest: 'Most recent solution',
+    catalogue: 'A chosen catalogue',
+  },
+  mechanism: {
+    hierarchy: 'Combine by network authority',
+    strategy: 'Follow the strategy',
+    catalogue: 'A chosen catalogue',
+  },
+};
+
+const FIELD_RULE_TITLES: Record<FieldRuleName, string> = {
+  depth: 'Depth',
+  magnitude: 'Magnitude',
+  mechanism: 'Focal mechanism',
+};
+
+// The options of each field-rule select with what lib/merge.ts does for each (contract M1),
+// and a note that holds for every option of that field.
+const FIELD_RULE_OPTIONS: Array<{
+  field: FieldRuleName;
+  options: Array<{ value: string; help: string }>;
+  note: string;
+}> = [
+  {
+    field: 'depth',
+    options: [
+      { value: 'strategy', help: 'Average and Median Values take the best-constrained depth; every other strategy keeps the depth of the report it selected.' },
+      { value: 'best-constrained', help: 'The depth of the report that solved for depth with the smallest depth uncertainty and the best station coverage; a fixed depth only when no report solved for depth.' },
+      { value: 'quality', help: 'The depth of the report ranked first by quality score.' },
+      { value: 'authority', help: 'The depth of the report from the highest-ranked network (Settings › Merge authority).' },
+      { value: 'newest', help: 'The depth of the most recently determined solution.' },
+      { value: 'catalogue', help: 'The depth of the chosen catalogue\'s report; a group without a report from it follows the strategy.' },
+    ],
+    note: 'The published depth always carries that report\'s own depth uncertainty and depth type. A report without a depth cannot supply it, and the strategy decides instead.',
+  },
+  {
+    field: 'magnitude',
+    options: [
+      { value: 'strategy', help: 'Average and Median Values choose by magnitude type; every other strategy keeps the magnitude of the report it selected.' },
+      { value: 'type-preference', help: 'Chooses by magnitude type across every report in the group: Mw first; below M6.2 local ML ahead of mb, from M6.2 Ms ahead.' },
+      { value: 'quality', help: 'The preferred magnitude of the report ranked first by quality score.' },
+      { value: 'authority', help: 'The preferred magnitude of the report from the highest-ranked network (Settings › Merge authority).' },
+      { value: 'newest', help: 'The preferred magnitude of the most recently determined solution.' },
+      { value: 'catalogue', help: 'The preferred magnitude of the chosen catalogue\'s report; a group without a report from it follows the strategy.' },
+    ],
+    note: 'The published magnitude carries its own type, uncertainty and preferred magnitude id.',
+  },
+  {
+    field: 'mechanism',
+    options: [
+      { value: 'hierarchy', help: 'Every report\'s focal mechanisms are kept together and the preferred one comes from the highest-ranked network (Settings › Merge authority).' },
+      { value: 'strategy', help: 'Only the focal mechanisms of the report the strategy selected, with its own preferred mechanism.' },
+      { value: 'catalogue', help: 'Only the focal mechanisms of the chosen catalogue\'s report; a group without a report from it follows the strategy.' },
+    ],
+    note: 'When the chosen report has no focal mechanism, the mechanisms are combined by network authority instead.',
+  },
+];
+
+const CONFLICT_LABELS: Record<ConflictHandling, string> = {
+  resolve: 'Resolve with the strategy',
+  hold: 'Hold for review',
 };
 
 // Status labels for merge status
@@ -157,7 +259,16 @@ export default function MergePage() {
   const [priorityOrder, setPriorityOrder] = useState<string[]>([]);
   const [priorityOrderAnnouncement, setPriorityOrderAnnouncement] = useState('');
   const [mergeStrategy, setMergeStrategy] = useState('priority');
+  // Per-field rules on top of the strategy (M1). A 'catalogue' rule keeps its own catalogue
+  // id so switching rules back and forth does not lose the pick.
+  const [fieldRuleChoices, setFieldRuleChoices] = useState<FieldRuleChoices>(DEFAULT_FIELD_RULE_CHOICES);
+  // What happens to a duplicate group the preview would flag: publish the strategy's answer
+  // or hold the row for review on the catalogue page (M1 onConflict).
+  const [onConflict, setOnConflict] = useState<ConflictHandling>('resolve');
   const [mergeStatus, setMergeStatus] = useState<MergeStatus>('idle');
+  // Rows the saved merge held for review (the merge route's heldForReviewCount; 0 when the
+  // server predates the field).
+  const [heldForReviewCount, setHeldForReviewCount] = useState(0);
   const [mergedEvents, setMergedEvents] = useState<any[]>([]);
   // Id of the saved merged catalogue (null for export-only merges); MergeActions exports it
   // through the server route so downloads are never limited to the events held here.
@@ -218,7 +329,7 @@ export default function MergePage() {
   useEffect(() => {
     previewRequestIdRef.current++;
     setPreviewData(null);
-  }, [timeThreshold, distanceThreshold, mergeStrategy, priority, priorityOrder]);
+  }, [timeThreshold, distanceThreshold, mergeStrategy, priority, priorityOrder, fieldRuleChoices, onConflict]);
 
   // Clear preview data when selected catalogues change (same in-flight invalidation).
   useEffect(() => {
@@ -237,17 +348,68 @@ export default function MergePage() {
     };
   }, []);
 
+  // The catalogue a 'catalogue' field rule names, as the request sends it: the pick when it is
+  // still selected, else the first selected catalogue (the schema requires an id from the
+  // request's own sources, and a stale pick from a deselected catalogue must not fail it).
+  const fieldRuleCatalogueId = (field: FieldRuleName): string | null => {
+    const chosen = fieldRuleChoices[field].catalogueId;
+    if (chosen && getSelectedCatalogues.some(catalogue => String(catalogue.id) === chosen)) return chosen;
+    return getSelectedCatalogues.length > 0 ? String(getSelectedCatalogues[0].id) : null;
+  };
+
+  // Only the rules that differ from the strategy's own behaviour, so a default form sends no
+  // fieldRules at all and the request keeps the shape earlier merges recorded.
+  const buildFieldRules = (): Record<string, { rule: string; catalogueId?: string }> | null => {
+    const rules: Record<string, { rule: string; catalogueId?: string }> = {};
+    (Object.keys(fieldRuleChoices) as FieldRuleName[]).forEach(field => {
+      const { rule } = fieldRuleChoices[field];
+      if (rule === DEFAULT_FIELD_RULE[field]) return;
+      if (rule === 'catalogue') {
+        const catalogueId = fieldRuleCatalogueId(field);
+        if (!catalogueId) return;
+        rules[field] = { rule, catalogueId };
+      } else {
+        rules[field] = { rule };
+      }
+    });
+    return Object.keys(rules).length > 0 ? rules : null;
+  };
+
   // One config builder for the preview and merge requests so the two cannot drift apart.
-  const buildMergeConfig = (): Record<string, unknown> => ({
-    timeThreshold,
-    distanceThreshold,
-    mergeStrategy,
-    priority,
-    // Only a Custom Order merge carries a ranking, so every other request keeps its shape.
-    ...(mergeStrategy === 'priority' && priority === 'custom'
-      ? { priorityOrder: rankedCatalogues.map(catalogue => String(catalogue.id)) }
-      : {}),
-  });
+  const buildMergeConfig = (): Record<string, unknown> => {
+    const fieldRules = buildFieldRules();
+    return {
+      timeThreshold,
+      distanceThreshold,
+      mergeStrategy,
+      priority,
+      // Only a Custom Order merge carries a ranking, so every other request keeps its shape.
+      ...(mergeStrategy === 'priority' && priority === 'custom'
+        ? { priorityOrder: rankedCatalogues.map(catalogue => String(catalogue.id)) }
+        : {}),
+      ...(fieldRules ? { fieldRules } : {}),
+      // 'resolve' is the server default; sending it would only change recorded parameters.
+      ...(onConflict === 'hold' ? { onConflict } : {}),
+    };
+  };
+
+  const setFieldRule = (field: FieldRuleName, rule: string) => {
+    setFieldRuleChoices(prev => ({ ...prev, [field]: { ...prev[field], rule } }));
+  };
+
+  const setFieldRuleCatalogue = (field: FieldRuleName, catalogueId: string) => {
+    setFieldRuleChoices(prev => ({ ...prev, [field]: { ...prev[field], catalogueId } }));
+  };
+
+  // The field rules as the merge summary lists them, one line per field.
+  const describeFieldRule = (field: FieldRuleName): string => {
+    const { rule } = fieldRuleChoices[field];
+    const label = FIELD_RULE_LABELS[field][rule] ?? rule;
+    if (rule !== 'catalogue') return label;
+    const catalogueId = fieldRuleCatalogueId(field);
+    const catalogue = getSelectedCatalogues.find(item => String(item.id) === catalogueId);
+    return catalogue ? `${label} (${catalogue.name})` : label;
+  };
 
   // Memoized catalogue selection handler
   const handleCatalogueSelect = useCallback((id: number | string) => {
@@ -428,6 +590,7 @@ export default function MergePage() {
     setMergeProgress(0);
     setMergedCatalogueId(null);
     setCompletedMerge(null);
+    setHeldForReviewCount(0);
     // Clear the QC preview so its "Proceed with Merge" button cannot re-trigger a merge
     // while this one runs or after it completes.
     previewRequestIdRef.current++;
@@ -496,6 +659,10 @@ export default function MergePage() {
 
       const result = await response.json();
       setCompletedMerge({ config, sourceCatalogues });
+      // Held rows exist only in a saved catalogue (export-only has nowhere to review them).
+      // A server without the field reports nothing held.
+      const held = Number(result.heldForReviewCount);
+      setHeldForReviewCount(!exportOnly && Number.isFinite(held) && held > 0 ? held : 0);
 
       // Server accepted and returned the merge result — only now mark the
       // fetch/match/merge/bounds steps complete (they previously flipped green
@@ -1656,7 +1823,7 @@ export default function MergePage() {
                           <div className="flex items-center gap-1.5">
                             <Label htmlFor="merge-strategy">Merge Strategy</Label>
                             <InfoTooltip
-                              content="Controls how conflicting event fields are resolved across sources (quality-based, priority, average, newest, or most complete)."
+                              content="Controls how conflicting event fields are resolved across sources (quality-based, priority, average, median, newest, or most complete)."
                             />
                           </div>
                           <Select
@@ -1670,6 +1837,7 @@ export default function MergePage() {
                               <SelectItem value="quality">Quality-Based (Recommended)</SelectItem>
                               <SelectItem value="priority">Source Priority</SelectItem>
                               <SelectItem value="average">Average Values</SelectItem>
+                              <SelectItem value="median">Median Values</SelectItem>
                               <SelectItem value="newest">Most Recent Solution</SelectItem>
                               <SelectItem value="complete">Most Complete Record</SelectItem>
                             </SelectContent>
@@ -1679,6 +1847,7 @@ export default function MergePage() {
                             {mergeStrategy === 'quality' && 'Keeps the best-constrained solution, comparing only the quality metrics every catalogue in the group reports (station count, azimuthal gap, RMS residual, magnitude uncertainty and type, evaluation status). If a catalogue reports none of them, network authority decides.'}
                             {mergeStrategy === 'priority' && 'Keeps the record from the source you rank highest when the same event appears in more than one catalogue.'}
                             {mergeStrategy === 'average' && 'Averages only the epicentre: weighted by inverse variance when every source reports a horizontal uncertainty, equally otherwise. Magnitude and depth are selected, not averaged: magnitude by type (Mw first; below M6.2 local ML ahead of mb, from M6.2 Ms ahead), depth from the best-constrained solution that solved for depth. Time is the earliest reported origin time; one agency\'s origin details (time uncertainty, station counts, agency) are not carried onto the averaged epicentre.'}
+                            {mergeStrategy === 'median' && 'Takes the median of the reported epicentres, latitude and longitude separately (longitudes unwrapped across the date line), and the median origin time; with two reports the median is their mean. Magnitude and depth are selected, not averaged: magnitude by type (Mw first; below M6.2 local ML ahead of mb, from M6.2 Ms ahead), depth from the best-constrained solution that solved for depth. No single report\'s origin details (time uncertainty, station counts, agency) are carried onto the median epicentre.'}
                             {mergeStrategy === 'newest' && 'Keeps the most recently determined solution: the one whose origin the agency computed last (QuakeML creation time). When not every catalogue reports that time, reviewed or final solutions win over preliminary ones, then the quality score decides.'}
                             {mergeStrategy === 'complete' && 'Use the record with the most complete information.'}
                           </p>
@@ -1689,7 +1858,7 @@ export default function MergePage() {
                             <div className="flex items-center gap-1.5">
                               <Label htmlFor="source-priority">Source Priority</Label>
                               <InfoTooltip
-                                content="Decides which catalogue's record is kept when the same event appears in more than one catalogue. Most Recent Solution keeps the solution its agency computed last. Custom Order uses your ranking, with quality score breaking any remaining tie. GeoNet > Others and GNS > Others keep GeoNet's record (GNS operates GeoNet); when a group has none, the built-in network-authority ranking decides, then quality score."
+                                content="Decides which catalogue's record is kept when the same event appears in more than one catalogue. Most Recent Solution keeps the solution its agency computed last. Custom Order uses your ranking, with quality score breaking any remaining tie. GeoNet > Others and GNS > Others keep GeoNet's record (GNS operates GeoNet); when a group has none, the network-authority ranking configured in Settings › Merge authority decides, then quality score."
                               />
                             </div>
                             <Select
@@ -1715,7 +1884,7 @@ export default function MergePage() {
                               {priority === 'quality' && ' The record with the best quality score is kept, comparing only the metrics every catalogue in the group reports; network authority decides when a catalogue reports none.'}
                               {priority === 'newest' && ' The most recently determined solution is kept (the latest origin creation time the agencies report); when not every catalogue reports one, reviewed or final solutions win over preliminary ones, then quality score.'}
                               {(priority === 'geonet' || priority === 'gns') &&
-                                ' The GeoNet record (GNS operates GeoNet) is kept when the group has one. It is recognised by its agency code (such as WEL) or the catalogue\'s provider or import source, not by words in a catalogue name. Otherwise the built-in network-authority ranking decides (GeoNet, GCMT, ISC, USGS, then other agencies), and quality score breaks ties.'}
+                                ' The GeoNet record (GNS operates GeoNet) is kept when the group has one. It is recognised by its agency code (such as WEL) or the catalogue\'s provider or import source, not by words in a catalogue name. Otherwise the network-authority ranking configured in Settings › Merge authority decides (by default GeoNet, GCMT, ISC, USGS, then other agencies), and quality score breaks ties.'}
                               {priority === 'custom' && ' Your ranking below decides: the record from the highest-ranked catalogue is kept, and quality score breaks any remaining tie.'}
                             </p>
                             {priority === 'custom' && (
@@ -1764,6 +1933,112 @@ export default function MergePage() {
                         )}
                       </div>
 
+                      {/* Per-field rules (M1). Each help text states what lib/merge.ts does for
+                          that rule; the defaults are the strategy's own behaviour. */}
+                      <div className="mt-6 space-y-3">
+                        <div>
+                          <h4 className="text-sm font-medium">Field rules</h4>
+                          <p className="text-xs text-muted-foreground">
+                            Decide depth, magnitude and focal mechanism separately from the strategy that picks the
+                            epicentre and origin time. Rules apply to the reports left after an older vintage of one
+                            agency&apos;s solution is superseded by its newer one.
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          {FIELD_RULE_OPTIONS.map(({ field, options, note }) => {
+                            const { rule } = fieldRuleChoices[field];
+                            const selectId = `field-rule-${field}`;
+                            const helpId = `${selectId}-help`;
+                            return (
+                              <div key={field} className="space-y-2">
+                                <Label htmlFor={selectId}>{FIELD_RULE_TITLES[field]}</Label>
+                                <Select value={rule} onValueChange={value => setFieldRule(field, value)}>
+                                  <SelectTrigger id={selectId} aria-describedby={helpId}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {options.map(option => (
+                                      <SelectItem key={option.value} value={option.value}>
+                                        {FIELD_RULE_LABELS[field][option.value]}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <p id={helpId} className="text-xs text-muted-foreground">
+                                  {options.find(option => option.value === rule)?.help} {note}
+                                </p>
+                                {rule === 'catalogue' && (
+                                  <div className="space-y-1">
+                                    <Label htmlFor={`${selectId}-catalogue`} className="text-xs">
+                                      {FIELD_RULE_TITLES[field]} from catalogue
+                                    </Label>
+                                    <Select
+                                      value={fieldRuleCatalogueId(field) ?? ''}
+                                      onValueChange={value => setFieldRuleCatalogue(field, value)}
+                                    >
+                                      <SelectTrigger id={`${selectId}-catalogue`}>
+                                        <SelectValue placeholder="Select a catalogue" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {getSelectedCatalogues.map(catalogue => (
+                                          <SelectItem key={catalogue.id} value={String(catalogue.id)}>
+                                            {catalogue.name}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Flagged groups (M1 onConflict). Holding never drops a report: the row is
+                          still written with the strategy's provisional solution. */}
+                      <div className="mt-6 space-y-3">
+                        <div>
+                          <h4 id="on-conflict-label" className="text-sm font-medium">When a duplicate group is flagged</h4>
+                          <p className="text-xs text-muted-foreground">
+                            The preview flags groups that were regrouped, are ambiguous, fail validation, or disagree on
+                            magnitude or depth, and reports that were matched but split off because their group failed
+                            validation (Separated).
+                          </p>
+                        </div>
+                        <RadioGroup
+                          aria-labelledby="on-conflict-label"
+                          value={onConflict}
+                          onValueChange={value => setOnConflict(value === 'hold' ? 'hold' : 'resolve')}
+                        >
+                          <div className="flex items-start gap-2">
+                            <RadioGroupItem id="on-conflict-resolve" value="resolve" className="mt-0.5" />
+                            <div className="grid gap-0.5 leading-tight">
+                              <Label htmlFor="on-conflict-resolve" className="text-sm font-medium">
+                                {CONFLICT_LABELS.resolve}
+                              </Label>
+                              <p className="text-xs text-muted-foreground">
+                                Flagged groups are merged like every other group; the preview&apos;s warnings are the
+                                only record.
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <RadioGroupItem id="on-conflict-hold" value="hold" className="mt-0.5" />
+                            <div className="grid gap-0.5 leading-tight">
+                              <Label htmlFor="on-conflict-hold" className="text-sm font-medium">
+                                {CONFLICT_LABELS.hold}
+                              </Label>
+                              <p className="text-xs text-muted-foreground">
+                                Flagged groups get a provisional solution from the strategy and are marked for review on
+                                the catalogue page, where a reviewer keeps it or publishes one report instead; nothing
+                                is dropped.
+                              </p>
+                            </div>
+                          </div>
+                        </RadioGroup>
+                      </div>
+
                       {/* Info Alert about Additional Improvements */}
                       <div className="rounded-lg border border-green-200 bg-green-50 p-4 mt-4">
                         <div className="flex gap-3">
@@ -1778,12 +2053,13 @@ export default function MergePage() {
                             </h4>
                             <ul className="text-xs text-green-800 leading-relaxed space-y-1 list-disc list-inside">
                               {/*
-                                Only the 'average' strategy calls selectBestMagnitude / selectBestDepth
-                                (lib/merge.ts). The other strategies copy one source record wholesale, so
-                                the magnitude hierarchy and depth-uncertainty selection genuinely do not
-                                apply to them and must not be advertised as if they did.
+                                Only the 'average' and 'median' strategies call selectBestMagnitude /
+                                selectBestDepth (lib/merge.ts). The other strategies copy one source record
+                                wholesale, so the magnitude hierarchy and depth-uncertainty selection genuinely
+                                do not apply to them and must not be advertised as if they did (a field rule
+                                above changes that per field, and says so itself).
                               */}
-                              {mergeStrategy === 'average' ? (
+                              {mergeStrategy === 'average' || mergeStrategy === 'median' ? (
                                 <>
                                   <li><strong>Magnitude Hierarchy:</strong> Uses ISC standard (Mw &gt; Ms &gt; mb &gt; ML) to choose which reported magnitude to keep, avoiding saturated scales</li>
                                   <li><strong>Depth Uncertainty:</strong> Selects depths with lower uncertainty and better station coverage</li>
@@ -1883,6 +2159,18 @@ export default function MergePage() {
                           <p className="text-sm text-muted-foreground">Distance Threshold</p>
                           <p className="font-medium">{distanceThreshold} km</p>
                         </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">Field Rules</p>
+                          <p className="font-medium" data-testid="summary-field-rules">
+                            {(Object.keys(FIELD_RULE_TITLES) as FieldRuleName[])
+                              .map(field => `${FIELD_RULE_TITLES[field]}: ${describeFieldRule(field)}`)
+                              .join(' · ')}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">Flagged Groups</p>
+                          <p className="font-medium" data-testid="summary-on-conflict">{CONFLICT_LABELS[onConflict]}</p>
+                        </div>
                       </div>
                     </div>
 
@@ -1925,6 +2213,7 @@ export default function MergePage() {
                 ) : (
                   <MergePreviewQC
                     previewData={previewData}
+                    holdForReview={onConflict === 'hold'}
                     onProceedWithMerge={handleStartMerge}
                     onCancel={() => setPreviewData(null)}
                   />
@@ -1938,6 +2227,22 @@ export default function MergePage() {
                     progress={mergeProgress}
                     estimatedTimeRemaining={mergeStatus === 'merging' && mergeProgress < 100 ? ((100 - mergeProgress) / 5) * 0.3 : 0}
                   />
+                )}
+
+                {/* Held rows live in the saved catalogue; the review queue on its page resolves them. */}
+                {mergeStatus === 'complete' && mergedCatalogueId && heldForReviewCount > 0 && (
+                  <Alert className="mb-4 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/50">
+                    <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                    <AlertTitle className="text-amber-900 dark:text-amber-200">
+                      {heldForReviewCount.toLocaleString()} {heldForReviewCount === 1 ? 'event was' : 'events were'} held for review
+                    </AlertTitle>
+                    <AlertDescription className="text-amber-800 dark:text-amber-300">
+                      Each holds a provisional solution until a reviewer keeps it or publishes one report instead.{' '}
+                      <Link href={`/catalogues/${mergedCatalogueId}`} className="font-medium underline underline-offset-2">
+                        Review {heldForReviewCount.toLocaleString()} held {heldForReviewCount === 1 ? 'event' : 'events'}
+                      </Link>
+                    </AlertDescription>
+                  </Alert>
                 )}
 
                 {mergeStatus === 'complete' && (

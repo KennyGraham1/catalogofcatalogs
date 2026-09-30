@@ -440,7 +440,7 @@ Merge
 
 - ``POST /api/merge`` - Merge multiple catalogues
   - Configurable matching rules (time, distance, magnitude)
-  - Multiple merge strategies (priority, average, newest, complete)
+  - Multiple merge strategies (quality, priority, average, median, newest, complete), per-field rules and review holds
 
 🌐 Data Sources
 --------------

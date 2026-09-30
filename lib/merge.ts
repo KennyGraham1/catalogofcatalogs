@@ -2,10 +2,20 @@ import { dbQueries, MergedEvent, MergedCatalogue } from './db';
 import type { ClientSession } from './mongodb';
 import { createId } from './id';
 import { calculateDistance, calculateTimeDifference } from './earthquake-utils';
-import type { SourceCatalogue, MergeConfig } from './validation';
+import type { SourceCatalogue, MergeConfig, MergeFieldRules } from './validation';
 import type { QuakeMLEvent, FocalMechanism, Origin } from './types/quakeml';
-import { extractBoundsFromEvents, NZ_NATIONAL_BOUNDS } from './geo-bounds-utils';
+import { extractBoundsFromEvents } from './geo-bounds-utils';
 import { metricsFromEvent, scoreQualityMetrics } from './quality-scoring';
+import {
+  DEFAULT_MERGE_AUTHORITY,
+  currentMergeAuthority,
+  loadMergeAuthority,
+  runWithMergeAuthority,
+  type AgencyKey,
+  type AuthorityEntry,
+  type MergeAuthorityTable,
+  type RegionalAuthority,
+} from './merge-authority';
 
 /** Rows per keyset page when reading a source catalogue for a merge. */
 const MERGE_INPUT_PAGE_SIZE = 10000;
@@ -99,8 +109,11 @@ interface EventData {
  * The optional flags say which report each published quantity came from (contract C2):
  * `selected` marks the report whose solution (origin time and epicentre) was published;
  * no report carries it when the epicentre was averaged. `magnitudeSelected` and
- * `depthSelected` mark where the averaged strategy took its magnitude and depth, and
- * `locationWeight` is that report's normalised share of the averaged epicentre.
+ * `depthSelected` mark where the averaged strategy (or a field rule) took its magnitude and
+ * depth, `mechanismSelected` the report whose focal mechanism was published when one
+ * report's was chosen (a mechanism field rule), and `locationWeight` is that report's
+ * normalised share of the averaged epicentre. `superseded` marks an older vintage of the
+ * same agency's solution (M5): kept for provenance, it takes no part in any selection.
  */
 interface SourceEventEntry {
   catalogueId: string | number;
@@ -109,11 +122,16 @@ interface SourceEventEntry {
   selected?: true;
   magnitudeSelected?: true;
   depthSelected?: true;
+  mechanismSelected?: true;
+  superseded?: true;
   locationWeight?: number;
 }
 
 interface MergedEventData extends EventData {
   sourceEvents: SourceEventEntry[];
+  /** Set by the persist path when the request holds flagged groups (onConflict 'hold'). */
+  review_status?: 'pending' | 'resolved' | null;
+  review_reasons?: string[] | null;
 }
 
 // ============================================================================
@@ -130,6 +148,7 @@ export type MergeConflictType =
   | 'group_size'           // Too many events matched together
   | 'time_inconsistency'   // Time values differ unexpectedly
   | 'network_mismatch'     // Different networks report very different values
+  | 'same_agency'          // One agency's two DIFFERENT events (distinct agency ids) in one group
   | 'validation_failed';   // General validation failure
 
 /**
@@ -301,30 +320,62 @@ export async function mergeCatalogues(
 
   const catalogueId = createId();
 
-  // If export-only mode, don't use transactions
-  if (exportOnly) {
-    return await executeMergeOperation(catalogueId, name, sourceCatalogues, config, metadata, exportOnly, undefined, options);
-  }
+  // The network-authority table is read once per merge and scoped to it (M6): every
+  // ranking below consults the same table, and a table an administrator saves while this
+  // merge runs applies to the next one.
+  const authority = await loadMergeAuthority();
+  return runWithMergeAuthority(authority, async () => {
+    // If export-only mode, don't use transactions
+    if (exportOnly) {
+      return await executeMergeOperation(catalogueId, name, sourceCatalogues, config, metadata, exportOnly, undefined, options);
+    }
 
-  // Use transaction for database writes
-  try {
-    return await dbQueries.transaction(async (session) => {
-      return await executeMergeOperation(
-        catalogueId,
-        name,
-        sourceCatalogues,
-        config,
-        metadata,
-        exportOnly,
-        session,
-        options
-      );
-    });
-  } catch (error) {
-    console.error('[Merge] Transaction failed, changes rolled back:', error);
-    throw error;
-  }
+    // Use transaction for database writes
+    try {
+      return await dbQueries!.transaction(async (session) => {
+        return await executeMergeOperation(
+          catalogueId,
+          name,
+          sourceCatalogues,
+          config,
+          metadata,
+          exportOnly,
+          session,
+          options
+        );
+      });
+    } catch (error) {
+      console.error('[Merge] Transaction failed, changes rolled back:', error);
+      throw error;
+    }
+  });
 }
+
+/**
+ * Optional MergedEvent columns a merged row may carry, in the order the database stores
+ * them. Shared by the persist path, the export-only path and the review rebuild
+ * (rebuildMergedEventForReport) so the three always produce the same field set.
+ */
+const OPTIONAL_DB_FIELDS: ReadonlyArray<string> = [
+  'source_id', 'region', 'location_name',
+  'event_public_id', 'event_type', 'event_type_certainty', 'source_event_type',
+  'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty',
+  'depth_uncertainty', 'horizontal_uncertainty',
+  'min_horizontal_uncertainty', 'max_horizontal_uncertainty', 'azimuth_max_horizontal_uncertainty',
+  'confidence_level',
+  'depth_type', 'earth_model_id', 'method_id',
+  'agency_id', 'author',
+  'magnitude_type', 'magnitude_uncertainty', 'magnitude_station_count',
+  'magnitude_method_id', 'magnitude_evaluation_mode', 'magnitude_evaluation_status',
+  'azimuthal_gap', 'used_phase_count', 'used_station_count', 'standard_error',
+  'minimum_distance', 'maximum_distance',
+  'associated_phase_count', 'associated_station_count', 'depth_phase_count',
+  'evaluation_mode', 'evaluation_status',
+  'preferred_origin_id', 'preferred_magnitude_id', 'preferred_focal_mechanism_id',
+  'origin_quality', 'origins', 'magnitudes', 'picks', 'arrivals',
+  'focal_mechanisms', 'amplitudes', 'station_magnitudes',
+  'event_descriptions', 'comments', 'creation_info',
+];
 
 /**
  * Extract all event fields from a MergedEventData object for storage or export.
@@ -389,6 +440,9 @@ function buildMergedEventFields(
   // re-derived from the base event's QuakeML: its preferred origin describes a different
   // hypocentre (finding #21).
   const averagedOrigin = (event as { _averagedOrigin?: boolean })._averagedOrigin === true;
+  // A depth field rule published another report's depth with that report's own type and
+  // uncertainty; the base's QuakeML origin describes a different depth (M1).
+  const depthResolved = (event as { _depthResolved?: boolean })._depthResolved === true;
 
   if (quakeml) {
     fields.event_public_id = quakeml.publicID;
@@ -401,9 +455,11 @@ function buildMergedEventFields(
       fields.time_uncertainty = preferredOrigin.time.uncertainty;
       fields.latitude_uncertainty = preferredOrigin.latitude.uncertainty;
       fields.longitude_uncertainty = preferredOrigin.longitude.uncertainty;
-      fields.depth_uncertainty = preferredOrigin.depth?.uncertainty != null
-        ? preferredOrigin.depth.uncertainty / 1000
-        : undefined;
+      if (!depthResolved) {
+        fields.depth_uncertainty = preferredOrigin.depth?.uncertainty != null
+          ? preferredOrigin.depth.uncertainty / 1000
+          : undefined;
+      }
       if (preferredOrigin.uncertainty?.horizontalUncertainty) {
         fields.horizontal_uncertainty = preferredOrigin.uncertainty.horizontalUncertainty / 1000;
       }
@@ -415,7 +471,7 @@ function buildMergedEventFields(
       if (ou?.confidenceLevel != null) fields.confidence_level = ou.confidenceLevel;
 
       // Origin metadata
-      fields.depth_type = preferredOrigin.depthType;
+      if (!depthResolved) fields.depth_type = preferredOrigin.depthType;
       fields.earth_model_id = preferredOrigin.earthModelID;
       fields.method_id = preferredOrigin.methodID;
       fields.region = preferredOrigin.region;
@@ -490,6 +546,22 @@ function buildMergedEventFields(
   fields.source_catalogue_ids = Array.isArray(provenance.source_catalogue_ids)
     ? provenance.source_catalogue_ids
     : null;
+
+  // Review workflow columns (contract M3), on every row so a reader can rely on their
+  // presence: a group held for review carries 'pending' and the preview's warnings; every
+  // other row null. The reviewer's fields are written by resolveMergedEventReview.
+  const review = event as {
+    review_status?: string | null;
+    review_reasons?: unknown;
+    reviewed_by?: string | null;
+    reviewed_at?: string | null;
+    review_choice?: string | null;
+  };
+  fields.review_status = review.review_status ?? null;
+  fields.review_reasons = Array.isArray(review.review_reasons) ? review.review_reasons : null;
+  fields.reviewed_by = review.reviewed_by ?? null;
+  fields.reviewed_at = review.reviewed_at ?? null;
+  fields.review_choice = review.review_choice ?? null;
 
   // Quality index Q of the PUBLISHED row (contracts C1/C2), from the same routine and default
   // weights the database uses on insert. A score inherited from a contributing row would
@@ -588,37 +660,19 @@ async function executeMergeOperation(
     // Perform the merge
     const mergedEvents = performMerge(allEvents, config);
 
-    // Optional MergedEvent fields — declared once to avoid per-event allocation.
-    const OPTIONAL_DB_FIELDS: ReadonlyArray<string> = [
-      'source_id', 'region', 'location_name',
-      'event_public_id', 'event_type', 'event_type_certainty', 'source_event_type',
-      'time_uncertainty', 'latitude_uncertainty', 'longitude_uncertainty',
-      'depth_uncertainty', 'horizontal_uncertainty',
-      'min_horizontal_uncertainty', 'max_horizontal_uncertainty', 'azimuth_max_horizontal_uncertainty',
-      'confidence_level',
-      'depth_type', 'earth_model_id', 'method_id',
-      'agency_id', 'author',
-      'magnitude_type', 'magnitude_uncertainty', 'magnitude_station_count',
-      'magnitude_method_id', 'magnitude_evaluation_mode', 'magnitude_evaluation_status',
-      'azimuthal_gap', 'used_phase_count', 'used_station_count', 'standard_error',
-      'minimum_distance', 'maximum_distance',
-      'associated_phase_count', 'associated_station_count', 'depth_phase_count',
-      'evaluation_mode', 'evaluation_status',
-      'preferred_origin_id', 'preferred_magnitude_id', 'preferred_focal_mechanism_id',
-      'origin_quality', 'origins', 'magnitudes', 'picks', 'arrivals',
-      'focal_mechanisms', 'amplitudes', 'station_magnitudes',
-      'event_descriptions', 'comments', 'creation_info',
-    ];
-
     // If export-only mode, return full event records without saving to database.
     // Uses the same field extraction as the DB save path so exports contain all
     // available QuakeML/rich fields — not just the 7-field minimal shape.
+    // Rows a 'hold' request kept back for review (M4); the merge page reports the count.
+    const heldForReviewCount = mergedEvents.filter(e => e.review_status === 'pending').length;
+
     if (exportOnly) {
       return {
         success: true,
         catalogueId: null,
         eventCount: mergedEvents.length,
         originalEventCount: allEvents.length,
+        heldForReviewCount,
         events: mergedEvents.map(e => ({
           id: e.id || createId(),
           ...buildMergedEventFields(e, OPTIONAL_DB_FIELDS),
@@ -681,7 +735,8 @@ async function executeMergeOperation(
       success: true,
       catalogueId,
       eventCount: insertedEventCount,
-      originalEventCount: allEvents.length
+      originalEventCount: allEvents.length,
+      heldForReviewCount,
     };
   } catch (error) {
     // In the transactional (non-export) path this runs INSIDE the open transaction, and the
@@ -1400,9 +1455,11 @@ function splitInconsistentGroup(events: EventData[], config: MergeConfig): Event
 interface MatchGroup {
   events: EventData[];
   // True when this group is the product of splitting a parent group that failed
-  // validateEventGroup (via regroupFailedEvents). Surfaced by the preview so the QC
-  // panel can flag salvaged/separated clusters.
+  // validateEventGroup: a sub-group regroupFailedEvents salvaged, or a report the split
+  // left on its own. Surfaced by the preview so the QC panel can flag them.
   regrouped: boolean;
+  // Why the parent group failed validation (the gate's messages), when regrouped.
+  splitReasons: string[];
   // True when a member of this group lost an alternative pairing that was nearly as close
   // as the one kept (AMBIGUITY_FACTOR): another report inside its matching window that the
   // one-to-one rule assigned elsewhere. The closest pairing was kept; the preview flags the
@@ -1646,6 +1703,11 @@ function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGro
   const exhausted = new Set<number>();
   const pairKey = (x: number, y: number) => (x < y ? x * n + y : y * n + x);
   const found: Array<{ members: number[]; regrouped: boolean }> = [];
+  // The gate's messages for the last failed cluster each report was in. A report the split
+  // leaves on its own is flagged with them: two reports the windows paired but the gate
+  // refused (magnitudes irreconcilable, two different events of one agency) are exactly
+  // what a reviewer should see, and published silently as unrelated events they were not.
+  const splitReasons = new Map<number, string[]>();
   const eligible = (edge: CandidateEdge) =>
     !assigned[edge.a] && !assigned[edge.b] && !exhausted.has(pairKey(edge.a, edge.b));
   let pending = order;
@@ -1666,12 +1728,14 @@ function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGro
     let anyFailed = false;
     for (const cluster of clusters) {
       const clusterEvents = cluster.map(i => sorted[i]);
-      if (validateEventGroup(clusterEvents)) {
+      const reasons: string[] = [];
+      if (validateEventGroup(clusterEvents, true, reasons)) {
         found.push({ members: cluster, regrouped: false });
         cluster.forEach(i => { assigned[i] = 1; });
         continue;
       }
       anyFailed = true;
+      cluster.forEach(i => splitReasons.set(i, reasons));
       for (let p = 0; p < cluster.length; p++) {
         for (let q = p + 1; q < cluster.length; q++) exhausted.add(pairKey(cluster[p], cluster[q]));
       }
@@ -1691,7 +1755,7 @@ function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGro
   }
 
   for (let i = 0; i < n; i++) {
-    if (!assigned[i]) found.push({ members: [i], regrouped: false });
+    if (!assigned[i]) found.push({ members: [i], regrouped: splitReasons.has(i) });
   }
   // Output in record order of each group's earliest report, as the sweep produced it.
   found.sort((g, h) => g.members[0] - h.members[0]);
@@ -1699,6 +1763,9 @@ function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGro
   return found.map(({ members, regrouped }) => ({
     events: members.map(i => sorted[i]),
     regrouped,
+    splitReasons: regrouped
+      ? Array.from(new Set(members.flatMap(i => splitReasons.get(i) ?? [])))
+      : [],
     ambiguous: members.length > 1 && members.some(i => contested[i] === 1),
   }));
 }
@@ -1711,11 +1778,31 @@ function performMerge(
   events: EventData[],
   config: MergeConfig
 ): MergedEventData[] {
-  const mergedEvents = groupMatchingEvents(events, config).map(g =>
-    mergeEventGroup(g.events, config)
-  );
+  const mergedEvents = groupMatchingEvents(events, config).map(g => mergeMatchGroup(g, config));
   console.log(`[Merge] Processed ${events.length} events into ${mergedEvents.length} merged events`);
   return mergedEvents;
+}
+
+/**
+ * Merge one association group as the persist path publishes it. With onConflict 'hold' a
+ * flagged group (assessMatchGroup: the same predicate the preview shows) is still merged by
+ * the strategy - the row needs coordinates - but is marked pending review with the
+ * preview's warnings, so what the reviewer sees is exactly what the preview counted.
+ */
+function mergeMatchGroup(group: MatchGroup, config: MergeConfig): MergedEventData {
+  const merged = mergeEventGroup(group.events, config);
+  if (config.onConflict === 'hold') {
+    const assessment = assessMatchGroup(group, config);
+    if (assessment.suspicious || assessment.separated) {
+      merged.review_status = 'pending';
+      // Within the stored column's bounds (at most 50 reasons of 500 characters, lib/db.ts):
+      // one over-long gate message must not make the insert refuse the whole merge.
+      merged.review_reasons = assessment.warnings
+        .slice(0, 50)
+        .map(reason => (reason.length > 500 ? `${reason.slice(0, 499)}…` : reason));
+    }
+  }
+  return merged;
 }
 
 /**
@@ -1878,21 +1965,72 @@ function assessMagnitudeConsistency(events: EventData[]): MagnitudeConsistency {
 /**
  * Validate that a group of events makes physical sense to merge
  */
-function validateEventGroup(events: EventData[], logConflicts: boolean = true): boolean {
+function validateEventGroup(events: EventData[], logConflicts: boolean = true, reasons?: string[]): boolean {
   if (events.length < 2) return true;
 
   // Trial validations (the greedy split in splitInconsistentGroup) pass logConflicts=false:
   // a rejected trial sub-group is not a real over-match and must not appear in the QC
   // conflict report, which would otherwise fill with O(n^2) phantom conflicts per group.
-  const logConflict: MergeConflictLog['log'] = logConflicts
+  const record: MergeConflictLog['log'] = logConflicts
     ? mergeConflictLog.log.bind(mergeConflictLog)
     : () => {};
+  // `reasons` collects the rejection messages (not the informational notes) so the
+  // association can tell the reviewer why a matched group was split.
+  const logConflict: MergeConflictLog['log'] = (type, severity, message, details) => {
+    if (reasons && severity !== 'info') reasons.push(message);
+    record(type, severity, message, details);
+  };
 
-  const eventIds = events.map(e => e.id || 'unknown');
-  const sources = events.map(e => e.source);
-  const avgLat = events.reduce((sum, e) => sum + e.latitude, 0) / events.length;
-  const avgLon = averageLongitudes(events.map(e => e.longitude));
-  const avgTime = events[0]?.time;
+  // Same-agency rule (M5; publication/merge_strategies.tex §The same-agency rule): an
+  // agency deduplicates its own catalogue, so two of its reports that carry DIFFERENT
+  // agency event ids are two earthquakes whatever their separation. Checked first: it is
+  // the one verdict no magnitude or depth agreement can overturn.
+  const sameAgency = findSameAgencyConflict(events);
+  if (sameAgency) {
+    const { eventIds, sources, avgLat, avgLon, avgTime } = conflictContext(events);
+    logConflict(
+      'same_agency',
+      'warning',
+      `Two different ${sameAgency.label} events in one group: ${sameAgency.ids.join(' vs ')} - split`,
+      {
+        eventIds,
+        sources,
+        values: { agency: sameAgency.agency, agencyEventIds: sameAgency.ids },
+        location: { lat: avgLat, lon: avgLon },
+        time: avgTime,
+      }
+    );
+    return false;
+  }
+
+  // Vintages of one agency solution are ONE report of the earthquake, and the merge
+  // publishes only the newest of them (supersedeSameAgency), so the consistency checks
+  // judge the reports that take part: a preliminary ML 3.1 and the reviewed ML 3.8 of the
+  // same agency event are a revision, not two earthquakes, and splitting them published the
+  // event twice.
+  const { active } = supersedeSameAgency(events);
+  if (active.length < 2) return true;
+  return validateGroupConsistency(active, logConflict);
+}
+
+/** The group summary every conflict record carries. */
+function conflictContext(events: EventData[]) {
+  return {
+    eventIds: events.map(e => e.id || 'unknown'),
+    sources: events.map(e => e.source),
+    avgLat: events.reduce((sum, e) => sum + e.latitude, 0) / events.length,
+    avgLon: averageLongitudes(events.map(e => e.longitude)),
+    avgTime: events[0]?.time,
+  };
+}
+
+/**
+ * The physical consistency checks of validateEventGroup (magnitude, depth, group size,
+ * spatial spread, a repeated source, time spread), over the reports that take part in the
+ * merge.
+ */
+function validateGroupConsistency(events: EventData[], logConflict: MergeConflictLog['log']): boolean {
+  const { eventIds, sources, avgLat, avgLon, avgTime } = conflictContext(events);
 
   // Magnitude consistency. assessMagnitudeConsistency drops absent AND non-finite
   // magnitudes, so a stray NaN can no longer make every comparison false and silently
@@ -2102,6 +2240,224 @@ function validateEventGroup(events: EventData[], logConflicts: boolean = true): 
 }
 
 // ============================================================================
+// SAME-AGENCY RULE (M5)
+// ============================================================================
+
+/** '?eventid=12345', '&evid=…' or the ISC's 'smi:ISC/evid=…': the id is the parameter's value. */
+const EVENT_ID_PARAMETER = /(?:^|[/?&;])(?:evid|eventid|event_id)=([^&;#/]+)/i;
+/** Resource identifiers and URLs whose last path segment is the event's own id. */
+const EVENT_ID_RESOURCE = /^(?:smi|quakeml|https?):/i;
+/** A '<source>:' qualification a previous merge put in front of a source_id. */
+const MERGE_QUALIFICATION = /^[^:/]+:(?=.)/;
+
+/**
+ * An agency event id reduced to the bare id the agency assigned, so that the spellings one
+ * earthquake arrives under compare equal: the GeoNet importer stores
+ * 'smi:nz.org.geonet/2024p100000' where a GeoNet quakesearch CSV upload stores
+ * '2024p100000'; ComCat writes 'quakeml:us.anss.org/event/us7000abcd', the ISC
+ * 'smi:ISC/evid=626000001', an FDSN service '…/query?eventid=12345'; and a previous merge
+ * qualifies a source_id as '<source>:<id>'. Case is kept for messages; ids are compared
+ * case-insensitively. null for an empty id.
+ */
+function normalizeAgencyEventId(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  let id = raw.trim();
+  const parameter = EVENT_ID_PARAMETER.exec(id);
+  if (parameter) {
+    id = parameter[1];
+  } else {
+    // Bounded: a row re-merged several times carries one qualification per merge.
+    for (let depth = 0; depth < 8; depth++) {
+      const scheme = EVENT_ID_RESOURCE.exec(id);
+      if (scheme) {
+        const path = id.slice(scheme[0].length).split(/[?#]/)[0];
+        const segments = path.split('/').filter(Boolean);
+        if (segments.length > 0) id = segments[segments.length - 1];
+        break;
+      }
+      const qualification = MERGE_QUALIFICATION.exec(id);
+      if (!qualification) break;
+      id = id.slice(qualification[0].length);
+    }
+  }
+  id = id.trim();
+  return id ? id : null;
+}
+
+/**
+ * The id an agency gave a report, normalised (normalizeAgencyEventId): its QuakeML event
+ * publicID, else its source_id. The kind is kept because only two ids of the same kind can
+ * show two DIFFERENT events: a publicID and a source_id may come from different id spaces
+ * (a compiler's evid against the agency's own id), so unequal ids of different kinds decide
+ * nothing, while equal ones of any kind are the same event.
+ */
+function agencyEventId(e: EventData): { kind: 'public' | 'source'; id: string } | null {
+  const publicId = agencyIdOrNull(normalizeAgencyEventId(e.event_public_id));
+  if (publicId) return { kind: 'public', id: publicId };
+  const sourceId = agencyIdOrNull(normalizeAgencyEventId(e.source_id));
+  return sourceId ? { kind: 'source', id: sourceId } : null;
+}
+
+/** A platform row id (a UUID, lib/id.ts). */
+const ROW_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * null for an id this platform made up rather than one an agency assigned: the QuakeML
+ * exporter names a row that has no agency id after its row id (smi:local/event/<uuid>), and a
+ * re-import of that file carries it as the publicID. It says nothing about which earthquake
+ * the report is, so it can neither split a group nor mark a vintage.
+ */
+function agencyIdOrNull(id: string | null): string | null {
+  return id && !ROW_ID_PATTERN.test(id) ? id : null;
+}
+
+/**
+ * Whether two unequal agency ids can show two DIFFERENT events: only ids of one kind and one
+ * network namespace. ComCat gives one earthquake several network ids ('us7000abcd',
+ * 'nc73912345'), and two downloads may store different ones, so ids whose leading network
+ * letters differ decide nothing. GeoNet ('2024p100000') and ISC ('626000001') ids start
+ * with digits and share the empty namespace.
+ */
+function distinctAgencyEvents(
+  a: { kind: 'public' | 'source'; id: string },
+  b: { kind: 'public' | 'source'; id: string }
+): boolean {
+  if (a.kind !== b.kind || a.id.toLowerCase() === b.id.toLowerCase()) return false;
+  const namespace = (id: string) => /^[a-z]*/i.exec(id)![0].toLowerCase();
+  return namespace(a.id) === namespace(b.id);
+}
+
+/** How the reviewer-facing messages name an agency (not a catalogue's label, which may say "GeoNet preliminary"). */
+const AGENCY_DISPLAY_NAMES: Readonly<Record<AgencyKey, string>> = {
+  geonet: 'GeoNet', gcmt: 'Global CMT', isc: 'ISC', usgs: 'USGS', emsc: 'EMSC', jma: 'JMA',
+  geofon: 'GEOFON', iris: 'IRIS', ingv: 'INGV', ign: 'IGN', bgr: 'BGR',
+};
+
+/** Whether a report is itself a merged row (a re-merged merged catalogue): its own provenance lists several reports. */
+function isMergedReport(e: EventData): boolean {
+  if (typeof e.merge_strategy === 'string' && e.merge_strategy.trim()) return true;
+  if (Array.isArray(e.sourceEvents) && e.sourceEvents.length > 1) return true;
+  const stored = parseJsonColumn(e.source_events);
+  return Array.isArray(stored) && stored.length > 1;
+}
+
+/**
+ * The agency whose OWN catalogue a report comes from, for the same-agency rule only, or null
+ * when that is not clear - and then the rule leaves the report alone. The rule rests on an
+ * agency deduplicating its own catalogue, which holds only for the agency's own reports in
+ * the agency's own id space, so:
+ *  - a merged row is nobody's report (its identity is one member's, its solution may be
+ *    computed, and its catalogue's name may name one agency: "GeoNet merged 2024");
+ *  - the catalogue's agency decides, and only when the row's own agency code (agency_id, or
+ *    its preferred QuakeML origin's agencyID) is absent or names the same agency: a
+ *    compiler's copy of an agency's solution (an ISC bulletin row whose prime hypocentre is
+ *    WEL's) carries the agency's code but the compiler's ids and creation times.
+ * resolveAgency, which ranks authority and applies agency preferences, still credits such a
+ * row to its author.
+ */
+function sameAgencyKey(e: EventData): AgencyKey | null {
+  if (isMergedReport(e)) return null;
+  // mergeCatalogues / previewMerge attach the catalogue's agency (catalogueAgencyOf, which
+  // also reads the catalogue's source label); a report built elsewhere has only its label.
+  const catalogueAgency = (e._catalogueAgency as AgencyKey | null | undefined) ?? agencyFromName(e.source);
+  if (!catalogueAgency) return null;
+  const ownAgency =
+    agencyFromCode(e.agency_id) ?? agencyFromCode(preferredQuakemlOrigin(e)?.creationInfo?.agencyID);
+  return ownAgency == null || ownAgency === catalogueAgency ? catalogueAgency : null;
+}
+
+/** The reports of each agency (sameAgencyKey), for agencies with at least two reports in the group. */
+function reportsByAgency(events: EventData[]): Array<[AgencyKey, EventData[]]> {
+  const byAgency = new Map<AgencyKey, EventData[]>();
+  for (const e of events) {
+    const agency = sameAgencyKey(e);
+    if (!agency) continue;
+    const members = byAgency.get(agency);
+    if (members) members.push(e);
+    else byAgency.set(agency, [e]);
+  }
+  return Array.from(byAgency.entries()).filter(([, members]) => members.length > 1);
+}
+
+/**
+ * Two reports of one agency with different agency ids of the same kind, if the group holds
+ * such a pair. Reports without a clear agency (sameAgencyKey) are never grouped, and a pair
+ * whose ids are not comparable (one has none, or a publicID against a source_id that differ)
+ * is left to the strategy like any two reports.
+ */
+function findSameAgencyConflict(
+  events: EventData[]
+): { agency: AgencyKey; label: string; ids: string[] } | null {
+  for (const [agency, members] of reportsByAgency(events)) {
+    const ordered = members.slice().sort(compareRecordOrder);
+    for (let i = 0; i < ordered.length; i++) {
+      const a = agencyEventId(ordered[i]);
+      if (!a) continue;
+      for (let j = i + 1; j < ordered.length; j++) {
+        const b = agencyEventId(ordered[j]);
+        if (!b || !distinctAgencyEvents(a, b)) continue;
+        return { agency, label: AGENCY_DISPLAY_NAMES[agency] ?? agency, ids: [a.id, b.id] };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Same-agency supersession (M5). Two reports of one agency (sameAgencyKey) that carry the
+ * same agency event id (normalised, of either kind) are two vintages of one solution - a
+ * preliminary and a reviewed GeoNet location, an ISC bulletin re-import: the newest
+ * (rankByNewest) is the agency's current solution and the rest are superseded - kept in the
+ * provenance, excluded from every selection, average, ranking and field rule. Anything less
+ * certain (no clear agency, a report without an id) is not superseded: both reports stay
+ * and the strategy decides between them, as for any two reports. `active` keeps the input
+ * order.
+ */
+function supersedeSameAgency(events: EventData[]): { active: EventData[]; superseded: Set<EventData> } {
+  const superseded = new Set<EventData>();
+  if (events.length < 2) return { active: events, superseded };
+  for (const [, members] of reportsByAgency(events)) {
+    const byId = new Map<string, EventData[]>();
+    for (const e of members) {
+      const id = agencyEventId(e)?.id.toLowerCase();
+      if (!id) continue;
+      const vintages = byId.get(id);
+      if (vintages) vintages.push(e);
+      else byId.set(id, [e]);
+    }
+    for (const vintages of Array.from(byId.values())) {
+      if (vintages.length < 2) continue;
+      for (const older of rankByNewest(vintages).slice(1)) superseded.add(older);
+    }
+  }
+  if (superseded.size === 0) return { active: events, superseded };
+  return { active: events.filter(e => !superseded.has(e)), superseded };
+}
+
+/**
+ * Re-insert the superseded reports into a provenance list built over the active reports
+ * only, in the group's original order, so source_events lists every contributing report
+ * (they still count towards source_catalogue_ids) with the flags the strategy set on the
+ * active ones intact.
+ */
+function restoreSupersededReports(
+  sourceEvents: SourceEventEntry[],
+  events: EventData[],
+  active: EventData[]
+): SourceEventEntry[] {
+  return events.map(e => {
+    const position = active.indexOf(e);
+    if (position >= 0) return sourceEvents[position];
+    return {
+      catalogueId: e.catalogueId ?? e.id ?? 'unknown',
+      source: e.source,
+      originalData: toSourceEventData(e),
+      superseded: true as const,
+    };
+  });
+}
+
+// ============================================================================
 // FIELD-LEVEL UNION MERGE
 // ============================================================================
 
@@ -2203,11 +2559,20 @@ const UNION_BLOB_FIELDS: ReadonlyArray<keyof MergedEvent> = [
   'comments',
 ] as const;
 
+/** How the focal mechanism is resolved inside unionMergeFields (contract M1). */
+interface UnionMergeOptions {
+  mechanism?: MergeFieldRules['mechanism'];
+}
+
 /**
  * Apply a field-level union over a group of source events onto the already-
  * selected merged base event.
  */
-function unionMergeFields(base: MergedEventData, events: EventData[]): MergedEventData {
+function unionMergeFields(
+  base: MergedEventData,
+  events: EventData[],
+  options: UnionMergeOptions = {}
+): MergedEventData {
   if (events.length <= 1) return base;
 
   // Sort sources by descending quality so better data fills gaps first; a fixed record
@@ -2286,11 +2651,26 @@ function unionMergeFields(base: MergedEventData, events: EventData[]): MergedEve
   // strategy's spread, or, for an averaged record, from the report mergeByAverage took the
   // depth from.
 
-  // Focal mechanisms: every mechanism any source stored is kept, ordered by the documented
-  // authority hierarchy, and the best becomes the preferred one (finding #30).
-  const mechanisms = unionFocalMechanisms(events);
+  // Focal mechanisms. A mechanism rule (M1) of 'strategy' publishes only the base report's
+  // own mechanisms, 'catalogue' only the named report's; either falls back to the hierarchy
+  // when its report stored none. Under the hierarchy (the default) every mechanism any
+  // source stored is kept, ordered by the documented authority hierarchy, and the best
+  // becomes the preferred one (finding #30).
+  const chosen = mechanismReportForRule(result, events, options.mechanism);
+  let mechanisms: FocalMechanism[];
+  let preferredId: string | null;
+  if (chosen) {
+    const own = focalMechanismsOf(chosen.report);
+    mechanisms = own.list;
+    preferredId = own.preferredId ?? own.list[0].publicID ?? null;
+    result.sourceEvents = result.sourceEvents.map((entry, index) =>
+      index === chosen.index ? { ...entry, mechanismSelected: true as const } : entry
+    );
+  } else {
+    mechanisms = unionFocalMechanisms(events);
+    preferredId = mechanisms[0]?.publicID ?? null;
+  }
   if (mechanisms.length > 0) {
-    const preferredId = mechanisms[0].publicID ?? null;
     (result as any).focal_mechanisms = JSON.stringify(mechanisms);
     result.preferred_focal_mechanism_id = preferredId;
     if (result.quakeml) {
@@ -2303,6 +2683,29 @@ function unionMergeFields(base: MergedEventData, events: EventData[]): MergedEve
   }
 
   return result;
+}
+
+/**
+ * The report whose own focal mechanisms a mechanism rule publishes, with its index in the
+ * group; null under the hierarchy, or when the rule's report stored no mechanism (fall back
+ * to the hierarchy). 'strategy' means the `selected` base report, so a computed epicentre
+ * (average, median), which publishes no report's solution, falls back too.
+ */
+function mechanismReportForRule(
+  merged: MergedEventData,
+  events: EventData[],
+  rule: MergeFieldRules['mechanism'] | undefined
+): { report: EventData; index: number } | null {
+  if (!rule || rule.rule === 'hierarchy') return null;
+  let index = -1;
+  if (rule.rule === 'catalogue') {
+    index = events.findIndex(e => String(e.catalogueId ?? '') === String(rule.catalogueId ?? ''));
+  } else {
+    index = merged.sourceEvents.findIndex(entry => entry.selected === true);
+  }
+  if (index < 0 || index >= events.length) return null;
+  const report = events[index];
+  return focalMechanismsOf(report).list.length > 0 ? { report, index } : null;
 }
 
 /**
@@ -2335,21 +2738,32 @@ function buildSourceEvents(events: EventData[], selectedIndex: number = -1): Mer
 }
 
 /** Strategy names a merged event may record (contract C2); anything else runs as 'priority'. */
-const MERGE_STRATEGY_NAMES = new Set(['quality', 'priority', 'newest', 'complete', 'average']);
+const MERGE_STRATEGY_NAMES = new Set(['quality', 'priority', 'newest', 'complete', 'average', 'median']);
 
 function mergeStrategyName(config: MergeConfig): string {
   return MERGE_STRATEGY_NAMES.has(config.mergeStrategy) ? config.mergeStrategy : 'priority';
 }
 
-const mergeParameterCache = new WeakMap<object, string>();
+const mergeParameterCache = new WeakMap<object, { authority: string; description: string }>();
+
+/**
+ * The authority table a merge ran with, as merge_parameters records it (M6): the built-in
+ * default, or an administrator's table identified by when it was saved.
+ */
+function describeMergeAuthority(table: MergeAuthorityTable = currentMergeAuthority()): string {
+  if (table.source !== 'custom') return 'default';
+  return `custom@${table.updatedAt ?? new Date(0).toISOString()}`;
+}
 
 /**
  * The effective merge configuration, as the JSON stored on every merged event
- * (`merge_parameters`, contract C2). Computed once per configuration object.
+ * (`merge_parameters`, contract C2). Computed once per configuration object and
+ * authority table (the table is scoped per merge, so one config object may run under two).
  */
 function describeMergeParameters(config: MergeConfig): string {
+  const authority = describeMergeAuthority();
   const cached = mergeParameterCache.get(config);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined && cached.authority === authority) return cached.description;
   const strategy = mergeStrategyName(config);
   const customOrder = strategy === 'priority' && config.priority === 'custom' && Array.isArray(config.priorityOrder);
   const description = JSON.stringify({
@@ -2358,11 +2772,15 @@ function describeMergeParameters(config: MergeConfig): string {
     distanceThresholdKm: config.distanceThreshold,
     priority: config.priority,
     ...(customOrder ? { priorityOrder: config.priorityOrder } : {}),
+    // Per-field rules (M1) and the hold-for-review choice (M4), as they were applied.
+    ...(config.fieldRules ? { fieldRules: config.fieldRules } : {}),
+    onConflict: config.onConflict ?? 'resolve',
+    authority,
     // The configured windows are always widened by magnitude and depth (eventsMatchAdaptive).
     adaptiveWindows: true,
     association: 'one-to-one, best match on normalised time and distance',
   });
-  mergeParameterCache.set(config, description);
+  mergeParameterCache.set(config, { authority, description });
   return description;
 }
 
@@ -2382,24 +2800,49 @@ function withMergeProvenance(merged: MergedEventData, config: MergeConfig): Merg
   merged.merge_strategy = mergeStrategyName(config);
   merged.merge_parameters = describeMergeParameters(config);
   merged.source_catalogue_ids = catalogueIds;
+  clearReviewColumns(merged);
   return merged;
 }
 
 /**
+ * A merged row starts unreviewed. The strategies spread a base report, and a report from a
+ * merged source catalogue carries that catalogue's review columns, which would otherwise
+ * publish a stale 'pending' (or a reviewer's name) on the new row. The persist path marks
+ * the held rows AFTER this (mergeMatchGroup).
+ */
+function clearReviewColumns(merged: MergedEventData): void {
+  merged.review_status = null;
+  merged.review_reasons = null;
+  merged.reviewed_by = null;
+  merged.reviewed_at = null;
+  merged.review_choice = null;
+}
+
+/**
  * Merge a group of matching events based on the selected strategy.
- * After the strategy selects the base record, a field-level union pass
- * fills in any optional fields that the base event lacks from other sources.
+ * Same-agency vintages are settled first (supersedeSameAgency); the strategy then selects
+ * the base record from the current reports, the per-field rules (M1) re-source the depth,
+ * magnitude and mechanism where the request asks, and a field-level union pass fills in
+ * any optional fields that the base event lacks from other sources.
  */
 function mergeEventGroup(
   events: EventData[],
   config: MergeConfig
 ): MergedEventData {
+  const { active, superseded } = supersedeSameAgency(events);
+  const merged = mergeActiveReports(active, config);
+  if (superseded.size > 0) merged.sourceEvents = restoreSupersededReports(merged.sourceEvents, events, active);
+  return withMergeProvenance(merged, config);
+}
+
+/** The strategy, field rules and union over the reports that take part in the merge. */
+function mergeActiveReports(events: EventData[], config: MergeConfig): MergedEventData {
   if (events.length === 1) {
     // A lone report is published as it stands, whatever the strategy.
-    return withMergeProvenance({
+    return {
       ...events[0],
       sourceEvents: buildSourceEvents([events[0]], 0)
-    }, config);
+    };
   }
 
   let mergedEvent: MergedEventData;
@@ -2407,6 +2850,9 @@ function mergeEventGroup(
   switch (config.mergeStrategy) {
     case 'average':
       mergedEvent = mergeByAverage(events);
+      break;
+    case 'median':
+      mergedEvent = mergeByMedian(events);
       break;
     case 'newest':
       mergedEvent = mergeByNewest(events);
@@ -2423,9 +2869,164 @@ function mergeEventGroup(
       break;
   }
 
+  // Field rules run before the union so the union's gap-filling sees the published depth
+  // and magnitude (and their metadata) as the rule set them.
+  applyDepthRule(mergedEvent, events, config.fieldRules?.depth);
+  applyMagnitudeRule(mergedEvent, events, config.fieldRules?.magnitude);
+
   // Apply field-level union: fill optional fields the base event lacks
   // from other sources in the group.
-  return withMergeProvenance(unionMergeFields(mergedEvent, events), config);
+  return unionMergeFields(mergedEvent, events, { mechanism: config.fieldRules?.mechanism });
+}
+
+// ============================================================================
+// PER-FIELD RESOLUTION RULES (contract M1)
+// ============================================================================
+
+/**
+ * The report a rule names among the current reports, or null when the rule cannot be
+ * applied to this group (no report from the named catalogue), in which case the strategy's
+ * own choice stands. 'best-constrained' / 'type-preference' are not report choices and are
+ * handled by their callers.
+ */
+function reportForFieldRule(
+  rule: string,
+  catalogueId: string | undefined,
+  events: EventData[]
+): EventData | null {
+  switch (rule) {
+    case 'quality':
+      return rankByQuality(events)[0] ?? null;
+    case 'authority':
+      return selectByNetworkAuthority(events);
+    case 'newest':
+      return rankByNewest(events)[0] ?? null;
+    case 'catalogue':
+      return events.find(e => String(e.catalogueId ?? '') === String(catalogueId ?? '')) ?? null;
+    default:
+      return null;
+  }
+}
+
+/** Set one provenance flag on exactly one report, clearing it everywhere else. */
+function markSelectedReport(
+  sourceEvents: SourceEventEntry[],
+  index: number,
+  flag: 'depthSelected' | 'magnitudeSelected'
+): void {
+  sourceEvents.forEach((entry, i) => {
+    if (i === index) entry[flag] = true;
+    else delete entry[flag];
+  });
+}
+
+/**
+ * The published depth's own type and uncertainty, from the report it was taken from (its
+ * preferred QuakeML origin in km, else its stored columns). A non-positive uncertainty is
+ * no measurement, as in the depth selection.
+ */
+function depthMetadataOf(report: EventData): { depth_type: string | null; depth_uncertainty: number | null } {
+  const origin = preferredQuakemlOrigin(report);
+  const uncertaintyKm = origin?.depth?.uncertainty != null
+    ? origin.depth.uncertainty / 1000
+    : report.depth_uncertainty;
+  return {
+    depth_type: origin?.depthType ?? report.depth_type ?? null,
+    depth_uncertainty:
+      typeof uncertaintyKm === 'number' && Number.isFinite(uncertaintyKm) && uncertaintyKm > 0 ? uncertaintyKm : null,
+  };
+}
+
+/**
+ * Depth rule: publish the named report's depth WITH its own DEPTH_META_FIELDS and mark
+ * that report `depthSelected`. A report with no depth cannot supply one (the strategy's
+ * choice stands). 'strategy' is the strategy's own behaviour and changes nothing.
+ */
+function applyDepthRule(merged: MergedEventData, events: EventData[], rule: MergeFieldRules['depth'] | undefined): void {
+  if (!rule || rule.rule === 'strategy') return;
+  let index: number;
+  if (rule.rule === 'best-constrained') {
+    const candidate = selectBestDepthCandidate(events);
+    if (!candidate) return;
+    index = candidate.index;
+  } else {
+    const report = reportForFieldRule(rule.rule, rule.catalogueId, events);
+    if (!report || report.depth == null || !Number.isFinite(report.depth)) return;
+    index = events.indexOf(report);
+  }
+  const report = events[index];
+  merged.depth = report.depth;
+  Object.assign(merged, depthMetadataOf(report));
+  (merged as { _depthResolved?: boolean })._depthResolved = true;
+  markSelectedReport(merged.sourceEvents, index, 'depthSelected');
+}
+
+/**
+ * Publish one selected magnitude measurement: its value, its OWN metadata and the pointer
+ * to its QuakeML entry, and mark the report it came from. Nulling the metadata lost real
+ * data; copying it from the base event stamped a different measurement's ±0.30 / 4
+ * stations onto a selection that came from a ±0.05 / 12-station solution.
+ */
+function publishSelectedMagnitude(merged: MergedEventData, selected: SelectedMagnitude): void {
+  merged.magnitude = selected.value;
+  merged.magnitude_type = selected.type !== 'unknown' ? selected.type : null;
+  merged.magnitude_uncertainty = selected.uncertainty;
+  merged.magnitude_station_count = selected.stationCount;
+  merged.magnitude_method_id = selected.methodID;
+  merged.magnitude_evaluation_mode = selected.evaluationMode;
+  merged.magnitude_evaluation_status = selected.evaluationStatus;
+  // The preferred-magnitude pointer follows the selected measurement: left pointing at
+  // the base's own preferred entry, the exporter rewrote THAT entry (an ML) with the
+  // selected Mw value and emitted the real Mw entry beside it.
+  merged.preferred_magnitude_id = selected.publicID;
+  (merged as { _magnitudeResolved?: boolean })._magnitudeResolved = true;
+  if (selected.sourceIndex != null) markSelectedReport(merged.sourceEvents, selected.sourceIndex, 'magnitudeSelected');
+}
+
+/**
+ * A report's own preferred magnitude as a SelectedMagnitude: its stored columns, with the
+ * preferred entry of its in-memory QuakeML filling what the columns do not state.
+ */
+function reportMagnitude(report: EventData, index: number): SelectedMagnitude {
+  const quakeml = report.quakeml;
+  const preferred = quakeml?.magnitudes?.find(m => m.publicID === quakeml.preferredMagnitudeID) ?? quakeml?.magnitudes?.[0];
+  const text = (column: unknown, fallback: unknown): string | null =>
+    typeof column === 'string' && column ? column : typeof fallback === 'string' && fallback ? fallback : null;
+  const num = (column: unknown, fallback: unknown): number | null =>
+    typeof column === 'number' && Number.isFinite(column)
+      ? column
+      : typeof fallback === 'number' && Number.isFinite(fallback) ? fallback : null;
+  return {
+    value: report.magnitude,
+    type: text(report.magnitude_type, preferred?.type) ?? 'unknown',
+    publicID: text(report.preferred_magnitude_id, preferred?.publicID),
+    uncertainty: num(report.magnitude_uncertainty, preferred?.mag?.uncertainty),
+    stationCount: num(report.magnitude_station_count, preferred?.stationCount),
+    methodID: text(report.magnitude_method_id, preferred?.methodID),
+    evaluationMode: text(report.magnitude_evaluation_mode, preferred?.evaluationMode),
+    evaluationStatus: text(report.magnitude_evaluation_status, preferred?.evaluationStatus),
+    sourceIndex: index,
+  };
+}
+
+/**
+ * Magnitude rule: 'type-preference' is the size-aware type hierarchy over the group
+ * (selectBestMagnitude, as the averaged strategies use); the other rules publish the named
+ * report's own preferred magnitude. A report without a magnitude cannot supply one.
+ */
+function applyMagnitudeRule(
+  merged: MergedEventData,
+  events: EventData[],
+  rule: MergeFieldRules['magnitude'] | undefined
+): void {
+  if (!rule || rule.rule === 'strategy') return;
+  if (rule.rule === 'type-preference') {
+    publishSelectedMagnitude(merged, selectBestMagnitude(events));
+    return;
+  }
+  const report = reportForFieldRule(rule.rule, rule.catalogueId, events);
+  if (!report || report.magnitude == null || !Number.isFinite(report.magnitude)) return;
+  publishSelectedMagnitude(merged, reportMagnitude(report, events.indexOf(report)));
 }
 
 // ============================================================================
@@ -2982,12 +3583,6 @@ const LARGE_EVENT_MAGNITUDE = 6.2;
 // ============================================================================
 
 /**
- * Seismological agencies the merge recognises for network authority, the GeoNet/GNS
- * priority options and focal-mechanism authority.
- */
-type AgencyKey = 'geonet' | 'gcmt' | 'isc' | 'usgs' | 'emsc' | 'jma' | 'geofon' | 'iris' | 'ingv' | 'ign' | 'bgr';
-
-/**
  * Agency codes as agencies write them in QuakeML creationInfo/agencyID (stored as
  * agency_id) and as FDSN network codes: 'WEL' is GeoNet's ISC code, 'NZ' its FDSN network,
  * 'US' the USGS, 'HRV' the Harvard/Global CMT project, 'ROM' INGV and 'MDD' IGN. A code is
@@ -3128,80 +3723,26 @@ function resolveAgency(e: EventData, sourceLabel: string | undefined = e.source)
 /**
  * Network authority hierarchy for prioritizing seismic data sources. `patterns` are
  * whole words of a source name (or agency codes); `agency` ties an entry to the agency
- * resolveAgency identifies.
+ * resolveAgency identifies. The table itself lives in lib/merge-authority.ts (M6): the
+ * engine reads whatever table the enclosing runWithMergeAuthority scope carries, which is
+ * the administrator's saved table for mergeCatalogues / previewMerge and the built-in
+ * default everywhere else.
  */
-interface NetworkAuthority {
-  patterns: string[];
-  priority: number;
-  region?: string;
-  description: string;
-  agency?: AgencyKey;
-}
-
-/**
- * Default network hierarchy (can be overridden by user configuration)
- * This is a global hierarchy suitable for most use cases
- */
-const DEFAULT_NETWORK_HIERARCHY: NetworkAuthority[] = [
-  // New Zealand authoritative networks
-  { patterns: ['geonet', 'gns'], priority: 1, region: 'NZ', description: 'GeoNet (NZ authoritative)', agency: 'geonet' },
-  // Global centroid moment tensor
-  { patterns: ['gcmt', 'cmt', 'globalcmt'], priority: 2, description: 'Global CMT', agency: 'gcmt' },
-  // International Seismological Centre
-  { patterns: ['isc', 'iscgem'], priority: 3, description: 'ISC/ISC-GEM', agency: 'isc' },
-  // USGS National Earthquake Information Center
-  { patterns: ['usgs', 'neic', 'anss', 'comcat'], priority: 4, description: 'USGS/NEIC', agency: 'usgs' },
-  // European-Mediterranean Seismological Centre
-  { patterns: ['emsc', 'csem'], priority: 5, description: 'EMSC', agency: 'emsc' },
-  // Japan Meteorological Agency
-  { patterns: ['jma'], priority: 6, region: 'JP', description: 'JMA', agency: 'jma' },
-  // Geofon
-  { patterns: ['geofon', 'gfz'], priority: 7, description: 'GEOFON/GFZ', agency: 'geofon' },
-  // IRIS
-  { patterns: ['iris'], priority: 8, description: 'IRIS', agency: 'iris' },
-  // Other regional networks
-  { patterns: ['ingv'], priority: 9, region: 'IT', description: 'INGV (Italy)', agency: 'ingv' },
-  { patterns: ['ign'], priority: 10, region: 'ES', description: 'IGN (Spain)', agency: 'ign' },
-];
+type NetworkAuthority = AuthorityEntry;
 
 /**
  * Regional network priority overrides
  * When events are within these regions, use region-specific priorities
  */
-interface RegionalPriority {
-  bounds: { minLat: number; maxLat: number; minLon: number; maxLon: number };
-  hierarchy: Array<{ patterns: string[]; priority: number; agency?: AgencyKey }>;
-}
+type RegionalPriority = Omit<RegionalAuthority, 'name'>;
 
-const REGIONAL_PRIORITIES: Record<string, RegionalPriority> = {
-  NZ: {
-    // The national extent the rest of the platform uses (lib/geo-bounds-utils
-    // NZ_NATIONAL_BOUNDS): the Kermadec Islands, the Chatham Rise and the subantarctic
-    // islands are GeoNet's area of responsibility too, and the old -50..-34 box ranked a
-    // Kermadec event by the global table. minLon > maxLon marks the antimeridian crossing.
-    bounds: {
-      minLat: NZ_NATIONAL_BOUNDS.minLatitude,
-      maxLat: NZ_NATIONAL_BOUNDS.maxLatitude,
-      minLon: NZ_NATIONAL_BOUNDS.minLongitude,
-      maxLon: NZ_NATIONAL_BOUNDS.maxLongitude,
-    },
-    hierarchy: [
-      { patterns: ['geonet', 'gns'], priority: 1, agency: 'geonet' },
-      { patterns: ['gcmt', 'cmt'], priority: 2, agency: 'gcmt' },
-      { patterns: ['isc'], priority: 3, agency: 'isc' },
-      { patterns: ['usgs', 'neic'], priority: 4, agency: 'usgs' },
-    ],
-  },
-  JP: {
-    bounds: { minLat: 24, maxLat: 46, minLon: 122, maxLon: 154 },
-    hierarchy: [
-      { patterns: ['jma'], priority: 1, agency: 'jma' },
-      { patterns: ['gcmt', 'cmt'], priority: 2, agency: 'gcmt' },
-      { patterns: ['isc'], priority: 3, agency: 'isc' },
-      { patterns: ['usgs', 'neic'], priority: 4, agency: 'usgs' },
-    ],
-  },
-};
+/** The built-in global hierarchy, kept as a named export for callers and tests. */
+const DEFAULT_NETWORK_HIERARCHY: ReadonlyArray<NetworkAuthority> = DEFAULT_MERGE_AUTHORITY.hierarchy;
+
+/** The built-in regional overrides by region name ('NZ', 'JP'), as they were once declared here. */
+const REGIONAL_PRIORITIES: Record<string, RegionalPriority> = Object.fromEntries(
+  DEFAULT_MERGE_AUTHORITY.regions.map(region => [region.name, region] as [string, RegionalPriority])
+);
 
 /** Longitude containment that supports antimeridian-crossing regions (minLon > maxLon). */
 function inRegionBounds(bounds: RegionalPriority['bounds'], latitude: number, longitude: number): boolean {
@@ -3212,12 +3753,32 @@ function inRegionBounds(bounds: RegionalPriority['bounds'], latitude: number, lo
   return latitude >= bounds.minLat && latitude <= bounds.maxLat && inLon;
 }
 
+/** Highest (least authoritative) priority each authority table lists, global and regional. */
+const LOWEST_LISTED_PRIORITY = new WeakMap<MergeAuthorityTable, number>();
+
+function lowestListedPriority(table: MergeAuthorityTable): number {
+  let lowest = LOWEST_LISTED_PRIORITY.get(table);
+  if (lowest === undefined) {
+    lowest = 0;
+    for (const entry of table.hierarchy) lowest = Math.max(lowest, entry.priority);
+    for (const region of table.regions) {
+      for (const entry of region.hierarchy) lowest = Math.max(lowest, entry.priority);
+    }
+    LOWEST_LISTED_PRIORITY.set(table, lowest);
+  }
+  return lowest;
+}
+
 /**
  * Get network priority for a source name
  * Lower priority = more authoritative (1 is best)
  *
  * The agency is identified from the event's agency code or its catalogue's explicit
  * agency when an event is given, otherwise from whole words of the source name.
+ *
+ * A network the table does not list ranks just below every listed one, and a report with
+ * no source at all below that. Fixed ranks (100, 999) put an unlisted network ABOVE a
+ * network an administrator listed at a priority past 100, which the table allows (to 1000).
  *
  * @param source - Source name to check
  * @param event - Optional event for agency identity and regional priority detection
@@ -3229,25 +3790,32 @@ function getNetworkPriority(
   event?: EventData,
   customHierarchy?: NetworkAuthority[]
 ): number {
+  // The running table (M6): regional overrides first, then the global hierarchy.
+  const table = currentMergeAuthority();
+  const hierarchy = customHierarchy || table.hierarchy;
+  const unlisted = Math.max(
+    lowestListedPriority(table),
+    customHierarchy ? Math.max(0, ...customHierarchy.map(entry => entry.priority)) : 0
+  ) + 1;
+
   const agency = event ? resolveAgency(event, source) : agencyFromName(source);
-  if (!source && !agency) return 999;
+  if (!source && !agency) return unlisted + 1;
   const words = new Set(source ? nameTokens(source) : []);
   const matches = (entry: { patterns: string[]; agency?: AgencyKey }) =>
     agency != null && entry.agency != null
       ? entry.agency === agency
       : entry.patterns.some(p => words.has(p.toLowerCase()));
 
-  // Check for regional priority override
   if (event && Number.isFinite(event.latitude) && Number.isFinite(event.longitude)) {
-    for (const regionConfig of Object.values(REGIONAL_PRIORITIES)) {
+    for (const regionConfig of table.regions) {
       if (!inRegionBounds(regionConfig.bounds, event.latitude, event.longitude)) continue;
       const entry = regionConfig.hierarchy.find(matches);
       if (entry) return entry.priority;
     }
   }
 
-  const entry = (customHierarchy || DEFAULT_NETWORK_HIERARCHY).find(matches);
-  return entry ? entry.priority : 100; // Unknown network
+  const entry = hierarchy.find(matches);
+  return entry ? entry.priority : unlisted;
 }
 
 /**
@@ -3770,15 +4338,67 @@ function mergeByAverage(events: EventData[]): MergedEventData {
   // Uncertainty-weighted location averaging (equal weights when any report lacks σ)
   const location = locationAverage(events);
 
+  // Use the earliest time - use pre-computed _timestamp if available for performance
+  const earliestEvent = events.reduce((earliest, e) => (compareRecordOrder(e, earliest) < 0 ? e : earliest));
+
+  return mergeByComputedEpicentre(events, {
+    latitude: location.latitude,
+    longitude: location.longitude,
+    time: earliestEvent.time,
+    weights: location.weights,
+  });
+}
+
+/**
+ * Median of a set of longitudes, unwrapped across the date line the way averageLongitudes
+ * treats them: a set that straddles ±180° is taken on the 0..360 circle first, so 179° and
+ * -179° have a median of 180°, not 0°.
+ */
+function medianLongitude(lons: number[]): number {
+  if (lons.length === 0) return 0;
+  if (Math.max(...lons) - Math.min(...lons) < 180) return median(lons);
+  return normalizeLongitude(median(lons.map(lon => (lon < 0 ? lon + 360 : lon))));
+}
+
+/**
+ * Consensus epicentre: component-wise median latitude and longitude and the median origin
+ * time (for two reports their mean). A median is insensitive to one distant outlier the
+ * weighted average is pulled toward.
+ */
+function medianEpicentre(events: EventData[]): { latitude: number; longitude: number; time: string } {
+  return {
+    latitude: median(events.map(e => e.latitude)),
+    longitude: medianLongitude(events.map(e => e.longitude)),
+    time: new Date(median(events.map(eventTimestamp))).toISOString(),
+  };
+}
+
+/**
+ * The 'median' strategy: a consensus epicentre and origin time (medianEpicentre), the
+ * best-constrained depth and the type-preferred magnitude, published exactly as the
+ * averaged strategy publishes a computed solution (no report `selected`, the metadata of
+ * one solution cleared), but with no location weights, since no report is weighted.
+ */
+function mergeByMedian(events: EventData[]): MergedEventData {
+  return mergeByComputedEpicentre(events, { ...medianEpicentre(events), weights: null });
+}
+
+/**
+ * Publish a computed solution (an averaged or a median epicentre and origin time) over a
+ * group: the epicentre no agency located, the best-constrained depth, the type-preferred
+ * magnitude, and the provenance of each. `weights` are each report's share of an averaged
+ * epicentre, or null when the epicentre was not weighted.
+ */
+function mergeByComputedEpicentre(
+  events: EventData[],
+  solution: { latitude: number; longitude: number; time: string; weights: number[] | null }
+): MergedEventData {
   // IMPROVEMENT: Use magnitude hierarchy instead of averaging
   // Averaging Mw=7.0 with ML=6.5 would give M=6.75 (incorrect due to saturation)
   const bestMagnitude = selectBestMagnitude(events);
 
   // IMPROVEMENT: Use best depth based on uncertainty instead of simple average
   const depthChoice = selectBestDepthCandidate(events);
-
-  // Use the earliest time - use pre-computed _timestamp if available for performance
-  const earliestEvent = events.reduce((earliest, e) => (compareRecordOrder(e, earliest) < 0 ? e : earliest));
 
   // Spread the highest-quality source event so that its identity (source_id,
   // event_public_id), event-level fields and supplementary products are kept. The averaged
@@ -3792,9 +4412,9 @@ function mergeByAverage(events: EventData[]): MergedEventData {
 
   const merged: MergedEventData = {
     ...bestQualityEvent,
-    time: earliestEvent.time,
-    latitude: location.latitude,
-    longitude: location.longitude,
+    time: solution.time,
+    latitude: solution.latitude,
+    longitude: solution.longitude,
     depth: depthChoice?.depth ?? null,
     magnitude: bestMagnitude.value,
     source: 'merged',
@@ -3821,41 +4441,21 @@ function mergeByAverage(events: EventData[]): MergedEventData {
 
     // The published depth's own type and uncertainty, from the report it was taken from
     // (a non-positive uncertainty is no measurement, as in the depth selection).
-    if (depthChoice) {
-      const depthReport = events[depthChoice.index];
-      const depthOrigin = preferredQuakemlOrigin(depthReport);
-      const uncertaintyKm = depthOrigin?.depth?.uncertainty != null
-        ? depthOrigin.depth.uncertainty / 1000
-        : depthReport.depth_uncertainty;
-      merged.depth_type = depthOrigin?.depthType ?? depthReport.depth_type ?? null;
-      merged.depth_uncertainty =
-        typeof uncertaintyKm === 'number' && Number.isFinite(uncertaintyKm) && uncertaintyKm > 0 ? uncertaintyKm : null;
-    }
+    if (depthChoice) Object.assign(merged, depthMetadataOf(events[depthChoice.index]));
 
     // Provenance: which report each published quantity came from, and each report's share
     // of the averaged epicentre (inverse-variance, or equal when a report stated no σ).
-    location.weights.forEach((weight, index) => {
-      merged.sourceEvents[index].locationWeight = Math.round(weight * 1e6) / 1e6;
-    });
-    if (bestMagnitude.sourceIndex != null) merged.sourceEvents[bestMagnitude.sourceIndex].magnitudeSelected = true;
+    if (solution.weights) {
+      solution.weights.forEach((weight, index) => {
+        merged.sourceEvents[index].locationWeight = Math.round(weight * 1e6) / 1e6;
+      });
+    }
     if (depthChoice) merged.sourceEvents[depthChoice.index].depthSelected = true;
   }
 
   // Set after the clear: the selected magnitude's OWN metadata, from the measurement the
-  // hierarchy actually chose. Nulling these lost real data; and copying them from the
-  // base event stamped a different measurement's ±0.30 / 4 stations onto a selection
-  // that came from a ±0.05 / 12-station solution with the same value.
-  merged.magnitude_type = bestMagnitude.type !== 'unknown' ? bestMagnitude.type : null;
-  merged.magnitude_uncertainty = bestMagnitude.uncertainty;
-  merged.magnitude_station_count = bestMagnitude.stationCount;
-  merged.magnitude_method_id = bestMagnitude.methodID;
-  merged.magnitude_evaluation_mode = bestMagnitude.evaluationMode;
-  merged.magnitude_evaluation_status = bestMagnitude.evaluationStatus;
-  // The preferred-magnitude pointer follows the selected measurement: left pointing at
-  // the base's own preferred entry, the exporter rewrote THAT entry (an ML) with the
-  // selected Mw value and emitted the real Mw entry beside it.
-  merged.preferred_magnitude_id = bestMagnitude.publicID;
-  (merged as { _magnitudeResolved?: boolean })._magnitudeResolved = true;
+  // hierarchy actually chose (publishSelectedMagnitude), and the report it came from.
+  publishSelectedMagnitude(merged, bestMagnitude);
 
   return merged;
 }
@@ -4313,6 +4913,12 @@ export async function previewMerge(
     throw new Error('Database not initialized');
   }
 
+  // The same authority table the persist path would run with (M6).
+  const authority = await loadMergeAuthority();
+  return runWithMergeAuthority(authority, () => previewMergeWithAuthority(sourceCatalogues, config));
+}
+
+async function previewMergeWithAuthority(sourceCatalogues: SourceCatalogue[], config: MergeConfig) {
   // Fetch events from all source catalogues
   const allEvents: EventData[] = [];
   const catalogueColors: Record<string, string> = {};
@@ -4356,6 +4962,9 @@ export async function previewMerge(
   // Identify suspicious matches — use the flag already set by performMergeWithGroups
   // to avoid calling validateEventGroup a second time (which would double-log conflicts).
   const suspiciousGroups = duplicateGroups.filter(group => group.isSuspicious);
+  const heldForReviewCount = duplicateGroups.filter(group => group.heldForReview).length;
+  const separatedReportsCount = duplicateGroups.filter(group => group.separated).length;
+  const supersededReportsCount = duplicateGroups.reduce((sum, group) => sum + group.supersededEventIndexes.length, 0);
 
   return {
     duplicateGroups: duplicateGroups.map(group => ({
@@ -4380,7 +4989,10 @@ export async function previewMerge(
       })),
       selectedEventIndex: group.selectedEventIndex,
       isSuspicious: group.isSuspicious,
+      separated: group.separated,
       validationWarnings: group.validationWarnings,
+      heldForReview: group.heldForReview,
+      supersededEventIndexes: group.supersededEventIndexes,
     })),
     statistics: {
       totalEventsBefore,
@@ -4388,9 +5000,96 @@ export async function previewMerge(
       duplicateGroupsCount,
       duplicatesRemoved,
       suspiciousGroupsCount: suspiciousGroups.length,
+      heldForReviewCount,
+      supersededReportsCount,
+      separatedReportsCount,
     },
     catalogueColors,
   };
+}
+
+/**
+ * Whether an association group needs a reviewer's eye, and why, in the words the preview
+ * shows. ONE predicate for the preview and the persist path (M4), so the groups the
+ * preview counts as flagged are exactly the rows a 'hold' merge marks pending: salvaged
+ * from a split cluster, a contested association, a failed consistency gate, a magnitude
+ * statement from the gate (a rejection, or an acceptance only on the common scale), or a
+ * depth range past the gate's tier. The gate re-run here does not log: the association
+ * already logged its verdict once.
+ */
+function assessMatchGroup(
+  group: MatchGroup,
+  _config: MergeConfig
+): { suspicious: boolean; separated: boolean; warnings: string[] } {
+  const matchingEvents = group.events;
+  const warnings: string[] = [];
+
+  // A regrouped group was salvaged from a larger cluster that failed consistency
+  // validation (the same split the persist path performs). Flag it for the reviewer.
+  if (group.regrouped) {
+    const why = group.splitReasons.length > 0 ? ` Reason: ${group.splitReasons.join('; ')}.` : '';
+    warnings.push(
+      matchingEvents.length > 1
+        ? `Salvaged from a larger matched cluster that failed consistency validation and was split.${why}`
+        : `Matched with another report but separated because the group failed consistency validation.${why}`
+    );
+  }
+
+  // Contested association (see MatchGroup.ambiguous): the closest pairing was kept, but a
+  // reviewer should confirm it — dense sequences are where fixed windows mislead.
+  if (group.ambiguous) {
+    warnings.push(
+      'Ambiguous association: a report in this group was nearly as close, in time and distance, to ' +
+      'another event that could not join it (a second report from a catalogue already in the group, ' +
+      'or one too far from the rest); the closest match was kept.'
+    );
+  }
+
+  // A report the split left on its own is `separated`, not a suspicious merge: it is
+  // published alone, and "suspicious matches" keeps meaning merged groups a reviewer should
+  // check. Both are flagged, and both are held under onConflict 'hold'.
+  const separated = group.regrouped && matchingEvents.length === 1;
+  const gateFailed = matchingEvents.length > 1 && !validateEventGroup(matchingEvents, false);
+  let suspicious = (group.regrouped && !separated) || group.ambiguous || gateFailed;
+
+  // The gate judges the reports that take part in the merge (superseded same-agency
+  // vintages excluded, see validateEventGroup), and so do the statistics quoted here.
+  const judged = matchingEvents.length > 1 ? supersedeSameAgency(matchingEvents).active : matchingEvents;
+  if (judged.length > 1) {
+    // Report EXACTLY what the gate decided: same helper, same filtered statistics, same
+    // thresholds. The preview used to recompute the mean and range over the unfiltered
+    // magnitude list, so a single null member coerced to 0 through Math.min/reduce and the
+    // panel quoted a fabricated range (and a threshold from a fabricated mean) for a group
+    // the merge had accepted without complaint.
+    const magnitude = assessMagnitudeConsistency(judged);
+    if (magnitude.reason) {
+      // reason is set both when the gate rejected the group and when it accepted only
+      // because the members agree on the common (Mw) scale — say which. Only a rejection
+      // flags the group: the rescue explains why the merge went ahead.
+      warnings.push(magnitude.reason);
+      if (magnitude.failure) suspicious = true;
+    }
+
+    const depths = judged.filter(e => e.depth != null).map(e => e.depth!);
+    if (depths.length > 1) {
+      const depthRange = Math.max(...depths) - Math.min(...depths);
+      const avgDepth = depths.reduce((a, b) => a + b, 0) / depths.length;
+      // Same filtered mean the gate uses; a group with no usable magnitude keeps the
+      // strictest tier rather than inventing a mean from nulls.
+      const avgMagPreview = magnitude.count > 0 ? magnitude.rawMean : 0;
+      const maxDepthRange = avgDepth < 70
+        ? (avgMagPreview < 5 ? 30 : 50)
+        : avgDepth < 300
+          ? (avgMagPreview < 5 ? 50 : 100)
+          : (avgMagPreview < 5 ? 100 : 150);
+      if (depthRange > maxDepthRange) {
+        warnings.push(`Large depth range: ${depthRange.toFixed(1)} km (threshold: ${maxDepthRange} km)`);
+        suspicious = true;
+      }
+    }
+  }
+
+  return { suspicious, separated, warnings };
 }
 
 /**
@@ -4404,7 +5103,10 @@ function performMergeWithGroups(
   events: EventData[];
   selectedEventIndex: number;
   isSuspicious: boolean;
+  separated: boolean;
   validationWarnings: string[];
+  heldForReview: boolean;
+  supersededEventIndexes: number[];
 }> {
   // Use the SAME grouping the persist path uses so the preview stats, groups, and
   // selected representative match exactly what mergeCatalogues will write. Each match
@@ -4413,76 +5115,92 @@ function performMergeWithGroups(
 
   return matchGroups.map((matchGroup, i) => {
     const matchingEvents = matchGroup.events;
-    const validationWarnings: string[] = [];
-
-    // A regrouped group was salvaged from a larger cluster that failed consistency
-    // validation (the same split the persist path performs). Flag it for the reviewer.
-    if (matchGroup.regrouped) {
-      validationWarnings.push(
-        'Salvaged from a larger matched cluster that failed consistency validation and was split.'
-      );
-    }
-
-    // Contested association (see MatchGroup.ambiguous): the closest pairing was kept, but a
-    // reviewer should confirm it — dense sequences are where fixed windows mislead.
-    if (matchGroup.ambiguous) {
-      validationWarnings.push(
-        'Ambiguous association: a report in this group was nearly as close, in time and distance, to ' +
-        'another event that could not join it (a second report from a catalogue already in the group, ' +
-        'or one too far from the rest); the closest match was kept.'
-      );
-    }
-
-    const isSuspicious =
-      matchGroup.regrouped ||
-      matchGroup.ambiguous ||
-      (matchingEvents.length > 1 && !validateEventGroup(matchingEvents));
-
-    if (matchingEvents.length > 1) {
-      // Report EXACTLY what the gate decided: same helper, same filtered statistics, same
-      // thresholds. The preview used to recompute the mean and range over the unfiltered
-      // magnitude list, so a single null member coerced to 0 through Math.min/reduce and the
-      // panel quoted a fabricated range (and a threshold from a fabricated mean) for a group
-      // the merge had accepted without complaint.
-      const magnitude = assessMagnitudeConsistency(matchingEvents);
-      if (magnitude.reason) {
-        // reason is set both when the gate rejected the group and when it accepted only
-        // because the members agree on the common (Mw) scale — say which.
-        validationWarnings.push(magnitude.reason);
-      }
-
-      const depths = matchingEvents.filter(e => e.depth != null).map(e => e.depth!);
-      if (depths.length > 1) {
-        const depthRange = Math.max(...depths) - Math.min(...depths);
-        const avgDepth = depths.reduce((a, b) => a + b, 0) / depths.length;
-        // Same filtered mean the gate uses; a group with no usable magnitude keeps the
-        // strictest tier rather than inventing a mean from nulls.
-        const avgMagPreview = magnitude.count > 0 ? magnitude.rawMean : 0;
-        const maxDepthRange = avgDepth < 70
-          ? (avgMagPreview < 5 ? 30 : 50)
-          : avgDepth < 300
-            ? (avgMagPreview < 5 ? 50 : 100)
-            : (avgMagPreview < 5 ? 100 : 150);
-        if (depthRange > maxDepthRange) {
-          validationWarnings.push(`Large depth range: ${depthRange.toFixed(1)} km (threshold: ${maxDepthRange} km)`);
-        }
-      }
-    }
+    const { suspicious: isSuspicious, separated, warnings: validationWarnings } = assessMatchGroup(matchGroup, config);
 
     // The report whose solution the merge publishes is the one it marks `selected` in the
     // provenance (C2); source events are in group order. An averaged epicentre publishes
-    // no single report's solution, so no member is selected (-1).
+    // no single report's solution, so no member is selected (-1). Superseded same-agency
+    // vintages (M5) are listed so the panel can grey them out.
     const mergedEvent = mergeEventGroup(matchingEvents, config);
     const selectedEventIndex = mergedEvent.sourceEvents.findIndex(entry => entry.selected === true);
+    const supersededEventIndexes = mergedEvent.sourceEvents
+      .map((entry, index) => (entry.superseded ? index : -1))
+      .filter(index => index >= 0);
 
     return {
       id: `group-${i}`,
       events: matchingEvents,
       selectedEventIndex,
       isSuspicious,
+      separated,
       validationWarnings,
+      // What a 'hold' merge would mark pending: the same predicate, the same reasons.
+      heldForReview: config.onConflict === 'hold' && (isSuspicious || separated),
+      supersededEventIndexes,
     };
   });
+}
+
+// ============================================================================
+// REVIEW REBUILD (contract M4, consumed by lib/db.ts resolveMergedEventReview)
+// ============================================================================
+
+/** The stored source_events column as entries, whether it arrives as JSON text or parsed. */
+function parseStoredSourceEvents(value: unknown): SourceEventEntry[] {
+  const parsed = parseJsonColumn(value);
+  if (!Array.isArray(parsed)) throw new Error('Merged event has no source_events provenance');
+  return parsed.filter(
+    (entry): entry is SourceEventEntry => entry != null && typeof entry === 'object' && (entry as SourceEventEntry).originalData != null
+  );
+}
+
+/**
+ * Publish report `reportIndex` of a stored merged row wholesale, as a reviewer resolving a
+ * held row chooses it: its origin time, epicentre, depth and magnitude with ALL of its own
+ * metadata groups (the report is the base, so nothing is borrowed), its mechanisms per the
+ * row's stored mechanism rule (merge_parameters.fieldRules) or the hierarchy, the
+ * provenance flags rewritten to that report (superseded flags kept), the row's own
+ * merge_strategy / merge_parameters / source_catalogue_ids, and Q recomputed. Returns the
+ * same field set buildMergedEventFields produces, for a $set. The stored depth and
+ * magnitude rules are deliberately not re-applied: the reviewer chose a whole report.
+ */
+export function rebuildMergedEventForReport(row: Record<string, unknown>, reportIndex: number): Record<string, unknown> {
+  const entries = parseStoredSourceEvents(row.source_events);
+  if (!Number.isInteger(reportIndex) || reportIndex < 0 || reportIndex >= entries.length) {
+    throw new Error(`No report ${reportIndex} in the merged event's provenance (${entries.length} reports)`);
+  }
+  if (entries[reportIndex].superseded) {
+    throw new Error(`Report ${reportIndex} is a superseded vintage of its agency's solution and cannot be published`);
+  }
+
+  const reports: EventData[] = entries.map(entry => ({
+    ...entry.originalData,
+    source: entry.source ?? entry.originalData.source,
+    catalogueId: entry.catalogueId ?? entry.originalData.catalogueId,
+  }));
+  const active = reports.filter((_, index) => !entries[index].superseded);
+  const report = reports[reportIndex];
+  const position = active.indexOf(report);
+
+  let mechanismRule: MergeFieldRules['mechanism'] | undefined;
+  const parameters = parseJsonColumn(row.merge_parameters) as { fieldRules?: MergeFieldRules } | null;
+  if (parameters && typeof parameters === 'object' && parameters.fieldRules?.mechanism) {
+    mechanismRule = parameters.fieldRules.mechanism;
+  }
+
+  const base: MergedEventData = { ...report, sourceEvents: buildSourceEvents(active, position) };
+  base.sourceEvents[position].magnitudeSelected = true;
+  base.sourceEvents[position].depthSelected = true;
+  const merged = unionMergeFields(base, active, { mechanism: mechanismRule });
+  merged.sourceEvents = restoreSupersededReports(merged.sourceEvents, reports, active);
+
+  merged.merge_strategy = typeof row.merge_strategy === 'string' ? row.merge_strategy : undefined;
+  merged.merge_parameters = typeof row.merge_parameters === 'string' ? row.merge_parameters : undefined;
+  merged.source_catalogue_ids = Array.isArray(row.source_catalogue_ids) ? row.source_catalogue_ids : undefined;
+  // The report may carry its own catalogue's review columns; the resolver writes this row's.
+  clearReviewColumns(merged);
+
+  return buildMergedEventFields(merged, OPTIONAL_DB_FIELDS);
 }
 
 export async function getMergedCatalogues() {
@@ -4534,7 +5252,14 @@ export {
   buildMergedEventFields,
   groupMatchingEvents,
   performMergeWithGroups,
+  assessMatchGroup,
   mergeEventGroup,
+  supersedeSameAgency,
+  normalizeAgencyEventId,
+  sameAgencyKey,
+  medianEpicentre,
+  medianLongitude,
+  OPTIONAL_DB_FIELDS,
   normalizeLongitude,
   getDistanceMultiplier,
   getDepthMultiplier,
@@ -4552,6 +5277,7 @@ export {
   mergeByQuality,
   mergeByPriority,
   mergeByAverage,
+  mergeByMedian,
   mergeByNewest,
   mergeByCompleteness,
   MAGNITUDE_HIERARCHY,
@@ -4587,3 +5313,4 @@ export {
 
 // Export types
 export type { NetworkAuthority, RegionalPriority, BoundingBox, HierarchicalSpatialIndex, MagnitudeConversionResult };
+export type { AgencyKey } from './merge-authority';

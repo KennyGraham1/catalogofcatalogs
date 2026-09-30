@@ -24,6 +24,8 @@ export type AuditAction =
   | 'catalogue.update'
   | 'import.geonet'
   | 'merge.create'
+  | 'merge.review'
+  | 'settings.merge_authority'
   | 'cache.clear';
 
 export interface AuditEntry {

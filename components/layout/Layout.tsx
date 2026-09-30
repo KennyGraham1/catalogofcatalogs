@@ -86,8 +86,9 @@ export function Layout({ children, nonce }: LayoutProps) {
             onShowShortcuts={() => setShortcutsHelpOpen(true)}
             onShowSearch={() => setGlobalSearchOpen(true)}
           />
-          <ReadOnlyBanner />
           <main className="flex-1 pt-20">
+            {/* Inside <main> so it starts below the fixed header, not underneath it. */}
+            <ReadOnlyBanner />
             {children}
           </main>
           <Footer />

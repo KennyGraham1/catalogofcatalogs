@@ -274,10 +274,13 @@ describe('performMergeWithGroups — QC statistics match the gate', () => {
     expect(salvaged?.events.map((e: any) => e.id).sort()).toEqual(['gn', 'oth']);
     const lone = groups.find(g => g.events.length === 1 && g.events[0].id === 'isc');
     expect(lone).toBeDefined();
+    // The released report is not a suspicious merge, but it is flagged as separated, with
+    // the gate's reason: it was matched, and a reviewer should see why it stands alone.
+    expect([lone?.isSuspicious, lone?.separated]).toEqual([false, true]);
     // No group is reported as clean while carrying a magnitude warning.
     for (const g of groups) {
       if (g.validationWarnings.some(w => w.toLowerCase().includes('magnitude'))) {
-        expect(g.isSuspicious).toBe(true);
+        expect(g.isSuspicious || g.separated).toBe(true);
       }
     }
   });

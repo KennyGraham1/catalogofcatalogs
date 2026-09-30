@@ -36,7 +36,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useCatalogueEvents } from '@/hooks/use-catalogue-events';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
 import { useAuth, usePermission } from '@/lib/auth/hooks';
-import { Permission } from '@/lib/auth/types';
+import { Permission, UserRole } from '@/lib/auth/types';
+import { ReviewQueue } from '@/components/merge/ReviewQueue';
 
 interface Event {
   id: string | number;
@@ -64,6 +65,30 @@ interface Catalogue {
   source_catalogues?: string;
   // C3: "MAJOR.MINOR.PATCH"; legacy catalogues written before versioning read as "1.0.0".
   version?: string | null;
+}
+
+/**
+ * A merged catalogue records the catalogues it was built from in source_catalogues (each
+ * entry carries the source catalogue's `id` and `name`); an upload or an import records only
+ * a source label there. Returns the names by id, or null when the catalogue is not merged.
+ */
+function sourceCatalogueNames(raw?: string | null): Record<string, string> | null {
+  if (!raw) return null;
+  let entries: unknown;
+  try {
+    entries = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(entries)) return null;
+  const names: Record<string, string> = {};
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { id, name } = entry as { id?: unknown; name?: unknown };
+    if (id === undefined || id === null || id === '') continue;
+    names[String(id)] = typeof name === 'string' && name ? name : String(id);
+  }
+  return Object.keys(names).length > 0 ? names : null;
 }
 
 /** Table 2 order, worst to best reversed for display (best grade first). */
@@ -96,6 +121,11 @@ export default function CatalogueDetailPage() {
 
   const loading = cataloguesLoading || (eventsLoading && events.length === 0);
   const error = cataloguesError?.message || eventsError;
+
+  // The merge review queue (M5) exists only for merged catalogues; the same roles that may
+  // merge (app/merge/page.tsx) may decide a held event.
+  const mergedSourceNames = useMemo(() => sourceCatalogueNames(catalogue?.source_catalogues), [catalogue]);
+  const canReview = user?.role === UserRole.EDITOR || user?.role === UserRole.ADMIN;
 
   // Catalogue-level quality aggregate (#65/#135): the paper describes Q as shown per event
   // in the table and aggregated at catalogue level here, not as a count of "has a score"
@@ -393,6 +423,11 @@ export default function CatalogueDetailPage() {
           </CardContent>
         </Card>
       </div>}
+
+      {/* Merge review queue: only a merged catalogue can hold events for review. */}
+      {mergedSourceNames && (
+        <ReviewQueue catalogueId={catalogueId} canReview={canReview} catalogueNames={mergedSourceNames} />
+      )}
 
       {/* Event filters: client-side over the already-loaded events (C4 shape), with saved
           filters and a filtered export (C12) alongside. */}

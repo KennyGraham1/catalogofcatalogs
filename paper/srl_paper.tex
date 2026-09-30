@@ -84,13 +84,14 @@ platform for ingesting, quality-scoring, merging, and statistically
 analysing earthquake catalogues from multiple agencies and formats, following
 the FAIR data principles (Findable, Accessible, Interoperable, Reusable).  CofC accepts data as CSV/TXT, GeoJSON,
 QuakeML~1.2 Basic Event Description (BED), and the FDSN Event Web Service.
-A five-strategy merging engine associates duplicate reports one to one (each
+A six-strategy merging engine associates duplicate reports one to one (each
 report with its closest counterpart in every other catalogue) within configurable,
 adaptive time and distance windows (widened for larger and deeper events), with
 magnitude and depth consistency enforced as separate per-group gates, and
 resolves conflicts by solution quality, source priority, most recent solution,
-record completeness, or an averaged epicentre, keeping every contributing report
-as per-event lineage.  A transparent quality-scoring system (a 0--100 index with
+record completeness, or an averaged or median epicentre, with optional per-field
+rules for depth, magnitude and focal mechanism and the option to hold flagged
+groups for review, keeping every contributing report as per-event lineage.  A transparent quality-scoring system (a 0--100 index with
 letter grades) evaluates each event across five dimensions: location precision,
 network geometry, solution fit, magnitude quality, and analyst-evaluation status.
 Standard seismological analyses run client-side in the browser:
@@ -492,7 +493,7 @@ contributions are:
     user-configurable index that is computed on import and exposed throughout a
     public web platform, rather than a new quality criterion.
   \item \textbf{Configurable, automated duplicate detection and conflict
-    resolution} for arbitrary catalogue pairs, with five interchangeable merge
+    resolution} for arbitrary catalogue pairs, with six interchangeable merge
     strategies and physical-validity gates, generalising the expert-driven
     association procedures developed for global catalogues
     \citep{storchak2013,engdahl1998,yeck2019} into a tool regional researchers
@@ -500,7 +501,7 @@ contributions are:
   \item \textbf{FAIR-by-design provenance}: every merged catalogue records its
     full per-event lineage (source-catalogue IDs, every contributing report and
     the one whose solution was published, merge strategy and thresholds, quality
-    score), re-exported as columns or properties in the CSV, JSON, GeoJSON and
+    score, review status), re-exported as columns or properties in the CSV, JSON, GeoJSON and
     KML outputs and as a per-event QuakeML \texttt{comment}
     \citep{schorlemmer2011}, with the catalogue version and a checksum of the
     exported rows recorded in every export, operationalising the FAIR principles
@@ -643,7 +644,8 @@ Zenodo) to obtain a persistent DOI, and DOI minting is not performed by the
 platform itself.  Every merged catalogue carries event-level provenance: the
 source catalogue IDs, every contributing report (with the one whose solution
 was published marked), the merge strategy and threshold parameters applied,
-and the quality score of the published solution.  This per-event provenance is
+the quality score of the published solution and, for a group held back for
+review, its review status.  This per-event provenance is
 carried in the CSV, JSON, GeoJSON and KML exports and as a per-event QuakeML
 \texttt{comment} \citep{schorlemmer2011}, and merge-level metadata is recorded
 at the catalogue level, supporting the reproducibility goals of CSEP-based
@@ -938,13 +940,13 @@ single group.
 \label{sec:strategies}
 
 Once duplicate groups are identified, a conflict-resolution strategy is
-applied.  CofC offers five strategies (Table~\ref{tab:strategies}).
+applied.  CofC offers six strategies (Table~\ref{tab:strategies}).
 
 \begin{table}[htbp]
 \centering
 \caption{Merge strategies available in CofC.  Whatever the strategy, every
 report in a duplicate group is kept in the merged event's lineage, with the
-report whose solution was published marked (none, for an averaged event); no
+report whose solution was published marked (none, for an averaged or median event); no
 other report's origin or depth metadata is attached to the published solution
 (see text).}
 \label{tab:strategies}
@@ -958,7 +960,7 @@ Quality-based (recommended)
     count, azimuthal gap, RMS residual, magnitude uncertainty and type, and
     evaluation status, on a fixed 100-point scale), comparing only the metrics
     \emph{every} report in the group states.  If a report states none of them, a
-    built-in network-authority ranking decides; remaining ties go to authority,
+    network-authority ranking (a default table the administrator can edit) decides; remaining ties go to authority,
     then to the more complete core record.  This merge-time score is distinct from
     the index $Q$ (equation~\eqref{eq:quality}); consolidating the two is planned. \\
 Source priority
@@ -989,6 +991,13 @@ Average values
     agency's origin details (gap, counts, RMS) are carried onto the averaged
     epicentre.  Best treated as exploratory, for closely consistent
     solutions. \\
+Median values
+  & As Average values, but the epicentre is the component-wise median of the
+    reported latitudes and longitudes (longitudes unwrapped across the date
+    line), every report counting equally, and the origin time is the median of
+    those reported (the mean, for two reports).  Magnitude, depth and origin
+    metadata are handled exactly as for Average values.  One outlying report
+    moves neither coordinate; stated uncertainties are not used. \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1009,6 +1018,31 @@ $m_{bLg}$, and $M_d$.  The switch is at 6.2 because there the $M_s$ relation
 becomes one to one while $M_L$ still reads $M_w$, so the published value stays
 within about 0.1 of $M_w$ on either side.  Rejected magnitudes are skipped; ties go
 to the smaller uncertainty, then to the agency's preferred magnitude.
+
+Three refinements apply on top of any strategy.  First, the depth, magnitude
+and focal mechanism of the merged event may each be resolved by a rule of their
+own rather than by the strategy: the depth from the best-constrained report, or
+from the report ranked first by quality, network authority or determination
+time, or from a named catalogue; the magnitude by the type preference above or
+from a report chosen in the same ways; the focal mechanism from the united set
+(the default), from the published report only, or from a named catalogue.  The
+published depth and magnitude always carry their own metadata, and the report
+that supplied each is marked in the lineage.  Second, a group the preview flags
+(a failed validity gate, a split group, an ambiguous pairing, or an inconsistent
+magnitude or depth range) may be held for review instead of resolved: the
+strategy's solution is written as provisional, the event is listed on the
+catalogue page with the reasons, and an editor either keeps that solution or
+publishes one contributing report wholesale, which bumps the catalogue version.
+Third, two reports of one agency in a group (the agency of their catalogue, not
+merely the author of a copied origin) are compared on their agency event
+identifiers, reduced to a bare form: equal identifiers are vintages of one
+solution, of which only the most recently computed takes part, the older being
+kept in the lineage as superseded; differing identifiers are two earthquakes,
+and the group is split, each report left alone being flagged with the reason;
+without comparable identifiers both reports take part as usual.  The network-authority table that the Source priority fallback,
+the Quality-based tie-break and the authority rule consult (a global ranking
+with regional overrides for New Zealand and Japan by default) is editable by an
+administrator, and each merged event records which table was used.
 
 The Quality-based strategy is recommended because it selects the
 best-constrained solution by an explicit, configurable rule rather than a
@@ -1277,7 +1311,8 @@ Processed or merged catalogues can be exported in:
   \item \textbf{CSV}: a flat table, one row per event, with the stored fields
     and per-event lineage columns (source-catalogue IDs, merge strategy and
     parameters, the selected source report and its catalogue, quality score and
-    grade, the agency's own event type, and the catalogue version), suitable for
+    grade, review status, the agency's own event type, and the catalogue
+    version), suitable for
     ZMAP \citep{wiemer2001}, ObsPy \citep{obspy2010}, and R/Python workflows;
     an optional commented prologue carries the catalogue metadata.
   \item \textbf{QuakeML~1.2 BED} \citep{schorlemmer2011}: re-serialisation

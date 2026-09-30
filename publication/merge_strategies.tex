@@ -1206,6 +1206,23 @@ of one event \citep{Patton2016}.  The group should be dissolved and a secondary
 pairwise pass performed on its members, constrained by the same-agency rule as
 in the ILP constraint \eqref{eq:ilp}.
 
+The platform implements this rule with one refinement.  A single \catalog\
+never contributes two reports to a group, but two different \catalogs\ may
+carry the same agency's solution (two download vintages of one bulletin, say).
+Before any strategy runs, the reports of one agency in a group are compared on
+their agency event identifiers (the QuakeML event public identifier, else the
+source identifier), reduced to a bare form so that differently spelled copies
+of one identifier agree.  A report counts as the agency's only when its
+\catalog\ is that agency's and its own origin author, if stated, is the same
+agency; a bulletin row reproducing another agency's hypocentre does not.  Equal
+identifiers mark vintages of one solution: only the most recently determined
+takes part in selection, averaging and the validity checks, and the older
+vintages are kept in the event's lineage, marked as superseded.  Differing
+identifiers of the same kind are two earthquakes: the group fails validation
+and is dissolved and re-paired through the failed-group recovery below, as the
+literature recommends.  Without comparable identifiers the reports are treated
+as independent, as reports of two agencies would be.
+
 \subsubsection{Failed-group recovery}
 
 When a group fails validation (e.g.\ because of a same-agency clash or
@@ -1256,7 +1273,9 @@ implementation status.
   Event association & Graph DSU \citep{Patton2016} & Union-find over candidate pairs from different \catalogs, joined closest first; one report per \catalog\ per group; groups of three or more need a common centre; failed groups split & Done \\
   Dense sequences & Nearest-neighbour $\eta$ \citep{Tanaka2022} & Adaptive windows; closest-first pairing; preview flags ambiguous pairings & Low \\
   Magnitude conversion & GOR / non-linear, regionally calibrated \citep{Grunthal2016, ISCGEM2018} & None for published magnitudes; global relations \citep{Scordilis2006} and $M_\mathrm{L} \approx M_\mathrm{w}$ only in the consistency gate and to size the event for the type preference & \textbf{High} \\
-  Multi-estimate averaging & $\alpha$-trimmed median \citep{ISCGEM2018} or Bayesian \citep{Si2024} & Magnitude selected by type; epicentre $1/\sigma^2$-weighted (equal weights when a $\sigma$ is missing) & Medium \\
+  Multi-estimate averaging & $\alpha$-trimmed median \citep{ISCGEM2018} or Bayesian \citep{Si2024} & Magnitude selected by type; epicentre $1/\sigma^2$-weighted (equal weights when a $\sigma$ is missing), or the component-wise median epicentre as an alternative strategy & Medium \\
+  Authority table & User-editable, regional overrides (ISC/ComCat practice) & Editable in the application settings; NZ and Japan overrides by default; the table used is recorded per merged event & Done \\
+  Same-agency rule & Two reports of one network are two events \citep{Patton2016} & Differing agency identifiers dissolve the group; identical identifiers mark the older vintage as superseded; otherwise independent & Done \\
   Source provenance & All solutions retained (ISC model) & Every report kept per event, published one marked; exported per event & Done \\
   Depth selection & Uncertainty-weighted \citep{Engdahl2020} & Best-constrained free depth, with its own depth type and uncertainty; fixed depths only as a last resort & Low \\
   Focal mechanism & GCMT $>$ regional CMT & All mechanisms united; GCMT $>$ USGS/NEIC $>$ GEOFON $>$ GeoNet $>$ INGV $>$ other MT $>$ first motion ($\geq 20$ polarities) $>$ automatic & Done \\

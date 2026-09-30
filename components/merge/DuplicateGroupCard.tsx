@@ -35,6 +35,11 @@ interface DuplicateGroup {
   selectedEventIndex: number;
   isSuspicious: boolean;
   validationWarnings: string[];
+  // Optional so a preview from a server that predates contract M4 still renders.
+  heldForReview?: boolean;
+  supersededEventIndexes?: number[];
+  /** Matched, then split off by the validity gate: published on its own. */
+  separated?: boolean;
 }
 
 interface DuplicateGroupCardProps {
@@ -62,8 +67,12 @@ export function DuplicateGroupCard({ group, groupIndex, catalogueColors, onViewO
   const magnitudes = group.events.map(e => e.magnitude);
   const magRange = Math.max(...magnitudes) - Math.min(...magnitudes);
 
+  // Older vintages of one agency's solution (contract M5): listed for provenance, but they
+  // took no part in the selection, so they are shown greyed and labelled.
+  const superseded = new Set(group.supersededEventIndexes ?? []);
+
   return (
-    <Card className={`${group.isSuspicious ? 'border-orange-300 dark:border-orange-900/60 bg-orange-50/30 dark:bg-orange-950/20' : ''}`}>
+    <Card className={`${group.isSuspicious || group.separated ? 'border-orange-300 dark:border-orange-900/60 bg-orange-50/30 dark:bg-orange-950/20' : ''}`}>
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
           <div className="flex-1">
@@ -72,7 +81,7 @@ export function DuplicateGroupCard({ group, groupIndex, catalogueColors, onViewO
                 Group #{groupIndex + 1}
               </CardTitle>
               <Badge variant={groupSize === 2 ? 'default' : groupSize === 3 ? 'secondary' : 'destructive'}>
-                {groupSize === 2 ? 'Duplicate' : groupSize === 3 ? 'Triplicate' : `${groupSize}× Match`}
+                {groupSize === 1 ? 'Single report' : groupSize === 2 ? 'Duplicate' : groupSize === 3 ? 'Triplicate' : `${groupSize}× Match`}
               </Badge>
               {group.isSuspicious && (
                 <Badge variant="outline" className="border-orange-500 text-orange-700">
@@ -80,11 +89,24 @@ export function DuplicateGroupCard({ group, groupIndex, catalogueColors, onViewO
                   Suspicious
                 </Badge>
               )}
+              {group.separated && (
+                <Badge variant="outline" className="border-orange-500 text-orange-700" title="Matched with another report, then kept apart because the group failed validation">
+                  <AlertTriangle className="h-3 w-3 mr-1" />
+                  Separated
+                </Badge>
+              )}
               {/* The Average Values strategy publishes an epicentre no single report located,
                   so no report is selected (selectedEventIndex -1). */}
               {group.selectedEventIndex < 0 && groupSize > 1 && (
                 <Badge variant="outline" title="No single report is kept: the epicentre is averaged across the reports">
                   Averaged
+                </Badge>
+              )}
+              {/* Held (M4): the merge writes the strategy's provisional solution and marks
+                  the row pending review on the catalogue page. */}
+              {group.heldForReview && (
+                <Badge variant="outline" className="border-amber-500 text-amber-700" title="The merged row is written with a provisional solution and marked for review on the catalogue page">
+                  Held
                 </Badge>
               )}
             </div>
@@ -159,6 +181,7 @@ export function DuplicateGroupCard({ group, groupIndex, catalogueColors, onViewO
               <tbody>
                 {group.events.map((event, idx) => {
                   const isSelected = idx === group.selectedEventIndex;
+                  const isSuperseded = superseded.has(idx);
                   const timeDiff = idx > 0 ? calculateTimeDifference(referenceEvent.time, event.time) : 0;
                   const distance = idx > 0 ? calculateDistance(
                     referenceEvent.latitude, referenceEvent.longitude,
@@ -166,19 +189,25 @@ export function DuplicateGroupCard({ group, groupIndex, catalogueColors, onViewO
                   ) : 0;
 
                   return (
-                    <tr 
-                      key={idx} 
-                      className={`border-b ${isSelected ? 'bg-green-50 dark:bg-green-950/40 font-medium' : ''}`}
+                    <tr
+                      key={idx}
+                      data-superseded={isSuperseded ? 'true' : undefined}
+                      className={`border-b ${isSelected ? 'bg-green-50 dark:bg-green-950/40 font-medium' : ''} ${isSuperseded ? 'text-muted-foreground opacity-60' : ''}`}
                     >
                       <td className="py-2 px-2">
                         <div className="flex items-center gap-2">
-                          <div 
-                            className="w-3 h-3 rounded-full flex-shrink-0" 
+                          <div
+                            className="w-3 h-3 rounded-full flex-shrink-0"
                             style={{ backgroundColor: catalogueColors[event.catalogueId] || '#6b7280' }}
                           />
                           <span className="truncate max-w-[120px]" title={event.catalogueName}>
                             {event.catalogueName}
                           </span>
+                          {isSuperseded && (
+                            <Badge variant="outline" className="text-[10px] px-1 py-0" title="An older vintage of this agency's solution; a newer one in the group replaces it">
+                              superseded
+                            </Badge>
+                          )}
                         </div>
                       </td>
                       <td className="py-2 px-2">

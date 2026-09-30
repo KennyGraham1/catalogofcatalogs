@@ -216,6 +216,19 @@ export interface MergedEvent {
   /** Distinct contributing catalogue IDs, in source_events order. */
   source_catalogue_ids?: string[] | null;
 
+  // Merge review workflow (contract M3). A merge run with onConflict 'hold' writes its
+  // flagged groups with 'pending' and the preview's warnings; a reviewer resolves the row
+  // (resolveMergedEventReview) by keeping the provisional solution or publishing one report.
+  review_status?: 'pending' | 'resolved' | null;
+  /** The group's warnings, as the merge preview shows them. */
+  review_reasons?: string[] | null;
+  /** User id of the reviewer. */
+  reviewed_by?: string | null;
+  /** ISO 8601 UTC. */
+  reviewed_at?: string | null;
+  /** 'keep', or 'report:<index into source_events>'. */
+  review_choice?: string | null;
+
   // Complex nested data as JSON strings
   origin_quality?: string | null;
   origins?: string | null;
@@ -540,8 +553,15 @@ export const ALLOWED_DEPTH_TYPE: Set<string> = (() => {
 })();
 
 /** Merge strategies whose name a merged event records in merge_strategy (C2). */
-export type MergeStrategyName = 'quality' | 'priority' | 'newest' | 'complete' | 'average';
-export const ALLOWED_MERGE_STRATEGY = new Set<string>(['quality', 'priority', 'newest', 'complete', 'average']);
+export type MergeStrategyName = 'quality' | 'priority' | 'newest' | 'complete' | 'average' | 'median';
+export const ALLOWED_MERGE_STRATEGY = new Set<string>(['quality', 'priority', 'newest', 'complete', 'average', 'median']);
+
+/** Review states a merged event may carry (M3). */
+export type MergeReviewStatus = 'pending' | 'resolved';
+const ALLOWED_REVIEW_STATUS = new Set<string>(['pending', 'resolved']);
+const REVIEW_CHOICE_PATTERN = /^(keep|report:\d+)$/;
+const MAX_REVIEW_REASONS = 50;
+const MAX_REVIEW_REASON_LENGTH = 500;
 
 const QUALITY_GRADES: ReadonlyArray<QualityGrade> = ['A+', 'A', 'B+', 'B', 'C', 'D', 'F'];
 
@@ -808,6 +828,32 @@ function validateDerivedAndProvenanceFields(fields: Record<string, unknown>, lab
     sourceIds.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 200)
   )) {
     throw new Error(`[Event ${label}] Invalid source_catalogue_ids: must be an array of catalogue ID strings`);
+  }
+  // Review workflow columns (M3), in the shapes the review queue and the resolver read.
+  const reviewStatus = fields.review_status;
+  if (reviewStatus != null && !(typeof reviewStatus === 'string' && ALLOWED_REVIEW_STATUS.has(reviewStatus))) {
+    throw new Error(
+      `[Event ${label}] Invalid review_status: "${String(reviewStatus)}". Allowed: ${Array.from(ALLOWED_REVIEW_STATUS).join(', ')}`
+    );
+  }
+  const reasons = fields.review_reasons;
+  if (reasons != null && !(
+    Array.isArray(reasons) && reasons.length <= MAX_REVIEW_REASONS &&
+    reasons.every((reason) => typeof reason === 'string' && reason.length <= MAX_REVIEW_REASON_LENGTH)
+  )) {
+    throw new Error(
+      `[Event ${label}] Invalid review_reasons: must be an array of at most ${MAX_REVIEW_REASONS} strings of at most ${MAX_REVIEW_REASON_LENGTH} characters`
+    );
+  }
+  const choice = fields.review_choice;
+  if (choice != null && !(typeof choice === 'string' && REVIEW_CHOICE_PATTERN.test(choice))) {
+    throw new Error(`[Event ${label}] Invalid review_choice: "${String(choice)}". Must be 'keep' or 'report:<index>'`);
+  }
+  for (const field of ['reviewed_by', 'reviewed_at'] as const) {
+    const value = fields[field];
+    if (value != null && !(typeof value === 'string' && value.length > 0 && value.length <= 200)) {
+      throw new Error(`[Event ${label}] Invalid ${field}: must be a non-empty string of at most 200 characters`);
+    }
   }
 }
 
@@ -1346,6 +1392,7 @@ const DESCRIPTIVE_EVENT_FIELDS = new Set([
   'region', 'location_name', 'event_descriptions', 'comments', 'creation_info',
   'agency_id', 'author', 'event_public_id', 'source_id', 'source_event_type',
   'source_events', 'merge_strategy', 'merge_parameters', 'source_catalogue_ids',
+  'review_status', 'review_reasons', 'reviewed_by', 'reviewed_at', 'review_choice',
 ]);
 /** Derived or bookkeeping fields: they follow other changes and never decide a bump. */
 const DERIVED_EVENT_FIELDS = new Set(['quality_score', 'quality_grade', 'created_at', 'catalogue_id', 'id']);
@@ -3348,6 +3395,190 @@ if (typeof window === 'undefined') {
 /**
  * Get the MongoDB database instance (for advanced operations)
  */
+// ============================================================================
+// MERGE REVIEW WORKFLOW (contract M3)
+// ============================================================================
+
+const REVIEW_PAGE_LIMIT_DEFAULT = 50;
+const REVIEW_PAGE_LIMIT_MAX = 200;
+
+/** Keyset cursor of the review queue: the last row's (time, id), ordered by time then id. */
+function encodeReviewCursor(event: Pick<MergedEvent, 'time' | 'id'>): string {
+  return `${event.time}|${event.id}`;
+}
+
+function decodeReviewCursor(cursor: string): { time: string; id: string } {
+  const separator = cursor.lastIndexOf('|');
+  if (separator <= 0 || separator === cursor.length - 1) {
+    throw new ValidationError('Invalid review cursor');
+  }
+  return { time: cursor.slice(0, separator), id: cursor.slice(separator + 1) };
+}
+
+/** The live catalogue behind a review request, or the 404 the API maps. */
+async function requireLiveCatalogue(catalogueId: string, session?: ClientSession): Promise<void> {
+  const catalogues = await getCollection(COLLECTIONS.CATALOGUES);
+  const doc = await catalogues.findOne(
+    { id: catalogueId, ...LIVE_CATALOGUE },
+    { projection: { _id: 1 }, ...(session ? { session } : {}) }
+  );
+  if (!doc) throw new AppError(`Catalogue ${catalogueId} not found`, 404, 'NOT_FOUND');
+}
+
+async function countReviewRows(catalogueId: string): Promise<{ pendingCount: number; resolvedCount: number }> {
+  const events = await getCollection(COLLECTIONS.EVENTS);
+  const [pendingCount, resolvedCount] = await Promise.all([
+    events.countDocuments({ catalogue_id: catalogueId, review_status: 'pending' }),
+    events.countDocuments({ catalogue_id: catalogueId, review_status: 'resolved' }),
+  ]);
+  return { pendingCount, resolvedCount };
+}
+
+/**
+ * A page of a merged catalogue's review queue: the rows a 'hold' merge kept back
+ * ('pending', the default) or the rows a reviewer has settled ('resolved'), complete with
+ * their source_events so the reviewer can compare the reports, in (time, id) order with a
+ * keyset cursor, plus both counts for the "Needs review (N)" badge.
+ */
+export async function getEventsForReview(
+  catalogueId: string,
+  opts: { status?: MergeReviewStatus; limit?: number; after?: string | null } = {}
+): Promise<{ events: MergedEvent[]; nextCursor: string | null; pendingCount: number; resolvedCount: number }> {
+  if (!catalogueId) throw new ValidationError('Missing catalogue ID');
+  const status = opts.status ?? 'pending';
+  if (!ALLOWED_REVIEW_STATUS.has(status)) throw new ValidationError(`Invalid review status: ${String(status)}`);
+  const requested = opts.limit ?? REVIEW_PAGE_LIMIT_DEFAULT;
+  if (!Number.isInteger(requested) || requested < 1 || requested > REVIEW_PAGE_LIMIT_MAX) {
+    throw new ValidationError(`Review page limit must be a whole number between 1 and ${REVIEW_PAGE_LIMIT_MAX}`);
+  }
+  await requireLiveCatalogue(catalogueId);
+
+  const query: Record<string, unknown> = { catalogue_id: catalogueId, review_status: status };
+  if (opts.after) {
+    const { time, id } = decodeReviewCursor(opts.after);
+    query.$or = [{ time: { $gt: time } }, { time, id: { $gt: id } }];
+  }
+  const events = await getCollection(COLLECTIONS.EVENTS);
+  const docs = await events
+    .find(query, { projection: { _id: 0 } })
+    .sort({ time: 1, id: 1 })
+    .limit(requested + 1)
+    .toArray();
+  const hasMore = docs.length > requested;
+  const page = toPlainArray<MergedEvent>(hasMore ? docs.slice(0, requested) : docs);
+  const counts = await countReviewRows(catalogueId);
+  return {
+    events: page,
+    nextCursor: hasMore && page.length > 0 ? encodeReviewCursor(page[page.length - 1]) : null,
+    ...counts,
+  };
+}
+
+/** The five fields whose change makes a review resolution a MAJOR catalogue version (paper §Versioning). */
+const REVIEW_SOLUTION_FIELDS = ['time', 'latitude', 'longitude', 'depth', 'magnitude'] as const;
+
+/**
+ * Resolve a held merged event (M3). 'keep' publishes the provisional solution as it stands
+ * (a PATCH-level change: only bookkeeping moves). { report: i } republishes report i of the
+ * row's provenance wholesale (lib/merge.ts rebuildMergedEventForReport): MAJOR when the
+ * published time, epicentre, depth or magnitude changed, else PATCH - and never less than
+ * classifyEventUpdate rates the same field changes as an event update. The update is
+ * conditional on the row still being pending, so two reviewers cannot both resolve it.
+ * Throws AppError 404 (no such live catalogue or event), 409 (not pending), 400 (bad index
+ * or a superseded report).
+ */
+export async function resolveMergedEventReview(
+  catalogueId: string,
+  eventId: string,
+  choice: 'keep' | { report: number },
+  actor: { userId: string }
+): Promise<{ event: MergedEvent; pendingCount: number }> {
+  if (!catalogueId || !eventId) throw new ValidationError('Missing catalogue or event ID');
+  if (!actor?.userId) throw new ValidationError('A reviewer is required');
+  await requireLiveCatalogue(catalogueId);
+
+  const events = await getCollection(COLLECTIONS.EVENTS);
+  const row = await events.findOne({ id: eventId, catalogue_id: catalogueId }, { projection: { _id: 0 } });
+  if (!row) throw new AppError(`Event ${eventId} not found in catalogue ${catalogueId}`, 404, 'NOT_FOUND');
+  if (row.review_status !== 'pending') {
+    throw new AppError(`Event ${eventId} is not pending review`, 409, 'CONFLICT');
+  }
+
+  const reviewed = { reviewed_by: actor.userId, reviewed_at: new Date().toISOString() };
+  let updateFields: Record<string, unknown>;
+  let level: CatalogueVersionLevel;
+  if (choice === 'keep') {
+    updateFields = { review_status: 'resolved', review_choice: 'keep', ...reviewed };
+    level = 'patch';
+  } else {
+    const index = choice?.report;
+    if (!Number.isInteger(index) || index < 0) {
+      throw new ValidationError(`Invalid report index: ${String(index)}`);
+    }
+    let entries: unknown;
+    try {
+      entries = JSON.parse(String(row.source_events ?? '[]'));
+    } catch {
+      entries = null;
+    }
+    if (!Array.isArray(entries) || index >= entries.length) {
+      throw new ValidationError(`Event ${eventId} has no report ${index}`);
+    }
+    if ((entries[index] as { superseded?: boolean } | null)?.superseded) {
+      throw new ValidationError(`Report ${index} is a superseded vintage of its agency's solution and cannot be published`);
+    }
+    // Imported lazily: lib/merge.ts imports this module at load, and the rebuild is only
+    // needed here, so the dependency stays one-way at module load.
+    const { rebuildMergedEventForReport } = await import('./merge');
+    const rebuilt = rebuildMergedEventForReport(row as Record<string, unknown>, index);
+    if (rebuilt.depth_type != null) {
+      const canonical = normalizeDepthType(rebuilt.depth_type);
+      if (canonical) rebuilt.depth_type = canonical;
+    }
+    validateOptionalRanges(rebuilt, eventId);
+    validateCoreFieldUpdates(rebuilt, eventId);
+    // The rebuilt field set carries empty review columns (a fresh merged row's); the reasons
+    // the row was held for stay with it, as a 'keep' resolution leaves them.
+    updateFields = {
+      ...rebuilt,
+      review_status: 'resolved',
+      review_reasons: row.review_reasons ?? null,
+      review_choice: `report:${index}`,
+      ...reviewed,
+    };
+    const solutionLevel: CatalogueVersionLevel =
+      REVIEW_SOLUTION_FIELDS.some((field) => !sameStoredValue(row[field] ?? null, rebuilt[field] ?? null))
+        ? 'major'
+        : 'patch';
+    // Never below what the same change would be as an ordinary event update: a magnitude of
+    // the same value on another scale (Mw 4.5 -> ML 4.5), or a changed depth type, is a new
+    // solution parameter there too (classifyEventUpdate), not a correction.
+    const updateLevel = classifyEventUpdate(row as Record<string, unknown>, rebuilt);
+    level = updateLevel && VERSION_RANK[updateLevel] > VERSION_RANK[solutionLevel] ? updateLevel : solutionLevel;
+  }
+
+  const result = await events.updateOne(
+    { id: eventId, catalogue_id: catalogueId, review_status: 'pending' },
+    { $set: updateFields }
+  );
+  if (result.matchedCount === 0) {
+    throw new AppError(`Event ${eventId} was resolved by someone else`, 409, 'CONFLICT');
+  }
+
+  // The same bookkeeping an event PATCH performs: the catalogue's event caches are stale,
+  // and the change is accounted for in its version.
+  await afterCatalogueWrite(catalogueId, false);
+  if (await recordCatalogueContentChange(catalogueId, level)) {
+    await afterCatalogueWrite(catalogueId, true);
+  }
+
+  const updated = await events.findOne({ id: eventId, catalogue_id: catalogueId }, { projection: { _id: 0 } });
+  const { pendingCount } = await countReviewRows(catalogueId);
+  const event = toPlainObject<MergedEvent>(updated as WithId<Document> | null)
+    ?? ({ ...row, ...updateFields } as unknown as MergedEvent);
+  return { event, pendingCount };
+}
+
 export async function getDbInstance(): Promise<Db> {
   return getDb();
 }

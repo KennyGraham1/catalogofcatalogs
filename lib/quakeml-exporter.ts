@@ -1052,6 +1052,28 @@ function lineageComment(event: ExportableEvent, lineage: EventLineage, options: 
   return { id: toResourceID(`${event.id}-lineage`, 'comment'), text: `Lineage: ${JSON.stringify(record)}` };
 }
 
+/**
+ * A held merged event (M5) says so in the document: the reader of a QuakeML export has no
+ * other way to tell a provisional solution from a decided one. Nothing is written for rows
+ * that were never held or have been resolved.
+ */
+function reviewComment(event: ExportableEvent): Comment | null {
+  if (event.review_status !== 'pending') return null;
+  let reasons: unknown = event.review_reasons;
+  if (typeof reasons === 'string') {
+    try {
+      reasons = JSON.parse(reasons);
+    } catch {
+      reasons = [reasons];
+    }
+  }
+  const texts = Array.isArray(reasons)
+    ? reasons.filter((reason): reason is string => typeof reason === 'string' && reason.trim() !== '')
+    : [];
+  const text = texts.length > 0 ? `Merge review: pending — ${texts.join('; ')}` : 'Merge review: pending';
+  return { id: toResourceID(`${event.id}-review`, 'comment'), text };
+}
+
 /** Keeps a stored event type that is not a BED EventType, or the agency's raw label (C8). */
 function eventTypeComment(
   event: ExportableEvent,
@@ -1097,18 +1119,41 @@ function withDistinctIDs<T extends { publicID?: unknown }>(items: T[], kind: str
   });
 }
 
-/** Whether a stored origin carries exactly the hypocentre of a row (depth: metres vs km). */
+/** A depth type label as compared: case and spacing do not distinguish two labels. */
+function depthTypeKey(label: unknown): string | null {
+  const text = textOrNull(label);
+  return text === null ? null : text.replace(/\s+/g, ' ').toLowerCase();
+}
+
+/**
+ * Whether a stored origin carries exactly the hypocentre of a row (depth: metres vs km) and
+ * the row's depth metadata. A merge's depth rule can publish one report's depth beside
+ * another report's epicentre, and fixed-depth conventions make the two depth VALUES equal
+ * often (10 km); the base's origin then matches every value while its depthType and depth
+ * uncertainty describe a different determination of the depth than the one the row
+ * publishes, so it cannot stand for the row.
+ */
 function originCarries(origin: Origin, row: ExportableEvent | Record<string, unknown>): boolean {
   const depthMetres = finiteNumber(origin.depth?.value);
-  return sameHypocentre(
+  const values = row as { time?: unknown; latitude?: unknown; longitude?: unknown; depth?: unknown };
+  if (!sameHypocentre(
     {
       time: origin.time?.value,
       latitude: finiteNumber(origin.latitude?.value),
       longitude: finiteNumber(origin.longitude?.value),
       depth: depthMetres === null ? null : depthMetres / 1000,
     },
-    row as { time?: unknown; latitude?: unknown; longitude?: unknown; depth?: unknown }
-  );
+    values
+  )) return false;
+  const meta = row as { depth?: unknown; depth_type?: unknown; depth_uncertainty?: unknown };
+  // Without a depth there is no depth determination to describe.
+  if (finiteNumber(meta.depth) === null) return true;
+  if (depthTypeKey(origin.depthType) !== depthTypeKey(meta.depth_type)) return false;
+  const uncertaintyMetres = finiteNumber(origin.depth?.uncertainty);
+  const originUncertainty = uncertaintyMetres === null ? null : uncertaintyMetres / 1000;
+  const rowUncertainty = finiteNumber(meta.depth_uncertainty);
+  if (originUncertainty === null || rowUncertainty === null) return originUncertainty === rowUncertainty;
+  return Math.abs(originUncertainty - rowUncertainty) <= 1e-9 * Math.max(1, Math.abs(rowUncertainty));
 }
 
 /**
@@ -1445,6 +1490,8 @@ export function eventToQuakeML(event: ExportableEvent, options: EventToQuakeMLOp
   if (lineageNote) comments.push(lineageNote);
   const typeNote = eventTypeComment(event, eventType);
   if (typeNote) comments.push(typeNote);
+  const reviewNote = reviewComment(event);
+  if (reviewNote) comments.push(reviewNote);
   if (origins.omittedIDs.length > 0) {
     comments.push({
       text: `Stored origin(s) ${origins.omittedIDs.join(', ')} omitted: no valid time, latitude or longitude ` +

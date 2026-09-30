@@ -27,6 +27,9 @@ interface DuplicateGroup {
   selectedEventIndex: number;
   isSuspicious: boolean;
   validationWarnings: string[];
+  // Optional so a preview from a server that predates contract M4 still renders.
+  heldForReview?: boolean;
+  supersededEventIndexes?: number[];
 }
 
 interface DuplicateGroupMapProps {
@@ -151,8 +154,12 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
 
     // Add markers for each event
     const markers: L.Marker[] = [];
+    // Older vintages of one agency's solution (contract M5) are drawn faded: they are listed
+    // for provenance but took no part in the selection.
+    const superseded = new Set(group.supersededEventIndexes ?? []);
     group.events.forEach((event, idx) => {
       const isSelected = idx === group.selectedEventIndex;
+      const isSuperseded = superseded.has(idx);
       const candidateColor = catalogueColors[event.catalogueId] || '';
       const color = /^#[0-9a-f]{6}$/i.test(candidateColor) ? candidateColor : '#6b7280';
 
@@ -160,6 +167,7 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
       const iconHtml = `
         <div style="
           background-color: ${color};
+          opacity: ${isSuperseded ? '0.45' : '1'};
           width: ${isSelected ? '24px' : '16px'};
           height: ${isSelected ? '24px' : '16px'};
           border-radius: 50%;
@@ -196,6 +204,7 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: 
               <div><strong>Depth:</strong> ${event.depth != null ? event.depth.toFixed(1) + ' km' : 'N/A'}</div>
               <div><strong>Location:</strong> ${event.latitude.toFixed(4)}, ${event.longitude.toFixed(4)}</div>
               ${isSelected ? '<div style="color: green; font-weight: bold; margin-top: 4px;">✓ Selected Event</div>' : ''}
+              ${isSuperseded ? '<div style="color: #6b7280; font-weight: bold; margin-top: 4px;">Superseded: an older vintage of this agency\'s solution</div>' : ''}
             </div>
           </div>
         `);

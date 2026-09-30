@@ -183,7 +183,7 @@ Catalogue merging process:
 2. **Configuration:** Set matching rules and merge strategy
 3. **Loading:** Load all events from source catalogues
 4. **Matching:** Detect duplicates using configurable thresholds
-5. **Resolution:** Apply merge strategy (quality, priority, average, newest, complete)
+5. **Resolution:** Supersede older same-agency vintages, then apply the merge strategy (quality, priority, average, median, newest, complete) and any per-field rules; flagged groups are held for review when requested
 6. **Storage:** Create merged catalogue with source tracking
 7. **Reporting:** Generate merge statistics
 

@@ -442,11 +442,72 @@ To verify the improvements work correctly:
 
 
 
+✅ **PHASE 5: RESOLUTION CONTROLS AND REVIEW** (Implemented)
+------------------------------------------------------------
+
+
+**Issue #13: Median (Consensus) Epicentre** ✅
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**Problem:** The Average strategy's weighted mean lets one badly located report pull the epicentre, and gives every report equal weight as soon as one states no uncertainty.
+
+**Solution:** Added the ``median`` strategy:
+- Component-wise median of latitude and longitude (longitudes unwrapped around the date line as ``averageLongitudes()`` does) and median origin time (the mean, for two reports)
+- Depth by ``selectBestDepthCandidate()`` and magnitude by ``selectBestMagnitude()``, single-agency origin metadata cleared exactly as ``average`` does (``_averagedOrigin``); ``source: 'merged'``, no ``selected`` report, no ``locationWeight``
+
+**Issue #14: Per-Field Resolution Rules** ✅
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**Problem:** One strategy decided the whole row; a user who wanted GeoNet's origin but the best-constrained depth had no way to say so.
+
+**Solution:** ``config.fieldRules`` with a rule per field, applied after the strategy picks its base report:
+- **depth:** ``strategy`` (default) | ``best-constrained`` | ``quality`` | ``authority`` | ``newest`` | ``catalogue``
+- **magnitude:** ``strategy`` (default) | ``type-preference`` | ``quality`` | ``authority`` | ``newest`` | ``catalogue``
+- **mechanism:** ``hierarchy`` (default) | ``strategy`` | ``catalogue``
+- The published depth always carries its own ``DEPTH_META_FIELDS``, the magnitude its own ``MAGNITUDE_META_FIELDS`` and ``preferred_magnitude_id``; metadata never moves between reports
+- A ``catalogue`` rule with no report in the group, a null depth, or a report with no mechanism falls back to the default rule
+- ``source_events`` flags ``depthSelected``, ``magnitudeSelected``, ``mechanismSelected``; ``merge_parameters.fieldRules`` records the rules
+
+**Issue #15: Hold Flagged Groups for Review** ✅
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**Problem:** A group the preview flagged as suspicious was resolved and published silently, so reviewer attention was requested but had nowhere to go.
+
+**Solution:**
+- One shared predicate, ``assessMatchGroup(group, config)``, decides *flagged* for both the preview and the persisted merge (regrouped, ambiguous, failed validation gate, magnitude-consistency reason, depth-range warning), so preview counts equal what is written
+- ``config.onConflict: 'hold'`` writes a flagged group's provisional solution with ``review_status: 'pending'`` and ``review_reasons``; every other row has ``review_status: null`` (columns ``review_status``, ``review_reasons``, ``reviewed_by``, ``reviewed_at``, ``review_choice``; index ``{ catalogue_id, review_status }``)
+- Review API ``GET /api/catalogues/{id}/review`` and ``POST /api/catalogues/{id}/review/{eventId}`` (``keep``, or ``report:<i>`` via ``rebuildMergedEventForReport()``, which republishes report *i* wholesale and rewrites the ``source_events`` flags); MAJOR version bump when the hypocentre or magnitude changed, else PATCH; audit action ``merge.review``
+- Review queue on the merged catalogue's page; ``ReviewStatus``/``reviewStatus`` in CSV/JSON/GeoJSON lineage and a ``Merge review: pending — …`` QuakeML comment
+
+**Issue #16: Same-Agency Handling** ✅
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**Problem:** Two catalogues carrying the same agency's solution (two download vintages) were treated as independent reports, and two genuinely different events from one agency could be merged.
+
+**Solution:** Before any strategy, reports are grouped by agency, conservatively: a report counts only when its catalogue's agency is known and its own origin author, if stated, agrees; merged rows never count. Agency event ids (``event_public_id``, else ``source_id``) are compared after normalisation (``smi:``/``quakeml:`` prefixes and merge qualifications removed):
+- Equal ids → ``rankByNewest()`` keeps the newest vintage; the rest are flagged ``superseded: true`` and take no part in selection, averaging, quality ranking, field rules or the validity gate, but still count in ``source_catalogue_ids``
+- Different ids of the same kind → ``MergeConflictType 'same_agency'`` ("Two different <agency> events in one group"); the group is split and each report left alone is flagged ``separated`` with the reason
+- No comparable ids → both reports stay active, as before
+- Preview groups report ``supersededEventIndexes`` and ``heldForReview``; statistics ``supersededReportsCount`` and ``heldForReviewCount``
+
+**Issue #17: Editable Network-Authority Table** ✅
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**Problem:** ``DEFAULT_NETWORK_HIERARCHY`` and ``REGIONAL_PRIORITIES`` were compile-time constants.
+
+**Solution:** ``lib/merge-authority.ts`` owns the table (``DEFAULT_MERGE_AUTHORITY`` reproduces the former constants, NZ bounds from ``NZ_NATIONAL_BOUNDS``):
+- Stored in the ``settings`` collection under key ``merge_authority``; ``loadMergeAuthority()`` falls back to the default when the document is absent or invalid
+- ``mergeCatalogues()`` and ``previewMerge()`` load it once and run inside ``runWithMergeAuthority()`` (AsyncLocalStorage); ``merge_parameters.authority`` records ``'default'`` or ``'custom@<updatedAt>'``
+- ``GET``/``PUT``/``DELETE /api/settings/merge-authority`` (viewer / admin / admin) with schema validation (``parseMergeAuthorityTable()``), audit action ``settings.merge_authority``; editable under **Settings › Merge authority**
+- Time-dependent authority (an agency ranking that changes with the event date) is deliberately not implemented
+
+
+
 🚀 **NEXT STEPS (NOT IMPLEMENTED)**
 ----------------------------------
 
 
-**Phase 5: Optional Enhancements**
+**Phase 6: Optional Enhancements**
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
@@ -479,8 +540,11 @@ To verify the improvements work correctly:
    - Updated spatial indexing for date line handling
    - Updated merge strategies
 
-2. **lib/validation.ts** (1 line changed)
-   - Added 'quality' to merge strategy enum
+2. **lib/validation.ts**
+   - Added 'quality', then 'median', to the merge strategy enum; added ``fieldRules`` and ``onConflict``
+
+3. **lib/merge-authority.ts** (new)
+   - Network-authority table: defaults, validation, storage and the per-merge context
 
 
 

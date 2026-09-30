@@ -25,7 +25,8 @@ export function ReadOnlyBanner() {
             You are in read-only mode. Log in to upload, merge, import, or edit catalogues.
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        {/* From lg the header shows Login and Sign Up itself; below, they are in its menu. */}
+        <div className="flex items-center gap-2 lg:hidden">
           <Button asChild size="sm" variant="outline">
             <Link href="/login">
               <LogIn className="mr-2 h-4 w-4" />

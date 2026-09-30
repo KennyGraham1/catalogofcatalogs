@@ -30,7 +30,8 @@ Key Capabilities
        with configurable filters and duplicate detection
    * - **Catalogue Merging**
      - Combine multiple catalogues with automated duplicate detection and
-       five different conflict resolution strategies
+       six conflict resolution strategies, per-field rules and a review
+       queue for flagged duplicate groups
    * - **Quality Assessment**
      - Automatic quality scoring (A+ to F grades) based on location uncertainty,
        network geometry, and solution parameters
