@@ -4,16 +4,30 @@ import React from 'react';
 import { render } from '@testing-library/react';
 const popupHtml: string[] = [];
 jest.mock('react-leaflet', () => ({ useMap: () => ({ removeLayer: () => {} }) }));
-jest.mock('@/hooks/use-map-theme', () => ({ BASE_LAYERS: [], getDefaultBaseLayer: () => 'none' }));
-jest.mock('leaflet', () => ({ __esModule: true, default: {
-  map: () => ({ remove: () => {}, fitBounds: () => {} }),
-  control: { layers: () => ({ addTo: () => {} }) },
-  layerGroup: () => { const g = { addTo: () => g, clearLayers: () => {}, addLayer: () => {} }; return g; },
-  divIcon: () => ({}),
-  icon: () => ({}),
-  marker: () => { const m = { addTo: () => m, bindPopup: (html: string) => { popupHtml.push(html); return m; }, getLatLng: () => ({ lat: -41, lng: 174 }) }; return m; },
-  latLngBounds: () => ({}),
-} }));
+jest.mock('@/hooks/use-map-theme', () => ({ useIsDarkTheme: () => false }));
+// Base layers and the default icon touch Leaflet internals the stand-in below does not model.
+jest.mock('@/components/map/MapLayerControl', () => ({
+  attachBaseLayers: () => ({ control: {}, setDark: () => {}, activeBase: () => null, remove: () => {} }),
+}));
+jest.mock('@/components/map/leaflet-default-icon', () => ({ ensureLeafletDefaultIcon: () => {} }));
+jest.mock('leaflet', () => {
+  // Any layer: records the HTML it is given for its popup.
+  const layer = () => {
+    const l: any = { addTo: () => l, bindPopup: (html: string) => { popupHtml.push(html); return l; }, getLatLng: () => ({ lat: -41, lng: 174 }) };
+    return l;
+  };
+  return { __esModule: true, default: {
+    map: () => ({ remove: () => {}, fitBounds: () => {} }),
+    control: { layers: () => ({ addTo: () => {} }), scale: () => ({ addTo: () => {} }) },
+    layerGroup: () => { const g = { addTo: () => g, clearLayers: () => {}, addLayer: () => {} }; return g; },
+    divIcon: () => ({}),
+    icon: () => ({}),
+    marker: layer,
+    circleMarker: layer,
+    polyline: layer,
+    latLngBounds: () => ({}),
+  } };
+});
 import { DuplicateGroupMap } from '@/components/merge/DuplicateGroupMap';
 // Both tests read popupHtml[0]: start each from an empty list so neither depends on the order
 // the tests run in (jest --randomize ran the station test first and left its popup here).

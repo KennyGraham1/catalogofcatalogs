@@ -25,10 +25,13 @@ const map = {
   }),
   on: jest.fn(),
   off: jest.fn(),
+  fitBounds: jest.fn(),
+  getContainer: () => document.createElement('div'),
 };
 jest.mock('react-leaflet', () => ({
   useMap: () => map,
   MapContainer: ({ children }: any) => <div>{children}</div>,
+  ScaleControl: () => null,
   GeoJSON: () => null,
   FeatureGroup: ({ children }: any) => <div>{children}</div>,
   Polyline: () => null,
@@ -40,8 +43,14 @@ jest.mock('react-leaflet-draw', () => ({ EditControl: () => null }));
 jest.mock('@/lib/fault-data', () => ({ loadFaultData: jest.fn().mockResolvedValue(null) }));
 jest.mock('@/components/map/MapLayerControl', () => ({ MapLayerControl: () => null }));
 jest.mock('@/hooks/use-map-theme', () => ({ useMapColors: () => ({ isDark: false, markerOpacity: 0.75 }) }));
-jest.mock('@/components/advanced-viz/UncertaintyEllipse', () => ({ UncertaintyEllipse: () => null }));
-jest.mock('@/components/advanced-viz/BeachBallMarker', () => ({ BeachBallMarker: () => null }));
+jest.mock('@/components/advanced-viz/UncertaintyEllipse', () => ({
+  ...jest.requireActual('@/components/advanced-viz/UncertaintyEllipse'),
+  UncertaintyEllipse: () => null,
+}));
+jest.mock('@/components/advanced-viz/BeachBallMarker', () => ({
+  ...jest.requireActual('@/components/advanced-viz/BeachBallMarker'),
+  BeachBallMarker: () => null,
+}));
 jest.mock('@/components/advanced-viz/StationMarker', () => ({ StationMarker: () => null }));
 
 const KAIKOURA = {
@@ -50,27 +59,29 @@ const KAIKOURA = {
 };
 /** en-GB day/month/year to the second, with the zone: by hand from the instant above. */
 const EXPECTED = '13/11/2016, 11:02:56 UTC';
+/** The shared event popup (OptimizedEventPopup, spec S5) writes it ISO-style, zone named. */
+const EXPECTED_ISO = '2016-11-13 11:02:56 UTC';
 
 beforeEach(() => {
   global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({ faults: [], count: 0 }) })) as unknown as typeof fetch;
 });
 
-const MAPS: Array<[string, () => JSX.Element]> = [
-  ['analytics map (UnifiedEarthquakeMap)', () => <UnifiedEarthquakeMap earthquakes={[KAIKOURA]} />],
-  ['catalogue MapView', () => <MapView events={[KAIKOURA] as any} />],
-  ['NZEarthquakeMap', () => <NZEarthquakeMap earthquakes={[KAIKOURA] as any} />],
-  ['EnhancedMapView', () => <EnhancedMapView events={[KAIKOURA]} />],
+const MAPS: Array<[string, () => JSX.Element, string, string]> = [
+  ['analytics map (UnifiedEarthquakeMap)', () => <UnifiedEarthquakeMap earthquakes={[KAIKOURA]} />, EXPECTED_ISO, '2016-11-14'],
+  ['catalogue MapView', () => <MapView events={[KAIKOURA] as any} />, EXPECTED, '14/11/2016'],
+  ['NZEarthquakeMap', () => <NZEarthquakeMap earthquakes={[KAIKOURA] as any} />, EXPECTED, '14/11/2016'],
+  ['EnhancedMapView', () => <EnhancedMapView events={[KAIKOURA]} />, EXPECTED, '14/11/2016'],
 ];
 
-describe.each(MAPS)('%s popup', (_name, renderMap) => {
+describe.each(MAPS)('%s popup', (_name, renderMap, expected, aucklandDay) => {
   it('shows the origin time in UTC with the zone named', async () => {
     render(renderMap());
     fireEvent.click(screen.getByTestId('marker'));
     await act(async () => {});
     const popup = screen.getByTestId('popup');
-    expect(popup).toHaveTextContent(EXPECTED);
+    expect(popup).toHaveTextContent(expected);
     // 14/11 is the Pacific/Auckland calendar day of this instant.
-    expect(popup).not.toHaveTextContent('14/11/2016');
+    expect(popup).not.toHaveTextContent(aucklandDay);
   });
 });
 

@@ -23,8 +23,9 @@ function buildCsp(nonce: string): string {
     "worker-src 'self'",
     "style-src 'self' 'unsafe-inline'",
     // Map tiles load as <img>: one host per base layer in hooks/use-map-theme.ts
-    // BASE_LAYERS (OpenStreetMap, Esri satellite, Carto, OpenTopoMap).
-    "img-src 'self' data: blob: https://*.tile.openstreetmap.org https://server.arcgisonline.com https://*.basemaps.cartocdn.com https://*.tile.opentopomap.org",
+    // BASE_LAYERS (Esri gray canvas / ocean / imagery and their label layers on
+    // server.arcgisonline.com; OpenStreetMap streets).
+    "img-src 'self' data: blob: https://*.tile.openstreetmap.org https://server.arcgisonline.com",
     "font-src 'self'",
     "connect-src 'self' https://api.geonet.org.nz https://*.tile.openstreetmap.org",
     "frame-ancestors 'self'",

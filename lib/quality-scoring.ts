@@ -3,6 +3,8 @@
  * Calculates comprehensive quality metrics based on QuakeML data
  */
 
+import { QUALITY_GRADE_COLORS, QUALITY_UNKNOWN_COLOR } from './map-style';
+
 export interface QualityMetrics {
   // Location quality
   horizontalUncertainty?: number | null;
@@ -500,16 +502,14 @@ function generateQualityDetails(
 }
 
 /**
- * Get quality color for visualization
+ * Quality colour for visualization, one colour per letter grade (lib/map-style.ts
+ * QUALITY_GRADE_COLORS: A+/A dark teal, B+/B teal, C yellow, D orange, F red). Read
+ * through scoreToGrade() so the map colour and the grade badge can never disagree. A
+ * missing or non-numeric score is grey - never a guessed grade.
  */
-export function getQualityColor(score: number): string {
-  // Boundaries aligned with the letter-grade thresholds in scoreToGrade()/Table 3
-  // so the map colour and the grade badge never disagree.
-  if (score >= 85) return '#22c55e'; // A / A+  green
-  if (score >= 75) return '#84cc16'; // B+      lime
-  if (score >= 65) return '#eab308'; // B       yellow
-  if (score >= 45) return '#f97316'; // C       orange
-  return '#ef4444';                  // D / F   red
+export function getQualityColor(score: number | null | undefined): string {
+  if (typeof score !== 'number' || !Number.isFinite(score)) return QUALITY_UNKNOWN_COLOR;
+  return QUALITY_GRADE_COLORS[scoreToGrade(score)];
 }
 
 /**

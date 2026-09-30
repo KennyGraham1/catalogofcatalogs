@@ -3,15 +3,17 @@
 import { useParams } from 'next/navigation';
 import { useState, useMemo } from 'react';
 import dynamic from 'next/dynamic';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Loader2, MapPin, AlertCircle } from 'lucide-react';
+import { Card, CardHeader, CardTitle } from '@/components/ui/card';
+import Link from 'next/link';
+import { Loader2, MapPin, AlertCircle, LogIn } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useCatalogueEvents } from '@/hooks/use-catalogue-events';
+import { EVENTS_SIGN_IN_MESSAGE } from '@/lib/catalogue-event-loader';
 import type { MapDetail } from '@/lib/map-event-selection';
 import { Button } from '@/components/ui/button';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
 import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
+import { formatCount } from '@/lib/map-format';
 
 // Dynamically import to avoid SSR issues with Leaflet
 const EarthquakeCircleMap = dynamic(
@@ -84,7 +86,7 @@ export default function CatalogueMapPage() {
           </h1>
           {catalogue && (
             <p className="text-muted-foreground mt-1">
-              {catalogue.name} • {catalogue.event_count} events
+              {catalogue.name} · {formatCount(catalogue.event_count ?? 0)} events
             </p>
           )}
         </div>
@@ -136,63 +138,61 @@ export default function CatalogueMapPage() {
         {error && <Button variant="outline" onClick={reload}>Retry loading events</Button>}
       </div>}
 
-      {/* Map Card */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Interactive Map</CardTitle>
-              <CardDescription>Explore earthquake events with advanced visualization features</CardDescription>
+      {/* Map card: the page header above already names the map, so the card is the map
+          alone - no second title, no status badge - filling the card to its rounded edge. */}
+      <Card className="overflow-hidden">
+        {loading && (
+          <div className="h-[700px] flex items-center justify-center">
+            <div className="text-center space-y-4">
+              <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
+              <p className="text-muted-foreground">Loading catalogue events...</p>
             </div>
-            {catalogue && (
-              <Badge variant={catalogue.status === 'complete' ? 'default' : 'secondary'}>
-                {catalogue.status}
-              </Badge>
-            )}
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {loading && (
-            <div className="h-[700px] flex items-center justify-center">
-              <div className="text-center space-y-4">
-                <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
-                <p className="text-muted-foreground">Loading catalogue events...</p>
-              </div>
-            </div>
-          )}
+        )}
 
-          {error && events.length === 0 && (
-            <div className="h-[700px] flex items-center justify-center p-6">
-              <Alert variant="destructive" className="max-w-md">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{error}</AlertDescription>
-                <Button variant="outline" onClick={reload}>Retry loading events</Button>
-              </Alert>
-            </div>
-          )}
+        {error === EVENTS_SIGN_IN_MESSAGE && events.length === 0 && (
+          <div className="h-[700px] flex items-center justify-center p-6">
+            <Alert className="max-w-md">
+              <LogIn className="h-4 w-4" />
+              <AlertDescription className="space-y-3">
+                <p>{error} Your session may have expired.</p>
+                <Button asChild size="sm">
+                  <Link href={`/login?callbackUrl=${encodeURIComponent(`/catalogues/${catalogueId}/map`)}`}>Log in</Link>
+                </Button>
+              </AlertDescription>
+            </Alert>
+          </div>
+        )}
 
-          {!loading && !error && events.length === 0 && (
-            <div className="h-[700px] flex items-center justify-center">
-              <div className="text-center space-y-2">
-                <MapPin className="h-12 w-12 text-muted-foreground mx-auto" />
-                <p className="text-muted-foreground">No events found in this catalogue</p>
-              </div>
-            </div>
-          )}
+        {error && error !== EVENTS_SIGN_IN_MESSAGE && events.length === 0 && (
+          <div className="h-[700px] flex items-center justify-center p-6">
+            <Alert variant="destructive" className="max-w-md">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+              <Button variant="outline" onClick={reload}>Retry loading events</Button>
+            </Alert>
+          </div>
+        )}
 
-          {!loading && events.length > 0 && (
-            <EarthquakeCircleMap
-              events={events}
-              sampleSize={sampleSize}
-              onSampleSizeChange={setSampleSize}
-              center={[-41.0, 174.0]}
-              zoom={6}
-              height="700px"
-              mapKey={`catalogue-map-${catalogueId}`}
-              catalogueNames={catalogueNames}
-            />
-          )}
-        </CardContent>
+        {!loading && !error && events.length === 0 && (
+          <div className="h-[700px] flex items-center justify-center">
+            <div className="text-center space-y-2">
+              <MapPin className="h-12 w-12 text-muted-foreground mx-auto" />
+              <p className="text-muted-foreground">No events found in this catalogue</p>
+            </div>
+          </div>
+        )}
+
+        {!loading && events.length > 0 && (
+          <EarthquakeCircleMap
+            events={events}
+            sampleSize={sampleSize}
+            onSampleSizeChange={setSampleSize}
+            height="clamp(480px, 72vh, 760px)"
+            mapKey={`catalogue-map-${catalogueId}`}
+            catalogueNames={catalogueNames}
+          />
+        )}
       </Card>
     </div>
   );

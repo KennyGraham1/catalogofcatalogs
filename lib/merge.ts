@@ -7,6 +7,7 @@ import type { SourceCatalogue, MergeConfig, MergeFieldRules } from './validation
 import type { QuakeMLEvent, FocalMechanism, Origin } from './types/quakeml';
 import { extractBoundsFromEvents } from './geo-bounds-utils';
 import { metricsFromEvent, scoreQualityMetrics } from './quality-scoring';
+import { OKABE_ITO } from './map-style';
 import {
   DEFAULT_MERGE_AUTHORITY,
   currentMergeAuthority,
@@ -4920,7 +4921,10 @@ async function previewMergeWithAuthority(sourceCatalogues: SourceCatalogue[], co
   // Fetch events from all source catalogues
   const allEvents: EventData[] = [];
   const catalogueColors: Record<string, string> = {};
-  const colors = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
+  // The Okabe–Ito palette the maps use for catalogues (CVD safe), so the preview's
+  // catalogue dots and its duplicate-group map agree. Its 8th entry is black or white by
+  // site theme, which the server cannot know, so only the first seven are assigned.
+  const colors = OKABE_ITO.slice(0, 7);
 
   for (let i = 0; i < sourceCatalogues.length; i++) {
     const catalogue = sourceCatalogues[i];
@@ -4992,6 +4996,7 @@ async function previewMergeWithAuthority(sourceCatalogues: SourceCatalogue[], co
       validationWarnings: group.validationWarnings,
       heldForReview: group.heldForReview,
       supersededEventIndexes: group.supersededEventIndexes,
+      computedEpicentre: group.computedEpicentre,
     })),
     statistics: {
       totalEventsBefore,
@@ -5106,6 +5111,9 @@ function performMergeWithGroups(
   validationWarnings: string[];
   heldForReview: boolean;
   supersededEventIndexes: number[];
+  /** The epicentre and origin time the merge computes and publishes when no single report
+   *  is selected (average / median strategies); null when a report's solution is published. */
+  computedEpicentre: { latitude: number; longitude: number; time: string } | null;
 }> {
   // Use the SAME grouping the persist path uses so the preview stats, groups, and
   // selected representative match exactly what mergeCatalogues will write. Each match
@@ -5136,6 +5144,10 @@ function performMergeWithGroups(
       // What a 'hold' merge would mark pending: the same predicate, the same reasons.
       heldForReview: config.onConflict === 'hold' && (isSuspicious || separated),
       supersededEventIndexes,
+      // Where the QC map draws the published solution of an averaged / median group.
+      computedEpicentre: selectedEventIndex < 0 && matchingEvents.length > 1
+        ? { latitude: mergedEvent.latitude, longitude: mergedEvent.longitude, time: String(mergedEvent.time) }
+        : null,
     };
   });
 }

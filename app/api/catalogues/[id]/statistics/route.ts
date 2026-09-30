@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbQueries } from '@/lib/db';
 import { Logger, NotFoundError, formatErrorResponse } from '@/lib/errors';
 import { requireViewer } from '@/lib/auth/middleware';
+import { catalogueScope, generateCacheKey, getCacheGeneration, statisticsCache } from '@/lib/cache';
 
 const logger = new Logger('CatalogueStatisticsAPI');
 
@@ -85,6 +86,18 @@ export async function GET(
     const catalogue = await dbQueries.getCatalogueById(catalogueId);
     if (!catalogue) {
       throw new NotFoundError('Catalogue');
+    }
+
+    // The statistics scan every event, which for a large catalogue that keeps its picks
+    // means reading hundreds of MB per request; opening the popover twice paid it twice.
+    // The result is cached under the catalogue's cache generation (taken before the read,
+    // and bumped by every catalogue or event write), so a change is never served stale.
+    // A null generation means it could not be read; the cache is then bypassed.
+    const generation = await getCacheGeneration(catalogueScope(catalogueId));
+    const cacheKey = generateCacheKey('catalogue-statistics', { catalogueId, generation, version: catalogue.version ?? null });
+    if (generation !== null) {
+      const cached = statisticsCache.get<CatalogueStatistics>(cacheKey);
+      if (cached) return NextResponse.json(cached);
     }
 
     // Aggregate the statistics in MongoDB. Reducing them in Node meant loading
@@ -172,6 +185,7 @@ export async function GET(
       eventCount: statistics.eventCount
     });
 
+    if (generation !== null) statisticsCache.set(cacheKey, statistics);
     return NextResponse.json(statistics);
   } catch (error) {
     logger.error('Failed to fetch catalogue statistics', error);

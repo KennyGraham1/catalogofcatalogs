@@ -11,9 +11,10 @@ import * as React from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 
 // The result map is loaded through next/dynamic and pulls in Leaflet.
+const mockMapProps: Array<Record<string, unknown>> = [];
 jest.mock('next/dynamic', () => ({
   __esModule: true,
-  default: () => function DynamicStub() { return null; },
+  default: () => function DynamicStub(props: Record<string, unknown>) { mockMapProps.push(props); return null; },
 }));
 
 // Radix renders dropdown content only after a real pointer interaction; render the export
@@ -92,6 +93,19 @@ describe('#31 merged-results table keeps unknown depth unknown', () => {
     expect(within(unknownRow).getByText('—')).toBeInTheDocument();
     const knownRow = screen.getByText('7.8').closest('tr')!;
     expect(within(knownRow).getByText('15.1')).toBeInTheDocument();
+  });
+});
+
+describe('merged-results map names the source catalogues', () => {
+  it('passes catalogue names by id, from the stored source_catalogues JSON', () => {
+    mockMapProps.length = 0;
+    render(
+      <MergeActions
+        events={[{ id: 'e1', time: KAIKOURA_UTC, latitude: -42.7, longitude: 173.1, depth: 15, magnitude: 7.8, source_events: '[]' }]}
+        catalogueMetadata={{ name: 'Merged', source_catalogues: JSON.stringify([{ id: 'cat-a', name: 'GeoNet' }, { id: 7, name: 'ISC' }]) }}
+      />
+    );
+    expect(mockMapProps.at(-1)?.catalogueNames).toEqual({ 'cat-a': 'GeoNet', '7': 'ISC' });
   });
 });
 

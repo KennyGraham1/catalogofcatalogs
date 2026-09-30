@@ -43,10 +43,14 @@ Navigate to **Analytics** or **Catalogues** → **View on Map**
 
 * Pan and zoom controls
 * Event markers sized by magnitude
-* Colour-coded by depth by default; switch to magnitude, quality, azimuthal
-  gap or source catalogue (see *Map Colour Modes* below)
+* Colour-coded by depth by default; switch to quality, azimuthal gap or source
+  catalogue (see *Map Colour Modes* below)
 * Click events for details
 * NZ active fault traces, on by default on the Analytics page map
+* Colour mode, overlays and map detail live in one **Style** panel (top right,
+  under the base-layer button); the legend card sits bottom right and collapses
+  to a "Legend" chip; a scale bar and, when not every event is drawn, a
+  "*N* of *M* events shown · zoom in for more" chip sit bottom left
 
 **Map Controls:**
 
@@ -70,42 +74,63 @@ Navigate to **Analytics** or **Catalogues** → **View on Map**
 Map Colour Modes
 =================
 
-A **Color By** control switches what a marker's colour encodes. Every legend is
-generated from the same function that colours the markers, so the legend can
-never drift out of sync with the map. The Analytics page map
-(``UnifiedEarthquakeMap``) offers all five modes below; the catalogue and
-dashboard map (``EarthquakeCircleMap``) offers Depth (default), Quality,
-Azimuthal Gap and Source Catalogue — it has no Magnitude colour mode, since
-magnitude is always shown by marker size there.
+A **Colour by** control in the map's Style panel switches what a marker's
+colour encodes. Every legend is generated from the same function that colours
+the markers, so the legend can never drift out of sync with the map. The
+Analytics page map (``UnifiedEarthquakeMap``) and the catalogue and dashboard
+map (``EarthquakeCircleMap``) offer the same four modes: Depth (default),
+Quality, Azimuthal gap and Source catalogue. There is no Magnitude colour
+mode: magnitude is always shown by marker size (a saved Analytics map state
+that still names the old Magnitude mode opens in Depth).
 
-**Depth** (default) — a cyan-to-dark-teal ramp:
+**Depth** (default) — six classes sampled from the perceptually ordered,
+colour-vision-deficiency-safe *plasma* scale: warm = shallow, dark = deep (the
+seismological convention). The dark theme uses fills one step lighter so deep
+events stay visible on the dark basemap. The legend draws the classes as a
+discrete colour bar with the boundaries 0, 15, 40, 70, 150 and 300 km.
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 70
+   :widths: 30 20 20 30
 
-   * - Color
-     - Depth Range
-   * - Cyan
-     - < 15 km
-   * - Teal (light)
-     - 15-40 km
-   * - Teal (medium)
-     - 40-100 km
-   * - Teal (dark)
-     - 100-200 km
-   * - Teal (darkest / navy)
-     - ≥ 200 km
-   * - Grey
-     - Unknown depth
+   * - Depth Range
+     - Light theme
+     - Dark theme
+     - Class
+   * - < 15 km
+     - ``#FCA636``
+     - ``#FDB42F``
+     - shallow
+   * - 15-40 km
+     - ``#E66C5C``
+     - ``#F07F4F``
+     - shallow
+   * - 40-70 km
+     - ``#C5407E``
+     - ``#DB5C68``
+     - shallow
+   * - 70-150 km
+     - ``#9C179E``
+     - ``#B83289``
+     - intermediate
+   * - 150-300 km
+     - ``#6A00A8``
+     - ``#8B0AA5``
+     - intermediate
+   * - ≥ 300 km
+     - ``#2A0593``
+     - ``#5B02A3``
+     - deep
+   * - Unknown depth
+     - ``#9CA3AF``
+     - ``#6B7280``
+     - –
 
-Standard hypocentral depth classes (ISC/USGS usage) are shallow < 70 km,
-intermediate 70-300 km, deep ≥ 300 km — a different grouping from the colour
-bands above, which follow the GeoNet map palette rather than these classes.
+The class boundaries at 70 and 300 km are the standard hypocentral depth
+classes (ISC/USGS usage): shallow < 70 km, intermediate 70-300 km, deep ≥ 300 km.
 
-**Quality** — coloured by the stored quality score (Q, 0-100), with band edges
-aligned to the letter-grade thresholds so the map colour and an event's grade
-badge never disagree:
+**Quality** — coloured by the stored quality score (Q, 0-100), one colour per
+letter grade so the map colour and an event's grade badge never disagree:
 
 .. list-table::
    :header-rows: 1
@@ -114,76 +139,88 @@ badge never disagree:
    * - Color
      - Grade(s)
      - Score Range
-   * - Green
+   * - Dark teal (``#0F766E``)
      - A+ / A
      - ≥ 85
-   * - Lime
-     - B+
-     - 75-84
-   * - Yellow
-     - B
-     - 65-74
-   * - Orange
+   * - Teal (``#14B8A6``)
+     - B+ / B
+     - 65-84
+   * - Yellow (``#EAB308``)
      - C
      - 45-64
-   * - Red
-     - D / F
-     - < 45
+   * - Orange (``#F97316``)
+     - D
+     - 35-44
+   * - Red (``#DC2626``)
+     - F
+     - < 35
 
-**Azimuthal Gap** — a continuous ramp, not discrete bands: green (small gap,
-well constrained) through yellow to red as the gap widens to 180°, then the
-ramp continues past red into magenta and violet hues beyond 180° so poorly
-constrained events stand out rather than blending into the same red as a
-175° gap. An event with no reported gap is grey.
+**Azimuthal Gap** — a continuous ramp, not discrete bands: teal at 0° (stations
+all round the event) through pale amber at the 180° usability threshold to red
+at 360°, interpolated in the perceptual OKLab space. The legend shows it as a
+gradient bar with ticks at 0, 90, 180, 270 and 360°. An event with no reported
+gap is grey.
 
-**Source Catalogue** — a categorical palette, one colour per contributing
-catalogue. For a merged event the colour follows whichever source's solution
+**Source Catalogue** — the colour-vision-deficiency-safe Okabe–Ito palette,
+one colour per contributing catalogue (assigned in alphabetical order of name,
+from the map's whole event set so colours do not change as you pan; an event
+with no catalogue information is grey). For a merged event the colour follows whichever source's solution
 was actually published (the ``source_events`` member marked *selected*); if
 none is marked selected (an *average*- or *median*-strategy merge), every contributing
 catalogue shares one "Merged (N sources)" category rather than guessing a
 single contributor. A pooled multi-catalogue view (e.g. the Analytics page
 loading several catalogues at once) colours each event by its own catalogue.
 
-**Magnitude** (Analytics page map only) — every marker uses one uniform
-colour; magnitude is encoded by size only.
-
 **Marker Size:**
 
-Markers use a stepped pixel radius keyed to the floor of the magnitude, not a
-logarithmic scale: 8 px, 12 px, 20 px and 24 px diameters at M2, M4, M6 and
-M7+ respectively (the size stops growing above M7).
+Marker radius grows exponentially with magnitude, ×1.5 per unit, so each
+magnitude unit is clearly larger: r = 2.2 × 1.5\ :sup:`M−1` px, from 2.2 px
+(M ≤ 1) to 28 px (about M7.3 and above) — M2 3.3 px, M3 5.0 px, M4 7.4 px,
+M5 11.1 px, M6 16.7 px, M7 25 px. An event with no magnitude is drawn at 3 px.
+The legend draws M2-M6 circles at exactly these radii. Larger events are
+drawn on top.
 
 Overlays (Analytics Page Map)
 ==============================
 
-An **Overlays** panel offers two toggles, both **off by default**:
+The **Overlays** section of the map's Style panel has three switches:
 
-* **Uncertainty Ellipses** — draws each plotted event's horizontal location
-  uncertainty, preferring (in order) the agency's reported QuakeML
-  ``OriginUncertainty`` error ellipse, then the circular
+* **Active faults** (on by default) — GNS Science active fault traces (NZ
+  Active Faults Database) as thin dark-red lines (light red in the dark
+  theme), 1 px and 1.5 px from zoom 9, drawn *under* the events so they never
+  hide a marker or take its click. The legend shows the line as "Active faults
+  (GNS Science NZ AFDB)". An event's popup lists the nearest mapped faults
+  within 50 km.
+* **Uncertainty ellipses** (off by default) — draws each plotted event's
+  horizontal location uncertainty, preferring (in order) the agency's reported
+  QuakeML ``OriginUncertainty`` error ellipse, then the circular
   ``horizontal_uncertainty`` field, then the larger of the latitude/longitude
   uncertainty marginals converted to kilometres at the event's latitude. When
   the ellipse has semi-axes but no reported azimuth, it is drawn as a circle
-  of the semi-major axis rather than guessing an orientation. Hovering an
-  ellipse shows "*N*\ % confidence ellipse" when the origin's QuakeML
-  confidence level is recorded, otherwise a note that the agency's confidence
-  level was not recorded.
-* **Focal Mechanisms** — draws a lower-hemisphere SVG beach-ball icon for
-  each plotted event with a resolvable nodal plane, preferring the event's
-  ``preferred_focal_mechanism_id``.
+  of the semi-major axis rather than guessing an orientation. Each ellipse is
+  a thin line in its event's own marker colour with a faint fill, under the
+  events; the approximate lat/lon-marginal extents are dashed. The legend
+  states the confidence level the agencies record for the drawn ellipses
+  (e.g. "Error ellipse, 90% confidence", or "confidence not recorded"), and
+  an event's popup gives its own error ("Location error 8.0 × 2.0 km, 90%
+  confidence").
+* **Focal mechanisms** (off by default) — draws a lower-hemisphere beach ball
+  for each plotted event with a resolvable nodal plane, preferring the event's
+  ``preferred_focal_mechanism_id``. Beach balls are sized by magnitude (19 px
+  at M2 to 45 px at M6, at most 48 px), larger events on top, and clicking one
+  opens its event's popup. To avoid burying the events at national scale they
+  are drawn only at zoom 6 or closer, or when at most **300** plotted events
+  have a mechanism; otherwise the panel says how many there are and to zoom
+  in.
 
-Both overlays act only on the events currently plotted (the spatially sampled
-set shown at the current view) and are capped at the **150** largest-magnitude
-events; when more than 150 qualifying events are plotted, a badge reads
-"Showing … for the 150 largest of *N* plotted events …".
-
-A separate **NZ Active Faults** toggle (on by default) draws known active
-fault traces near the map view from local fault data, alongside a "Nearby
-Faults" panel.
+The ellipse and beach-ball overlays act only on the events currently plotted
+(the spatially sampled set shown at the current view) and are capped at the
+**150** largest-magnitude events; when more qualify, the note under the switch
+reads "Showing the 150 largest of *N* plotted events."
 
 There is no "Show Stations" toggle: the platform does not store per-event
 station coordinates, so station positions cannot be drawn on the map. Use the
-**Azimuthal Gap** colour mode for the data-backed view of network coverage, or
+**Azimuthal gap** colour mode for the data-backed view of network coverage, or
 open an event's detail panel for its station-coverage card (station count,
 gap, distances).
 
@@ -198,13 +235,13 @@ converted to kilometres at the event's latitude. When axes are reported
 without an azimuth, the shape drawn is a circle of the semi-major axis.
 
 * **Ellipses:** Horizontal uncertainty (latitude/longitude)
-* **Color coding:** A network-geometry heuristic derived from the azimuthal
-  gap (green ≥ 0.9, yellow ≥ 0.7, orange ≥ 0.5, red below) — **not** the
-  event's quality grade and not a statistical confidence level
+* **Colour:** the event's own marker colour (so it follows the chosen colour
+  mode), thin line and faint fill; dashed when the shape is only the
+  approximate lat/lon-marginal extent, which is **not** a confidence region
 * **Size:** Proportional to the uncertainty magnitude
-* **Confidence label:** hovering an ellipse shows the confidence level
-  QuakeML records for it (e.g. "68% confidence ellipse") when present,
-  otherwise a note that the agency's confidence level was not recorded
+* **Confidence label:** the legend states the confidence level QuakeML
+  records for the drawn ellipses (e.g. "68% confidence") when present,
+  otherwise that it was not recorded; an event's popup gives its own error
 
 **Interpretation:**
 
@@ -224,12 +261,13 @@ Beach ball diagrams (lower-hemisphere, SVG) show:
   **oblique-reverse** or **reverse**; mechanisms the WSM scheme does not
   classify are labelled **oblique**
 
-**Colors:**
+**Colours:**
 
-* Blue, shaded quadrants: compressional (first motion up); contain the
-  **T** (tension) axis
-* Unshaded quadrants (background colour): dilatational (first motion down);
-  contain the **P** (pressure) axis
+* Shaded quadrants: compressional (first motion up); contain the **T**
+  (tension) axis. On the Analytics map they take the event's depth colour
+  when colouring by depth, dark grey in the other colour modes
+* White quadrants: dilatational (first motion down); contain the **P**
+  (pressure) axis
 
 When a merged event carries reports from more than one agency, the mechanism
 shown follows this preference order: GCMT > USGS/NEIC > GEOFON > GeoNet >
@@ -243,17 +281,17 @@ The platform does not store per-event station coordinates, so no station
 markers or station-to-event lines are drawn on the map. Network geometry is
 shown two other ways:
 
-* **Azimuthal Gap colour mode:** a continuous green (small gap) → yellow →
-  red ramp up to 180°, continuing into magenta/violet beyond 180° so poorly
-  constrained events stand out; events with no reported gap are grey
+* **Azimuthal gap colour mode:** a continuous teal (small gap) → pale amber
+  (180°) → red (360°) ramp, so poorly constrained events stand out; events
+  with no reported gap are grey
 * **Station coverage card:** an event's detail panel reports its station
   count, azimuthal gap and station distances as a per-event widget, not a
   map overlay
 
 **Quality indicators:**
 
-* Good coverage: small azimuthal gap (ramp stays green/yellow)
-* Poor coverage: large azimuthal gap, especially beyond 180°
+* Good coverage: small azimuthal gap (teal end of the ramp)
+* Poor coverage: large azimuthal gap, especially beyond 180° (towards red)
 
 -----------------
 Charts and Graphs
@@ -573,14 +611,19 @@ Draw a bounding box on the map or enter coordinates.
 Map Base Layers
 ----------------
 
-Switch between different base maps:
+Switch between different base maps from the layers button in the top-right
+corner of the map:
 
-* **OpenStreetMap:** Default, detailed street and terrain
-* **Satellite:** Aerial/satellite imagery
-* **Terrain:** Topographic with elevation shading
-* **Dark:** Dark theme for presentations
+* **Light gray** (default in the light theme) and **Dark gray** (default in the
+  dark theme): quiet Esri canvas basemaps so the events read first. Their place
+  labels are drawn above the events. Toggling the site theme swaps between the
+  two gray bases.
+* **Ocean (bathymetry):** Esri ocean basemap, where trenches and the Hikurangi
+  margin read clearly.
+* **Satellite:** Esri aerial/satellite imagery.
+* **Streets (OpenStreetMap):** detailed street map.
 
-Access via the layer control icon in the top-right corner of the map.
+A base you pick other than the gray ones stays selected when the theme changes.
 
 -----------------------
 Export Visualizations

@@ -1,10 +1,11 @@
 /**
  * Size and depth legends must describe the markers actually drawn.
  *
- * Size: getMagnitudePixelRadius gives radii [3, 3, 4, 5, 6, 8, 10, 12] px by floor(M),
- * so M6 markers are 20 px across and M7+ 24 px. The legends drew 16 and 20 px swatches
- * for them (the M5 and M6 sizes), so an M6.3 marker matched the 'M7+' swatch. Two legacy
- * maps drew metre-radius Circles, which no fixed legend can describe at every zoom.
+ * Size: getMagnitudePixelRadius is continuous and exponential (r = 2.2 * 1.5^(M-1) px,
+ * clamped to 2.2-28), so every legend circle must be drawn at exactly the radius a marker
+ * of that magnitude gets. The old stepped legends drew 16 and 20 px swatches for M6/M7+
+ * markers that were really 20 and 24 px, so an M6.3 marker matched the 'M7+' swatch. Two
+ * legacy maps drew metre-radius Circles, which no fixed legend can describe at every zoom.
  *
  * Depth: markers take getEarthquakeColor(depth, isDark), but the analytics legend was
  * hard-coded to the light palette, had no entry for unknown depth, and called 100-200 km
@@ -29,12 +30,15 @@ const map = {
   }),
   on: jest.fn(),
   off: jest.fn(),
+  fitBounds: jest.fn(),
+  getContainer: () => document.createElement('div'),
 };
 const markerRender = jest.fn();
 let mockIsDark = false;
 jest.mock('react-leaflet', () => ({
   useMap: () => map,
   MapContainer: ({ children }: any) => <div>{children}</div>,
+  ScaleControl: () => null,
   GeoJSON: () => null,
   FeatureGroup: ({ children }: any) => <div>{children}</div>,
   Polyline: () => null,
@@ -46,8 +50,14 @@ jest.mock('react-leaflet-draw', () => ({ EditControl: () => null }));
 jest.mock('@/lib/fault-data', () => ({ loadFaultData: jest.fn().mockResolvedValue(null) }));
 jest.mock('@/components/map/MapLayerControl', () => ({ MapLayerControl: () => null }));
 jest.mock('@/hooks/use-map-theme', () => ({ useMapColors: () => ({ isDark: mockIsDark, markerOpacity: 0.75 }) }));
-jest.mock('@/components/advanced-viz/UncertaintyEllipse', () => ({ UncertaintyEllipse: () => null }));
-jest.mock('@/components/advanced-viz/BeachBallMarker', () => ({ BeachBallMarker: () => null }));
+jest.mock('@/components/advanced-viz/UncertaintyEllipse', () => ({
+  ...jest.requireActual('@/components/advanced-viz/UncertaintyEllipse'),
+  UncertaintyEllipse: () => null,
+}));
+jest.mock('@/components/advanced-viz/BeachBallMarker', () => ({
+  ...jest.requireActual('@/components/advanced-viz/BeachBallMarker'),
+  BeachBallMarker: () => null,
+}));
 jest.mock('@/components/advanced-viz/StationMarker', () => ({ StationMarker: () => null }));
 
 /** One event per depth band and magnitude tier; latitude identifies the marker. */
@@ -96,9 +106,11 @@ function expectSizeLegendMatchesMarkers(heading: RegExp) {
     const drawn = markerRender.mock.calls.map(([props]) => props).filter((p) => p.center[0] === event.latitude).pop();
     expect({ id: event.id, radius: drawn.radius }).toEqual({ id: event.id, radius: getMagnitudePixelRadius(event.magnitude) });
   }
-  // The review's example: an M6.3 marker is the M6 swatch's size, not the M7+ one's.
+  // The review's example: an M6.3 marker now sits between the M6 and M7+ swatches.
   const m6 = rows.find(({ label }) => label === 'M6')!;
-  expect(diameter(m6.swatch)).toBe(2 * getMagnitudePixelRadius(6.3));
+  const m7 = rows.find(({ label }) => label === 'M7+')!;
+  expect(2 * getMagnitudePixelRadius(6.3)).toBeGreaterThan(diameter(m6.swatch)!);
+  expect(2 * getMagnitudePixelRadius(6.3)).toBeLessThan(diameter(m7.swatch)!);
 }
 
 /** [min, max) of a label such as '< 15 km', '15–40 km' or '≥ 200 km (V. Deep)'. */
@@ -151,26 +163,90 @@ beforeEach(() => {
 });
 
 describe('catalogue and dashboard map (EarthquakeCircleMap)', () => {
-  it.each([false, true])('size and depth legends match the markers (dark mode %s)', (isDark) => {
+  const lastDrawn = (latitude: number) =>
+    markerRender.mock.calls.map(([props]) => props).filter((p) => p.center[0] === latitude).pop();
+
+  it.each([false, true])('magnitude key circles are drawn at the markers\' true radius (dark mode %s)', (isDark) => {
     mockIsDark = isDark;
     render(<EarthquakeCircleMap events={events} sampleSize="auto" onSampleSizeChange={jest.fn()} />);
-    expectSizeLegendMatchesMarkers(/^magnitude/i);
-    expectDepthLegendMatchesMarkers(/^depth/i, isDark);
+    const items = Array.from(document.querySelectorAll<HTMLElement>('[data-legend="magnitude"] [data-magnitude]'));
+    expect(items.map((item) => item.textContent)).toEqual(['M2', 'M3', 'M4', 'M5', 'M6']);
+    for (const item of items) {
+      const magnitude = Number(item.dataset.magnitude);
+      expect({ magnitude, r: Number(item.querySelector('circle')!.getAttribute('r')) })
+        .toEqual({ magnitude, r: getMagnitudePixelRadius(magnitude) });
+    }
+    for (const event of events) {
+      expect({ id: event.id, radius: lastDrawn(event.latitude).radius }).toEqual({ id: event.id, radius: getMagnitudePixelRadius(event.magnitude) });
+    }
+  });
+
+  it.each([false, true])('depth bar keys every marker colour with a class containing its depth (dark mode %s)', (isDark) => {
+    mockIsDark = isDark;
+    render(<EarthquakeCircleMap events={events} sampleSize="auto" onSampleSizeChange={jest.fn()} />);
+    const segments = Array.from(document.querySelectorAll<HTMLElement>('[data-legend="depth"] [data-depth-class]'))
+      .map((segment) => ({ color: segment.style.backgroundColor, label: segment.dataset.depthClass! }));
+    expect(segments.map(({ label }) => label)).toEqual(['< 15 km', '15–40 km', '40–70 km', '70–150 km', '150–300 km', '≥ 300 km']);
+    for (const event of events) {
+      const fill = lastDrawn(event.latitude).pathOptions.fillColor;
+      expect({ depth: event.depth, fill }).toEqual({ depth: event.depth, fill: getEarthquakeColor(event.depth, isDark) });
+      if (event.depth === null) {
+        const unknown = document.querySelector<HTMLElement>('[data-legend="depth"] [data-swatch="unknown depth"]')!;
+        expect(unknown.style.backgroundColor).toBe(rgb(fill));
+        continue;
+      }
+      const row = segments.find(({ color }) => color === rgb(fill));
+      const [min, max] = labelRange(row!.label)!;
+      expect({ depth: event.depth, label: row!.label, inside: event.depth >= min && event.depth < max })
+        .toEqual({ depth: event.depth, label: row!.label, inside: true });
+    }
+    // Boundaries under the bar and the standard classes, with their limits, beneath it.
+    const legend = document.querySelector('[data-legend="depth"]')!;
+    expect(legend).toHaveTextContent('shallow < 70 · intermediate 70–300 · deep ≥ 300 km');
+    expect(legend).toHaveTextContent(/0\s*15\s*40\s*70\s*150\s*300\s*km/);
   });
 });
 
 describe('analytics map (UnifiedEarthquakeMap)', () => {
-  it('magnitude mode: the size legend matches the markers', () => {
+  const lastDrawn = (latitude: number) =>
+    markerRender.mock.calls.map(([props]) => props).filter((p) => p.center[0] === latitude).pop();
+
+  it('magnitude key circles are drawn at the markers\' true radius', () => {
     render(<UnifiedEarthquakeMap earthquakes={events as any} />);
-    expectSizeLegendMatchesMarkers(/^magnitude/i);
+    const items = Array.from(document.querySelectorAll<HTMLElement>('[data-legend="magnitude"] [data-magnitude]'));
+    expect(items.map((item) => item.textContent)).toEqual(['M2', 'M3', 'M4', 'M5', 'M6']);
+    for (const item of items) {
+      const magnitude = Number(item.dataset.magnitude);
+      expect({ magnitude, r: Number(item.querySelector('circle')!.getAttribute('r')) })
+        .toEqual({ magnitude, r: getMagnitudePixelRadius(magnitude) });
+    }
+    for (const event of events) {
+      expect({ id: event.id, radius: lastDrawn(event.latitude).radius }).toEqual({ id: event.id, radius: getMagnitudePixelRadius(event.magnitude) });
+    }
   });
 
-  it.each([false, true])('depth mode: the legend matches the markers (dark mode %s)', async (isDark) => {
+  it.each([false, true])('depth (the default) keys every marker colour with a class containing its depth (dark mode %s)', async (isDark) => {
     mockIsDark = isDark;
     render(<UnifiedEarthquakeMap earthquakes={events as any} />);
-    fireEvent.click(screen.getByLabelText('Depth'));
     await act(async () => {});
-    expectDepthLegendMatchesMarkers(/^depth/i, isDark);
+    expect(screen.getByLabelText('Depth')).toBeChecked();
+    const segments = Array.from(document.querySelectorAll<HTMLElement>('[data-legend="depth"] [data-depth-class]'))
+      .map((segment) => ({ color: segment.style.backgroundColor, label: segment.dataset.depthClass! }));
+    expect(segments.map(({ label }) => label)).toEqual(['< 15 km', '15–40 km', '40–70 km', '70–150 km', '150–300 km', '≥ 300 km']);
+    for (const event of events) {
+      const fill = lastDrawn(event.latitude).pathOptions.fillColor;
+      expect({ depth: event.depth, fill }).toEqual({ depth: event.depth, fill: getEarthquakeColor(event.depth, isDark) });
+      if (event.depth === null) {
+        const unknown = document.querySelector<HTMLElement>('[data-legend="depth"] [data-swatch="unknown depth"]')!;
+        expect(unknown.style.backgroundColor).toBe(rgb(fill));
+        continue;
+      }
+      const row = segments.find(({ color }) => color === rgb(fill));
+      const [min, max] = labelRange(row!.label)!;
+      expect({ depth: event.depth, label: row!.label, inside: event.depth >= min && event.depth < max })
+        .toEqual({ depth: event.depth, label: row!.label, inside: true });
+    }
+    expect(document.querySelector('[data-legend="depth"]')).toHaveTextContent('shallow < 70 · intermediate 70–300 · deep ≥ 300 km');
   });
 });
 

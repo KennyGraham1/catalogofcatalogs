@@ -8,6 +8,7 @@
  * palette + legend, which is what a MapLegend-consuming map colours markers with.
  */
 import { buildCatalogueColorScale, resolveSourceCatalogue, type SourceCatalogueEvent } from '@/components/map/MapLegend';
+import { CATALOGUE_UNKNOWN_COLOR, OKABE_ITO } from '@/lib/map-style';
 
 describe('resolveSourceCatalogue', () => {
   it('prefers the source_events member marked selected over any other signal', () => {
@@ -106,7 +107,29 @@ describe('buildCatalogueColorScale', () => {
 
   it('falls back to a neutral grey for a key that was never in the plotted set', () => {
     const scale = buildCatalogueColorScale([{ key: 'a', label: 'Alpha' }]);
-    expect(scale.colorFor('never-seen')).toBe('#94a3b8');
+    expect(scale.colorFor('never-seen')).toBe(CATALOGUE_UNKNOWN_COLOR);
+    expect(CATALOGUE_UNKNOWN_COLOR).toBe('#9CA3AF');
+  });
+
+  it('colours catalogues from the Okabe–Ito palette, in label order, black/white by theme for the 8th', () => {
+    const infos = 'ABCDEFGH'.split('').map((letter) => ({ key: letter.toLowerCase(), label: `Catalogue ${letter}` }));
+    const light = buildCatalogueColorScale(infos);
+    const dark = buildCatalogueColorScale(infos, { isDark: true });
+    expect(light.legend.map((row) => row.color)).toEqual([...OKABE_ITO]);
+    expect(light.legend.map((row) => row.color)).toEqual(['#0072B2', '#E69F00', '#009E73', '#D55E00', '#CC79A7', '#56B4E9', '#F0E442', '#000000']);
+    expect(dark.legend[7].color).toBe('#FFFFFF');
+  });
+
+  it('greys "Unknown source" and lists it last without spending a palette colour', () => {
+    const scale = buildCatalogueColorScale([
+      resolveSourceCatalogue({}),
+      { key: 'z', label: 'Zeta' },
+      { key: 'a', label: 'Alpha' },
+    ]);
+    expect(scale.legend.map((row) => row.label)).toEqual(['Alpha', 'Zeta', 'Unknown source']);
+    expect(scale.colorFor('__unknown__')).toBe(CATALOGUE_UNKNOWN_COLOR);
+    expect(scale.colorFor('a')).toBe(OKABE_ITO[0]);
+    expect(scale.colorFor('z')).toBe(OKABE_ITO[1]);
   });
 
   it('produces an empty legend for an empty input rather than throwing', () => {

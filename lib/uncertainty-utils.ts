@@ -3,6 +3,8 @@
  * for earthquake location uncertainties
  */
 
+import { azimuthalGapColor } from './map-style';
+
 export interface UncertaintyData {
   latitude: number;
   longitude: number;
@@ -298,24 +300,14 @@ export function generateEllipsePoints(
 
 /**
  * Continuous colour ramp for the station-coverage "azimuthal gap" map colour mode
- * (paper sec:viz): green (well-constrained) through yellow to red as the largest gap
- * between reporting stations widens, matching a standard "good to bad" traffic-light
- * hue sweep. Beyond the widely-used 180-degree usability threshold (Havskov &
- * Ottemoller, 2010, sec. 6.3; GeoNet quality flags) the ramp keeps going but swings
- * into magenta/violet hues instead of staying red, so poorly-constrained events are
- * unmistakably highlighted rather than blending into the same red as a 175-degree gap.
+ * (paper sec:viz), from lib/map-style.ts azimuthalGapColor: teal (0°, stations all
+ * round the event) through pale amber at the widely-used 180° usability threshold
+ * (Havskov & Ottemoller, 2010, sec. 6.3; GeoNet quality flags) to red at 360°,
+ * interpolated in OKLab so equal gap steps read as equal colour steps. Returns hex.
  * A missing gap is grey, never a guessed position on the ramp.
  */
 export function getAzimuthalGapColor(gap: number | null | undefined): string {
-  if (gap === null || gap === undefined || !Number.isFinite(gap)) return '#94a3b8'; // slate-400: unknown
-  const clamped = Math.max(0, Math.min(360, gap));
-  if (clamped <= 180) {
-    const hue = 142 - 142 * (clamped / 180); // 142 (green) at 0 deg -> 0 (red) at 180 deg
-    return `hsl(${hue.toFixed(1)}, 85%, 45%)`;
-  }
-  const over = clamped - 180; // 0..180 beyond the 180 deg threshold
-  const hue = 360 - 100 * (over / 180); // continues 0/360 (red) -> 260 (blue-violet)
-  return `hsl(${hue.toFixed(1)}, 100%, 38%)`;
+  return azimuthalGapColor(gap);
 }
 
 /**

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { DuplicateGroupCard } from './DuplicateGroupCard';
-import { AlertTriangle, CheckCircle2, Info, TrendingDown, Users } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Info, TrendingDown, Users, X } from 'lucide-react';
 
 // Dynamically import map component to avoid SSR issues with Leaflet
 const DuplicateGroupMap = dynamic(
@@ -46,6 +46,8 @@ interface DuplicateGroup {
   supersededEventIndexes?: number[];
   /** A report the association matched but the validity gate split off: published alone. */
   separated?: boolean;
+  /** The averaged / median epicentre the merge publishes when no report is selected. */
+  computedEpicentre?: { latitude: number; longitude: number; time: string } | null;
 }
 
 interface PreviewData {
@@ -74,6 +76,12 @@ interface MergePreviewQCProps {
 export function MergePreviewQC({ previewData, holdForReview = false, onProceedWithMerge, onCancel }: MergePreviewQCProps) {
   const [selectedGroup, setSelectedGroup] = useState<DuplicateGroup | null>(null);
   const [filterView, setFilterView] = useState<'all' | 'duplicates' | 'suspicious' | 'separated'>('duplicates');
+  const mapCardRef = useRef<HTMLDivElement>(null);
+
+  // The map card opens below the (scrolling) group list: bring it into view.
+  useEffect(() => {
+    if (selectedGroup) mapCardRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+  }, [selectedGroup]);
 
   const { duplicateGroups, statistics, catalogueColors } = previewData;
 
@@ -95,6 +103,7 @@ export function MergePreviewQC({ previewData, holdForReview = false, onProceedWi
   });
 
   const duplicateGroupsOnly = duplicateGroups.filter(g => g.events.length > 1);
+  const selectedCatalogueCount = selectedGroup ? new Set(selectedGroup.events.map(event => event.catalogueId)).size : 0;
 
   return (
     <div className="space-y-6">
@@ -230,24 +239,31 @@ export function MergePreviewQC({ previewData, holdForReview = false, onProceedWi
         </CardContent>
       </Card>
 
-      {/* Map View Modal */}
+      {/* The selected group on the map: the map fills the card below its header. */}
       {selectedGroup && (
-        <Card className="border-2 border-blue-500">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Map View - Group #{(groupIndexById.get(selectedGroup.id) ?? 0) + 1}</CardTitle>
-              <Button variant="outline" size="sm" onClick={() => setSelectedGroup(null)}>
-                Close Map
-              </Button>
+        <Card ref={mapCardRef} role="region" aria-label="Duplicate group map" className="overflow-hidden">
+          <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-4">
+            <div className="space-y-1">
+              <CardTitle className="text-base">
+                Group #{(groupIndexById.get(selectedGroup.id) ?? 0) + 1} on the map
+              </CardTitle>
+              <CardDescription>
+                {selectedGroup.events.length} {selectedGroup.events.length === 1 ? 'entry' : 'entries'} from{' '}
+                {selectedCatalogueCount} {selectedCatalogueCount === 1 ? 'catalogue' : 'catalogues'}.
+                Click an entry for its offset from the published solution.
+              </CardDescription>
             </div>
+            <Button variant="outline" size="sm" onClick={() => setSelectedGroup(null)}>
+              <X className="mr-1 h-4 w-4" aria-hidden />
+              Close map
+            </Button>
           </CardHeader>
-          <CardContent>
-            <DuplicateGroupMap
-              group={selectedGroup}
-              catalogueColors={catalogueColors}
-              height="500px"
-            />
-          </CardContent>
+          <DuplicateGroupMap
+            group={selectedGroup}
+            catalogueColors={catalogueColors}
+            height="500px"
+            className="border-t"
+          />
         </Card>
       )}
 

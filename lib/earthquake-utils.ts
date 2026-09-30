@@ -6,6 +6,7 @@
 import { EarthquakeEvent } from '@/types/earthquake';
 import { dedupeById } from '@/lib/utils';
 import type { DateFormat } from './date-format-detector';
+import { depthColor, magnitudeRadius } from './map-style';
 
 // Re-export for backwards compatibility with existing imports
 export type { EarthquakeEvent } from '@/types/earthquake';
@@ -23,33 +24,15 @@ interface SampleableEvent {
 }
 
 /**
- * Get color for earthquake markers based on depth (GeoNet style)
- * Implements a cyan-to-dark-teal gradient matching GeoNet NZ earthquake maps
- * Shallow events (< 15km) are bright cyan, deep events (>= 200km) are navy
- * @param depth - Depth in kilometers
- * @param isDark - Whether dark theme is active
+ * Marker fill for an earthquake's depth, from the shared depth classes in lib/map-style.ts
+ * (DEPTH_CLASSES: matplotlib 'plasma' samples, warm = shallow, dark = deep, boundaries at
+ * 15, 40, 70, 150 and 300 km). Unknown depth is grey, never a guessed class.
+ * @param depth - Depth in kilometres
+ * @param isDark - Whether dark theme is active (dark fills are one notch lighter)
  * @returns Color hex code
  */
 export function getEarthquakeColor(depth: number | null | undefined, isDark: boolean = false): string {
-  // Handle missing or null depth - use a neutral color
-  if (depth === null || depth === undefined || isNaN(depth)) {
-    return isDark ? '#9ca3af' : '#6b7280';  // gray for unknown depth
-  }
-
-  // Shallow events: bright cyan (most visible) - < 15km
-  if (depth < 15) return isDark ? '#06B6D4' : '#00CED1';  // cyan-500 / medium cyan
-
-  // Medium-shallow: teal - 15-40km
-  if (depth < 40) return isDark ? '#14B8A6' : '#20B2AA';  // teal-500 / light sea green
-
-  // Medium: darker teal - 40-100km
-  if (depth < 100) return isDark ? '#0D9488' : '#008B8B';  // teal-600 / dark cyan
-
-  // Deep: very dark teal - 100-200km
-  if (depth < 200) return isDark ? '#0F766E' : '#006666';  // teal-700 / darker teal
-
-  // Very deep: navy - >= 200km
-  return isDark ? '#115E59' : '#004D4D';  // teal-800 / very dark teal
+  return depthColor(depth, isDark);
 }
 
 /**
@@ -98,15 +81,14 @@ export function getMagnitudeRadius(magnitude: number): number {
  * Screen-pixel radius for CircleMarker rendering. Unlike getMagnitudeRadius (which
  * returns metres for a geographic Circle and must be reprojected on every zoom),
  * a pixel radius lets Leaflet's canvas renderer draw thousands of points cheaply and
- * keeps marker sizes legible at every zoom level. Mirrors the same magnitude tiers.
+ * keeps marker sizes legible at every zoom level.
+ *
+ * Continuous and exponential (lib/map-style.ts magnitudeRadius): r(M) =
+ * clamp(2.2 * 1.5^(M - 1), 2.2, 28) px, so each magnitude unit is clearly larger
+ * (M2 3.3, M3 5.0, M4 7.4, M5 11.1, M6 16.7, M7 25 px); unknown magnitude 3 px.
  */
 export function getMagnitudePixelRadius(magnitude: number): number {
-  if (magnitude === null || magnitude === undefined || isNaN(magnitude)) {
-    return 3;
-  }
-  const clampedMag = Math.max(0, Math.min(10, magnitude));
-  const radii = [3, 3, 4, 5, 6, 8, 10, 12];
-  return radii[Math.min(Math.floor(clampedMag), 7)];
+  return magnitudeRadius(magnitude);
 }
 
 /**

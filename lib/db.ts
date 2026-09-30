@@ -2242,6 +2242,19 @@ if (typeof window === 'undefined') {
       // "filter out null/undefined, then reduce" semantics of the old code.
       const [facets] = await collection.aggregate<FacetResult>([
         { $match: match },
+        // Only the fields the statistics read. $facet receives whole documents otherwise, and
+        // a catalogue that keeps its picks and arrivals carries tens of kB of JSON per event
+        // that the pipeline would materialise for nothing. focal_mechanisms is reduced to
+        // present-or-not here for the same reason.
+        {
+          $project: {
+            _id: 0, time: 1, magnitude: 1, magnitude_type: 1, depth: 1, azimuthal_gap: 1,
+            used_station_count: 1, quality_score: 1, quality_grade: 1,
+            horizontal_uncertainty: 1, min_horizontal_uncertainty: 1, max_horizontal_uncertainty: 1,
+            latitude_uncertainty: 1, longitude_uncertainty: 1, depth_uncertainty: 1,
+            focal_mechanisms: { $cond: [isPresent('$focal_mechanisms'), true, null] },
+          },
+        },
         {
           $facet: {
             overall: [{

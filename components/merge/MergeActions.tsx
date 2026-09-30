@@ -198,6 +198,18 @@ export function MergeActions({ events, catalogueMetadata = {}, catalogueId }: Me
     () => buildExportMetadata(catalogueMetadata, events.length),
     [catalogueMetadata, events.length]
   );
+  // Source catalogue names by id, so the map's "Source catalogue" colour mode and its popups
+  // name catalogues rather than showing their ids.
+  const catalogueNames = useMemo(() => {
+    const names: Record<string, string> = {};
+    const list = exportMetadata.sourceCatalogues;
+    if (Array.isArray(list)) {
+      for (const entry of list as Array<{ id?: unknown; name?: unknown }>) {
+        if (entry && entry.id != null && typeof entry.name === 'string' && entry.name) names[String(entry.id)] = entry.name;
+      }
+    }
+    return names;
+  }, [exportMetadata.sourceCatalogues]);
 
   const saveBlob = (blob: Blob, filename: string) => {
     if (typeof window === 'undefined') return;
@@ -342,7 +354,7 @@ export function MergeActions({ events, catalogueMetadata = {}, catalogueId }: Me
 
         <TabsContent value="map" className="mt-4">
           <div className="h-[600px] w-full relative z-0">
-            <MapWithNoSSR events={events} />
+            <MapWithNoSSR events={events} catalogueNames={catalogueNames} />
           </div>
         </TabsContent>
 

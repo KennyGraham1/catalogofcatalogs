@@ -243,11 +243,11 @@ Quality on Map
 
 Events color-coded by quality:
 
-* Green (``#22c55e``): A+, A (score >= 85) - excellent/very good
-* Lime (``#84cc16``): B+ (score 75-84) - good
-* Yellow (``#eab308``): B (score 65-74) - good
-* Orange (``#f97316``): C (score 45-64) - fair
-* Red (``#ef4444``): D, F (score < 45) - poor/very poor
+* Dark teal (``#0F766E``): A+, A (score >= 85) - excellent/very good
+* Teal (``#14B8A6``): B+, B (score 65-84) - good
+* Yellow (``#EAB308``): C (score 45-64) - fair
+* Orange (``#F97316``): D (score 35-44) - poor
+* Red (``#DC2626``): F (score < 35) - very poor
 
 Quality Trends
 ==============

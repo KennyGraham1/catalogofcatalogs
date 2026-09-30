@@ -25,6 +25,10 @@ jest.mock('@/lib/db', () => ({
 import { NextRequest } from 'next/server';
 import { GET, type CatalogueStatistics } from '@/app/api/catalogues/[id]/statistics/route';
 import { dbQueries } from '@/lib/db';
+import { statisticsCache } from '@/lib/cache';
+
+// Statistics are cached per catalogue generation; tests reuse catalogue ids.
+beforeEach(() => statisticsCache.clearAll());
 
 const mockDb = dbQueries as unknown as Record<string, jest.Mock>;
 
@@ -161,5 +165,24 @@ describe('server2 :: catalogue statistics nullability', () => {
       averageQualityScore: 61.5,
       gradeDistribution: [{ grade: 'B', count: 1 }, { grade: 'C', count: 2 }],
     });
+  });
+});
+
+describe('catalogue statistics are cached per catalogue generation', () => {
+  it('serves a repeat request without rescanning, and rescans after a write to the catalogue', async () => {
+    const { invalidateCatalogueCache } = jest.requireActual('@/lib/cache');
+    mockDb.getCatalogueEventStatistics.mockReset();
+    mockDb.getCatalogueEventStatistics.mockResolvedValue({
+      ...emptyAggregate, eventCount: 3, earliestTime: '2020-01-01T00:00:00.000Z', latestTime: '2020-01-02T00:00:00.000Z',
+    });
+
+    await get();
+    await get();
+    // Scanning every event of a large picks-retained catalogue on each popover open was the cost.
+    expect(mockDb.getCatalogueEventStatistics).toHaveBeenCalledTimes(1);
+
+    invalidateCatalogueCache('cat-1');
+    await get();
+    expect(mockDb.getCatalogueEventStatistics).toHaveBeenCalledTimes(2);
   });
 });

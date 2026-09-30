@@ -82,7 +82,7 @@ describe('#57 :: catalogue statistics count every form of location uncertainty',
   it('counts horizontal (any form) or depth uncertainty, and reports each separately', async () => {
     aggregate.mockReturnValueOnce({ toArray: async () => [{ overall: [], magnitudeTypes: [] }] });
     await dbQueries!.getCatalogueEventStatistics('cat');
-    const group = aggregate.mock.calls[0][0][1].$facet.overall[0].$group;
+    const group = aggregate.mock.calls[0][0].find((stage: any) => stage.$facet).$facet.overall[0].$group;
 
     expect(sumOver(group.eventsWithUncertainty, docs)).toBe(5);
     expect(sumOver(group.eventsWithHorizontalUncertainty, docs)).toBe(4);

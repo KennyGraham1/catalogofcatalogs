@@ -27,6 +27,7 @@ jest.mock('react-leaflet', () => {
       React.useImperativeHandle(ref, () => ({ addLayer: mockAddLayer, removeLayer: jest.fn() }));
       return <div>{children}</div>;
     }),
+    ScaleControl: () => null,
   };
 });
 jest.mock('react-leaflet-draw', () => ({ EditControl: () => null }));

@@ -1,9 +1,9 @@
 /**
  * Quality-score legends must describe the colours getQualityColor actually draws.
  *
- * Markers are coloured by getQualityColor (green >= 85, lime >= 75, yellow >= 65,
- * orange >= 45, red below), whose cut-offs are the letter-grade thresholds of
- * scoreToGrade (A+ 95, A 85, B+ 75, B 65, C 45, D 35) and paper Table 2. The legends
+ * Markers are coloured by getQualityColor, one colour per letter grade of scoreToGrade
+ * (A+ 95, A 85, B+ 75, B 65, C 45, D 35; paper Table 2): A+/A dark teal, B+/B teal,
+ * C yellow, D orange, F red (lib/map-style.ts QUALITY_GRADE_COLORS). The legends
  * were hard-coded with the older 90/80/70/60 bands, so an orange Q = 50 marker (grade C,
  * and the popup badge says C) was keyed 'D (60-69)' and a red Q = 40 (grade D) 'F (< 60)'.
  * Expected grades and ranges below are the paper's table, not read back from the code.
@@ -26,11 +26,14 @@ const map = {
   }),
   on: jest.fn(),
   off: jest.fn(),
+  fitBounds: jest.fn(),
+  getContainer: () => document.createElement('div'),
 };
 const markerRender = jest.fn();
 jest.mock('react-leaflet', () => ({
   useMap: () => map,
   MapContainer: ({ children }: any) => <div>{children}</div>,
+  ScaleControl: () => null,
   GeoJSON: () => null,
   FeatureGroup: ({ children }: any) => <div>{children}</div>,
   Polyline: () => null,
@@ -42,17 +45,23 @@ jest.mock('react-leaflet-draw', () => ({ EditControl: () => null }));
 jest.mock('@/lib/fault-data', () => ({ loadFaultData: jest.fn().mockResolvedValue(null) }));
 jest.mock('@/components/map/MapLayerControl', () => ({ MapLayerControl: () => null }));
 jest.mock('@/hooks/use-map-theme', () => ({ useMapColors: () => ({ isDark: false, markerOpacity: 0.75 }) }));
-jest.mock('@/components/advanced-viz/UncertaintyEllipse', () => ({ UncertaintyEllipse: () => null }));
-jest.mock('@/components/advanced-viz/BeachBallMarker', () => ({ BeachBallMarker: () => null }));
+jest.mock('@/components/advanced-viz/UncertaintyEllipse', () => ({
+  ...jest.requireActual('@/components/advanced-viz/UncertaintyEllipse'),
+  UncertaintyEllipse: () => null,
+}));
+jest.mock('@/components/advanced-viz/BeachBallMarker', () => ({
+  ...jest.requireActual('@/components/advanced-viz/BeachBallMarker'),
+  BeachBallMarker: () => null,
+}));
 jest.mock('@/components/advanced-viz/StationMarker', () => ({ StationMarker: () => null }));
 
 /** Paper Table 2 grouped by marker colour (publication tab:quality_grades). */
 const TABLE_2_BANDS = [
-  { color: '#22c55e', grades: ['A+', 'A'], min: 85, max: 100 },
-  { color: '#84cc16', grades: ['B+'], min: 75, max: 84 },
-  { color: '#eab308', grades: ['B'], min: 65, max: 74 },
-  { color: '#f97316', grades: ['C'], min: 45, max: 64 },
-  { color: '#ef4444', grades: ['D', 'F'], min: 0, max: 44 },
+  { color: '#0F766E', grades: ['A+', 'A'], min: 85, max: 100 },
+  { color: '#14B8A6', grades: ['B+', 'B'], min: 65, max: 84 },
+  { color: '#EAB308', grades: ['C'], min: 45, max: 64 },
+  { color: '#F97316', grades: ['D'], min: 35, max: 44 },
+  { color: '#DC2626', grades: ['F'], min: 0, max: 34 },
 ];
 
 /** Every band edge of both functions, plus the scores quoted in the review. */
@@ -115,8 +124,14 @@ describe('quality legend bands are derived from getQualityColor and scoreToGrade
   it('reproduces paper Table 2 grouped by marker colour', () => {
     expect(QUALITY_LEGEND_BANDS.map(({ color, grades, min, max }) => ({ color, grades, min, max }))).toEqual(TABLE_2_BANDS);
     expect(QUALITY_LEGEND_BANDS.map(({ label }) => label)).toEqual([
-      'A+ / A (≥ 85)', 'B+ (75–84)', 'B (65–74)', 'C (45–64)', 'D / F (< 45)',
+      'A+ / A (≥ 85)', 'B+ / B (65–84)', 'C (45–64)', 'D (35–44)', 'F (< 35)',
     ]);
+  });
+
+  it('is grey only for a missing score - never for real data', () => {
+    expect(getQualityColor(null)).toBe('#9CA3AF');
+    expect(getQualityColor(Number.NaN)).toBe('#9CA3AF');
+    for (let score = 0; score <= 100; score++) expect(getQualityColor(score)).not.toBe('#9CA3AF');
   });
 
   it('agrees with the marker colour and the badge grade on both sides of every band edge', () => {
@@ -132,11 +147,14 @@ describe('quality legend bands are derived from getQualityColor and scoreToGrade
 });
 
 describe('every map legend keys the quality colours with the real grades', () => {
-  it('analytics map (UnifiedEarthquakeMap), after choosing Color By -> Quality', async () => {
+  it('analytics map (UnifiedEarthquakeMap), after choosing Colour by -> Quality', async () => {
     render(<UnifiedEarthquakeMap earthquakes={events} />);
     fireEvent.click(screen.getByLabelText('Quality'));
     await act(async () => {});
-    const rows = legendRows('Quality Score');
+    // The quality key is a bar: one segment per band, labelled with its grades and range.
+    const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-legend="quality"] [data-quality-band]'))
+      .map((band) => ({ color: band.style.backgroundColor, label: band.dataset.qualityBand! }));
+    expect(screen.getByRole('heading', { name: 'Location quality (Q)' })).toBeInTheDocument();
     expectLegendMatchesMarkers(rows);
 
     // The plotted markers and the legend agree for the events actually on the map.

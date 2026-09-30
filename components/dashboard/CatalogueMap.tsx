@@ -1,14 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState, memo } from 'react';
-import { Card } from '@/components/ui/card';
-import { MapPin, Filter } from 'lucide-react';
+import { MapPin } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useCatalogueEvents } from '@/hooks/use-catalogue-events';
 import { Button } from '@/components/ui/button';
 import { EarthquakeCircleMap } from '@/components/map/EarthquakeCircleMap';
 import type { MapDetail } from '@/lib/map-event-selection';
+import { formatCount } from '@/lib/map-format';
 
 interface Catalogue {
   id: string;
@@ -114,38 +114,36 @@ export const CatalogueMap = memo(function CatalogueMap() {
       onSampleSizeChange={setSampleSize}
       mapKey={`catalogue-map-${selectedCatalogue}`}
       height="600px"
+      className="rounded-b-[calc(var(--radius)-1px)]"
       catalogueNames={catalogueNames}
     />;
   };
 
+  const selectorId = 'dashboard-map-catalogue';
   return (
-    <div className="h-[600px] w-full relative">
-      {/* Catalogue selector — overlaid top-left, above the map */}
-      {catalogues.length > 0 && <div className="absolute top-4 left-4 z-[2000]">
-        <Card className="p-3 bg-background/95 backdrop-blur-sm shadow-lg">
-          <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-muted-foreground" />
-            <Select value={selectedCatalogue} onValueChange={setSelectedCatalogue}>
-              <SelectTrigger aria-label="Catalogue" className="w-[250px] h-8">
-                <SelectValue placeholder="Select catalogue" />
-              </SelectTrigger>
-              <SelectContent position="popper" className="z-[10000]">
-                {catalogues.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name} ({c.event_count} events)
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </Card>
+    <div className="w-full">
+      {/* Catalogue selector in the card's header strip: nothing overlays the map's own controls. */}
+      {catalogues.length > 0 && <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-6 pb-3">
+        <label htmlFor={selectorId} className="text-xs font-medium text-muted-foreground">Catalogue</label>
+        <Select value={selectedCatalogue} onValueChange={setSelectedCatalogue}>
+          <SelectTrigger id={selectorId} aria-label="Catalogue" className="h-8 w-[300px] max-w-full text-xs">
+            <SelectValue placeholder="Select catalogue" />
+          </SelectTrigger>
+          <SelectContent position="popper" className="z-[10000]">
+            {catalogues.map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                {c.name} ({formatCount(c.event_count ?? 0)} events)
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {!complete && events.length > 0 && <div className="flex items-center gap-2 text-xs text-muted-foreground" role={eventsError ? 'alert' : 'status'}>
+          <span>{eventsError || `Preview · ${loadedCount.toLocaleString()} events received, loading the rest…`}</span>
+          {eventsError && <Button size="sm" variant="outline" className="h-7 text-xs" onClick={reload}>Retry loading events</Button>}
+        </div>}
       </div>}
 
       {renderMap()}
-      {!complete && events.length > 0 && <Card className="absolute bottom-4 left-4 z-[2000] p-3" role={eventsError ? 'alert' : 'status'}>
-        <p className="text-sm">{eventsError || `Preview · ${loadedCount.toLocaleString()} events received. Loading remaining events...`}</p>
-        {eventsError && <Button size="sm" variant="outline" onClick={reload}>Retry loading events</Button>}
-      </Card>}
     </div>
   );
 });

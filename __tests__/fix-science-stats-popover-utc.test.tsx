@@ -4,8 +4,12 @@
  * (QuakeML 1.2 / ISO 8601), and the analytics page renders them in UTC, so under
  * NZDT the popover put a boundary event on the next calendar day (and sometimes the
  * next year). Expected strings are derived by hand from the UTC instants.
+ *
+ * The assertions hold on any host: the popover must show the UTC day, labelled UTC, and
+ * never the New Zealand day. (Assigning process.env.TZ here would not change the zone: Jest
+ * gives each test file its own copy of process.env. A zone-less formatter in this component
+ * is caught on any host by the source scan in __tests__/utc2-utc-origin-times.test.ts.)
  */
-process.env.TZ = 'Pacific/Auckland';
 
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
@@ -17,7 +21,8 @@ afterEach(() => { global.fetch = originalFetch; });
 it('shows the UTC calendar day of the earliest and latest origin times, labelled UTC', async () => {
   // Kaikoura mainshock 2016-11-13T11:02:56Z is 14/11/2016 in Pacific/Auckland (UTC+13);
   // 2024-12-31T12:30Z is already 01/01/2025 there.
-  expect(new Date('2016-11-13T11:02:56.000Z').getDate()).toBe(14); // the zone really is NZDT here
+  const nzDay = (iso: string) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Pacific/Auckland', day: 'numeric' }).format(new Date(iso));
+  expect([nzDay('2016-11-13T11:02:56.000Z'), nzDay('2024-12-31T12:30:00.000Z')]).toEqual(['14', '1']); // boundary instants
   global.fetch = jest.fn().mockResolvedValue({
     ok: true,
     json: async () => ({

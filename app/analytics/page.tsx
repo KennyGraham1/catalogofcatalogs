@@ -152,10 +152,18 @@ function describeBinningCorrection(resolution: number, correction: number): stri
   return `${correction.toFixed(3)} (magnitudes reported at mixed resolutions, or a cut-off between reported values)`;
 }
 
+/**
+ * Map tab height: at least 640 px on desktop, otherwise the viewport under the fixed header
+ * and the tab bar (capped at 920 px); the filter sidebar takes the same height so the two
+ * cards line up. Smaller fixed heights on phones and tablets keep the page scrollable.
+ */
+const MAP_TAB_DESKTOP_HEIGHT = 'lg:h-[clamp(640px,calc(100vh_-_12rem),920px)]';
+const MAP_TAB_MAP_HEIGHT = `h-[480px] sm:h-[560px] ${MAP_TAB_DESKTOP_HEIGHT}`;
+
 // Dynamically import unified map component to avoid SSR issues
 const UnifiedEarthquakeMap = dynamic(() => import('@/components/visualize/UnifiedEarthquakeMap'), {
   ssr: false,
-  loading: () => <div className="h-[600px] w-full bg-muted animate-pulse rounded-lg flex items-center justify-center text-muted-foreground">Loading map...</div>
+  loading: () => <div className={`${MAP_TAB_MAP_HEIGHT} w-full bg-muted animate-pulse flex items-center justify-center text-muted-foreground`}>Loading map...</div>
 });
 
 // Performance constants
@@ -546,7 +554,6 @@ export default function AnalyticsPage() {
   const [depthRange, setDepthRange] = useState<number[]>([...DEPTH_SLIDER]);
   const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
   const [selectedCataloguesFilter, setSelectedCataloguesFilter] = useState<string[]>([]);
-  const [colorBy, setColorBy] = useState<'magnitude' | 'depth'>('magnitude');
   const [timeFilter, setTimeFilter] = useState('all');
   // Analysis filters from the paper's bias guidance: minimum quality score, maximum
   // azimuthal gap, and magnitude type(s); agency-flagged records are excluded by default.
@@ -1622,24 +1629,33 @@ export default function AnalyticsPage() {
 
         {/* Unified Map Tab */}
         <TabsContent value="map" className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Filters sidebar (fixed width) beside the map; on desktop both cards share one
+              height, the filter list scrolling inside its card, so their edges line up. */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
             {/* Filters Sidebar */}
-            <Card className="lg:col-span-1 h-fit">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base flex items-center gap-2">
+            <Card className={`flex flex-col overflow-hidden ${MAP_TAB_DESKTOP_HEIGHT}`}>
+              <CardHeader className="flex-shrink-0 space-y-0.5 border-b px-4 py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
                     <Filter className="h-4 w-4" />
                     Filters
                   </CardTitle>
-                  <Button variant="ghost" size="sm" onClick={handleResetFilters}>
-                    <RefreshCw className="h-4 w-4" />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={handleResetFilters}
+                    aria-label="Reset filters"
+                    title="Reset filters"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
                   </Button>
                 </div>
-                <CardDescription className="text-xs">
+                <CardDescription className="text-xs tabular-nums">
                   {filteredEarthquakes.length.toLocaleString()} of {events.length.toLocaleString()} events
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
                 {/* Magnitude Range */}
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
@@ -1818,7 +1834,7 @@ export default function AnalyticsPage() {
                       <Label className="text-xs font-medium">Catalogues ({selectedCataloguesFilter.length} selected)</Label>
                       <InfoTooltip content="Filter events to a subset of catalogues when viewing all." />
                     </div>
-                    <div className="space-y-1.5 border rounded-md p-2">
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto border rounded-md p-2">
                       {availableCatalogues.map(catalogue => (
                         <div key={catalogue} className="flex items-center space-x-2">
                           <Checkbox
@@ -1851,26 +1867,18 @@ export default function AnalyticsPage() {
               </CardContent>
             </Card>
 
-            {/* Map View */}
-            <div className="lg:col-span-3">
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-lg">Interactive Earthquake Map</CardTitle>
-                  <CardDescription className="text-xs">
-                    Explore earthquake locations with advanced visualization options
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <UnifiedEarthquakeMap
-                    key={`map-${selectedCatalogue}`}
-                    earthquakes={filteredEarthquakes as any}
-                    colorBy={colorBy}
-                    showFocalMechanisms={true}
-                    showFaultLines={true}
-                  />
-                </CardContent>
-              </Card>
-            </div>
+            {/* Map View: the card is the map (no second title), filling it to its rounded
+                edge; colour mode, overlays and detail live in the map's Style panel. On
+                phones the map comes first. */}
+            <Card className="order-first overflow-hidden lg:order-none">
+              <UnifiedEarthquakeMap
+                key={`map-${selectedCatalogue}`}
+                earthquakes={filteredEarthquakes as any}
+                showFocalMechanisms={true}
+                showFaultLines={true}
+                className={MAP_TAB_MAP_HEIGHT}
+              />
+            </Card>
           </div>
         </TabsContent>
 

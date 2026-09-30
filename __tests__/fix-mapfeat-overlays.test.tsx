@@ -3,14 +3,14 @@
  * overlays described by the paper (sec:viz) but previously only prototyped in the
  * unmounted EnhancedMapView: uncertainty ellipses and focal-mechanism beach balls.
  *
- *  - Both are off by default (opt-in extras), toggled by Switches in the "Overlays"
- *    panel.
+ *  - Both are off by default (opt-in extras), toggled by Switches in the Style panel's
+ *    "Overlays" section.
  *  - The beach-ball toggle only exists when the `showFocalMechanisms` prop is true (the
  *    analytics page passes true); with it false/omitted, no toggle renders and no beach
  *    ball is ever drawn, regardless of what the events contain.
  *  - Overlays are drawn only for the plotted events and further capped (largest
  *    magnitude first) so a big catalogue cannot stall the browser with thousands of
- *    64-point polygons or rasterised icons; a visible note reports the cap.
+ *    64-point polygons or rasterised icons; a note under the switch reports the cap.
  */
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen } from '@testing-library/react';
@@ -25,6 +25,8 @@ const map = {
   }),
   on: jest.fn(),
   off: jest.fn(),
+  fitBounds: jest.fn(),
+  getContainer: () => document.createElement('div'),
 };
 const markerRender = jest.fn();
 const ellipseRender = jest.fn();
@@ -32,6 +34,7 @@ const beachBallRender = jest.fn();
 jest.mock('react-leaflet', () => ({
   useMap: () => map,
   MapContainer: ({ children }: any) => <div>{children}</div>,
+  ScaleControl: () => null,
   GeoJSON: () => null,
   Popup: ({ children }: any) => <div data-testid="popup">{children}</div>,
   CircleMarker: (props: any) => { markerRender(props); return <button data-testid="marker" onClick={props.eventHandlers?.click}>Event</button>; },
@@ -40,9 +43,11 @@ jest.mock('@/components/map/MapLayerControl', () => ({ MapLayerControl: () => nu
 jest.mock('@/hooks/use-map-theme', () => ({ useMapColors: () => ({ isDark: false, markerOpacity: 0.75 }) }));
 jest.mock('@/lib/fault-data', () => ({ loadFaultData: jest.fn().mockResolvedValue(null) }));
 jest.mock('@/components/advanced-viz/UncertaintyEllipse', () => ({
+  ...jest.requireActual('@/components/advanced-viz/UncertaintyEllipse'),
   UncertaintyEllipse: (props: any) => { ellipseRender(props); return null; },
 }));
 jest.mock('@/components/advanced-viz/BeachBallMarker', () => ({
+  ...jest.requireActual('@/components/advanced-viz/BeachBallMarker'),
   BeachBallMarker: (props: any) => { beachBallRender(props); return null; },
 }));
 
@@ -82,12 +87,12 @@ describe('uncertainty-ellipse overlay toggle', () => {
     render(<UnifiedEarthquakeMap earthquakes={[baseEvent]} />);
     await act(async () => {});
     expect(ellipseRender).not.toHaveBeenCalled();
-    expect(screen.getByRole('switch', { name: 'Uncertainty Ellipses' })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('switch', { name: 'Uncertainty ellipses' })).toHaveAttribute('aria-checked', 'false');
   });
 
   it('draws an ellipse for a plotted event once switched on, using the reported circular uncertainty', async () => {
     render(<UnifiedEarthquakeMap earthquakes={[baseEvent]} />);
-    fireEvent.click(screen.getByRole('switch', { name: 'Uncertainty Ellipses' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Uncertainty ellipses' }));
     await act(async () => {});
     expect(ellipseRender).toHaveBeenCalledTimes(1);
     const [{ ellipse, eventId }] = ellipseRender.mock.calls[0];
@@ -98,7 +103,7 @@ describe('uncertainty-ellipse overlay toggle', () => {
 
   it('carries confidence_level (C16) through to the drawn ellipse when the event has it', async () => {
     render(<UnifiedEarthquakeMap earthquakes={[{ ...baseEvent, confidence_level: 90 }]} />);
-    fireEvent.click(screen.getByRole('switch', { name: 'Uncertainty Ellipses' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Uncertainty ellipses' }));
     await act(async () => {});
     const [{ ellipse }] = ellipseRender.mock.calls[0];
     expect(ellipse.confidenceLevel).toBe(90);
@@ -107,7 +112,7 @@ describe('uncertainty-ellipse overlay toggle', () => {
   it('draws nothing for an event with no location-uncertainty fields at all', async () => {
     const noUncertainty = { ...baseEvent, horizontal_uncertainty: null, focal_mechanisms: null };
     render(<UnifiedEarthquakeMap earthquakes={[noUncertainty]} />);
-    fireEvent.click(screen.getByRole('switch', { name: 'Uncertainty Ellipses' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Uncertainty ellipses' }));
     await act(async () => {});
     expect(ellipseRender).not.toHaveBeenCalled();
   });
@@ -117,20 +122,20 @@ describe('focal-mechanism beach-ball overlay, gated by showFocalMechanisms', () 
   it('offers no toggle and draws nothing when showFocalMechanisms is not passed (default false)', async () => {
     render(<UnifiedEarthquakeMap earthquakes={[baseEvent]} />);
     await act(async () => {});
-    expect(screen.queryByRole('switch', { name: 'Focal Mechanisms' })).toBeNull();
+    expect(screen.queryByRole('switch', { name: 'Focal mechanisms' })).toBeNull();
     expect(beachBallRender).not.toHaveBeenCalled();
   });
 
   it('offers the toggle when showFocalMechanisms is true, off until switched on', async () => {
     render(<UnifiedEarthquakeMap earthquakes={[baseEvent]} showFocalMechanisms />);
     await act(async () => {});
-    expect(screen.getByRole('switch', { name: 'Focal Mechanisms' })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('switch', { name: 'Focal mechanisms' })).toHaveAttribute('aria-checked', 'false');
     expect(beachBallRender).not.toHaveBeenCalled();
   });
 
   it('draws the preferred mechanism (preferred_focal_mechanism_id), not just the first stored one, once switched on', async () => {
     render(<UnifiedEarthquakeMap earthquakes={[baseEvent]} showFocalMechanisms />);
-    fireEvent.click(screen.getByRole('switch', { name: 'Focal Mechanisms' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Focal mechanisms' }));
     await act(async () => {});
     expect(beachBallRender).toHaveBeenCalledTimes(1);
     const [{ mechanism, eventId }] = beachBallRender.mock.calls[0];
@@ -141,7 +146,7 @@ describe('focal-mechanism beach-ball overlay, gated by showFocalMechanisms', () 
   it('never draws a beach ball for an event with no resolvable nodal plane', async () => {
     const noPlane = { ...baseEvent, focal_mechanisms: JSON.stringify([{ publicID: 'x' }]) };
     render(<UnifiedEarthquakeMap earthquakes={[noPlane]} showFocalMechanisms />);
-    fireEvent.click(screen.getByRole('switch', { name: 'Focal Mechanisms' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Focal mechanisms' }));
     await act(async () => {});
     expect(beachBallRender).not.toHaveBeenCalled();
   });
@@ -163,7 +168,7 @@ describe('overlay cap (largest magnitude first) and its visible note', () => {
 
   it('draws ellipses for only the cap-many largest-magnitude events and says so', async () => {
     render(<UnifiedEarthquakeMap earthquakes={many} showFocalMechanisms />);
-    fireEvent.click(screen.getByRole('switch', { name: 'Uncertainty Ellipses' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Uncertainty ellipses' }));
     await act(async () => {});
 
     // Every render of a mounted-but-not-memoized overlay re-invokes its mock, so the number
@@ -174,13 +179,14 @@ describe('overlay cap (largest magnitude first) and its visible note', () => {
     expect(drawnEllipseIds).toContain('m151'); // largest magnitude: always kept
     expect(drawnEllipseIds).not.toContain('m1'); // smallest magnitude: dropped by the cap
 
-    // The truncation note names the cap and the true total so a user knows events are hidden.
-    expect(screen.getByText(exactTextNode('Showing uncertainty ellipses for the 150 largest of 151 plotted events with location uncertainty.'))).toBeInTheDocument();
+    // The truncation note under the switch names the cap and the true total so a user
+    // knows some events have no ellipse.
+    expect(screen.getByText(exactTextNode('Showing the 150 largest of 151 plotted events.'))).toBeInTheDocument();
   });
 
   it('draws beach balls for only the cap-many largest-magnitude events and says so', async () => {
     render(<UnifiedEarthquakeMap earthquakes={many} showFocalMechanisms />);
-    fireEvent.click(screen.getByRole('switch', { name: 'Focal Mechanisms' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Focal mechanisms' }));
     await act(async () => {});
 
     const drawnBeachBallIds = new Set(beachBallRender.mock.calls.map(([props]) => props.eventId));
@@ -188,6 +194,7 @@ describe('overlay cap (largest magnitude first) and its visible note', () => {
     expect(drawnBeachBallIds).toContain('m151');
     expect(drawnBeachBallIds).not.toContain('m1');
 
-    expect(screen.getByText(exactTextNode('Showing beach balls for the 150 largest of 151 plotted events with a focal mechanism.'))).toBeInTheDocument();
+    // 151 mechanisms <= 300, so they are drawn at this national zoom (5) - capped.
+    expect(screen.getByText(exactTextNode('Showing the 150 largest of 151 plotted events.'))).toBeInTheDocument();
   });
 });

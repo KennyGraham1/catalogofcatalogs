@@ -8,7 +8,9 @@
  * only the OpenStreetMap and Carto hosts, so 'Satellite (Esri)' and 'Terrain
  * (OpenTopoMap)' rendered as a blank grey map with a CSP violation per tile. This test
  * reads the policy from the real middleware and checks every BASE_LAYERS URL, so adding
- * a layer without updating the policy fails here.
+ * a layer without updating the policy fails here. The CARTO layers (now watermarked
+ * "API KEY REQUIRED") and OpenTopoMap were retired from BASE_LAYERS, and their hosts from
+ * the policy with them.
  */
 
 jest.mock('next-auth/middleware', () => ({ withAuth: (middleware: unknown) => middleware }));
@@ -66,5 +68,12 @@ describe.each(['production', 'development'] as const)('img-src in %s', nodeEnv =
     const sources = await imgSrcFor(nodeEnv, '/login');
     expect(allowedBy(sources, 'https://a.tile.example.org/5/31/19.png')).toBe(false);
     expect(allowedBy(sources, 'https://opentopomap.org.evil.example/5/31/19.png')).toBe(false);
+  });
+
+  it('no longer allows the retired CARTO and OpenTopoMap tile hosts (no layer uses them)', async () => {
+    const sources = await imgSrcFor(nodeEnv, '/catalogues');
+    expect(sources.join(' ')).not.toMatch(/cartocdn|opentopomap/);
+    expect(allowedBy(sources, 'https://a.basemaps.cartocdn.com/dark_all/5/31/19.png')).toBe(false);
+    expect(allowedBy(sources, 'https://a.tile.opentopomap.org/5/31/19.png')).toBe(false);
   });
 });

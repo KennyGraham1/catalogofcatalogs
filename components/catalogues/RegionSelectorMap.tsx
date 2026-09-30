@@ -1,18 +1,22 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback, memo } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback, memo } from 'react';
 import L from 'leaflet';
 import { MapContainer, FeatureGroup } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
+import { MapScaleBar } from '@/components/map/MapScaleBar';
+import { ensureLeafletDefaultIcon } from '@/components/map/leaflet-default-icon';
 import { EditControl } from 'react-leaflet-draw';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { MapPin, Trash2, Info } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
+import { useIsDarkTheme } from '@/hooks/use-map-theme';
 import { NZ_NATIONAL_BOUNDS, unwrappedLongitudeRange } from '@/lib/geo-bounds-utils';
+import { cn } from '@/lib/utils';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
+import styles from './RegionSelectorMap.module.css';
+import { MAP_ZOOM_OPTIONS } from '@/lib/map-style';
 
 export interface GeographicBounds {
   minLatitude: number;
@@ -41,6 +45,40 @@ const REGION_PRESETS: Record<string, GeographicBounds> = {
   'nz-wellington': { minLatitude: -41.6, maxLatitude: -40.7, minLongitude: 174.7, maxLongitude: 175.5 },
   // Auckland region
   'nz-auckland': { minLatitude: -37.3, maxLatitude: -36.5, minLongitude: 174.4, maxLongitude: 175.2 },
+};
+
+/** Drawn-region outline width (px) and fill opacity (spec S6). */
+export const REGION_SHAPE_WEIGHT = 2;
+export const REGION_SHAPE_FILL_OPACITY = 0.08;
+
+/** --primary of the default light / dark theme (app/globals.css), if it cannot be read. */
+const PRIMARY_FALLBACK = { light: 'hsl(0, 0%, 9%)', dark: 'hsl(0, 0%, 98%)' };
+
+/**
+ * The app's primary colour (--primary, "H S% L%") as a colour Leaflet can paint: SVG
+ * presentation attributes and leaflet-draw's guide dashes cannot read a CSS variable.
+ */
+export function resolvePrimaryColor(isDark: boolean): string {
+  if (typeof document !== 'undefined') {
+    const raw = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim();
+    const match = /^(-?[\d.]+)(?:deg)?\s+([\d.]+)%\s+([\d.]+)%$/.exec(raw);
+    if (match) return `hsl(${match[1]}, ${match[2]}%, ${match[3]}%)`;
+  }
+  return isDark ? PRIMARY_FALLBACK.dark : PRIMARY_FALLBACK.light;
+}
+
+/** Style of a drawn or preset region: the primary colour, 2 px outline, 8 % fill. */
+export function regionShapeStyle(isDark: boolean): L.PathOptions {
+  const color = resolvePrimaryColor(isDark);
+  return { color, weight: REGION_SHAPE_WEIGHT, opacity: 1, fillColor: color, fillOpacity: REGION_SHAPE_FILL_OPACITY };
+}
+
+/** leaflet-draw edit mode: dash the region being edited but keep its colour (leaflet-draw
+ *  would otherwise repaint it pink). */
+const EDIT_OPTIONS = {
+  edit: {
+    selectedPathOptions: { dashArray: '6, 4', fill: true, fillOpacity: 0.14, maintainColor: true } as L.PathOptions,
+  },
 };
 
 const clampValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -118,16 +156,27 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
   const featureGroupRef = useRef<L.FeatureGroup | null>(null);
   const [selectedBounds, setSelectedBounds] = useState<GeographicBounds | null>(initialBounds);
   const drawnPolygonRef = useRef<L.Layer | null>(null);
+  const isDark = useIsDarkTheme();
 
-  // Fix for Leaflet icons in Next.js
+  // Default marker icon from this origin (the cdnjs images the CSP blocks are not used).
+  useEffect(() => { ensureLeafletDefaultIcon(); }, []);
+
+  // Drawn and preset regions in the app's primary colour, following the site theme.
+  const shapeStyle = useMemo(() => regionShapeStyle(isDark), [isDark]);
   useEffect(() => {
-    delete (L.Icon.Default.prototype as any)._getIconUrl;
-    L.Icon.Default.mergeOptions({
-      iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-      iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-      shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-    });
-  }, []);
+    const drawn = drawnPolygonRef.current;
+    if (drawn instanceof L.Path) drawn.setStyle(shapeStyle);
+  }, [shapeStyle]);
+
+  // leaflet-draw options; a new object (theme change) makes EditControl rebuild its toolbar.
+  const drawOptions = useMemo(() => ({
+    polygon: { allowIntersection: false, shapeOptions: shapeStyle },
+    rectangle: false as const,
+    circle: false as const,
+    circlemarker: false as const,
+    marker: false as const,
+    polyline: false as const,
+  }), [shapeStyle]);
 
   // Memoized polygon creation handler
   const handlePolygonCreated = useCallback((e: any) => {
@@ -199,11 +248,7 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
     );
 
     // Create rectangle for preset (keep as rectangle for presets)
-    const rectangle = L.rectangle(bounds, {
-      color: '#3b82f6',
-      weight: 2,
-      fillOpacity: 0.2,
-    });
+    const rectangle = L.rectangle(bounds, shapeStyle);
 
     if (featureGroupRef.current) {
       featureGroupRef.current.addLayer(rectangle);
@@ -226,119 +271,81 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
     return `${abs.toFixed(2)}°${dir}`;
   };
 
+  const crossesDateLine = selectedBounds !== null && selectedBounds.minLongitude > selectedBounds.maxLongitude;
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <MapPin className="h-5 w-5" />
-          Interactive Region Selector
-        </CardTitle>
-        <CardDescription>
-          Draw a polygon on the map to select a geographic region, or choose a preset
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Preset Regions */}
-        <div className="space-y-2">
-          <div className="flex flex-wrap gap-2">
-            <Select onValueChange={setPresetRegion}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Select Region" />
-              </SelectTrigger>
-              <SelectContent className="z-[1000]">
-                <SelectItem value="nz">New Zealand (All)</SelectItem>
-                <SelectItem value="nz-north">North Island</SelectItem>
-                <SelectItem value="nz-south">South Island</SelectItem>
-                <SelectItem value="nz-auckland">Auckland</SelectItem>
-                <SelectItem value="nz-wellington">Wellington</SelectItem>
-                <SelectItem value="nz-canterbury">Canterbury</SelectItem>
-              </SelectContent>
-            </Select>
-            {selectedBounds && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleClear}
-              >
-                <Trash2 className="h-4 w-4 mr-1" />
-                Clear
-              </Button>
-            )}
-          </div>
-        </div>
-
-        {/* Selected Bounds Display */}
+    <div className="space-y-3">
+      {/* Preset regions */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Select onValueChange={setPresetRegion}>
+          <SelectTrigger className="w-[200px]" aria-label="Preset region">
+            <SelectValue placeholder="Select Region" />
+          </SelectTrigger>
+          <SelectContent className="z-[1000]">
+            <SelectItem value="nz">New Zealand (All)</SelectItem>
+            <SelectItem value="nz-north">North Island</SelectItem>
+            <SelectItem value="nz-south">South Island</SelectItem>
+            <SelectItem value="nz-auckland">Auckland</SelectItem>
+            <SelectItem value="nz-wellington">Wellington</SelectItem>
+            <SelectItem value="nz-canterbury">Canterbury</SelectItem>
+          </SelectContent>
+        </Select>
         {selectedBounds && (
-          <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-            <div className="flex items-start gap-2">
-              <Info className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5" />
-              <div className="text-sm">
-                <div className="font-medium text-blue-900 dark:text-blue-100 mb-1">
-                  Selected Region
-                </div>
-                <div className="text-blue-700 dark:text-blue-300 space-y-0.5">
-                  <div>
-                    Latitude: {formatCoord(selectedBounds.minLatitude, true)} to {formatCoord(selectedBounds.maxLatitude, true)}
-                  </div>
-                  <div>
-                    Longitude: {formatCoord(selectedBounds.minLongitude, false)} to {formatCoord(selectedBounds.maxLongitude, false)}
-                    {selectedBounds.minLongitude > selectedBounds.maxLongitude && (
-                      <span className="ml-1 text-xs text-blue-700 dark:text-blue-300">(crosses date line)</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Map */}
-        <div style={{ height }} className="rounded-lg overflow-hidden border">
-          <MapContainer
-            key="region-selector-map"
-            center={[-41, 174]}
-            zoom={5}
-            ref={mapRef}
-            className="h-full w-full"
-            scrollWheelZoom={true}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleClear}
           >
-            <MapLayerControl position="topright" />
+            <Trash2 className="h-4 w-4 mr-1" />
+            Clear
+          </Button>
+        )}
+      </div>
 
-            <FeatureGroup ref={featureGroupRef}>
-              <EditControl
-                position="topright"
-                onCreated={handlePolygonCreated}
-                onEdited={handlePolygonEdited}
-                onDeleted={handlePolygonDeleted}
-                draw={{
-                  polygon: {
-                    allowIntersection: false,
-                    shapeOptions: {
-                      color: '#3b82f6',
-                      weight: 2,
-                      fillOpacity: 0.2,
-                    },
-                  },
-                  rectangle: false,
-                  circle: false,
-                  circlemarker: false,
-                  marker: false,
-                  polyline: false,
-                }}
-              />
-            </FeatureGroup>
-          </MapContainer>
+      {/* Selected bounds */}
+      {selectedBounds && (
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 rounded-md border bg-muted/40 px-3 py-2 text-xs tabular-nums">
+          <span className="font-medium text-foreground">Selected region</span>
+          <span className="text-muted-foreground">
+            Latitude: {formatCoord(selectedBounds.minLatitude, true)} to {formatCoord(selectedBounds.maxLatitude, true)}
+          </span>
+          <span className="text-muted-foreground">
+            Longitude: {formatCoord(selectedBounds.minLongitude, false)} to {formatCoord(selectedBounds.maxLongitude, false)}
+            {crossesDateLine && <span className="ml-1">(crosses date line)</span>}
+          </span>
         </div>
+      )}
 
-        {/* Instructions */}
-        <div className="text-xs text-muted-foreground space-y-1">
-          <div className="flex items-center gap-1">
-            <Badge variant="outline" className="text-xs">Tip</Badge>
-            <span>Click the polygon tool (⬠) in the top-right corner to draw a region on the map</span>
-          </div>
-          <div>You can also edit or delete the polygon after drawing it</div>
-        </div>
-      </CardContent>
-    </Card>
+      {/* Map */}
+      <div style={{ height }} className={cn('relative isolate overflow-hidden rounded-md border', styles.map)}>
+        <MapContainer
+          key="region-selector-map"
+          center={[-41, 174]}
+          zoom={5}
+          ref={mapRef}
+          className="h-full w-full"
+          {...MAP_ZOOM_OPTIONS}
+          scrollWheelZoom={true}
+        >
+          <MapLayerControl position="topright" />
+          <MapScaleBar />
+
+          <FeatureGroup ref={featureGroupRef}>
+            <EditControl
+              position="topright"
+              onCreated={handlePolygonCreated}
+              onEdited={handlePolygonEdited}
+              onDeleted={handlePolygonDeleted}
+              draw={drawOptions}
+              edit={EDIT_OPTIONS}
+            />
+          </FeatureGroup>
+        </MapContainer>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Draw a polygon with the tool at the top right of the map, or pick a preset; the search uses its bounding box.
+      </p>
+    </div>
   );
 });

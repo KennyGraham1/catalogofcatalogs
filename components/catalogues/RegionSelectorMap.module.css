@@ -1,0 +1,82 @@
+/*
+ * leaflet-draw controls of the region selector, in the shared map chrome (app/globals.css
+ * styles the bar itself: border, background, 30 px buttons, foreground colour).
+ *
+ * leaflet-draw paints its buttons from a black sprite, which all but vanished on the dark
+ * control background. The sprite is dropped and each button draws a lucide icon as a CSS
+ * mask filled with currentColor - the control's foreground, dimmed when disabled - so the
+ * icons follow the site theme exactly like the zoom and layer buttons.
+ */
+.map :global .leaflet-control-container .leaflet-draw-toolbar a {
+  position: relative;
+  background-image: none;
+}
+
+.map :global .leaflet-control-container .leaflet-draw-toolbar a::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: 16px 16px;
+  mask-size: 16px 16px;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+/* lucide "pentagon" */
+.map :global .leaflet-control-container .leaflet-draw-toolbar a.leaflet-draw-draw-polygon::after {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.7c-.7.5-1 1.4-.7 2.2l2.8 8.7c.3.8 1 1.4 1.9 1.4h9.1c.9 0 1.6-.6 1.9-1.4l2.8-8.7c.3-.8 0-1.7-.7-2.2l-7.4-5.3a2.1 2.1 0 0 0-2.4 0Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.7c-.7.5-1 1.4-.7 2.2l2.8 8.7c.3.8 1 1.4 1.9 1.4h9.1c.9 0 1.6-.6 1.9-1.4l2.8-8.7c.3-.8 0-1.7-.7-2.2l-7.4-5.3a2.1 2.1 0 0 0-2.4 0Z'/%3E%3C/svg%3E");
+}
+
+/* lucide "pencil" */
+.map :global .leaflet-control-container .leaflet-draw-toolbar a.leaflet-draw-edit-edit::after {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z'/%3E%3Cpath d='m15 5 4 4'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z'/%3E%3Cpath d='m15 5 4 4'/%3E%3C/svg%3E");
+}
+
+/* lucide "trash-2" */
+.map :global .leaflet-control-container .leaflet-draw-toolbar a.leaflet-draw-edit-remove::after {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h18'/%3E%3Cpath d='M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6'/%3E%3Cpath d='M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2'/%3E%3Cpath d='M10 11v6'/%3E%3Cpath d='M14 11v6'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h18'/%3E%3Cpath d='M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6'/%3E%3Cpath d='M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2'/%3E%3Cpath d='M10 11v6'/%3E%3Cpath d='M14 11v6'/%3E%3C/svg%3E");
+}
+
+/* The tool in use */
+.map :global .leaflet-control-container .leaflet-draw-toolbar a.leaflet-draw-toolbar-button-enabled {
+  background-color: hsl(var(--accent));
+}
+
+/* Finish / Delete last point / Cancel: a segmented button row in the same chrome */
+.map :global .leaflet-control-container .leaflet-draw-actions {
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px);
+  overflow: hidden;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+
+.map :global .leaflet-control-container .leaflet-draw-actions a {
+  height: 30px;
+  line-height: 30px;
+  padding: 0 10px;
+  border-radius: 0;
+  border-left: 1px solid hsl(var(--border));
+  background-color: hsl(var(--background) / 0.95);
+  color: hsl(var(--foreground));
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.map :global .leaflet-control-container .leaflet-draw-actions li:first-child a {
+  border-left: none;
+}
+
+.map :global .leaflet-control-container .leaflet-draw-actions a:hover,
+.map :global .leaflet-control-container .leaflet-draw-actions a:focus-visible {
+  background-color: hsl(var(--accent));
+}

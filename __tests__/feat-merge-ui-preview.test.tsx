@@ -10,11 +10,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import L from 'leaflet';
 
 jest.mock('leaflet/dist/leaflet.css', () => ({}));
-jest.mock('@/hooks/use-map-theme', () => ({
-  useMapColors: () => ({ isDark: false, markerOpacity: 0.75 }),
-  BASE_LAYERS: [],
-  getDefaultBaseLayer: () => 'none',
-}));
+// react-leaflet ships ESM that Jest does not transform; the QC map is plain Leaflet and only
+// imports the shared layer control's attachBaseLayers and the scale options beside it.
+jest.mock('react-leaflet', () => ({ useMap: jest.fn(), ScaleControl: () => null }));
 
 // next/dynamic loads the component lazily, so the page's real MergePreviewQC (stubbed below
 // to record its props) can be reached through the page.
@@ -190,17 +188,17 @@ describe('DuplicateGroupMap popups', () => {
   });
   afterEach(() => jest.restoreAllMocks());
 
-  it('labels a superseded report in its popup and fades its marker', () => {
-    const marker = jest.spyOn(L, 'marker');
-    const divIcon = jest.spyOn(L, 'divIcon');
+  it('labels a superseded report in its popup and draws it hollow and dashed', () => {
+    const circleMarker = jest.spyOn(L, 'circleMarker');
     render(<DuplicateGroupMap group={heldGroup} catalogueColors={{}} height="500px" />);
-    const markers = marker.mock.results.map(result => result.value as L.Marker);
+    const markers = circleMarker.mock.results.map(result => result.value as L.CircleMarker);
     expect(String(markers[1].getPopup()!.getContent())).toContain('Superseded');
     expect(String(markers[0].getPopup()!.getContent())).not.toContain('Superseded');
     expect(String(markers[2].getPopup()!.getContent())).not.toContain('Superseded');
-    const icons = divIcon.mock.calls.map(call => String((call[0] as L.DivIconOptions).html));
-    expect(icons[1]).toMatch(/opacity: 0\.45/);
-    expect(icons[0]).toMatch(/opacity: 1;/);
+    expect(markers[1].options).toMatchObject({ fillOpacity: 0, dashArray: expect.any(String) });
+    expect(markers[0].options.fillOpacity).toBeGreaterThan(0);
+    expect(markers[0].options.dashArray).toBeFalsy();
+    expect(markers[2].options.dashArray).toBeFalsy();
   });
 });
 

@@ -10,8 +10,7 @@ import { DefaultFieldMappings } from '@/components/settings/DefaultFieldMappings
 import { MergeAuthoritySettings } from '@/components/settings/MergeAuthoritySettings';
 import { useAuth } from '@/lib/auth/hooks';
 import { UserRole } from '@/lib/auth/types';
-import { getMagnitudeColor } from '@/lib/earthquake-utils';
-import { DepthLegendItems, MagnitudeLegendItems } from '@/components/map/MapLegend';
+import { AzimuthalGapColorBar, DepthColorBar, MagnitudeSizeKey, QualityColorKey } from '@/components/map/MapLegend';
 import { Settings, Database, Map, Lock, GitMerge } from 'lucide-react';
 
 /**
@@ -145,19 +144,29 @@ export default function SettingsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="space-y-2">
-                  <Label>Magnitude colour mode</Label>
-                  <MagnitudeLegendItems getColor={getMagnitudeColor} />
-                  <p className="text-xs text-muted-foreground">
-                    getMagnitudeColor is deprecated: it returns the same blue for every
-                    magnitude, because magnitude is encoded by marker size (shown above), not
-                    colour, on every map in this app.
-                  </p>
-                </div>
+                <div className="grid gap-6 sm:grid-cols-2">
+                  <div className="max-w-[260px] space-y-2 text-xs">
+                    <Label>Marker size: magnitude</Label>
+                    <MagnitudeSizeKey isDark={isDark} />
+                    <p className="text-muted-foreground">
+                      Magnitude is always encoded by marker size, never by colour.
+                    </p>
+                  </div>
 
-                <div className="space-y-2">
-                  <Label>Depth colour mode</Label>
-                  <DepthLegendItems isDark={isDark} />
+                  <div className="max-w-[260px] space-y-2 text-xs">
+                    <Label>Colour: depth (default)</Label>
+                    <DepthColorBar isDark={isDark} />
+                  </div>
+
+                  <div className="max-w-[260px] space-y-2 text-xs">
+                    <Label>Colour: location quality (Q)</Label>
+                    <QualityColorKey />
+                  </div>
+
+                  <div className="max-w-[260px] space-y-2 text-xs">
+                    <Label>Colour: azimuthal gap</Label>
+                    <AzimuthalGapColorBar />
+                  </div>
                 </div>
 
                 <p className="text-xs text-muted-foreground">

@@ -10,6 +10,10 @@ import { GET as getStatistics } from '@/app/api/catalogues/[id]/statistics/route
 import { dbQueries } from '@/lib/db';
 import { requireViewer } from '@/lib/auth/middleware';
 import { eventCache } from '@/lib/cache';
+import { statisticsCache } from '@/lib/cache';
+
+// Statistics are cached per catalogue generation; tests reuse catalogue ids.
+beforeEach(() => statisticsCache.clearAll());
 
 jest.mock('@/lib/auth/middleware', () => ({ requireViewer: jest.fn() }));
 jest.mock('@/lib/db', () => ({

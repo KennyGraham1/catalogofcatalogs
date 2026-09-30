@@ -1,118 +1,149 @@
 /**
- * Hook for managing map theme (light/dark mode)
- * Provides appropriate tile layer URLs and styles for different themes
+ * Map theme: the basemaps every map offers (BASE_LAYERS, the single source) and hooks that
+ * follow the site's light/dark theme.
+ *
+ * CARTO's keyless basemaps now return an "API KEY REQUIRED" watermark, so the themed
+ * defaults are Esri's keyless World Light/Dark Gray Canvas. Their place-name reference
+ * layers (LABEL_LAYERS) are drawn in a separate pane ABOVE the data - see
+ * components/map/MapLayerControl.tsx.
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { MARKER_STYLE } from '@/lib/map-style';
 
 export interface MapThemeConfig {
+  /** Tile URL template of the gray base for the current theme (maps without a layer control). */
   tileLayerUrl: string;
   attribution: string;
   isDark: boolean;
+  /** The full BASE_LAYERS entry behind tileLayerUrl. */
+  baseLayer: BaseLayerConfig;
 }
 
 /**
  * Base layer configuration for map layer control
  */
 export interface BaseLayerConfig {
+  /** Name shown in the layer menu (also the layer's identity). */
   name: string;
   url: string;
   attribution: string;
+  /** Deepest zoom the map may show over this layer (tiles are upscaled past maxNativeZoom). */
   maxZoom?: number;
+  /** Deepest zoom the tile service actually has tiles for. */
+  maxNativeZoom?: number;
+  /** Set on the two gray canvas bases: the theme they belong to and their label layer. */
+  theme?: 'light' | 'dark';
+  labelsUrl?: string;
 }
 
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
+const ESRI_CANVAS_ATTRIBUTION = 'Tiles &copy; Esri &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors';
+
+export const LIGHT_GRAY_BASE = 'Light gray';
+export const DARK_GRAY_BASE = 'Dark gray';
+
 /**
- * All available base layers for the layer control
+ * All base layers, in layer-menu order. The first two follow the site theme.
  */
 export const BASE_LAYERS: BaseLayerConfig[] = [
   {
-    name: 'OpenStreetMap',
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    name: LIGHT_GRAY_BASE,
+    url: `${ESRI}/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}`,
+    attribution: ESRI_CANVAS_ATTRIBUTION,
     maxZoom: 19,
+    maxNativeZoom: 16,
+    theme: 'light',
+    labelsUrl: `${ESRI}/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}`,
   },
   {
-    name: 'Satellite (Esri)',
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    name: DARK_GRAY_BASE,
+    url: `${ESRI}/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`,
+    attribution: ESRI_CANVAS_ATTRIBUTION,
+    maxZoom: 19,
+    maxNativeZoom: 16,
+    theme: 'dark',
+    labelsUrl: `${ESRI}/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`,
+  },
+  {
+    // Bathymetry: trenches and the Hikurangi margin read here.
+    name: 'Ocean (bathymetry)',
+    url: `${ESRI}/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}`,
+    attribution: 'Tiles &copy; Esri &mdash; Sources: GEBCO, NOAA, CHS, OSU, UNH, CSUMB, National Geographic, DeLorme, NAVTEQ, and Esri',
+    maxZoom: 19,
+    maxNativeZoom: 13,
+  },
+  {
+    name: 'Satellite',
+    url: `${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`,
     attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
     maxZoom: 19,
   },
   {
-    name: 'CartoDB Dark',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    maxZoom: 20,
-  },
-  {
-    name: 'CartoDB Positron',
-    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    maxZoom: 20,
-  },
-  {
-    name: 'Terrain (OpenTopoMap)',
-    url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-    attribution: 'Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)',
-    maxZoom: 17,
+    name: 'Streets (OpenStreetMap)',
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19,
   },
 ];
+
+/** The gray base that belongs to a theme. */
+export function getThemeBaseLayer(isDark: boolean): BaseLayerConfig {
+  return BASE_LAYERS.find(layer => layer.theme === (isDark ? 'dark' : 'light'))!;
+}
 
 /**
  * Get the default base layer name based on dark mode
  */
 export function getDefaultBaseLayer(isDark: boolean): string {
-  return isDark ? 'CartoDB Dark' : 'OpenStreetMap';
+  return getThemeBaseLayer(isDark).name;
+}
+
+/** True for the two theme-following gray bases. */
+export function isThemeBaseLayer(name: string | null | undefined): boolean {
+  return BASE_LAYERS.some(layer => layer.name === name && layer.theme !== undefined);
+}
+
+/** Read the site theme (next-themes toggles `dark` on <html>). */
+function documentIsDark(): boolean {
+  return typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
 }
 
 /**
- * Hook to get map theme configuration based on current theme
+ * Whether the site is in dark mode, updated live when the theme is toggled. Initialised
+ * from the document so a client-only map mounts with the right basemap and palette.
  */
-export function useMapTheme(): MapThemeConfig {
-  const [isDark, setIsDark] = useState(false);
+export function useIsDarkTheme(): boolean {
+  const [isDark, setIsDark] = useState(documentIsDark);
 
   useEffect(() => {
-    // Check if dark mode is enabled
-    const checkDarkMode = () => {
-      const isDarkMode = document.documentElement.classList.contains('dark');
-      setIsDark(isDarkMode);
-    };
-
-    // Initial check
-    checkDarkMode();
-
-    // Watch for theme changes
-    const observer = new MutationObserver(checkDarkMode);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
-
+    const check = () => setIsDark(documentIsDark());
+    check();
+    const observer = new MutationObserver(check);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
     return () => observer.disconnect();
   }, []);
 
-  // Return appropriate tile layer based on theme
-  if (isDark) {
-    // CartoDB Dark Matter - excellent for dark mode
-    return {
-      tileLayerUrl: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-      isDark: true,
-    };
-  } else {
-    // OpenStreetMap - standard light mode
-    return {
-      tileLayerUrl: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      isDark: false,
-    };
-  }
+  return isDark;
+}
+
+/**
+ * Hook to get map theme configuration based on current theme: the gray base for maps
+ * that draw a single TileLayer instead of MapLayerControl.
+ */
+export function useMapTheme(): MapThemeConfig {
+  const isDark = useIsDarkTheme();
+  return useMemo(() => {
+    const baseLayer = getThemeBaseLayer(isDark);
+    return { tileLayerUrl: baseLayer.url, attribution: baseLayer.attribution, isDark, baseLayer };
+  }, [isDark]);
 }
 
 /**
  * Get color adjustments for map elements based on theme
  */
 export function useMapColors() {
-  const { isDark } = useMapTheme();
+  const isDark = useIsDarkTheme();
 
   // Memoize so the returned object keeps a stable identity between renders. Map
   // components depend on this in marker useMemo() deps; a fresh object each render
@@ -120,8 +151,8 @@ export function useMapColors() {
   return useMemo(() => ({
     isDark,
 
-    // Consistent opacity for depth-gradient visualization
-    markerOpacity: 0.75,
+    /** Event marker fill opacity (lib/map-style.ts MARKER_STYLE). */
+    markerOpacity: MARKER_STYLE.fillOpacity,
     lineOpacity: isDark ? 0.8 : 0.6,
 
     // Fault line colors (adjusted for dark mode)
@@ -138,4 +169,3 @@ export function useMapColors() {
     uncertaintyColor: isDark ? '#FFA94D' : '#FF9800',
   }), [isDark]);
 }
-

@@ -1,14 +1,28 @@
 'use client';
 
+import { useState, type ReactNode } from 'react';
+import { ChevronDown, List } from 'lucide-react';
 import { getQualityColor, scoreToGrade, type QualityGrade } from '@/lib/quality-scoring';
 import { getEarthquakeColor, getMagnitudePixelRadius } from '@/lib/earthquake-utils';
 import { getAzimuthalGapColor } from '@/lib/uncertainty-utils';
+import {
+  AZIMUTHAL_GAP_TICKS, CATALOGUE_UNKNOWN_COLOR, DEPTH_CLASSES, FAULT_LEGEND_LABEL, MAGNITUDE_KEY_MAGNITUDES,
+  MAP_OVERLAY_CLASS, MARKER_STYLE, QUALITY_UNKNOWN_COLOR, azimuthalGapGradientCss, catalogueColorAt,
+  faultPathOptions, markerStrokeStyle,
+} from '@/lib/map-style';
+import { cn } from '@/lib/utils';
 
 /**
- * Legend entries are built from the functions that colour and size the markers, so a
- * legend cannot drift from the map it describes. The hard-coded quality legends kept the
- * old 90/80/70/60 bands after getQualityColor moved to the letter-grade thresholds, so
+ * Map legends. Every entry is built from the functions that colour and size the markers,
+ * so a legend cannot drift from the map it describes. The hard-coded quality legends kept
+ * the old 90/80/70/60 bands after getQualityColor moved to the letter-grade thresholds, so
  * every band was labelled one grade low next to a popup badge showing the true grade.
+ *
+ * Current API (spec S3): <MapLegend> card with <LegendSection>s holding <DepthColorBar>,
+ * <QualityColorKey>, <AzimuthalGapColorBar>, <CatalogueColorKey>, <MagnitudeSizeKey> and
+ * <FaultLineKey> - or <ColorModeLegendSection mode=...> to pick the colour key. The
+ * *LegendItems components further down are the previous swatch-grid legends, kept so maps
+ * not yet moved to the new chrome still compile; do not use them in new code.
  */
 
 export interface QualityLegendBand {
@@ -52,7 +66,10 @@ export function buildQualityLegendBands(): QualityLegendBand[] {
 
 export const QUALITY_LEGEND_BANDS = buildQualityLegendBands();
 
-/** Quality-score colour key, one row per getQualityColor band. */
+/**
+ * Quality-score colour key, one row per getQualityColor band.
+ * @deprecated Use <QualityColorKey /> inside <MapLegend>.
+ */
 export function QualityLegendItems() {
   return (
     <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
@@ -76,8 +93,8 @@ const DEPTH_SWEEP_MAX_KM = 700;
 
 /**
  * getEarthquakeColor's bands for one theme, found by sweeping depth, plus the colour it
- * uses for an unknown depth. The bands follow the GeoNet palette rather than the depth
- * classes, so they are labelled by range only; DEPTH_CLASS_NOTE states the classes.
+ * uses for an unknown depth. Labelled by range; DEPTH_CLASS_NOTE states the standard
+ * shallow / intermediate / deep classes the bands nest in.
  */
 export function buildDepthLegendEntries(isDark: boolean): DepthLegendEntry[] {
   const bands: Array<{ color: string; min: number }> = [];
@@ -103,7 +120,10 @@ const DEPTH_LEGEND_ENTRIES = {
 /** Standard hypocentral depth classes (ISC/USGS usage). */
 export const DEPTH_CLASS_NOTE = 'Shallow < 70 km · intermediate 70–300 km · deep ≥ 300 km';
 
-/** Depth colour key for the active theme, as the markers are coloured. */
+/**
+ * Depth colour key for the active theme, as the markers are coloured.
+ * @deprecated Use <DepthColorBar isDark={...} /> inside <MapLegend>.
+ */
 export function DepthLegendItems({ isDark }: { isDark: boolean }) {
   const entries = isDark ? DEPTH_LEGEND_ENTRIES.dark : DEPTH_LEGEND_ENTRIES.light;
   return (
@@ -128,7 +148,7 @@ export interface MagnitudeLegendEntry {
   diameter: number;
 }
 
-/** Tiers shown in the size key; M7+ because getMagnitudePixelRadius stops growing at M7. */
+/** Tiers shown in the legacy size key (MagnitudeLegendItems). The new key uses MAGNITUDE_KEY_MAGNITUDES. */
 export const MAGNITUDE_LEGEND_ENTRIES: MagnitudeLegendEntry[] = [
   { magnitude: 2, label: 'M2' },
   { magnitude: 4, label: 'M4' },
@@ -142,6 +162,7 @@ const SIZE_SWATCH_COLOR = '#0D9488';
 /**
  * Magnitude size key drawn at the markers' own screen size. `getColor` gives the swatch
  * the markers' colour when colour also encodes magnitude.
+ * @deprecated Use <MagnitudeSizeKey isDark={...} /> inside <MapLegend>.
  */
 export function MagnitudeLegendItems({ getColor }: { getColor?: (magnitude: number) => string }) {
   return (
@@ -168,7 +189,10 @@ export function MagnitudeLegendItems({ getColor }: { getColor?: (magnitude: numb
  */
 export const AZIMUTHAL_GAP_LEGEND_TICKS = [0, 60, 120, 180, 270, 360] as const;
 
-/** Azimuthal-gap colour key: the same continuous ramp the markers are coloured with. */
+/**
+ * Azimuthal-gap colour key: the same continuous ramp the markers are coloured with.
+ * @deprecated Use <AzimuthalGapColorBar /> inside <MapLegend>.
+ */
 export function AzimuthalGapLegendItems() {
   return (
     <>
@@ -195,21 +219,10 @@ export function AzimuthalGapLegendItems() {
 // ---------------------------------------------------------------------------------------
 
 /** Grey used for an event whose source catalogue cannot be resolved from any signal. */
-const UNKNOWN_CATALOGUE_COLOR = '#94a3b8'; // slate-400, matching the "unknown" grey used elsewhere on these maps
+const UNKNOWN_CATALOGUE_COLOR = CATALOGUE_UNKNOWN_COLOR;
 
-/** Distinct hues, cycled when more catalogues are plotted than the palette has entries. */
-const CATALOGUE_PALETTE = [
-  '#2563eb', // blue
-  '#d97706', // amber
-  '#16a34a', // green
-  '#db2777', // pink
-  '#7c3aed', // violet
-  '#0891b2', // cyan
-  '#dc2626', // red
-  '#65a30d', // lime
-  '#ea580c', // orange
-  '#4338ca', // indigo
-];
+/** resolveSourceCatalogue's key for an event with no catalogue signal at all. */
+export const UNKNOWN_SOURCE_KEY = '__unknown__';
 
 export interface SourceCatalogueEvent {
   /** Pooled multi-catalogue views (e.g. the analytics page) stamp every event with this. */
@@ -276,7 +289,7 @@ export function resolveSourceCatalogue(
   }
 
   if (event.catalogue) return { key: `catalogue:${event.catalogue}`, label: event.catalogue };
-  return { key: '__unknown__', label: 'Unknown source' };
+  return { key: UNKNOWN_SOURCE_KEY, label: 'Unknown source' };
 }
 
 export interface CatalogueColorScale {
@@ -285,23 +298,37 @@ export interface CatalogueColorScale {
 }
 
 /**
- * Build a stable categorical colour assignment from the distinct SourceCatalogueInfo keys
- * present in one map's plotted events, plus the legend entries it implies. Sorted by
- * label so the legend reads alphabetically and is deterministic regardless of event
- * order; the same set of catalogues always gets the same colours.
+ * Build a stable categorical colour assignment (Okabe–Ito, lib/map-style.ts) from the
+ * distinct SourceCatalogueInfo keys of one map's events, plus the legend entries it implies.
+ * Sorted by label so the legend reads alphabetically and is deterministic regardless of
+ * event order: the same set of catalogues always gets the same colours. Build it from the
+ * map's full event list, not the viewport sample, so colours do not shift as the user pans.
+ * 'Unknown source' is grey and listed last; it never takes a palette colour.
  */
-export function buildCatalogueColorScale(infos: SourceCatalogueInfo[]): CatalogueColorScale {
+export function buildCatalogueColorScale(
+  infos: SourceCatalogueInfo[],
+  { isDark = false }: { isDark?: boolean } = {}
+): CatalogueColorScale {
   const labelByKey = new Map<string, string>();
   for (const info of infos) if (!labelByKey.has(info.key)) labelByKey.set(info.key, info.label);
-  const orderedKeys = Array.from(labelByKey.keys()).sort((a, b) => labelByKey.get(a)!.localeCompare(labelByKey.get(b)!));
-  const colorByKey = new Map(orderedKeys.map((key, index) => [key, CATALOGUE_PALETTE[index % CATALOGUE_PALETTE.length]]));
+  const orderedKeys = Array.from(labelByKey.keys())
+    .filter((key) => key !== UNKNOWN_SOURCE_KEY)
+    .sort((a, b) => labelByKey.get(a)!.localeCompare(labelByKey.get(b)!));
+  const colorByKey = new Map(orderedKeys.map((key, index) => [key, catalogueColorAt(index, isDark)]));
+  if (labelByKey.has(UNKNOWN_SOURCE_KEY)) {
+    orderedKeys.push(UNKNOWN_SOURCE_KEY);
+    colorByKey.set(UNKNOWN_SOURCE_KEY, UNKNOWN_CATALOGUE_COLOR);
+  }
   return {
     colorFor: (key: string) => colorByKey.get(key) ?? UNKNOWN_CATALOGUE_COLOR,
     legend: orderedKeys.map((key) => ({ key, label: labelByKey.get(key)!, color: colorByKey.get(key)! })),
   };
 }
 
-/** Source-catalogue colour key: one row per distinct catalogue in the plotted events. */
+/**
+ * Source-catalogue colour key: one row per distinct catalogue in the plotted events.
+ * @deprecated Use <CatalogueColorKey legend={...} /> inside <MapLegend>.
+ */
 export function SourceCatalogueLegendItems({ legend }: { legend: Array<{ key: string; label: string; color: string }> }) {
   if (legend.length === 0) {
     return <p className="mt-2 text-[10px] text-muted-foreground">No catalogue information on the plotted events.</p>;
@@ -317,3 +344,310 @@ export function SourceCatalogueLegendItems({ legend }: { legend: Array<{ key: st
     </div>
   );
 }
+
+// =======================================================================================
+// Map chrome legend (spec S3): one collapsible card bottom-right, generated from the same
+// colour and size functions the markers use.
+// =======================================================================================
+
+/** Default legend position: bottom-right, clear of the attribution line under it. */
+export const MAP_LEGEND_POSITION = 'bottom-6 right-2';
+
+export interface MapLegendProps {
+  children: ReactNode;
+  /** Extra classes; position overrides merge over MAP_LEGEND_POSITION. */
+  className?: string;
+  /** Start expanded (default) or as the small "Legend" chip. */
+  defaultOpen?: boolean;
+  /** Accessible name of the legend region. */
+  label?: string;
+}
+
+/**
+ * The legend card: width <= 220 px, text-xs, never taller than 45% of the map (scrolls
+ * beyond that), collapsible to a "Legend" chip. Place it as a sibling of <MapContainer>
+ * inside the map's `relative` wrapper. Children are <LegendSection>s, divided by rules.
+ */
+export function MapLegend({ children, className, defaultOpen = true, label = 'Map legend' }: MapLegendProps) {
+  const [open, setOpen] = useState(defaultOpen);
+  if (!open) {
+    return (
+      <button
+        type="button"
+        aria-expanded={false}
+        aria-label="Show legend"
+        onClick={() => setOpen(true)}
+        className={cn(
+          'absolute z-[1000] inline-flex h-7 items-center gap-1.5 px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-accent',
+          MAP_OVERLAY_CLASS, MAP_LEGEND_POSITION, className,
+        )}
+      >
+        <List className="h-3.5 w-3.5" aria-hidden />
+        Legend
+      </button>
+    );
+  }
+  return (
+    <section
+      aria-label={label}
+      className={cn(
+        'absolute z-[1000] w-[220px] max-w-[calc(100%-16px)] max-h-[45%] overflow-y-auto px-2.5 py-2 text-xs text-foreground',
+        MAP_OVERLAY_CLASS, MAP_LEGEND_POSITION, className,
+      )}
+    >
+      <button
+        type="button"
+        aria-expanded
+        aria-label="Hide legend"
+        onClick={() => setOpen(false)}
+        className="absolute right-1 top-1 inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+      </button>
+      <div className="space-y-2 [&>*+*]:border-t [&>*+*]:pt-2">{children}</div>
+    </section>
+  );
+}
+
+/** One titled block of the legend (colour key, magnitude key, faults...). */
+export function LegendSection({ title, children, className }: { title: string; children: ReactNode; className?: string }) {
+  return (
+    <div className={className}>
+      <h4 className="mb-1.5 pr-5 text-[11px] font-semibold leading-4">{title}</h4>
+      {children}
+    </div>
+  );
+}
+
+/** Tick labels under a bar: `ticks` at fractions 0..1 of its width; the ends hug the edges. */
+function BarTicks({ ticks }: { ticks: Array<{ at: number; label: string }> }) {
+  return (
+    <div className="relative h-3 text-[10px] leading-3 tabular-nums text-muted-foreground" aria-hidden>
+      {ticks.map(({ at, label }) => (
+        <span
+          key={`${at}-${label}`}
+          className="absolute whitespace-nowrap"
+          style={at <= 0 ? { left: 0 } : at >= 1 ? { right: 0 } : { left: `${at * 100}%`, transform: 'translateX(-50%)' }}
+        >
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function UnknownSwatch({ color, label }: { color: string; label: string }) {
+  return (
+    <div className="flex items-center gap-1.5 pt-1 text-[10px] leading-3 text-muted-foreground">
+      <span data-swatch={label} className="h-2.5 w-2.5 flex-shrink-0 rounded-sm ring-1 ring-inset ring-black/10 dark:ring-white/15" style={{ backgroundColor: color }} />
+      {label}
+    </div>
+  );
+}
+
+const BAR_CLASS = 'flex h-2.5 overflow-hidden rounded-sm ring-1 ring-inset ring-black/10 dark:ring-white/15';
+
+/** A depth class's representative depth, for reading its colour back from getEarthquakeColor. */
+const classSampleDepth = (min: number, max: number) => (Number.isFinite(min) ? min : Math.min(0, max - 1));
+
+/**
+ * Depth colour key: a discrete horizontal bar, one segment per DEPTH_CLASSES entry,
+ * coloured by getEarthquakeColor (so it shows exactly what the markers use), boundaries
+ * 0 15 40 70 150 300 km under it, the shallow / intermediate / deep classes over it, and
+ * the unknown-depth swatch.
+ */
+/** 'shallow < 70 · intermediate 70–300 · deep ≥ 300 km', from the class boundaries. */
+function depthClassCaption(categories: Array<{ name: string; span: number }>): string {
+  let index = 0;
+  const parts = categories.map(({ name, span }) => {
+    const first = DEPTH_CLASSES[index];
+    const last = DEPTH_CLASSES[index + span - 1];
+    index += span;
+    if (!Number.isFinite(first.min) || first.min <= 0) return `${name} < ${last.max}`;
+    if (!Number.isFinite(last.max)) return `${name} ≥ ${first.min}`;
+    return `${name} ${first.min}–${last.max}`;
+  });
+  return `${parts.join(' · ')} km`;
+}
+
+export function DepthColorBar({ isDark, showUnknown = true }: { isDark: boolean; showUnknown?: boolean }) {
+  const count = DEPTH_CLASSES.length;
+  const segments = DEPTH_CLASSES.map((cls) => ({ ...cls, color: getEarthquakeColor(classSampleDepth(cls.min, cls.max), isDark) }));
+  const categories: Array<{ name: string; span: number }> = [];
+  for (const segment of segments) {
+    const last = categories[categories.length - 1];
+    if (last && last.name === segment.category) last.span++;
+    else categories.push({ name: segment.category, span: 1 });
+  }
+  const ticks = segments.map((segment, index) => ({ at: index / count, label: String(index === 0 ? 0 : segment.min) }));
+  ticks.push({ at: 1, label: 'km' });
+  return (
+    <div data-legend="depth">
+      <div role="img" aria-label={`Depth colour scale: ${segments.map((s) => s.label).join(', ')}`} className={BAR_CLASS}>
+        {segments.map((segment) => (
+          <span key={segment.label} data-depth-class={segment.label} title={segment.label} className="flex-1" style={{ backgroundColor: segment.color }} />
+        ))}
+      </div>
+      <BarTicks ticks={ticks} />
+      {/* The classes in full under the bar: labels over the segments had to be truncated
+          ('intermedi…') in a legend this narrow. */}
+      <p className="mt-1 text-[10px] leading-3 text-muted-foreground">{depthClassCaption(categories)}</p>
+      {showUnknown && <UnknownSwatch color={getEarthquakeColor(null, isDark)} label="unknown depth" />}
+    </div>
+  );
+}
+
+/**
+ * Magnitude size key: circles for M2-M6 (or `magnitudes`) at their true rendered radius
+ * (getMagnitudePixelRadius), in a neutral fill with the marker stroke, on a common baseline.
+ */
+export function MagnitudeSizeKey({ isDark, magnitudes = MAGNITUDE_KEY_MAGNITUDES }: { isDark: boolean; magnitudes?: readonly number[] }) {
+  const stroke = markerStrokeStyle(isDark);
+  const strokeWidth = stroke.weight ?? MARKER_STYLE.weight;
+  const fill = isDark ? MARKER_STYLE.neutralFill.dark : MARKER_STYLE.neutralFill.light;
+  return (
+    <div
+      data-legend="magnitude"
+      role="img"
+      aria-label={`Marker size by magnitude: ${magnitudes.map((m) => `M${m}`).join(', ')}`}
+      className="flex items-end justify-between gap-1"
+    >
+      {magnitudes.map((magnitude) => {
+        const radius = getMagnitudePixelRadius(magnitude);
+        const size = 2 * radius + strokeWidth;
+        return (
+          <div key={magnitude} data-magnitude={magnitude} className="flex flex-col items-center gap-0.5">
+            <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="block" aria-hidden>
+              <circle cx={size / 2} cy={size / 2} r={radius} fill={fill} fillOpacity={MARKER_STYLE.fillOpacity} stroke={stroke.color} strokeWidth={strokeWidth} />
+            </svg>
+            <span className="text-[10px] leading-3 tabular-nums text-muted-foreground">M{magnitude}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Quality key: a discrete bar, one segment per getQualityColor band (QUALITY_LEGEND_BANDS),
+ * best grade left, grades over it and score boundaries under it.
+ */
+export function QualityColorKey({ showUnknown = false }: { showUnknown?: boolean }) {
+  const bands = QUALITY_LEGEND_BANDS;
+  const count = bands.length;
+  const ticks = [
+    { at: 0, label: String(QUALITY_SCORE_MAX) },
+    ...bands.slice(0, -1).map((band, index) => ({ at: (index + 1) / count, label: String(band.min) })),
+    { at: 1, label: String(QUALITY_SCORE_MIN) },
+  ];
+  return (
+    <div data-legend="quality">
+      <div className="flex text-[10px] font-medium leading-3 text-muted-foreground" aria-hidden>
+        {bands.map((band) => (
+          <span key={band.color} className="flex-1 truncate text-center">{band.grades.join('/')}</span>
+        ))}
+      </div>
+      <div role="img" aria-label={`Quality colour scale: ${bands.map((b) => b.label).join(', ')}`} className={cn(BAR_CLASS, 'mt-0.5')}>
+        {bands.map((band) => (
+          <span key={band.color} data-quality-band={band.label} title={band.label} className="flex-1" style={{ backgroundColor: band.color }} />
+        ))}
+      </div>
+      <BarTicks ticks={ticks} />
+      {showUnknown && <UnknownSwatch color={QUALITY_UNKNOWN_COLOR} label="no quality score" />}
+    </div>
+  );
+}
+
+/**
+ * Azimuthal-gap key: the continuous ramp as a gradient bar sampled from azimuthalGapColor,
+ * ticks at 0/90/180/270/360°, and the unknown-gap swatch.
+ */
+export function AzimuthalGapColorBar({ showUnknown = true }: { showUnknown?: boolean }) {
+  return (
+    <div data-legend="azimuthal-gap">
+      <div className="flex justify-between text-[10px] leading-3 text-muted-foreground" aria-hidden>
+        <span>good</span>
+        <span>poor</span>
+      </div>
+      <div
+        role="img"
+        aria-label="Azimuthal gap colour scale from 0° (good station coverage) to 360° (poor)"
+        className={cn(BAR_CLASS, 'mt-0.5')}
+        style={{ backgroundImage: azimuthalGapGradientCss() }}
+      />
+      <BarTicks ticks={AZIMUTHAL_GAP_TICKS.map((gap) => ({ at: gap / 360, label: `${gap}°` }))} />
+      {showUnknown && <UnknownSwatch color={getAzimuthalGapColor(null)} label="unknown gap" />}
+    </div>
+  );
+}
+
+/** Source-catalogue key: one row per catalogue in buildCatalogueColorScale's legend. */
+export function CatalogueColorKey({ legend, isDark = false }: { legend: CatalogueColorScale['legend']; isDark?: boolean }) {
+  if (legend.length === 0) {
+    return <p className="text-[10px] text-muted-foreground">No catalogue information on the plotted events.</p>;
+  }
+  const stroke = markerStrokeStyle(isDark);
+  return (
+    <ul data-legend="source-catalogue" className="space-y-1">
+      {legend.map(({ key, label, color }) => (
+        <li key={key} data-catalogue-key={key} className="flex min-w-0 items-center gap-1.5">
+          <span
+            data-swatch={label}
+            className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+            style={{ backgroundColor: color, boxShadow: `0 0 0 ${stroke.weight}px ${stroke.color}` }}
+          />
+          <span className="truncate" title={label}>{label}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Fault-line key: a short line in the fault style and the source. */
+export function FaultLineKey({ isDark, label = FAULT_LEGEND_LABEL }: { isDark: boolean; label?: string }) {
+  const style = faultPathOptions(isDark, 0);
+  return (
+    <div data-legend="faults" className="flex items-center gap-1.5">
+      <svg width="20" height="8" className="flex-shrink-0" aria-hidden>
+        <line x1="0" y1="4" x2="20" y2="4" stroke={style.color} strokeOpacity={style.opacity} strokeWidth={1.5} />
+      </svg>
+      <span className="text-[11px] leading-4">{label}</span>
+    </div>
+  );
+}
+
+/** The colour modes the event maps offer. */
+export type MapColorMode = 'depth' | 'quality' | 'azimuthal-gap' | 'source-catalogue';
+
+/** Radio labels for the colour modes (sentence case, one place). */
+export const COLOR_MODE_LABELS: Readonly<Record<MapColorMode, string>> = Object.freeze({
+  depth: 'Depth',
+  quality: 'Quality',
+  'azimuthal-gap': 'Azimuthal gap',
+  'source-catalogue': 'Source catalogue',
+});
+
+/** Legend headings for the colour modes. */
+export const COLOR_MODE_LEGEND_TITLES: Readonly<Record<MapColorMode, string>> = Object.freeze({
+  depth: 'Depth',
+  quality: 'Location quality (Q)',
+  'azimuthal-gap': 'Azimuthal gap',
+  'source-catalogue': 'Source catalogue',
+});
+
+/** The colour key for the active colour mode, titled. */
+export function ColorModeLegendSection({
+  mode, isDark, catalogueLegend = [],
+}: { mode: MapColorMode; isDark: boolean; catalogueLegend?: CatalogueColorScale['legend'] }) {
+  return (
+    <LegendSection title={COLOR_MODE_LEGEND_TITLES[mode]}>
+      {mode === 'quality' ? <QualityColorKey />
+        : mode === 'azimuthal-gap' ? <AzimuthalGapColorBar />
+          : mode === 'source-catalogue' ? <CatalogueColorKey legend={catalogueLegend} isDark={isDark} />
+            : <DepthColorBar isDark={isDark} />}
+    </LegendSection>
+  );
+}
+
+/** Colour for an index-th catalogue on maps that list catalogues themselves (DuplicateGroupMap). */
+export { catalogueColorAt, CATALOGUE_UNKNOWN_COLOR };

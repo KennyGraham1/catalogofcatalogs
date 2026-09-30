@@ -7,6 +7,7 @@ import NZEarthquakeMap from '@/components/visualize/NZEarthquakeMap';
 import { EnhancedMapView } from '@/components/advanced-viz/EnhancedMapView';
 import { useEventMapPopup } from '@/hooks/use-event-map-popup';
 import { useViewportFilteredEvents, useMapViewport } from '@/hooks/use-map-viewport';
+import { getEarthquakeColor } from '@/lib/earthquake-utils';
 
 const listeners: Record<string, Set<() => void>> = {};
 let west = 170;
@@ -20,6 +21,8 @@ const map = {
   }),
   on: jest.fn((name: string, callback: () => void) => { (listeners[name] ??= new Set()).add(callback); }),
   off: jest.fn((name: string, callback: () => void) => { listeners[name]?.delete(callback); }),
+  fitBounds: jest.fn(),
+  getContainer: () => document.createElement('div'),
 };
 const markerRender = jest.fn();
 jest.mock('react-leaflet-draw', () => ({ EditControl: () => null }));
@@ -30,6 +33,7 @@ jest.mock('@/components/advanced-viz/StationMarker', () => ({ StationMarker: () 
 jest.mock('react-leaflet', () => ({
   useMap: () => map,
   MapContainer: ({ children }: any) => <div>{children}</div>,
+  ScaleControl: () => null,
   Circle: (props: any) => <button data-testid="marker" onClick={props.eventHandlers?.click}>Event</button>,
   CircleMarker: (props: any) => {
     markerRender(props);
@@ -75,7 +79,8 @@ describe('map rendering regressions', () => {
 
   it('does not color missing depth as a shallow earthquake', () => {
     render(<EarthquakeCircleMap events={[{ ...events[0], depth: null }]} sampleSize={1000} onSampleSizeChange={jest.fn()} />);
-    expect(markerRender.mock.calls[0][0].pathOptions.fillColor).toBe('#6b7280');
+    expect(markerRender.mock.calls[0][0].pathOptions.fillColor).toBe(getEarthquakeColor(null, false));
+    expect(getEarthquakeColor(null, false)).toBe('#9CA3AF');
   });
 
   it('selects from the new viewport after panning instead of a fixed global sample', () => {

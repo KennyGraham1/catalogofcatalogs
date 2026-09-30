@@ -26,7 +26,13 @@ const axesOnly = '<minHorizontalUncertainty>2000</minHorizontalUncertainty><maxH
 // Draw through the real component and real Leaflet onto a map stub that records the layer.
 const draw = (ellipse: Ellipse) => {
   const layers: any[] = [];
-  const map: any = { addLayer: (layer: any) => { layers.push(layer); return map; }, removeLayer: jest.fn() };
+  const panes: Record<string, any> = {};
+  const map: any = {
+    addLayer: (layer: any) => { layers.push(layer); return map; },
+    removeLayer: jest.fn(),
+    getPane: (name: string) => panes[name],
+    createPane: (name: string) => (panes[name] = { style: {} }),
+  };
   (useMap as jest.Mock).mockReturnValue(map);
   render(<UncertaintyEllipse ellipse={ellipse} eventId="e89" />);
   const layer = layers[0];

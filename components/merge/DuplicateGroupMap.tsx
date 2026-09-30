@@ -1,13 +1,21 @@
 'use client';
 
-import { escapeHtml } from '@/lib/html';
-
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { BASE_LAYERS, getDefaultBaseLayer } from '@/hooks/use-map-theme';
+import { useIsDarkTheme } from '@/hooks/use-map-theme';
 import { positionInMapWorld } from '@/lib/map-event-selection';
-import { formatOriginTime } from '@/components/map/OptimizedEventPopup';
+import { MAP_ZOOM_OPTIONS, MARKER_STYLE } from '@/lib/map-style';
+import { cn } from '@/lib/utils';
+import { attachBaseLayers, type BaseLayerControlHandle } from '@/components/map/MapLayerControl';
+import { MAP_SCALE_OPTIONS } from '@/components/map/MapScaleBar';
+import { ensureLeafletDefaultIcon } from '@/components/map/leaflet-default-icon';
+import { CatalogueColorKey, LegendSection, MapLegend } from '@/components/map/MapLegend';
+import {
+  GROUP_FIT_OPTIONS, GROUP_MARKER_RADIUS, computedEpicentrePopupHtml, connectorStyle, entryRole,
+  epicentreCrossSvg, groupCatalogueColors, groupCatalogueLegend, groupEntryPopupHtml, groupMarkerStyle,
+  publishedReference, type GroupEntryRole,
+} from './duplicate-group-style';
 
 interface EventData {
   id?: string;
@@ -15,7 +23,9 @@ interface EventData {
   latitude: number;
   longitude: number;
   depth?: number | null;
+  depth_uncertainty?: number | null;
   magnitude: number;
+  magnitude_type?: string | null;
   source: string;
   catalogueId: string;
   catalogueName: string;
@@ -24,247 +34,266 @@ interface EventData {
 interface DuplicateGroup {
   id: string;
   events: EventData[];
+  /** Index of the entry whose solution the merge publishes; -1 when it computes one. */
   selectedEventIndex: number;
   isSuspicious: boolean;
   validationWarnings: string[];
   // Optional so a preview from a server that predates contract M4 still renders.
   heldForReview?: boolean;
   supersededEventIndexes?: number[];
+  /** The averaged / median epicentre the merge publishes when no entry is selected. */
+  computedEpicentre?: { latitude: number; longitude: number; time: string } | null;
 }
 
 interface DuplicateGroupMapProps {
   group: DuplicateGroup;
+  /** Catalogue id -> colour, as the preview API assigned them (the group card's dots). */
   catalogueColors: Record<string, string>;
   height?: string;
+  /** Extra classes for the map wrapper (e.g. a top rule under a card header). */
+  className?: string;
 }
 
-export function DuplicateGroupMap({ group, catalogueColors, height = '400px' }: DuplicateGroupMapProps) {
+/** Paint order: hollow superseded rings at the bottom, the published entry on top. */
+const PAINT_ORDER: Record<GroupEntryRole, number> = { superseded: 0, duplicate: 1, published: 2 };
+
+const POPUP_OPTIONS: L.PopupOptions = { minWidth: 220, maxWidth: 300, autoPanPadding: [48, 48] };
+
+const CROSS_SIZE = 14;
+
+const PUBLISHED_TAG = '<span class="inline-block whitespace-nowrap rounded-sm bg-background/85 px-1 text-[10px] font-medium leading-4 text-foreground shadow-sm">published</span>';
+
+/**
+ * The small "published" tag beside the published entry (or the computed epicentre), on the
+ * side away from the other entries so it does not cover them. No iconSize: the tag sizes to
+ * its text; a left-hand tag is shifted back by its own width.
+ */
+function publishedLabelIcon(offset: number, side: 'left' | 'right'): L.DivIcon {
+  return L.divIcon({
+    className: 'duplicate-group-label',
+    html: side === 'right' ? PUBLISHED_TAG : `<span class="block -translate-x-full">${PUBLISHED_TAG}</span>`,
+    iconSize: undefined,
+    iconAnchor: side === 'right' ? [-offset, 8] : [offset, 8],
+  });
+}
+
+/** Right of the symbol unless the other entries lie mostly to its right. */
+function labelSide(at: [number, number], others: Array<[number, number]>): 'left' | 'right' {
+  if (others.length === 0) return 'right';
+  const meanLng = others.reduce((sum, [, lng]) => sum + lng, 0) / others.length;
+  return at[1] >= meanLng ? 'right' : 'left';
+}
+
+/**
+ * The merge preview's "View on Map": one duplicate group (2-10 catalogue entries of one
+ * event, usually a few km apart) on the gray basemap at regional scale. Entries are
+ * coloured by source catalogue; the published entry carries a thick ring and a
+ * "published" tag, superseded vintages are hollow and dashed, and dashed grey connectors
+ * run to the published solution (the computed epicentre, marked with a cross, for an
+ * averaged / median group). Each popup gives the entry's separation from it.
+ *
+ * Imperative Leaflet (not react-leaflet): the map is created once, base layers come from
+ * the shared layer control (attachBaseLayers: gray base by theme, labels above the data,
+ * maxNativeZoom), and only the overlay is redrawn when the group or the theme changes.
+ */
+export function DuplicateGroupMap({ group, catalogueColors, height = '400px', className }: DuplicateGroupMapProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const layerControlRef = useRef<L.Control.Layers | null>(null);
-  const baseLayersRef = useRef<Record<string, L.TileLayer>>({});
-  const activeBaseLayerRef = useRef<L.TileLayer | null>(null);
-  const overlayLayerRef = useRef<L.LayerGroup | null>(null);
-  const [isDark, setIsDark] = useState(false);
+  const baseLayersRef = useRef<BaseLayerControlHandle | null>(null);
+  const overlayRef = useRef<L.LayerGroup | null>(null);
+  const fittedGroupRef = useRef<DuplicateGroup | null>(null);
+  const isDark = useIsDarkTheme();
+  const isDarkRef = useRef(isDark);
 
-  // Guard against empty events array
-  const hasEvents = group.events && group.events.length > 0;
+  const events = useMemo(() => group.events ?? [], [group.events]);
+  const hasEvents = events.length > 0;
 
-  // Check for dark mode
+  const colors = useMemo(() => groupCatalogueColors(events, catalogueColors, isDark), [events, catalogueColors, isDark]);
+  const legend = useMemo(() => groupCatalogueLegend(events, colors), [events, colors]);
+  const roles = useMemo(() => events.map((_, index) => entryRole(group, index)), [events, group]);
+  const reference = useMemo(() => publishedReference(group), [group]);
+
+  // Create the map once (and destroy it on unmount); theme and group changes only touch
+  // the base layer and the overlay below, so zoom/pan and the chosen base survive them.
   useEffect(() => {
-    const checkDarkMode = () => {
-      const isDarkMode = document.documentElement.classList.contains('dark');
-      setIsDark(isDarkMode);
-    };
+    if (!containerRef.current || mapRef.current || !hasEvents) return;
+    ensureLeafletDefaultIcon();
 
-    checkDarkMode();
-
-    const observer = new MutationObserver(checkDarkMode);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
-
-    return () => observer.disconnect();
-  }, []);
-
-  // Initialize the map ONCE (mount) and destroy it only on unmount. Previously this whole
-  // effect depended on [group, catalogueColors, isDark, hasEvents] and its cleanup called
-  // map.remove() on every change, so a dark-mode toggle or prop change tore down and rebuilt
-  // the entire Leaflet map — losing zoom/pan/layer selection and flashing tiles.
-  useEffect(() => {
-    if (!mapContainerRef.current || mapRef.current || !hasEvents) return;
-
-    const map = L.map(mapContainerRef.current, {
-      center: [group.events[0].latitude, group.events[0].longitude],
-      zoom: 8,
+    const first = group.events[0];
+    const map = L.map(containerRef.current, {
+      center: [first.latitude, first.longitude],
+      zoom: GROUP_FIT_OPTIONS.maxZoom,
+      minZoom: 2,
+      maxZoom: 18,
+      ...MAP_ZOOM_OPTIONS,
       zoomControl: true,
     });
     mapRef.current = map;
-
-    // Create base layers + layer control once.
-    const baseLayers: Record<string, L.TileLayer> = {};
-    const defaultLayerName = getDefaultBaseLayer(isDark);
-    BASE_LAYERS.forEach((layer) => {
-      const tileLayer = L.tileLayer(layer.url, {
-        attribution: layer.attribution,
-        maxZoom: layer.maxZoom || 19,
-      });
-      baseLayers[layer.name] = tileLayer;
-      if (layer.name === defaultLayerName) {
-        tileLayer.addTo(map);
-        activeBaseLayerRef.current = tileLayer;
-      }
-    });
-    baseLayersRef.current = baseLayers;
-
-    layerControlRef.current = L.control.layers(baseLayers, {}, { position: 'topright' });
-    layerControlRef.current.addTo(map);
-
-    // Markers/polylines live in a dedicated overlay group so they can be swapped without
-    // touching the base layers.
-    overlayLayerRef.current = L.layerGroup().addTo(map);
+    baseLayersRef.current = attachBaseLayers(map, { isDark: isDarkRef.current, position: 'topright' });
+    L.control.scale(MAP_SCALE_OPTIONS).addTo(map);
+    overlayRef.current = L.layerGroup().addTo(map);
 
     return () => {
+      baseLayersRef.current?.remove();
+      baseLayersRef.current = null;
       map.remove();
       mapRef.current = null;
-      layerControlRef.current = null;
-      overlayLayerRef.current = null;
-      activeBaseLayerRef.current = null;
-      baseLayersRef.current = {};
+      overlayRef.current = null;
+      fittedGroupRef.current = null;
     };
-    // Mount/unmount only — subsequent prop/theme changes are handled by the effects below.
+    // Mount/unmount only: later prop and theme changes are handled by the effects below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasEvents]);
 
-  // Swap the active base tile layer on theme change instead of recreating the map.
+  // Follow the site theme: swap the gray base (a base the user chose stays).
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const targetName = getDefaultBaseLayer(isDark);
-    const target = baseLayersRef.current[targetName];
-    if (!target || target === activeBaseLayerRef.current) return;
-    if (activeBaseLayerRef.current) map.removeLayer(activeBaseLayerRef.current);
-    target.addTo(map);
-    activeBaseLayerRef.current = target;
+    isDarkRef.current = isDark;
+    baseLayersRef.current?.setDark(isDark);
   }, [isDark]);
 
-  // Update markers/polylines when the group or colours change; the map itself is reused.
+  // Draw the group.
   useEffect(() => {
     const map = mapRef.current;
-    const overlay = overlayLayerRef.current;
+    const overlay = overlayRef.current;
     if (!map || !overlay || !hasEvents) return;
-
-    // Clear previously drawn markers/polylines (base layers untouched).
     overlay.clearLayers();
 
-    // Draw every event in the reference event's world copy. Merge matches duplicates across
-    // the antimeridian (Kermadec/Chatham), and Leaflet does not wrap markers, polylines or
-    // bounds, so a pair at 179.95° and -179.97° (8 km apart) was drawn 360° apart and fitted
-    // at world zoom. A zero-width box at the reference longitude centres positionInMapWorld
-    // on it. Popups still report the stored coordinates.
-    const referenceEvent = group.events[0];
-    const referenceWorld = {
-      north: referenceEvent.latitude,
-      south: referenceEvent.latitude,
-      east: referenceEvent.longitude,
-      west: referenceEvent.longitude,
-    };
-    const displayPosition = (event: EventData) => positionInMapWorld(event, referenceWorld);
+    // Draw every entry in the first entry's world copy. Merge matches duplicates across the
+    // antimeridian (Kermadec/Chatham), and Leaflet does not wrap markers, lines or bounds,
+    // so a pair at 179.95° and -179.97° (8 km apart) was drawn 360° apart and fitted at
+    // world zoom. A zero-width box at the anchor longitude centres positionInMapWorld on
+    // it. Popups still report the stored coordinates.
+    const anchor = events[0];
+    const world = { north: anchor.latitude, south: anchor.latitude, east: anchor.longitude, west: anchor.longitude };
+    const at = (point: { latitude: number; longitude: number }) => positionInMapWorld(point, world);
+    const referencePosition = reference ? at(reference) : null;
 
-    // Add markers for each event
-    const markers: L.Marker[] = [];
-    // Older vintages of one agency's solution (contract M5) are drawn faded: they are listed
-    // for provenance but took no part in the selection.
-    const superseded = new Set(group.supersededEventIndexes ?? []);
-    group.events.forEach((event, idx) => {
-      const isSelected = idx === group.selectedEventIndex;
-      const isSuperseded = superseded.has(idx);
-      const candidateColor = catalogueColors[event.catalogueId] || '';
-      const color = /^#[0-9a-f]{6}$/i.test(candidateColor) ? candidateColor : '#6b7280';
-
-      // Create custom icon
-      const iconHtml = `
-        <div style="
-          background-color: ${color};
-          opacity: ${isSuperseded ? '0.45' : '1'};
-          width: ${isSelected ? '24px' : '16px'};
-          height: ${isSelected ? '24px' : '16px'};
-          border-radius: 50%;
-          border: ${isSelected ? '3px solid #fff' : '2px solid #fff'};
-          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: white;
-          font-size: ${isSelected ? '12px' : '10px'};
-          font-weight: bold;
-        ">
-          ${idx + 1}
-        </div>
-      `;
-
-      const icon = L.divIcon({
-        html: iconHtml,
-        className: 'custom-marker',
-        iconSize: [isSelected ? 24 : 16, isSelected ? 24 : 16],
-        iconAnchor: [isSelected ? 12 : 8, isSelected ? 12 : 8],
+    // Connectors first, so they run under the symbols.
+    if (referencePosition) {
+      events.forEach((event, index) => {
+        if (roles[index] === 'published' && !reference?.computed) return;
+        overlay.addLayer(L.polyline([referencePosition, at(event)], connectorStyle(isDark)));
       });
+    }
 
-      // formatOriginTime returns an unparseable time verbatim, so it is escaped like the name.
-      const marker = L.marker(displayPosition(event), { icon })
-        .bindPopup(`
-          <div style="min-width: 200px;">
-            <div style="font-weight: bold; margin-bottom: 4px; color: ${color};">
-              ${escapeHtml(event.catalogueName)}
-            </div>
-            <div style="font-size: 12px;">
-              <div><strong>Time:</strong> ${escapeHtml(formatOriginTime(event.time))}</div>
-              <div><strong>Magnitude:</strong> ${event.magnitude.toFixed(2)}</div>
-              <div><strong>Depth:</strong> ${event.depth != null ? event.depth.toFixed(1) + ' km' : 'N/A'}</div>
-              <div><strong>Location:</strong> ${event.latitude.toFixed(4)}, ${event.longitude.toFixed(4)}</div>
-              ${isSelected ? '<div style="color: green; font-weight: bold; margin-top: 4px;">✓ Selected Event</div>' : ''}
-              ${isSuperseded ? '<div style="color: #6b7280; font-weight: bold; margin-top: 4px;">Superseded: an older vintage of this agency\'s solution</div>' : ''}
-            </div>
-          </div>
-        `);
-      overlay.addLayer(marker);
-
-      markers.push(marker);
+    // One circle per entry, created in entry order and painted in role order.
+    const circles = events.map((event, index) => {
+      const color = colors.get(event.catalogueId)!;
+      return L.circleMarker(at(event), { ...groupMarkerStyle(roles[index], color, isDark), radius: GROUP_MARKER_RADIUS })
+        .bindPopup(groupEntryPopupHtml({ entry: event, role: roles[index], color, reference }), POPUP_OPTIONS);
     });
+    events
+      .map((_, index) => index)
+      .sort((a, b) => PAINT_ORDER[roles[a]] - PAINT_ORDER[roles[b]])
+      .forEach(index => overlay.addLayer(circles[index]));
 
-    // Draw lines connecting events
-    if (group.events.length > 1) {
-      group.events.slice(1).forEach((event) => {
-        overlay.addLayer(
-          L.polyline(
-            [
-              displayPosition(referenceEvent),
-              displayPosition(event),
-            ],
-            {
-              color: '#666',
-              weight: 1,
-              opacity: 0.5,
-              dashArray: '5, 5',
-            }
-          )
-        );
-      });
+    let labelPosition: [number, number] | null = null;
+    let labelOffset = GROUP_MARKER_RADIUS + 5;
+    let labelNeighbours: Array<[number, number]> = [];
+    if (reference?.computed && referencePosition) {
+      const activeEntries = roles.filter(role => role !== 'superseded').length;
+      overlay.addLayer(
+        L.marker(referencePosition, {
+          icon: L.divIcon({
+            className: 'duplicate-group-epicentre',
+            html: epicentreCrossSvg(isDark, CROSS_SIZE),
+            iconSize: [CROSS_SIZE, CROSS_SIZE],
+            iconAnchor: [CROSS_SIZE / 2, CROSS_SIZE / 2],
+          }),
+          title: 'Computed epicentre',
+          keyboard: false,
+        }).bindPopup(computedEpicentrePopupHtml(reference, activeEntries), POPUP_OPTIONS)
+      );
+      labelPosition = referencePosition;
+      labelOffset = CROSS_SIZE / 2 + 5;
+      labelNeighbours = events.map(event => at(event));
+    } else {
+      const published = roles.indexOf('published');
+      if (published >= 0) {
+        labelPosition = at(events[published]);
+        labelNeighbours = events.filter((_, index) => index !== published).map(event => at(event));
+      }
+    }
+    if (labelPosition) {
+      overlay.addLayer(L.marker(labelPosition, {
+        icon: publishedLabelIcon(labelOffset, labelSide(labelPosition, labelNeighbours)),
+        interactive: false,
+        keyboard: false,
+      }));
     }
 
-    // Fit bounds to show all events
-    if (markers.length > 0) {
-      const bounds = L.latLngBounds(markers.map(m => m.getLatLng()));
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+    // Frame the group when it changes (not on a theme toggle, which keeps the user's view).
+    if (fittedGroupRef.current !== group) {
+      fittedGroupRef.current = group;
+      const points = events.map(event => at(event));
+      if (referencePosition) points.push(referencePosition);
+      map.fitBounds(L.latLngBounds(points), GROUP_FIT_OPTIONS);
     }
-  }, [group, catalogueColors, hasEvents]);
+  }, [group, events, colors, roles, reference, isDark, hasEvents]);
 
-  // Fallback UI for empty groups
   if (!hasEvents) {
     return (
       <div
-        style={{
-          height,
-          width: '100%',
-          borderRadius: '8px',
-          overflow: 'hidden',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: 'var(--muted)',
-          color: 'var(--muted-foreground)',
-        }}
+        className={cn('flex w-full items-center justify-center bg-muted/30 text-sm text-muted-foreground', className)}
+        style={{ height }}
       >
-        <span>No events to display</span>
+        No events to display
       </div>
     );
   }
 
+  const hasDuplicates = roles.includes('duplicate');
+  const hasSuperseded = roles.includes('superseded');
+
   return (
-    <div
-      ref={mapContainerRef}
-      style={{ height, width: '100%', borderRadius: '8px', overflow: 'hidden' }}
-    />
+    <div className={cn('relative isolate w-full overflow-hidden', className)} style={{ height }}>
+      <div ref={containerRef} className="h-full w-full" data-testid="duplicate-group-map" />
+      <MapLegend label="Group legend">
+        <LegendSection title="Catalogue">
+          <CatalogueColorKey legend={legend} isDark={isDark} />
+        </LegendSection>
+        <LegendSection title="Entries">
+          <ul data-legend="group-roles" className="space-y-1">
+            {reference && !reference.computed && <RoleKey role="published" isDark={isDark} label="published" />}
+            {hasDuplicates && <RoleKey role="duplicate" isDark={isDark} label={reference?.computed ? 'averaged entry' : 'duplicate'} />}
+            {hasSuperseded && <RoleKey role="superseded" isDark={isDark} label="superseded (older vintage)" />}
+            {reference?.computed && (
+              <li data-role-key="computed-epicentre" className="flex items-center gap-1.5">
+                <span
+                  aria-hidden
+                  className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center"
+                  dangerouslySetInnerHTML={{ __html: epicentreCrossSvg(isDark, 12) }}
+                />
+                <span>computed epicentre (published)</span>
+              </li>
+            )}
+          </ul>
+        </LegendSection>
+      </MapLegend>
+    </div>
+  );
+}
+
+/** Legend symbol for an entry role, drawn with the map's own path style on a neutral fill
+ *  (colour encodes the catalogue, not the role). */
+function RoleKey({ role, isDark, label }: { role: GroupEntryRole; isDark: boolean; label: string }) {
+  const neutral = isDark ? MARKER_STYLE.neutralFill.dark : MARKER_STYLE.neutralFill.light;
+  const style = groupMarkerStyle(role, role === 'superseded' ? (isDark ? '#9CA3AF' : '#6B7280') : neutral, isDark);
+  return (
+    <li data-role-key={role} className="flex items-center gap-1.5">
+      <svg width="16" height="16" viewBox="0 0 16 16" className="flex-shrink-0" aria-hidden>
+        <circle
+          cx="8"
+          cy="8"
+          r="5.5"
+          fill={style.fillColor}
+          fillOpacity={style.fillOpacity}
+          stroke={style.color}
+          strokeWidth={style.weight}
+          strokeDasharray={style.dashArray as string | undefined}
+        />
+      </svg>
+      <span>{label}</span>
+    </li>
   );
 }

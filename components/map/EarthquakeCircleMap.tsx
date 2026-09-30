@@ -1,30 +1,32 @@
 'use client';
 
-import { useEffect, useCallback, useMemo, useState, memo } from 'react';
-import { useMapEventSelection } from '@/hooks/use-map-event-selection';
-import { MapViewportObserver } from './MapViewportObserver';
-import { MapDetailControl } from './MapDetailControl';
-import type { MapDetail } from '@/lib/map-event-selection';
-import { EarthquakeMarkerLayer } from './EarthquakeMarkerLayer';
-import {
-  DepthLegendItems, MagnitudeLegendItems, QualityLegendItems, AzimuthalGapLegendItems,
-  SourceCatalogueLegendItems, resolveSourceCatalogue, buildCatalogueColorScale,
-} from './MapLegend';
-import { useEventMapPopup } from '@/hooks/use-event-map-popup';
-import L from 'leaflet';
+import { useCallback, useMemo, useState, memo } from 'react';
 import { MapContainer, Popup } from 'react-leaflet';
-import { MapLayerControl } from '@/components/map/MapLayerControl';
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Label } from '@/components/ui/label';
-import { Activity, Calendar, Ruler, MapPin, Info, Layers } from 'lucide-react';
-import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
-import { getEarthquakeColor, getMagnitudeLabel } from '@/lib/earthquake-utils';
+import 'leaflet/dist/leaflet.css';
+import { useMapEventSelection } from '@/hooks/use-map-event-selection';
+import { useEventMapPopup } from '@/hooks/use-event-map-popup';
+import { useMapColors } from '@/hooks/use-map-theme';
+import type { MapDetail } from '@/lib/map-event-selection';
+import { getEarthquakeColor } from '@/lib/earthquake-utils';
 import { getAzimuthalGapColor } from '@/lib/uncertainty-utils';
 import { getQualityColor } from '@/lib/quality-scoring';
+import { FIT_BOUNDS_OPTIONS, MAP_ZOOM_OPTIONS } from '@/lib/map-style';
+import { eventsFitBounds } from '@/lib/map-view';
+import { cn } from '@/lib/utils';
 import { resolveEventQuality } from '@/components/events/event-quality';
-import { useMapColors } from '@/hooks/use-map-theme';
-import 'leaflet/dist/leaflet.css';
+import { MapViewportObserver } from './MapViewportObserver';
+import { MapDetailControl } from './MapDetailControl';
+import { EarthquakeMarkerLayer } from './EarthquakeMarkerLayer';
+import { MapLayerControl } from './MapLayerControl';
+import { MapScaleBar } from './MapScaleBar';
+import { MapStatusChip } from './MapStatusChip';
+import { MapStylePanel, StylePanelSection, StyleRadioGroup } from './MapStylePanel';
+import { FitMapToEvents } from './FitMapToEvents';
+import { OptimizedEventPopup } from './OptimizedEventPopup';
+import {
+  COLOR_MODE_LABELS, ColorModeLegendSection, LegendSection, MagnitudeSizeKey, MapLegend,
+  UNKNOWN_SOURCE_KEY, buildCatalogueColorScale, resolveSourceCatalogue, type MapColorMode,
+} from './MapLegend';
 
 export interface CircleMapEvent {
   id: string | number;
@@ -36,6 +38,12 @@ export interface CircleMapEvent {
   magnitude_type?: string | null;
   event_type?: string | null;
   region?: string | null;
+
+  // Popup details (shown only when present).
+  depth_uncertainty?: number | null;
+  depth_type?: string | null;
+  source_id?: string | null;
+  used_station_count?: number | null;
 
   // C1: stored quality score/grade (resolveEventQuality prefers these; see event-quality.ts).
   quality_score?: number | null;
@@ -57,10 +65,14 @@ interface EarthquakeCircleMapProps {
   events: CircleMapEvent[];
   sampleSize: MapDetail;
   onSampleSizeChange: (size: MapDetail) => void;
+  /** Fixed initial view. Omit both to frame the events (the default). */
   center?: [number, number];
   zoom?: number;
+  /** CSS height of the map; the map fills it. */
   height?: string;
   mapKey?: string;
+  /** Extra classes for the map wrapper (e.g. rounding to match the enclosing card). */
+  className?: string;
   /**
    * Optional catalogue id -> display name lookup for the source-catalogue colour mode.
    * Without it, a merged row's contributing catalogues are labelled by their raw id.
@@ -68,104 +80,42 @@ interface EarthquakeCircleMapProps {
   catalogueNames?: Record<string, string>;
 }
 
-/** Colour modes this map's selector offers (paper sec:viz: depth, quality grade,
- *  azimuthal gap, source catalogue). Magnitude is size-only here, matching the existing
- *  legend ("Magnitude (Size)"), so it is not also a colour choice. */
-type CircleMapColorMode = 'depth' | 'quality' | 'azimuthal-gap' | 'source-catalogue';
+/** Colour modes this map offers (paper sec:viz: depth, quality grade, azimuthal gap,
+ *  source catalogue). Magnitude is encoded by size only, so it is not a colour choice. */
+const COLOR_MODES: MapColorMode[] = ['depth', 'quality', 'azimuthal-gap', 'source-catalogue'];
+const COLOR_MODE_OPTIONS = COLOR_MODES.map((value) => ({ value, label: COLOR_MODE_LABELS[value] }));
 
-/**
- * Origin times are UTC by definition (QuakeML 1.2 / ISO 8601 "Z"), so they are rendered
- * in UTC with the zone shown - formatting them in the browser's zone puts an event on the
- * wrong calendar day for 13 of every 24 hours under NZDT (UTC+13).
- *
- * Hoisted to module scope on purpose: popups are rebuilt per event over thousands of
- * events, and constructing an Intl.DateTimeFormat per render costs ~82 ms per 1000 rows.
- */
-const UTC_SECOND_FORMAT = new Intl.DateTimeFormat('en-GB', {
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  timeZone: 'UTC',
-  timeZoneName: 'short',
-});
-
-/** Render an ISO origin time in UTC; unparseable values are shown verbatim. */
-function formatOriginTime(time: string): string {
-  const date = new Date(time);
-  if (Number.isNaN(date.getTime())) return time;
-  return UTC_SECOND_FORMAT.format(date);
-}
-
-
-function EventPopupContent({ event }: { event: CircleMapEvent }) {
-  return (
-    <div className="p-2 min-w-[200px]">
-      <div className="flex items-center justify-between mb-2">
-        <Badge variant="outline" className="text-xs">
-          {getMagnitudeLabel(event.magnitude)}
-        </Badge>
-        <span className="text-sm font-semibold">M {event.magnitude.toFixed(1)}</span>
-      </div>
-      <div className="space-y-1 text-sm">
-        <div className="flex items-center gap-2">
-          <Calendar className="h-3 w-3 text-muted-foreground" />
-          <span>{formatOriginTime(event.time)}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <MapPin className="h-3 w-3 text-muted-foreground" />
-          <span>{event.latitude.toFixed(3)}°, {event.longitude.toFixed(3)}°</span>
-        </div>
-        {event.depth != null && (
-          <div className="flex items-center gap-2">
-            <Ruler className="h-3 w-3 text-muted-foreground" />
-            <span>{event.depth.toFixed(1)} km depth</span>
-          </div>
-        )}
-        {event.magnitude_type && (
-          <div className="flex items-center gap-2">
-            <Activity className="h-3 w-3 text-muted-foreground" />
-            <span>Type: {event.magnitude_type}</span>
-          </div>
-        )}
-        {event.region && (
-          <div className="flex items-center gap-2">
-            <MapPin className="h-3 w-3 text-muted-foreground" />
-            <span className="truncate max-w-[160px]">{event.region}</span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+const STYLE_INFO = (
+  <>
+    Colour shows the chosen attribute; marker size always shows magnitude. <b>Quality</b> is the
+    location quality score (Q 0–100). <b>Azimuthal gap</b> is the largest angle between recording
+    stations seen from the epicentre. <b>Source catalogue</b> is, for a merged event, the catalogue
+    whose solution the row publishes. <b>Map detail</b> caps how many events are drawn at once;
+    zoom in to see more.
+  </>
+);
 
 export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
   events,
   sampleSize,
   onSampleSizeChange,
-  center = [-41.0, 174.0],
-  zoom = 5,
+  center,
+  zoom,
   height = '600px',
   mapKey = 'earthquake-circle-map',
+  className,
   catalogueNames,
 }: EarthquakeCircleMapProps) {
-  const mapColors = useMapColors();
-  const [colorMode, setColorMode] = useState<CircleMapColorMode>('depth');
+  const { isDark } = useMapColors();
+  const [colorMode, setColorMode] = useState<MapColorMode>('depth');
 
-  const { sampled: sampledEvents, total, displayCount, visibleCount, isSampled, onViewportChange } = useMapEventSelection(events, sampleSize);
+  const { sampled: sampledEvents, displayCount, visibleCount, onViewportChange } = useMapEventSelection(events, sampleSize);
+  const { activePopup, onEventClick, closePopup } = useEventMapPopup(events, mapKey);
 
-  useEffect(() => {
-    delete (L.Icon.Default.prototype as any)._getIconUrl;
-    L.Icon.Default.mergeOptions({
-      iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-      iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-      shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-    });
-  }, []);
-
-  const { activePopup, onEventClick } = useEventMapPopup(events, mapKey);
+  // Frame the events (antimeridian aware; NZ when empty). MapContainer reads the bounds once,
+  // on creation; FitMapToEvents keeps framing them while events stream in.
+  const fixedView = center !== undefined && zoom !== undefined;
+  const bounds = useMemo(() => (fixedView ? null : eventsFitBounds(events)), [events, fixedView]);
 
   // Quality scores (C1: prefer the stored quality_score/quality_grade; see event-quality.ts).
   const qualityScoreMap = useMemo(() => {
@@ -173,157 +123,97 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
     return new Map(sampledEvents.map(event => [event.id, resolveEventQuality(event)]));
   }, [sampledEvents, colorMode]);
 
-  // Source-catalogue category per event (contract C2) and the categorical scale/legend it implies.
+  // Source-catalogue category per event (contract C2), resolved over ALL events so a
+  // catalogue keeps its colour as the viewport sample changes.
   const sourceCatalogueInfoMap = useMemo(() => {
     if (colorMode !== 'source-catalogue') return new Map<CircleMapEvent['id'], ReturnType<typeof resolveSourceCatalogue>>();
-    return new Map(sampledEvents.map(event => [event.id, resolveSourceCatalogue(event, catalogueNames)]));
-  }, [sampledEvents, colorMode, catalogueNames]);
+    return new Map(events.map(event => [event.id, resolveSourceCatalogue(event, catalogueNames)]));
+  }, [events, colorMode, catalogueNames]);
 
   const sourceCatalogueScale = useMemo(
-    () => buildCatalogueColorScale(Array.from(sourceCatalogueInfoMap.values())),
-    [sourceCatalogueInfoMap]
+    () => buildCatalogueColorScale(Array.from(sourceCatalogueInfoMap.values()), { isDark }),
+    [sourceCatalogueInfoMap, isDark]
   );
 
   const getEventColor = useCallback((event: CircleMapEvent) => {
     if (colorMode === 'quality') {
       const quality = qualityScoreMap.get(event.id);
-      return quality ? getQualityColor(quality.score) : getEarthquakeColor(event.depth, mapColors.isDark);
+      return getQualityColor(quality ? quality.score : null);
     }
     if (colorMode === 'azimuthal-gap') {
       return getAzimuthalGapColor(event.azimuthal_gap);
     }
     if (colorMode === 'source-catalogue') {
       const info = sourceCatalogueInfoMap.get(event.id);
-      return sourceCatalogueScale.colorFor(info?.key ?? '__unknown__');
+      return sourceCatalogueScale.colorFor(info?.key ?? UNKNOWN_SOURCE_KEY);
     }
-    return getEarthquakeColor(event.depth, mapColors.isDark);
-  }, [colorMode, qualityScoreMap, mapColors.isDark, sourceCatalogueInfoMap, sourceCatalogueScale]);
+    return getEarthquakeColor(event.depth, isDark);
+  }, [colorMode, qualityScoreMap, isDark, sourceCatalogueInfoMap, sourceCatalogueScale]);
+
+  const popupEvent = activePopup?.event;
+  const popupQuality = useMemo(
+    () => (popupEvent && colorMode === 'quality' ? resolveEventQuality(popupEvent) : null),
+    [popupEvent, colorMode]
+  );
 
   return (
-    <div className="relative" style={{ height }}>
-      {/* Map Options: colour-mode selector (paper sec:viz: depth, quality grade,
-          azimuthal gap, source catalogue), self-contained so callers need no change. */}
-      <Card className="absolute top-4 right-4 z-[2000] p-3 bg-background/95 backdrop-blur-sm shadow-lg max-w-[220px]">
-        <div className="flex items-center gap-1.5 mb-2">
-          <Layers className="h-3.5 w-3.5" />
-          <Label className="text-xs font-medium">Color By</Label>
-          <InfoTooltip content="Choose which attribute determines marker color." />
-        </div>
-        <div className="space-y-1">
-          {([
-            { mode: 'depth', label: 'Depth', term: 'depth' },
-            { mode: 'quality', label: 'Quality', term: 'qualityScore' },
-            { mode: 'azimuthal-gap', label: 'Azimuthal Gap', term: 'azimuthalGap' },
-          ] as const).map(({ mode, label, term }) => (
-            <div key={mode} className="flex items-center gap-2">
-              <input
-                type="radio"
-                id={`circle-color-${mode}`}
-                name={`circle-colorMode-${mapKey}`}
-                checked={colorMode === mode}
-                onChange={() => setColorMode(mode)}
-                className="cursor-pointer"
-              />
-              <div className="flex items-center gap-1.5">
-                <Label htmlFor={`circle-color-${mode}`} className="text-xs cursor-pointer">{label}</Label>
-                <TechnicalTermTooltip term={term} />
-              </div>
-            </div>
-          ))}
-          <div className="flex items-center gap-2">
-            <input
-              type="radio"
-              id="circle-color-source-catalogue"
-              name={`circle-colorMode-${mapKey}`}
-              checked={colorMode === 'source-catalogue'}
-              onChange={() => setColorMode('source-catalogue')}
-              className="cursor-pointer"
-            />
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="circle-color-source-catalogue" className="text-xs cursor-pointer">Source Catalogue</Label>
-              <InfoTooltip content="For a merged event, the catalogue whose solution (time and location) this row publishes; otherwise the catalogue the event came from." />
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      {/* Sampling badge */}
-      {isSampled && (
-        <Card className="absolute top-20 left-4 z-[2000] p-3 bg-background/95 backdrop-blur-sm shadow-lg">
-          <div className="flex items-center gap-2 text-sm">
-            <Info className="h-4 w-4 text-blue-500" />
-            <span>
-              Displaying <strong>{displayCount.toLocaleString()}</strong> of{' '}
-              <strong>{visibleCount.toLocaleString()}</strong> visible events. Zoom in for more.
-            </span>
-          </div>
-        </Card>
-      )}
-
+    <div className={cn('relative isolate overflow-hidden', className)} style={{ height }}>
       <MapContainer
         key={mapKey}
-        center={center}
-        zoom={zoom}
+        {...(bounds ? { bounds, boundsOptions: FIT_BOUNDS_OPTIONS } : { center, zoom })}
         className="h-full w-full"
         minZoom={2}
         maxZoom={18}
+        {...MAP_ZOOM_OPTIONS}
         preferCanvas={true}
       >
         <MapLayerControl position="topright" />
+        <MapScaleBar />
+        {bounds && <FitMapToEvents bounds={bounds} />}
         <MapViewportObserver onChange={onViewportChange} />
-        <EarthquakeMarkerLayer events={sampledEvents} getColor={getEventColor} opacity={mapColors.markerOpacity} onEventClick={onEventClick} />
+        <EarthquakeMarkerLayer
+          events={sampledEvents}
+          getColor={getEventColor}
+          isDark={isDark}
+          selectedId={popupEvent?.id ?? null}
+          onEventClick={onEventClick}
+        />
         {activePopup && (
           <Popup
             key={activePopup.seq}
             position={activePopup.position}
+            minWidth={260}
+            maxWidth={300}
+            autoPanPadding={[48, 48]}
+            eventHandlers={{ remove: () => closePopup(activePopup.seq) }}
           >
-            <EventPopupContent event={activePopup.event} />
+            <OptimizedEventPopup event={activePopup.event} quality={popupQuality} />
           </Popup>
         )}
       </MapContainer>
 
-      {/* Legend: swatches come from the same functions that colour the markers above */}
-      <Card className="absolute bottom-4 right-4 z-[2000] max-w-[240px] border-border/60 bg-background/90 px-3 py-2.5 text-[11px] leading-tight backdrop-blur-sm shadow-lg">
-        <div className="flex items-center justify-between gap-2">
-          <h4 className="text-[11px] font-semibold">
-            {colorMode === 'quality' ? 'Quality Score'
-              : colorMode === 'azimuthal-gap' ? 'Azimuthal Gap'
-              : colorMode === 'source-catalogue' ? 'Source Catalogue'
-              : 'Depth (Color)'}
-          </h4>
-          {colorMode === 'quality' ? (
-            <TechnicalTermTooltip term="qualityScore" />
-          ) : colorMode === 'azimuthal-gap' ? (
-            <TechnicalTermTooltip term="azimuthalGap" />
-          ) : colorMode === 'source-catalogue' ? (
-            <InfoTooltip content="Which catalogue each plotted event's solution (or source) came from." />
-          ) : (
-            <TechnicalTermTooltip term="depth" />
-          )}
-        </div>
-        {colorMode === 'quality' ? (
-          <QualityLegendItems />
-        ) : colorMode === 'azimuthal-gap' ? (
-          <AzimuthalGapLegendItems />
-        ) : colorMode === 'source-catalogue' ? (
-          <SourceCatalogueLegendItems legend={sourceCatalogueScale.legend} />
-        ) : (
-          <DepthLegendItems isDark={mapColors.isDark} />
-        )}
-
-        <div className="mt-2 border-t border-border/60 pt-2">
-          <div className="flex items-center justify-between gap-2">
-            <h4 className="text-[11px] font-semibold">Magnitude (Size)</h4>
-            <TechnicalTermTooltip term="magnitude" />
-          </div>
-          <MagnitudeLegendItems />
-        </div>
-
-        <div className="mt-2 border-t border-border/60 pt-2">
-          <p className="text-[10px] text-muted-foreground mb-2">{total.toLocaleString()} total events</p>
+      <MapStylePanel info={STYLE_INFO}>
+        <StyleRadioGroup
+          name={`circle-colorMode-${mapKey}`}
+          legend="Colour by"
+          value={colorMode}
+          onChange={setColorMode}
+          options={COLOR_MODE_OPTIONS}
+        />
+        <StylePanelSection>
           <MapDetailControl value={sampleSize} onChange={onSampleSizeChange} />
-        </div>
-      </Card>
+        </StylePanelSection>
+      </MapStylePanel>
+
+      <MapStatusChip shown={displayCount} total={visibleCount} />
+
+      {/* Legend: every key is generated from the functions that colour and size the markers. */}
+      <MapLegend>
+        <ColorModeLegendSection mode={colorMode} isDark={isDark} catalogueLegend={sourceCatalogueScale.legend} />
+        <LegendSection title="Magnitude">
+          <MagnitudeSizeKey isDark={isDark} />
+        </LegendSection>
+      </MapLegend>
     </div>
   );
 });

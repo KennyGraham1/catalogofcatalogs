@@ -23,11 +23,14 @@ const map = {
   }),
   on: jest.fn(),
   off: jest.fn(),
+  fitBounds: jest.fn(),
+  getContainer: () => document.createElement('div'),
 };
 const markerRender = jest.fn();
 jest.mock('react-leaflet', () => ({
   useMap: () => map,
   MapContainer: ({ children }: any) => <div>{children}</div>,
+  ScaleControl: () => null,
   GeoJSON: () => null,
   Popup: ({ children }: any) => <div data-testid="popup">{children}</div>,
   CircleMarker: (props: any) => { markerRender(props); return <button data-testid="marker" onClick={props.eventHandlers?.click}>Event</button>; },
@@ -35,13 +38,20 @@ jest.mock('react-leaflet', () => ({
 jest.mock('@/components/map/MapLayerControl', () => ({ MapLayerControl: () => null }));
 jest.mock('@/hooks/use-map-theme', () => ({ useMapColors: () => ({ isDark: false, markerOpacity: 0.75 }) }));
 jest.mock('@/lib/fault-data', () => ({ loadFaultData: jest.fn().mockResolvedValue(null) }));
-jest.mock('@/components/advanced-viz/UncertaintyEllipse', () => ({ UncertaintyEllipse: () => null }));
-jest.mock('@/components/advanced-viz/BeachBallMarker', () => ({ BeachBallMarker: () => null }));
+jest.mock('@/components/advanced-viz/UncertaintyEllipse', () => ({
+  ...jest.requireActual('@/components/advanced-viz/UncertaintyEllipse'),
+  UncertaintyEllipse: () => null,
+}));
+jest.mock('@/components/advanced-viz/BeachBallMarker', () => ({
+  ...jest.requireActual('@/components/advanced-viz/BeachBallMarker'),
+  BeachBallMarker: () => null,
+}));
 
 beforeEach(() => markerRender.mockClear());
 
 /**
- * Colour the marker drawn at (latitude, longitude), from the MOST RECENT render. CircleMarker
+ * Fill colour of the marker drawn at (latitude, longitude), from the MOST RECENT render
+ * (the stroke is the shared neutral outline, lib/map-style.ts markerPathOptions). CircleMarker
  * carries no event id (see components/map/EarthquakeMarkerLayer.tsx), only `center` and
  * `pathOptions`, so matching by position is the only way to identify "this event's marker"
  * from the mock's captured props — and since the same position is captured again on every
@@ -51,7 +61,7 @@ beforeEach(() => markerRender.mockClear());
  */
 function colorAt(latitude: number, longitude: number) {
   const matches = markerRender.mock.calls.filter(([props]) => props.center?.[0] === latitude && props.center?.[1] === longitude);
-  return matches[matches.length - 1]?.[0]?.pathOptions?.color;
+  return matches[matches.length - 1]?.[0]?.pathOptions?.fillColor;
 }
 
 /** jsdom normalises an inline backgroundColor style (hex or hsl alike) to "rgb(r, g, b)" when
@@ -64,17 +74,11 @@ function domColor(css: string): string {
   return probe.style.backgroundColor;
 }
 
-/**
- * Every swatch (inline background-color) inside the legend Card headed `heading`, with the
- * label text beside it. Mirrors __tests__/fix-maps-quality-legend.test.tsx's helper: the
- * card also holds the magnitude-size key below the colour legend, which is harmless noise
- * for a "this colour maps to this label" lookup.
- */
-function legendRows(heading: string) {
-  const card = screen.getByRole('heading', { name: heading }).parentElement!.parentElement!;
-  return Array.from(card.querySelectorAll<HTMLElement>('[style*="background-color"]')).map((swatch) => ({
-    color: swatch.style.backgroundColor,
-    label: swatch.nextElementSibling?.textContent ?? '',
+/** Rows of the new legend's source-catalogue key (components/map/MapLegend CatalogueColorKey). */
+function catalogueKeyRows() {
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-legend="source-catalogue"] li')).map((row) => ({
+    color: (row.querySelector('[data-swatch]') as HTMLElement).style.backgroundColor,
+    label: row.textContent ?? '',
   }));
 }
 
@@ -93,16 +97,17 @@ describe('UnifiedEarthquakeMap azimuthal-gap colour mode', () => {
     expect(colorAt(-41.3, 174.3)).toBe(getAzimuthalGapColor(null));
   });
 
-  it('switching the radio to Azimuthal Gap re-colours markers and swaps in the matching legend', async () => {
+  it('switching the radio to Azimuthal gap re-colours markers and swaps in the matching legend', async () => {
     render(<UnifiedEarthquakeMap earthquakes={events} colorBy="depth" />);
-    fireEvent.click(screen.getByLabelText('Azimuthal Gap'));
+    fireEvent.click(screen.getByLabelText('Azimuthal gap'));
     await act(async () => {});
     expect(colorAt(-41.2, 174.2)).toBe(getAzimuthalGapColor(200));
-    const rows = legendRows('Azimuthal Gap');
-    // Every tick swatch in the legend is literally getAzimuthalGapColor's own output.
-    for (const gap of [0, 60, 120, 180, 270, 360]) {
-      expect(rows.some(row => row.color === domColor(getAzimuthalGapColor(gap)))).toBe(true);
-    }
+    expect(screen.getByRole('heading', { name: 'Azimuthal gap' })).toBeInTheDocument();
+    // The gradient bar is sampled from the very function that coloured the markers.
+    const bar = document.querySelector<HTMLElement>('[data-legend="azimuthal-gap"] [role="img"]')!;
+    for (const gap of [0, 180, 360]) expect(bar.style.backgroundImage).toContain(getAzimuthalGapColor(gap));
+    const unknown = document.querySelector<HTMLElement>('[data-legend="azimuthal-gap"] [data-swatch="unknown gap"]')!;
+    expect(unknown.style.backgroundColor).toBe(domColor(colorAt(-41.3, 174.3)));
   });
 });
 
@@ -123,7 +128,7 @@ describe('UnifiedEarthquakeMap source-catalogue colour mode', () => {
   it('legend lists each catalogue with the exact colour used on its markers', async () => {
     render(<UnifiedEarthquakeMap earthquakes={events} colorBy="source-catalogue" />);
     await act(async () => {});
-    const rows = legendRows('Source Catalogue');
+    const rows = catalogueKeyRows();
     expect(rows.find(r => r.label === 'GeoNet Archive')?.color).toBe(domColor(colorAt(-41.1, 174.1)));
     expect(rows.find(r => r.label === 'ISC Bulletin')?.color).toBe(domColor(colorAt(-41.3, 174.3)));
   });
@@ -140,7 +145,7 @@ describe('UnifiedEarthquakeMap source-catalogue colour mode', () => {
     ];
     render(<UnifiedEarthquakeMap earthquakes={merged} colorBy="source-catalogue" />);
     await act(async () => {});
-    const rows = legendRows('Source Catalogue');
+    const rows = catalogueKeyRows();
     expect(rows.find(r => r.label === 'GeoNet')).toBeDefined();
     expect(rows.find(r => r.label === 'Combined NZ Catalogue')).toBeUndefined();
   });
@@ -157,16 +162,27 @@ describe('EarthquakeCircleMap colour-mode selector', () => {
     render(<EarthquakeCircleMap events={events} sampleSize="auto" onSampleSizeChange={noop} />);
     await act(async () => {});
     expect(screen.getByLabelText('Depth')).toBeChecked();
-    expect(screen.getByRole('heading', { name: 'Depth (Color)' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Depth' })).toBeInTheDocument();
+    expect(document.querySelector('[data-legend="depth"]')).not.toBeNull();
+  });
+
+  it('offers only colour modes that vary with the data - magnitude is size, not colour', () => {
+    render(<EarthquakeCircleMap events={events} sampleSize="auto" onSampleSizeChange={noop} />);
+    const radios = screen.getAllByRole('radio').map((radio) => (radio as HTMLInputElement).labels?.[0]?.textContent);
+    expect(radios).toEqual(['Depth', 'Quality', 'Azimuthal gap', 'Source catalogue']);
   });
 
   it('Azimuthal Gap mode colours markers with getAzimuthalGapColor and shows the matching legend', async () => {
     render(<EarthquakeCircleMap events={events} sampleSize="auto" onSampleSizeChange={noop} />);
-    fireEvent.click(screen.getByLabelText('Azimuthal Gap'));
+    fireEvent.click(screen.getByLabelText('Azimuthal gap'));
     await act(async () => {});
     expect(colorAt(-41.1, 174.1)).toBe(getAzimuthalGapColor(30));
     expect(colorAt(-41.2, 174.2)).toBe(getAzimuthalGapColor(220));
-    expect(screen.getByRole('heading', { name: 'Azimuthal Gap' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Azimuthal gap' })).toBeInTheDocument();
+    // The gradient bar is sampled from the very function that coloured the markers.
+    const bar = document.querySelector<HTMLElement>('[data-legend="azimuthal-gap"] [role="img"]')!;
+    for (const gap of [0, 180, 360]) expect(bar.style.backgroundImage).toContain(getAzimuthalGapColor(gap));
+    expect(document.querySelector('[data-legend="azimuthal-gap"]')).toHaveTextContent(/0°.*90°.*180°.*270°.*360°/);
   });
 
   it('Quality mode prefers the stored quality_score/quality_grade over recomputing it', async () => {
@@ -177,6 +193,9 @@ describe('EarthquakeCircleMap colour-mode selector', () => {
     // getQualityColor(90) without recomputing from (mostly absent) metrics.
     expect(colorAt(-41.1, 174.1)).toBe(getQualityColor(90));
     expect(colorAt(-41.2, 174.2)).toBe(getQualityColor(40));
+    // Both colours are keyed in the quality bar.
+    const bands = Array.from(document.querySelectorAll<HTMLElement>('[data-quality-band]')).map((band) => band.style.backgroundColor);
+    expect(bands).toEqual(expect.arrayContaining([domColor(getQualityColor(90)), domColor(getQualityColor(40))]));
   });
 
   it('Source Catalogue mode is offered and gives every event a colour with a legend entry', async () => {
@@ -185,9 +204,9 @@ describe('EarthquakeCircleMap colour-mode selector', () => {
       { id: 11, latitude: -41.2, longitude: 174.2, magnitude: 4, depth: 5, time: '2024-01-01T00:00:00Z', source_catalogue_ids: ['cat-y'] },
     ];
     render(<EarthquakeCircleMap events={merged} sampleSize="auto" onSampleSizeChange={noop} catalogueNames={{ 'cat-x': 'Catalogue X', 'cat-y': 'Catalogue Y' }} />);
-    fireEvent.click(screen.getByLabelText('Source Catalogue'));
+    fireEvent.click(screen.getByLabelText('Source catalogue'));
     await act(async () => {});
-    const rows = legendRows('Source Catalogue');
+    const rows = catalogueKeyRows();
     expect(rows.find(r => r.label === 'Catalogue X')?.color).toBe(domColor(colorAt(-41.1, 174.1)));
     expect(rows.find(r => r.label === 'Catalogue Y')?.color).toBe(domColor(colorAt(-41.2, 174.2)));
     expect(colorAt(-41.1, 174.1)).not.toBe(colorAt(-41.2, 174.2));

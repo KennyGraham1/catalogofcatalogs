@@ -22,7 +22,7 @@ async function main() {
   assert.match(response.headers.get('location'), /\/login/);
   // Every map base layer's tile host is allowed by img-src.
   const imgSrc = login.headers.get('content-security-policy').split(';').find((d: string) => d.trim().startsWith('img-src'));
-  for (const host of ['tile.openstreetmap.org', 'server.arcgisonline.com', 'basemaps.cartocdn.com', 'tile.opentopomap.org']) {
+  for (const host of ['tile.openstreetmap.org', 'server.arcgisonline.com']) {
     assert.ok(imgSrc.includes(host), `img-src must allow ${host}`);
   }
   // A cross-origin write to the API is refused before any route runs.

@@ -28,7 +28,7 @@ jest.mock('@/components/settings/DefaultFieldMappings', () => ({
 import SettingsPage from '@/app/settings/page';
 import { useAuth } from '@/lib/auth/hooks';
 import { UserRole } from '@/lib/auth/types';
-import { getMagnitudeColor } from '@/lib/earthquake-utils';
+import { getMagnitudeColor, getMagnitudePixelRadius } from '@/lib/earthquake-utils';
 
 const mockUseAuth = useAuth as jest.Mock;
 
@@ -92,17 +92,16 @@ describe('Settings page (gc#5)', () => {
     expect(screen.getByTestId('field-mappings')).toHaveAttribute('data-readonly', 'true');
   });
 
-  it('renders the magnitude legend from the real (deprecated, uniform-colour) getMagnitudeColor function', async () => {
+  it('renders the magnitude size key the maps use, circles at the markers\' true radius', async () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
     await openTab(user, /visualization reference/i);
 
-    // The function the legend is built from is genuinely uniform across magnitudes —
-    // this is what makes the old green/yellow/orange/red/purple legend dishonest.
+    // Magnitude is encoded by size only: getMagnitudeColor is (still) uniform.
     expect(getMagnitudeColor(2)).toBe(getMagnitudeColor(7));
-    expect(screen.getByText(/deprecated/i)).toBeInTheDocument();
-    expect(screen.getByText('M2')).toBeInTheDocument();
-    expect(screen.getByText('M7+')).toBeInTheDocument();
+    for (const label of ['M2', 'M3', 'M4', 'M5', 'M6']) expect(screen.getByText(label)).toBeInTheDocument();
+    const m4 = document.querySelector('[data-legend="magnitude"] [data-magnitude="4"] circle')!;
+    expect(Number(m4.getAttribute('r'))).toBe(getMagnitudePixelRadius(4));
   });
 
   it('renders the real depth legend (components/map/MapLegend.tsx, backed by getEarthquakeColor)', async () => {
@@ -110,8 +109,11 @@ describe('Settings page (gc#5)', () => {
     render(<SettingsPage />);
     await openTab(user, /visualization reference/i);
 
-    expect(screen.getByText('< 15 km')).toBeInTheDocument();
-    expect(screen.getByText('≥ 200 km')).toBeInTheDocument();
-    expect(screen.getByText('Unknown depth')).toBeInTheDocument();
+    const segments = Array.from(document.querySelectorAll<HTMLElement>('[data-legend="depth"] [data-depth-class]'));
+    expect(segments.map((segment) => segment.dataset.depthClass)).toEqual(['< 15 km', '15–40 km', '40–70 km', '70–150 km', '150–300 km', '≥ 300 km']);
+    expect(screen.getByText('unknown depth')).toBeInTheDocument();
+    // The quality and azimuthal-gap keys are shown too.
+    expect(document.querySelector('[data-legend="quality"]')).not.toBeNull();
+    expect(document.querySelector('[data-legend="azimuthal-gap"]')).not.toBeNull();
   });
 });

@@ -1,5 +1,8 @@
 import type { CursorPaginatedResult, EventSummary } from './db';
 
+/** The loader's error when the event request is refused for want of a session (HTTP 401). */
+export const EVENTS_SIGN_IN_MESSAGE = "Sign in to view this catalogue's events.";
+
 export interface EventCatalogue {
   id: string;
   name: string;
@@ -98,6 +101,10 @@ export async function loadCatalogueEvents(catalogues: EventCatalogue[], { signal
           if (cursor) params.set('cursor', cursor);
           const response = await fetch(`/api/catalogues/${encodeURIComponent(catalogue.id)}/events?${params}`, { signal: controller.signal });
           checkCancelled();
+          // Events need a signed-in account (the catalogue list does not): say so, instead of a
+          // bare 'HTTP 401' over an empty map that reads as a broken map.
+          if (response.status === 401) throw new Error(EVENTS_SIGN_IN_MESSAGE);
+          if (response.status === 403) throw new Error(`Your account cannot view the events of ${catalogue.name}.`);
           if (!response.ok) throw new Error(`Failed to load ${catalogue.name} (HTTP ${response.status})`);
           const result: CursorPaginatedResult<EventSummary> | EventSummary[] = await response.json();
           checkCancelled();

@@ -23,7 +23,8 @@ const KAIKOURA_UTC = '2016-11-13T11:02:56.000Z';
 
 /** en-GB, day/month/year with a zone label: derived by hand from the instant above. */
 const EXPECTED_TO_THE_MINUTE = '13/11/2016, 11:02 UTC';
-const EXPECTED_TO_THE_SECOND = '13/11/2016, 11:02:56 UTC';
+/** The map popup writes the instant ISO-style (MAP_DESIGN_SPEC S5), still in UTC. */
+const EXPECTED_POPUP = '2016-11-13 11:02:56 UTC';
 
 const event = {
   id: 'kaikoura',
@@ -36,14 +37,19 @@ const event = {
   region: 'Kaikoura',
 };
 
-/** Every file in this cluster that renders an origin time. */
+/** Every file in this cluster that formats an origin time with Intl. */
 const OWNED_UI_FILES = [
   'app/analytics/page.tsx',
   'components/catalogues/CatalogueStatsPopover.tsx',
   'components/events/EventTable.tsx',
   'components/events/VirtualizedEventTable.tsx',
-  'components/map/EarthquakeCircleMap.tsx',
   'components/map/OptimizedEventPopup.tsx',
+];
+
+/** Files that show origin times through a shared formatter rather than their own. */
+const DELEGATING_UI_FILES = [
+  'components/map/EarthquakeCircleMap.tsx',
+  'lib/map-format.ts',
 ];
 
 const readOwned = (file: string) => readFileSync(path.join(process.cwd(), file), 'utf8');
@@ -66,8 +72,8 @@ describe('origin times render in UTC', () => {
 
   it('OptimizedEventPopup shows the UTC origin time to the second', () => {
     render(createElement(OptimizedEventPopup, { event: { ...event, id: 1 } }));
-    expect(screen.getAllByText(EXPECTED_TO_THE_SECOND).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/14\/11\/2016/)).toBeNull();
+    expect(screen.getAllByText(EXPECTED_POPUP).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/2016-11-14/)).toBeNull();
   });
 
   it('an unparseable time is shown verbatim rather than throwing', () => {
@@ -79,7 +85,7 @@ describe('origin times render in UTC', () => {
 });
 
 describe('no origin-time renderer is left on the host timezone', () => {
-  it.each(OWNED_UI_FILES)('%s has no zone-less toLocale* date call', (file) => {
+  it.each([...OWNED_UI_FILES, ...DELEGATING_UI_FILES])('%s has no zone-less toLocale* date call', (file) => {
     const source = readOwned(file);
     // Bare `x.toLocaleString()` on a NUMBER (thousands separators) is fine; a date
     // formatted with an explicit locale and no timeZone is the defect.
@@ -94,6 +100,13 @@ describe('no origin-time renderer is left on the host timezone', () => {
     expect(source).toContain("timeZone: 'UTC'");
     // The zone is shown to the reader so the value cannot be read as local time.
     expect(source).toContain("timeZoneName: 'short'");
+  });
+
+  it('the popup formats the origin time from the UTC instant (toISOString), never the host zone', () => {
+    const source = readOwned('lib/map-format.ts');
+    expect(source).toContain('toISOString()');
+    expect(source).not.toMatch(/get(?:Hours|Date|Month|FullYear)\(/);
+    expect(readOwned('components/map/EarthquakeCircleMap.tsx')).toContain('<OptimizedEventPopup');
   });
 
   it('the popup tooltip no longer calls the origin time local', () => {

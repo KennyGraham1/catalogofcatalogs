@@ -3,8 +3,9 @@
  *
  * 1. getAzimuthalGapColor: the continuous colour ramp behind the map's "azimuthal gap"
  *    colour mode (paper sec:viz station-coverage panel). It must be a genuine continuous
- *    ramp (no hard-coded discrete bands), grey for an unknown gap, and gap > 180 degrees
- *    must read as visually distinct ("clearly highlighted"), not just a darker red.
+ *    ramp (no hard-coded discrete bands), grey for an unknown gap, and run from teal at 0°
+ *    through pale amber at the 180° usability threshold to red at 360° (MAP_DESIGN_SPEC
+ *    S2), so a gap past 180° reads as a different colour family from a well-surrounded one.
  * 2. confidence_level (C16) threading: calculateUncertaintyEllipse must carry
  *    UncertaintyData.confidence_level into UncertaintyEllipse.confidenceLevel only when
  *    the ellipse comes from a reported OriginUncertainty ellipse/circle (never the
@@ -20,51 +21,48 @@ import {
 } from '@/lib/uncertainty-utils';
 
 describe('getAzimuthalGapColor', () => {
-  const hue = (css: string): number => {
-    const match = css.match(/^hsl\(([-\d.]+),\s*([\d.]+)%,\s*([\d.]+)%\)$/);
-    expect(match).not.toBeNull();
-    return Number(match![1]);
+  const rgb = (hex: string): [number, number, number] => {
+    expect(hex).toMatch(/^#[0-9A-F]{6}$/i);
+    const n = parseInt(hex.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   };
-  const saturation = (css: string): number => {
-    const match = css.match(/^hsl\([-\d.]+,\s*([\d.]+)%/);
-    return Number(match![1]);
+  /** WCAG relative luminance, a monotonic proxy for perceived lightness. */
+  const luminance = (hex: string) => {
+    const [r, g, b] = rgb(hex).map((c) => { const v = c / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
   };
 
   it('is grey for an unknown gap (null, undefined, NaN) rather than a guessed ramp position', () => {
-    const grey = '#94a3b8';
+    const grey = '#9CA3AF';
     expect(getAzimuthalGapColor(null)).toBe(grey);
     expect(getAzimuthalGapColor(undefined)).toBe(grey);
     expect(getAzimuthalGapColor(NaN)).toBe(grey);
   });
 
-  it('starts green (well-constrained) at gap 0 and reaches red at the 180 degree threshold', () => {
-    expect(hue(getAzimuthalGapColor(0))).toBeCloseTo(142, 0);
-    expect(hue(getAzimuthalGapColor(180))).toBeCloseTo(0, 0);
+  it('runs teal (0°) -> pale amber (180°) -> red (360°)', () => {
+    expect(getAzimuthalGapColor(0)).toBe('#0F766E');
+    expect(getAzimuthalGapColor(180)).toBe('#FDE68A');
+    expect(getAzimuthalGapColor(360)).toBe('#B91C1C');
   });
 
-  it('is a continuous ramp from 0 to 180 degrees: hue decreases monotonically, no discrete jumps', () => {
-    const samples = [0, 30, 60, 90, 120, 150, 180].map(gap => hue(getAzimuthalGapColor(gap)));
-    for (let i = 1; i < samples.length; i++) {
-      expect(samples[i]).toBeLessThan(samples[i - 1]);
+  it('is a continuous ramp: lightness rises monotonically to 180° and falls after, no discrete jumps', () => {
+    const up = [0, 30, 60, 90, 120, 150, 180].map(gap => luminance(getAzimuthalGapColor(gap)));
+    const down = [180, 210, 240, 270, 300, 330, 360].map(gap => luminance(getAzimuthalGapColor(gap)));
+    for (let i = 1; i < up.length; i++) expect(up[i]).toBeGreaterThan(up[i - 1]);
+    for (let i = 1; i < down.length; i++) expect(down[i]).toBeLessThan(down[i - 1]);
+    // Neighbouring degrees differ by at most a few levels per channel: no hidden steps.
+    for (let gap = 1; gap <= 360; gap++) {
+      const a = rgb(getAzimuthalGapColor(gap - 1));
+      const b = rgb(getAzimuthalGapColor(gap));
+      expect(Math.max(...a.map((c, i) => Math.abs(c - b[i])))).toBeLessThanOrEqual(6);
     }
   });
 
-  it('highlights gap > 180 degrees as a visually distinct regime, not merely "more red"', () => {
-    // Saturation/lightness step up beyond the 180 degree usability threshold (Havskov &
-    // Ottemoller 2010 sec 6.3; GeoNet quality flags), so a 181 degree gap cannot be
-    // mistaken for a 179 degree one even though the ramp itself has no discontinuity.
-    expect(saturation(getAzimuthalGapColor(179))).toBe(85);
-    expect(saturation(getAzimuthalGapColor(181))).toBe(100);
-  });
-
-  it('keeps ramping (not clamping to a single "bad" colour) as the gap widens past 180', () => {
-    const at270 = hue(getAzimuthalGapColor(270));
-    const at360 = hue(getAzimuthalGapColor(360));
-    expect(at270).not.toBeCloseTo(at360, 0);
-    // Beyond 180 the ramp swings into magenta/violet hues, clearly outside the
-    // green-yellow-red family used for <= 180 degrees.
-    expect(at360).toBeGreaterThan(200);
-    expect(at360).toBeLessThan(320);
+  it('puts poorly constrained gaps (> 180°) in a different colour family from good ones', () => {
+    const [r0, g0] = rgb(getAzimuthalGapColor(45));
+    const [r1, g1] = rgb(getAzimuthalGapColor(300));
+    expect(g0).toBeGreaterThan(r0); // green-dominant: well surrounded
+    expect(r1).toBeGreaterThan(g1 + 60); // red-dominant: poor geometry
   });
 
   it('clamps out-of-range gaps instead of extrapolating past the reportable 0-360 range', () => {
