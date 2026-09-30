@@ -189,8 +189,10 @@ describe('M1 onConflict: flagged duplicate groups', () => {
   it('sends onConflict only when holding for review', async () => {
     openConfiguration();
     fireEvent.click(screen.getByRole('radio', { name: 'Hold for review' }));
-    expect(document.body).toHaveTextContent(/provisional solution/);
-    expect(document.body).toHaveTextContent(/nothing is dropped/);
+    expect(screen.getByRole('radio', { name: 'Hold for review' }).parentElement).toHaveTextContent(/Merge provisionally and list them for review/);
+    // The detail (nothing is dropped) is in the section's tooltip.
+    fireEvent.focus(within(screen.getByText('Flagged groups').parentElement!).getByRole('button', { name: 'More information' }));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/Holding never drops a report/);
     goToPreview();
     const preview = await generatePreview();
     expect(preview.config.onConflict).toBe('hold');
@@ -242,15 +244,31 @@ describe('M4 Median Values strategy', () => {
     expect(help).toHaveTextContent(/with two reports the median is their mean/);
     expect(help).toHaveTextContent(/depth from the best-constrained solution/);
     expect(help).toHaveTextContent(/No single report's origin details/);
-    // The green algorithm box describes selection, as for Average Values.
-    expect(screen.getByText('Magnitude Hierarchy:')).toBeInTheDocument();
-    expect(screen.getByText('Depth Uncertainty:')).toBeInTheDocument();
+    // Under the field rules: magnitude and depth are selected, as for Average Values.
+    expect(screen.getByText(/^Chosen by type: Mw first/)).toBeInTheDocument();
+    expect(screen.getByText('From the best-constrained report that solved for depth.')).toBeInTheDocument();
 
     goToPreview();
     expect(screen.getAllByText('Median Values').length).toBeGreaterThan(0);
     expect(screen.queryByText(/^median$/i)).toBeNull();
     const preview = await generatePreview();
     expect(preview.config.mergeStrategy).toBe('median');
+  });
+});
+
+describe('what the published depth and magnitude will be', () => {
+  it('says magnitudes are kept as reported unless a rule or strategy selects by type', async () => {
+    openConfiguration();
+    // Default: Source Priority, both rules following the strategy.
+    expect(screen.getByText('Kept as reported, not converted to Mw, so ML, mb and Mw can mix.')).toBeInTheDocument();
+    expect(screen.getByText('From the report the strategy picks.')).toBeInTheDocument();
+    await choose('Magnitude', 'Magnitude type preference');
+    expect(screen.getByText(/^Chosen by type: Mw first/)).toBeInTheDocument();
+    await choose('Depth', 'Network authority');
+    expect(screen.queryByText(/From the report the strategy picks|best-constrained report that solved/)).toBeNull();
+    // Matching behaviour sits with the matching settings; the old algorithm box is gone.
+    expect(screen.getByText(/Events either side of 180° are matched/)).toBeInTheDocument();
+    expect(screen.queryByText('Enhanced Merge Algorithm')).toBeNull();
   });
 });
 

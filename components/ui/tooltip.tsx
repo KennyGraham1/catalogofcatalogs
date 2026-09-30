@@ -5,7 +5,18 @@ import * as TooltipPrimitive from '@radix-ui/react-tooltip';
 
 import { cn } from '@/lib/utils';
 
-const TooltipProvider = TooltipPrimitive.Provider;
+/**
+ * Tooltips open after 150 ms (Radix's default is 700 ms, which felt unresponsive for help
+ * icons) and switch instantly between neighbouring triggers. A caller can still pass its
+ * own delayDuration.
+ */
+function TooltipProvider({
+  delayDuration = 150,
+  skipDelayDuration = 300,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Provider>) {
+  return <TooltipPrimitive.Provider delayDuration={delayDuration} skipDelayDuration={skipDelayDuration} {...props} />;
+}
 
 const Tooltip = TooltipPrimitive.Root;
 

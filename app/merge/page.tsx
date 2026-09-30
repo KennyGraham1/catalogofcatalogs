@@ -209,6 +209,79 @@ const FIELD_RULE_OPTIONS: Array<{
   },
 ];
 
+// Each strategy and source-priority option: a short summary shown under the select (two
+// sentences for a strategy, one for a source priority), and
+// the full description (what lib/merge.ts does) in its tooltip and as the select's
+// accessible description.
+const STRATEGY_TEXT: Record<string, { summary: string; details: string }> = {
+  quality: {
+    summary: 'Uses the catalogue entry with the best-constrained solution (station count, azimuthal gap, RMS residual, uncertainties). The other entries are kept as its sources.',
+    details: 'Keeps the best-constrained solution, comparing only the quality metrics every catalogue in the group reports (station count, azimuthal gap, RMS residual, magnitude uncertainty and type, evaluation status). If a catalogue reports none of them, network authority decides.',
+  },
+  priority: {
+    summary: 'Uses the catalogue entry from the agency or catalogue you rank highest (set under Source Priority). The other entries are kept as its sources.',
+    details: 'Keeps the record from the source you rank highest when the same event appears in more than one catalogue.',
+  },
+  average: {
+    summary: 'Averages the epicentres of all entries, weighted by 1/σ² when every entry reports a location uncertainty. Magnitude and depth are selected, not averaged.',
+    details: 'Averages only the epicentre: weighted by inverse variance when every source reports a horizontal uncertainty, equally otherwise. Magnitude and depth are selected, not averaged: magnitude by type (Mw first; below M6.2 local ML ahead of mb, from M6.2 Ms ahead), depth from the best-constrained solution that solved for depth. Time is the earliest reported origin time; one agency\'s origin details (time uncertainty, station counts, agency) are not carried onto the averaged epicentre.',
+  },
+  median: {
+    summary: 'Takes the median epicentre and origin time of all entries, robust to one outlying solution when there are three or more. Magnitude and depth are selected, not averaged.',
+    details: 'Takes the median of the reported epicentres, latitude and longitude separately (longitudes unwrapped across the date line), and the median origin time; with two reports the median is their mean. Magnitude and depth are selected, not averaged: magnitude by type (Mw first; below M6.2 local ML ahead of mb, from M6.2 Ms ahead), depth from the best-constrained solution that solved for depth. No single report\'s origin details (time uncertainty, station counts, agency) are carried onto the median epicentre.',
+  },
+  newest: {
+    summary: 'Uses the most recently computed solution (latest origin creation time), so a reviewed solution supersedes a preliminary one. The other entries are kept as its sources.',
+    details: 'Keeps the most recently determined solution: the one whose origin the agency computed last (QuakeML creation time). When not every catalogue reports that time, reviewed or final solutions win over preliminary ones, then the quality score decides.',
+  },
+  complete: {
+    summary: 'Uses the catalogue entry with the most populated fields (uncertainties, quality metrics, focal mechanisms). The other entries are kept as its sources.',
+    details: 'Keeps the record with the most complete information (the most populated fields).',
+  },
+};
+
+// Nothing falls back to quality alone: a missing preferred agency falls back to network
+// authority, then quality (lib/merge.ts mergeByPriority).
+const SOURCE_PRIORITY_TEXT: Record<string, { summary: string; details: string }> = {
+  quality: {
+    summary: 'Best quality score wins.',
+    details: 'The record with the best quality score is kept, comparing only the metrics every catalogue in the group reports; network authority decides when a catalogue reports none.',
+  },
+  newest: {
+    summary: 'Most recently computed solution wins.',
+    details: 'The most recently determined solution is kept (the latest origin creation time the agencies report); when not every catalogue reports one, reviewed or final solutions win over preliminary ones, then quality score.',
+  },
+  geonet: {
+    summary: 'GeoNet\'s report wins; otherwise network authority.',
+    details: 'The GeoNet record (GNS operates GeoNet) is kept when the group has one. It is recognised by its agency code (such as WEL) or the catalogue\'s provider or import source, not by words in a catalogue name. Otherwise the network-authority ranking configured in Settings › Merge authority decides (by default GeoNet, GCMT, ISC, USGS, then other agencies), and quality score breaks ties.',
+  },
+  custom: {
+    summary: 'Your ranking below decides.',
+    details: 'Your ranking below decides: the record from the highest-ranked catalogue is kept, and quality score breaks any remaining tie.',
+  },
+};
+SOURCE_PRIORITY_TEXT.gns = SOURCE_PRIORITY_TEXT.geonet;
+
+// What the published depth or magnitude will be under the current strategy and rule, in one
+// line under the rule's select. Average and Median Values select both by the rules
+// selectBestDepth / selectBestMagnitude apply (lib/merge.ts); every other strategy publishes
+// the chosen report's own value, as reported: magnitudes are never converted to Mw.
+function fieldRuleHint(field: FieldRuleName, rule: string, strategy: string): string | null {
+  const computed = strategy === 'average' || strategy === 'median';
+  if (field === 'magnitude') {
+    return rule === 'type-preference' || (rule === 'strategy' && computed)
+      ? 'Chosen by type: Mw first; below M6.2 ML before mb, from M6.2 Ms first.'
+      : 'Kept as reported, not converted to Mw, so ML, mb and Mw can mix.';
+  }
+  if (field === 'depth') {
+    if (rule === 'best-constrained' || (rule === 'strategy' && computed)) {
+      return 'From the best-constrained report that solved for depth.';
+    }
+    return rule === 'strategy' ? 'From the report the strategy picks.' : null;
+  }
+  return null;
+}
+
 const CONFLICT_LABELS: Record<ConflictHandling, string> = {
   resolve: 'Resolve with the strategy',
   hold: 'Hold for review',
@@ -1759,6 +1832,10 @@ export default function MergePage() {
                               at M7.0 and above. Events deeper than 300 km get a further 1.5× on distance
                               (1.2× between 100 and 300 km).
                             </p>
+                            <p className="mt-1 text-xs text-blue-800 leading-relaxed">
+                              Events either side of 180° are matched, and reports that cannot be one earthquake
+                              (e.g. M4.0 with M7.0) are never merged.
+                            </p>
                           </div>
                         </div>
                       </div>
@@ -1822,15 +1899,13 @@ export default function MergePage() {
                         <div className="space-y-2">
                           <div className="flex items-center gap-1.5">
                             <Label htmlFor="merge-strategy">Merge Strategy</Label>
-                            <InfoTooltip
-                              content="Controls how conflicting event fields are resolved across sources (quality-based, priority, average, median, newest, or most complete)."
-                            />
+                            <InfoTooltip content={STRATEGY_TEXT[mergeStrategy]?.details} />
                           </div>
                           <Select
                             value={mergeStrategy}
                             onValueChange={value => setMergeStrategy(value)}
                           >
-                            <SelectTrigger id="merge-strategy">
+                            <SelectTrigger id="merge-strategy" aria-describedby="merge-strategy-help">
                               <SelectValue placeholder="Select strategy" />
                             </SelectTrigger>
                             <SelectContent>
@@ -1842,24 +1917,15 @@ export default function MergePage() {
                               <SelectItem value="complete">Most Complete Record</SelectItem>
                             </SelectContent>
                           </Select>
-                          <p className="text-xs text-muted-foreground">
-                            {/* Each text states what lib/merge.ts does for that strategy. */}
-                            {mergeStrategy === 'quality' && 'Keeps the best-constrained solution, comparing only the quality metrics every catalogue in the group reports (station count, azimuthal gap, RMS residual, magnitude uncertainty and type, evaluation status). If a catalogue reports none of them, network authority decides.'}
-                            {mergeStrategy === 'priority' && 'Keeps the record from the source you rank highest when the same event appears in more than one catalogue.'}
-                            {mergeStrategy === 'average' && 'Averages only the epicentre: weighted by inverse variance when every source reports a horizontal uncertainty, equally otherwise. Magnitude and depth are selected, not averaged: magnitude by type (Mw first; below M6.2 local ML ahead of mb, from M6.2 Ms ahead), depth from the best-constrained solution that solved for depth. Time is the earliest reported origin time; one agency\'s origin details (time uncertainty, station counts, agency) are not carried onto the averaged epicentre.'}
-                            {mergeStrategy === 'median' && 'Takes the median of the reported epicentres, latitude and longitude separately (longitudes unwrapped across the date line), and the median origin time; with two reports the median is their mean. Magnitude and depth are selected, not averaged: magnitude by type (Mw first; below M6.2 local ML ahead of mb, from M6.2 Ms ahead), depth from the best-constrained solution that solved for depth. No single report\'s origin details (time uncertainty, station counts, agency) are carried onto the median epicentre.'}
-                            {mergeStrategy === 'newest' && 'Keeps the most recently determined solution: the one whose origin the agency computed last (QuakeML creation time). When not every catalogue reports that time, reviewed or final solutions win over preliminary ones, then the quality score decides.'}
-                            {mergeStrategy === 'complete' && 'Use the record with the most complete information.'}
-                          </p>
+                          <p className="text-xs text-muted-foreground">{STRATEGY_TEXT[mergeStrategy]?.summary}</p>
+                          <p id="merge-strategy-help" className="sr-only">{STRATEGY_TEXT[mergeStrategy]?.details}</p>
                         </div>
 
                         {mergeStrategy === 'priority' && (
                           <div className="space-y-2">
                             <div className="flex items-center gap-1.5">
                               <Label htmlFor="source-priority">Source Priority</Label>
-                              <InfoTooltip
-                                content="Decides which catalogue's record is kept when the same event appears in more than one catalogue. Most Recent Solution keeps the solution its agency computed last. Custom Order uses your ranking, with quality score breaking any remaining tie. GeoNet > Others and GNS > Others keep GeoNet's record (GNS operates GeoNet); when a group has none, the network-authority ranking configured in Settings › Merge authority decides, then quality score."
-                              />
+                              <InfoTooltip content={SOURCE_PRIORITY_TEXT[priority]?.details} />
                             </div>
                             <Select
                               value={priority}
@@ -1876,16 +1942,10 @@ export default function MergePage() {
                                 <SelectItem value="custom">Custom Order</SelectItem>
                               </SelectContent>
                             </Select>
-                            {/* Describes what the selected option does as implemented (lib/merge.ts
-                                mergeByPriority). Nothing falls back to quality alone: a missing
-                                preferred agency falls back to network authority, then quality. */}
-                            <p id="source-priority-help" className="text-xs text-muted-foreground">
-                              Choose whose record is kept when the same event appears in more than one catalogue.
-                              {priority === 'quality' && ' The record with the best quality score is kept, comparing only the metrics every catalogue in the group reports; network authority decides when a catalogue reports none.'}
-                              {priority === 'newest' && ' The most recently determined solution is kept (the latest origin creation time the agencies report); when not every catalogue reports one, reviewed or final solutions win over preliminary ones, then quality score.'}
-                              {(priority === 'geonet' || priority === 'gns') &&
-                                ' The GeoNet record (GNS operates GeoNet) is kept when the group has one. It is recognised by its agency code (such as WEL) or the catalogue\'s provider or import source, not by words in a catalogue name. Otherwise the network-authority ranking configured in Settings › Merge authority decides (by default GeoNet, GCMT, ISC, USGS, then other agencies), and quality score breaks ties.'}
-                              {priority === 'custom' && ' Your ranking below decides: the record from the highest-ranked catalogue is kept, and quality score breaks any remaining tie.'}
+                            <p className="text-xs text-muted-foreground">{SOURCE_PRIORITY_TEXT[priority]?.summary}</p>
+                            <p id="source-priority-help" className="sr-only">
+                              Choose whose record is kept when the same event appears in more than one catalogue.{' '}
+                              {SOURCE_PRIORITY_TEXT[priority]?.details}
                             </p>
                             {priority === 'custom' && (
                               <div className="space-y-1.5">
@@ -1939,9 +1999,7 @@ export default function MergePage() {
                         <div>
                           <h4 className="text-sm font-medium">Field rules</h4>
                           <p className="text-xs text-muted-foreground">
-                            Decide depth, magnitude and focal mechanism separately from the strategy that picks the
-                            epicentre and origin time. Rules apply to the reports left after an older vintage of one
-                            agency&apos;s solution is superseded by its newer one.
+                            Optionally take these from a different report than the strategy picks.
                           </p>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1951,7 +2009,10 @@ export default function MergePage() {
                             const helpId = `${selectId}-help`;
                             return (
                               <div key={field} className="space-y-2">
-                                <Label htmlFor={selectId}>{FIELD_RULE_TITLES[field]}</Label>
+                                <div className="flex items-center gap-1.5">
+                                  <Label htmlFor={selectId}>{FIELD_RULE_TITLES[field]}</Label>
+                                  <InfoTooltip content={`${options.find(option => option.value === rule)?.help} ${note}`} />
+                                </div>
                                 <Select value={rule} onValueChange={value => setFieldRule(field, value)}>
                                   <SelectTrigger id={selectId} aria-describedby={helpId}>
                                     <SelectValue />
@@ -1964,7 +2025,10 @@ export default function MergePage() {
                                     ))}
                                   </SelectContent>
                                 </Select>
-                                <p id={helpId} className="text-xs text-muted-foreground">
+                                {fieldRuleHint(field, rule, mergeStrategy) && (
+                                  <p className="text-xs text-muted-foreground">{fieldRuleHint(field, rule, mergeStrategy)}</p>
+                                )}
+                                <p id={helpId} className="sr-only">
                                   {options.find(option => option.value === rule)?.help} {note}
                                 </p>
                                 {rule === 'catalogue' && (
@@ -1999,12 +2063,10 @@ export default function MergePage() {
                           still written with the strategy's provisional solution. */}
                       <div className="mt-6 space-y-3">
                         <div>
-                          <h4 id="on-conflict-label" className="text-sm font-medium">When a duplicate group is flagged</h4>
-                          <p className="text-xs text-muted-foreground">
-                            The preview flags groups that were regrouped, are ambiguous, fail validation, or disagree on
-                            magnitude or depth, and reports that were matched but split off because their group failed
-                            validation (Separated).
-                          </p>
+                          <div className="flex items-center gap-1.5">
+                            <h4 id="on-conflict-label" className="text-sm font-medium">Flagged groups</h4>
+                            <InfoTooltip content="The preview flags groups that were regrouped, are ambiguous, fail validation, or disagree on magnitude or depth, and reports that were matched but split off because their group failed validation (Separated). Holding never drops a report: the row is written with the strategy's provisional solution and a reviewer keeps it or publishes one report instead." />
+                          </div>
                         </div>
                         <RadioGroup
                           aria-labelledby="on-conflict-label"
@@ -2017,10 +2079,7 @@ export default function MergePage() {
                               <Label htmlFor="on-conflict-resolve" className="text-sm font-medium">
                                 {CONFLICT_LABELS.resolve}
                               </Label>
-                              <p className="text-xs text-muted-foreground">
-                                Flagged groups are merged like every other group; the preview&apos;s warnings are the
-                                only record.
-                              </p>
+                              <p className="text-xs text-muted-foreground">Merge them like any other group.</p>
                             </div>
                           </div>
                           <div className="flex items-start gap-2">
@@ -2029,50 +2088,10 @@ export default function MergePage() {
                               <Label htmlFor="on-conflict-hold" className="text-sm font-medium">
                                 {CONFLICT_LABELS.hold}
                               </Label>
-                              <p className="text-xs text-muted-foreground">
-                                Flagged groups get a provisional solution from the strategy and are marked for review on
-                                the catalogue page, where a reviewer keeps it or publishes one report instead; nothing
-                                is dropped.
-                              </p>
+                              <p className="text-xs text-muted-foreground">Merge provisionally and list them for review on the catalogue page.</p>
                             </div>
                           </div>
                         </RadioGroup>
-                      </div>
-
-                      {/* Info Alert about Additional Improvements */}
-                      <div className="rounded-lg border border-green-200 bg-green-50 p-4 mt-4">
-                        <div className="flex gap-3">
-                          <div className="flex-shrink-0">
-                            <svg className="h-5 w-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                            </svg>
-                          </div>
-                          <div className="flex-1">
-                            <h4 className="text-sm font-medium text-green-900 mb-1">
-                              Enhanced Merge Algorithm
-                            </h4>
-                            <ul className="text-xs text-green-800 leading-relaxed space-y-1 list-disc list-inside">
-                              {/*
-                                Only the 'average' and 'median' strategies call selectBestMagnitude /
-                                selectBestDepth (lib/merge.ts). The other strategies copy one source record
-                                wholesale, so the magnitude hierarchy and depth-uncertainty selection genuinely
-                                do not apply to them and must not be advertised as if they did (a field rule
-                                above changes that per field, and says so itself).
-                              */}
-                              {mergeStrategy === 'average' || mergeStrategy === 'median' ? (
-                                <>
-                                  <li><strong>Magnitude Hierarchy:</strong> Uses ISC standard (Mw &gt; Ms &gt; mb &gt; ML) to choose which reported magnitude to keep, avoiding saturated scales</li>
-                                  <li><strong>Depth Uncertainty:</strong> Selects depths with lower uncertainty and better station coverage</li>
-                                </>
-                              ) : (
-                                <li><strong>Magnitude Scale:</strong> The merged magnitude is kept unchanged from the selected source, together with its magnitude type — values are not converted to a common scale, so a merged catalogue may mix ML, mb and Mw</li>
-                              )}
-                              <li><strong>Date Line Handling:</strong> Correctly matches events across the International Date Line (Pacific region)</li>
-                              <li><strong>Validation:</strong> Prevents merging physically inconsistent events (e.g., M4.0 with M7.0); magnitudes are compared on a common Mw scale when every source reports a magnitude type</li>
-                              {/* <li><strong>Performance:</strong> 15-30% faster with latitude-aware spatial indexing</li> */}
-                            </ul>
-                          </div>
-                        </div>
                       </div>
                     </div>
                   </div>
