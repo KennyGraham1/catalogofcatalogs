@@ -56,7 +56,7 @@ beforeEach(() => {
     data: rows[id] ?? [],
     pagination: { nextCursor: null, prevCursor: null, hasMore: false, limit: 10000 },
   }));
-  db.getCatalogueById.mockResolvedValue(undefined);
+  db.getCatalogueById.mockImplementation(async (id: string) => ({ id, status: 'complete' }));
   db.bulkInsertEvents.mockImplementation(async (saved: any[]) => saved.length);
 });
 
@@ -118,7 +118,7 @@ describe("onConflict 'resolve' / omitted", () => {
       db.getEventsByCatalogueIdCursor.mockImplementation(async (id: string) => ({
         data: rows[id] ?? [], pagination: { nextCursor: null, prevCursor: null, hasMore: false, limit: 10000 },
       }));
-      db.getCatalogueById.mockResolvedValue(undefined);
+      db.getCatalogueById.mockImplementation(async (id: string) => ({ id, status: 'complete' }));
       db.bulkInsertEvents.mockImplementation(async (saved: any[]) => saved.length);
       const { result, saved } = await merge(config);
       expect(saved.map(r => r.review_status)).toEqual([null, null, null]);

@@ -177,35 +177,35 @@ const FIELD_RULE_OPTIONS: Array<{
   {
     field: 'depth',
     options: [
-      { value: 'strategy', help: 'Average and Median Values take the best-constrained depth; every other strategy keeps the depth of the report it selected.' },
-      { value: 'best-constrained', help: 'The depth of the report that solved for depth with the smallest depth uncertainty and the best station coverage; a fixed depth only when no report solved for depth.' },
-      { value: 'quality', help: 'The depth of the report ranked first by quality score.' },
-      { value: 'authority', help: 'The depth of the report from the highest-ranked network (Settings › Merge authority).' },
+      { value: 'strategy', help: 'Average and Median Values take the best-constrained depth; every other strategy keeps the depth of the entry it selected.' },
+      { value: 'best-constrained', help: 'The depth of the solution with a free (not fixed) depth, the smallest depth uncertainty and the best station coverage; a fixed depth only when no solution has a free depth.' },
+      { value: 'quality', help: 'The depth of the entry ranked first by quality score.' },
+      { value: 'authority', help: 'The depth of the entry from the highest-ranked network (Settings › Merge authority).' },
       { value: 'newest', help: 'The depth of the most recently determined solution.' },
-      { value: 'catalogue', help: 'The depth of the chosen catalogue\'s report; a group without a report from it follows the strategy.' },
+      { value: 'catalogue', help: 'The depth of the chosen catalogue\'s entry; a group without an entry from it follows the strategy.' },
     ],
-    note: 'The published depth always carries that report\'s own depth uncertainty and depth type. A report without a depth cannot supply it, and the strategy decides instead.',
+    note: 'The published depth always carries that entry\'s own depth uncertainty and depth type. An entry without a depth cannot supply it, and the strategy decides instead.',
   },
   {
     field: 'magnitude',
     options: [
-      { value: 'strategy', help: 'Average and Median Values choose by magnitude type; every other strategy keeps the magnitude of the report it selected.' },
-      { value: 'type-preference', help: 'Chooses by magnitude type across every report in the group: Mw first; below M6.2 local ML ahead of mb, from M6.2 Ms ahead.' },
-      { value: 'quality', help: 'The preferred magnitude of the report ranked first by quality score.' },
-      { value: 'authority', help: 'The preferred magnitude of the report from the highest-ranked network (Settings › Merge authority).' },
+      { value: 'strategy', help: 'Average and Median Values choose by magnitude type; every other strategy keeps the magnitude of the entry it selected.' },
+      { value: 'type-preference', help: 'Chooses by magnitude type across every entry in the group: Mw first; below M6.2 local ML ahead of mb, from M6.2 Ms ahead.' },
+      { value: 'quality', help: 'The preferred magnitude of the entry ranked first by quality score.' },
+      { value: 'authority', help: 'The preferred magnitude of the entry from the highest-ranked network (Settings › Merge authority).' },
       { value: 'newest', help: 'The preferred magnitude of the most recently determined solution.' },
-      { value: 'catalogue', help: 'The preferred magnitude of the chosen catalogue\'s report; a group without a report from it follows the strategy.' },
+      { value: 'catalogue', help: 'The preferred magnitude of the chosen catalogue\'s entry; a group without an entry from it follows the strategy.' },
     ],
     note: 'The published magnitude carries its own type, uncertainty and preferred magnitude id.',
   },
   {
     field: 'mechanism',
     options: [
-      { value: 'hierarchy', help: 'Every report\'s focal mechanisms are kept together and the preferred one comes from the highest-ranked network (Settings › Merge authority).' },
-      { value: 'strategy', help: 'Only the focal mechanisms of the report the strategy selected, with its own preferred mechanism.' },
-      { value: 'catalogue', help: 'Only the focal mechanisms of the chosen catalogue\'s report; a group without a report from it follows the strategy.' },
+      { value: 'hierarchy', help: 'Every entry\'s focal mechanisms are kept together and the preferred one comes from the highest-ranked network (Settings › Merge authority).' },
+      { value: 'strategy', help: 'Only the focal mechanisms of the entry the strategy selected, with its own preferred mechanism.' },
+      { value: 'catalogue', help: 'Only the focal mechanisms of the chosen catalogue\'s entry; a group without an entry from it combines mechanisms by network authority.' },
     ],
-    note: 'When the chosen report has no focal mechanism, the mechanisms are combined by network authority instead.',
+    note: 'When the chosen entry has no focal mechanism, the mechanisms are combined by network authority instead.',
   },
 ];
 
@@ -224,15 +224,15 @@ const STRATEGY_TEXT: Record<string, { summary: string; details: string }> = {
   },
   average: {
     summary: 'Averages the epicentres of all entries, weighted by 1/σ² when every entry reports a location uncertainty. Magnitude and depth are selected, not averaged.',
-    details: 'Averages only the epicentre: weighted by inverse variance when every source reports a horizontal uncertainty, equally otherwise. Magnitude and depth are selected, not averaged: magnitude by type (Mw first; below M6.2 local ML ahead of mb, from M6.2 Ms ahead), depth from the best-constrained solution that solved for depth. Time is the earliest reported origin time; one agency\'s origin details (time uncertainty, station counts, agency) are not carried onto the averaged epicentre.',
+    details: 'Averages only the epicentre: weighted by inverse variance when every source reports a horizontal uncertainty, equally otherwise. Magnitude and depth are selected, not averaged: magnitude by type (Mw first; below M6.2 local ML ahead of mb, from M6.2 Ms ahead), depth from the best-constrained solution that solved for depth, falling back to a fixed depth only when none did. Time is the earliest reported origin time; one agency\'s origin details (time uncertainty, station counts, agency) are not carried onto the averaged epicentre.',
   },
   median: {
     summary: 'Takes the median epicentre and origin time of all entries, robust to one outlying solution when there are three or more. Magnitude and depth are selected, not averaged.',
-    details: 'Takes the median of the reported epicentres, latitude and longitude separately (longitudes unwrapped across the date line), and the median origin time; with two reports the median is their mean. Magnitude and depth are selected, not averaged: magnitude by type (Mw first; below M6.2 local ML ahead of mb, from M6.2 Ms ahead), depth from the best-constrained solution that solved for depth. No single report\'s origin details (time uncertainty, station counts, agency) are carried onto the median epicentre.',
+    details: 'Takes the median of the reported epicentres, latitude and longitude separately (longitudes unwrapped across the date line), and the median origin time; with two entries the median is their mean. Magnitude and depth are selected, not averaged: magnitude by type (Mw first; below M6.2 local ML ahead of mb, from M6.2 Ms ahead), depth from the best-constrained solution that solved for depth, falling back to a fixed depth only when none did. No single entry\'s origin details (time uncertainty, station counts, agency) are carried onto the median epicentre.',
   },
   newest: {
-    summary: 'Uses the most recently computed solution (latest origin creation time), so a reviewed solution supersedes a preliminary one. The other entries are kept as its sources.',
-    details: 'Keeps the most recently determined solution: the one whose origin the agency computed last (QuakeML creation time). When not every catalogue reports that time, reviewed or final solutions win over preliminary ones, then the quality score decides.',
+    summary: 'Uses the latest reported solution creation time, falling back to review status and quality when times are missing. The other entries are kept as its sources.',
+    details: 'Keeps the most recently determined solution: the one whose origin the agency computed last (QuakeML creation time). When times are missing or tied and every entry states its review status, reviewed or final solutions win over preliminary ones; remaining ties use quality score. A rejected solution is used only if every entry is rejected.',
   },
   complete: {
     summary: 'Uses the catalogue entry with the most populated fields (uncertainties, quality metrics, focal mechanisms). The other entries are kept as its sources.',
@@ -249,10 +249,10 @@ const SOURCE_PRIORITY_TEXT: Record<string, { summary: string; details: string }>
   },
   newest: {
     summary: 'Most recently computed solution wins.',
-    details: 'The most recently determined solution is kept (the latest origin creation time the agencies report); when not every catalogue reports one, reviewed or final solutions win over preliminary ones, then quality score.',
+    details: 'The most recently determined solution is kept (the latest origin creation time the agencies report); when times are missing or tied and every entry states its review status, reviewed or final solutions win over preliminary ones; remaining ties use quality score. A rejected solution is used only if every entry is rejected.',
   },
   geonet: {
-    summary: 'GeoNet\'s report wins; otherwise network authority.',
+    summary: 'GeoNet\'s entry is used; otherwise network authority decides.',
     details: 'The GeoNet record (GNS operates GeoNet) is kept when the group has one. It is recognised by its agency code (such as WEL) or the catalogue\'s provider or import source, not by words in a catalogue name. Otherwise the network-authority ranking configured in Settings › Merge authority decides (by default GeoNet, GCMT, ISC, USGS, then other agencies), and quality score breaks ties.',
   },
   custom: {
@@ -270,14 +270,14 @@ function fieldRuleHint(field: FieldRuleName, rule: string, strategy: string): st
   const computed = strategy === 'average' || strategy === 'median';
   if (field === 'magnitude') {
     return rule === 'type-preference' || (rule === 'strategy' && computed)
-      ? 'Chosen by type: Mw first; below M6.2 ML before mb, from M6.2 Ms first.'
+      ? 'Chosen by type: Mw first; among other scales, ML leads below M6.2 and Ms from M6.2.'
       : 'Kept as reported, not converted to Mw, so ML, mb and Mw can mix.';
   }
   if (field === 'depth') {
     if (rule === 'best-constrained' || (rule === 'strategy' && computed)) {
-      return 'From the best-constrained report that solved for depth.';
+      return 'Best-constrained depth; a fixed depth only when no solution has a free depth.';
     }
-    return rule === 'strategy' ? 'From the report the strategy picks.' : null;
+    return rule === 'strategy' ? 'From the entry the strategy picks.' : null;
   }
   return null;
 }
@@ -1833,7 +1833,7 @@ export default function MergePage() {
                               (1.2× between 100 and 300 km).
                             </p>
                             <p className="mt-1 text-xs text-blue-800 leading-relaxed">
-                              Events either side of 180° are matched, and reports that cannot be one earthquake
+                              Events either side of 180° are matched, and entries that cannot be one earthquake
                               (e.g. M4.0 with M7.0) are never merged.
                             </p>
                           </div>
@@ -1999,7 +1999,7 @@ export default function MergePage() {
                         <div>
                           <h4 className="text-sm font-medium">Field rules</h4>
                           <p className="text-xs text-muted-foreground">
-                            Optionally take these from a different report than the strategy picks.
+                            Optionally take these from a different entry than the strategy picks.
                           </p>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -2059,13 +2059,13 @@ export default function MergePage() {
                         </div>
                       </div>
 
-                      {/* Flagged groups (M1 onConflict). Holding never drops a report: the row is
+                      {/* Flagged groups (M1 onConflict). Holding never drops an entry: the row is
                           still written with the strategy's provisional solution. */}
                       <div className="mt-6 space-y-3">
                         <div>
                           <div className="flex items-center gap-1.5">
                             <h4 id="on-conflict-label" className="text-sm font-medium">Flagged groups</h4>
-                            <InfoTooltip content="The preview flags groups that were regrouped, are ambiguous, fail validation, or disagree on magnitude or depth, and reports that were matched but split off because their group failed validation (Separated). Holding never drops a report: the row is written with the strategy's provisional solution and a reviewer keeps it or publishes one report instead." />
+                            <InfoTooltip content="The preview flags groups that were regrouped, are ambiguous, fail validation, or disagree on magnitude or depth, and entries that were matched but split off because their group failed validation (Separated). Holding never drops an entry: the row is written with the strategy's provisional solution and a reviewer keeps it or publishes one entry's solution instead." />
                           </div>
                         </div>
                         <RadioGroup
@@ -2256,7 +2256,7 @@ export default function MergePage() {
                       {heldForReviewCount.toLocaleString()} {heldForReviewCount === 1 ? 'event was' : 'events were'} held for review
                     </AlertTitle>
                     <AlertDescription className="text-amber-800 dark:text-amber-300">
-                      Each holds a provisional solution until a reviewer keeps it or publishes one report instead.{' '}
+                      Each holds a provisional solution until a reviewer keeps it or publishes one entry&apos;s solution instead.{' '}
                       <Link href={`/catalogues/${mergedCatalogueId}`} className="font-medium underline underline-offset-2">
                         Review {heldForReviewCount.toLocaleString()} held {heldForReviewCount === 1 ? 'event' : 'events'}
                       </Link>

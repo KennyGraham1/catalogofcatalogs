@@ -3513,7 +3513,7 @@ export async function resolveMergedEventReview(
   } else {
     const index = choice?.report;
     if (!Number.isInteger(index) || index < 0) {
-      throw new ValidationError(`Invalid report index: ${String(index)}`);
+      throw new ValidationError(`Invalid entry index: ${String(index)}`);
     }
     let entries: unknown;
     try {
@@ -3522,10 +3522,10 @@ export async function resolveMergedEventReview(
       entries = null;
     }
     if (!Array.isArray(entries) || index >= entries.length) {
-      throw new ValidationError(`Event ${eventId} has no report ${index}`);
+      throw new ValidationError(`Event ${eventId} has no entry ${index}`);
     }
     if ((entries[index] as { superseded?: boolean } | null)?.superseded) {
-      throw new ValidationError(`Report ${index} is a superseded vintage of its agency's solution and cannot be published`);
+      throw new ValidationError(`Entry ${index} is a superseded vintage of its agency's solution and cannot be published`);
     }
     // Imported lazily: lib/merge.ts imports this module at load, and the rebuild is only
     // needed here, so the dependency stays one-way at module load.

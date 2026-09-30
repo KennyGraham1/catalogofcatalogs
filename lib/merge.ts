@@ -1,6 +1,7 @@
 import { dbQueries, MergedEvent, MergedCatalogue } from './db';
 import type { ClientSession } from './mongodb';
 import { createId } from './id';
+import { AppError } from './errors';
 import { calculateDistance, calculateTimeDifference } from './earthquake-utils';
 import type { SourceCatalogue, MergeConfig, MergeFieldRules } from './validation';
 import type { QuakeMLEvent, FocalMechanism, Origin } from './types/quakeml';
@@ -76,18 +77,21 @@ async function loadCompleteCatalogueEvents(
 }
 
 /**
- * The stored catalogue document behind a merge source, for its explicit agency metadata
- * (provider, data source, import source). Best-effort: a missing document or an adapter
- * without the lookup just means the agency is identified from the event rows instead.
+ * Verify a source exists and is ready, and read its explicit agency metadata. A missing
+ * catalogue is not an empty catalogue, and a failed metadata lookup must not silently
+ * change network authority. Adapters without catalogue documents use event metadata.
  */
 async function loadSourceCatalogueDocument(catalogueId: string): Promise<MergedCatalogue | null> {
   const db = dbQueries;
   if (!db || typeof db.getCatalogueById !== 'function') return null;
-  try {
-    return (await db.getCatalogueById(catalogueId)) ?? null;
-  } catch {
-    return null;
+  const catalogue = await db.getCatalogueById(catalogueId);
+  if (!catalogue) {
+    throw new AppError('One or more source catalogues were not found', 404, 'CATALOGUE_NOT_FOUND');
   }
+  if (catalogue.status === 'processing' || (catalogue.status as string) === 'deleting') {
+    throw new AppError('A source catalogue is being updated or deleted. Retry when it is ready.', 409, 'CATALOGUE_NOT_READY');
+  }
+  return catalogue;
 }
 
 interface EventData {
@@ -645,8 +649,9 @@ async function executeMergeOperation(
       }
 
       const catalogueIdStr = String(catalogue.id);
+      const sourceDocument = await loadSourceCatalogueDocument(catalogueIdStr);
       const eventsArray = await loadCompleteCatalogueEvents(catalogueIdStr);
-      const catalogueAgency = catalogueAgencyOf(catalogue, await loadSourceCatalogueDocument(catalogueIdStr));
+      const catalogueAgency = catalogueAgencyOf(catalogue, sourceDocument);
 
       // A loop, not push(...spread): spreading a whole source catalogue as function
       // arguments throws RangeError past the V8 argument limit (~131k), so a
@@ -666,6 +671,31 @@ async function executeMergeOperation(
     // Rows a 'hold' request kept back for review (M4); the merge page reports the count.
     const heldForReviewCount = mergedEvents.filter(e => e.review_status === 'pending').length;
 
+    const eventRows = mergedEvents.map(event => ({
+      ...buildMergedEventFields(event, OPTIONAL_DB_FIELDS),
+      id: exportOnly ? event.id || createId() : createId(),
+    } as Record<string, unknown> & { id: string }));
+
+    // Association has already decided which reports belong together. Two separate output
+    // groups can still carry the same source_id (for example, equally named CSV catalogues
+    // using independent row numbers, or revisions outside the matching window). The
+    // ingestion writer deduplicates those keys, so give EVERY colliding group its own
+    // merge identity. Keep the agency's original ID in source_events. Use the same rule
+    // for export and save, and retain this identity when a reviewer republishes a report.
+    const sourceIdCounts = new Map<string, number>();
+    for (const row of eventRows) {
+      if (typeof row.source_id === 'string') {
+        sourceIdCounts.set(row.source_id, (sourceIdCounts.get(row.source_id) ?? 0) + 1);
+      }
+    }
+    const reservedSourceIds = new Set(sourceIdCounts.keys());
+    for (const row of eventRows) {
+      if (typeof row.source_id !== 'string' || sourceIdCounts.get(row.source_id)! <= 1) continue;
+      while (reservedSourceIds.has(`merge-row:${row.id}`)) row.id = createId();
+      row.source_id = `merge-row:${row.id}`;
+      reservedSourceIds.add(row.source_id as string);
+    }
+
     if (exportOnly) {
       return {
         success: true,
@@ -673,10 +703,7 @@ async function executeMergeOperation(
         eventCount: mergedEvents.length,
         originalEventCount: allEvents.length,
         heldForReviewCount,
-        events: mergedEvents.map(e => ({
-          id: e.id || createId(),
-          ...buildMergedEventFields(e, OPTIONAL_DB_FIELDS),
-        })),
+        events: eventRows,
       };
     }
 
@@ -694,24 +721,23 @@ async function executeMergeOperation(
       source_events: string;
     }> = [];
 
-    for (const event of mergedEvents) {
-      dbEvents.push({
-        id: createId(),
-        catalogue_id: catalogueId,
-        ...buildMergedEventFields(event, OPTIONAL_DB_FIELDS),
-      } as any);
+    for (const event of eventRows) {
+      event.catalogue_id = catalogueId;
+      dbEvents.push(event as any);
     }
 
     // Bulk insert all events at once (Performance Optimization)
     // This is much faster than individual inserts and only triggers cache invalidation once.
     //
-    // Record what MongoDB actually WROTE, not what was submitted: bulkInsertEvents drops rows
-    // repeating a source_id within the batch and skips rows colliding with the
-    // (catalogue_id, source_id) unique index. Persisting mergedEvents.length instead would
-    // make every deduplicated row a phantom event in the merged catalogue's event_count.
+    // A fresh merged catalogue must retain EVERY output group. The generic ingestion
+    // writer may skip duplicate keys; a short write here is data loss, so throw inside the
+    // transaction and roll back instead of completing a catalogue unlike the preview.
     let insertedEventCount = 0;
     if (dbEvents.length > 0) {
       insertedEventCount = await dbQueries.bulkInsertEvents(dbEvents, session);
+    }
+    if (insertedEventCount !== dbEvents.length) {
+      throw new Error('Could not save every merged event; the merge was rolled back');
     }
 
     // Extract and update geographic bounds
@@ -2519,8 +2545,8 @@ const MAGNITUDE_META_FIELDS: ReadonlyArray<keyof MergedEvent> = [
   'magnitude_evaluation_status',
 ] as const;
 
-// Location-uncertainty fields that must travel with the LOCATION — not grafted from a
-// source whose coordinates differ from the merged (possibly averaged) location. The
+// Location-uncertainty fields belong to one origin solution. Equal rounded coordinates
+// do not justify grafting another report's uncertainties onto the published origin. The
 // ellipse's confidence level (C16) qualifies the same ellipse, so it travels with it.
 const LOCATION_META_FIELDS: ReadonlyArray<keyof MergedEvent> = [
   'latitude_uncertainty',
@@ -2608,41 +2634,12 @@ function unionMergeFields(
     }
   }
 
-  // Magnitude metadata: fill ONLY from a source reporting the SAME magnitude measurement —
-  // matching value AND type. Matching value alone is unsafe: a different, higher-quality
-  // source that merely happens to report the same numeric value (e.g. an Mw 5.0 vs the
-  // base's untyped 5.0) would otherwise graft its type onto the base's value and mislabel
-  // it. When the base has no type, only a same-value untyped source can enrich it.
-  const resultMagType = (result.magnitude_type ?? null) as string | null;
-  const magSource = result.magnitude != null
-    ? ranked.find(
-        src =>
-          src.magnitude != null &&
-          src.magnitude === result.magnitude &&
-          ((src.magnitude_type ?? null) as string | null) === resultMagType
-      )
-    : undefined;
-  if (magSource) {
-    for (const field of MAGNITUDE_META_FIELDS) {
-      if (result[field] == null && (magSource as any)[field] != null) {
-        (result as any)[field] = (magSource as any)[field];
-      }
-    }
-  }
-
-  // Location uncertainties: fill ONLY from the source whose coordinates match the merged
-  // location. For averaged locations no source matches, so these correctly stay unset
-  // rather than being attributed to a point no single source reported.
-  const locSource = ranked.find(
-    src => src.latitude === result.latitude && src.longitude === result.longitude
-  );
-  if (locSource) {
-    for (const field of LOCATION_META_FIELDS) {
-      if (result[field] == null && (locSource as any)[field] != null) {
-        (result as any)[field] = (locSource as any)[field];
-      }
-    }
-  }
+  // Magnitude and location metadata already came from the selected measurement through
+  // the strategy or field rule. Equal rounded magnitude/type or coordinates are common
+  // between independent solutions; they do not identify the same measurement. Filling
+  // gaps by numerical equality fabricated uncertainty, station counts and even mixed
+  // different reports' ellipses. Computed epicentres carry no report's location metadata,
+  // including when an average or median happens to coincide with a reported epicentre.
 
   // Depth metadata (DEPTH_META_FIELDS) is never filled from another report, not even one
   // stating the same depth value: fixed-depth conventions (10, 33 km) make equal depths
@@ -3913,7 +3910,7 @@ function getMagnitudePriority(magType: string | undefined, referenceMagnitude?: 
 interface SelectedMagnitude {
   value: number;
   type: string;
-  /** publicID of the QuakeML entry the value came from; null for a scalar column. */
+  /** publicID of the selected measurement, including a scalar's stored preferred ID. */
   publicID: string | null;
   uncertainty: number | null;
   stationCount: number | null;
@@ -4017,7 +4014,8 @@ function selectBestMagnitude(events: EventData[]): SelectedMagnitude {
           preferred: true,
           order: candidates.length,
           meta: {
-            publicID: null,
+            publicID: typeof event.preferred_magnitude_id === 'string' && event.preferred_magnitude_id
+              ? event.preferred_magnitude_id : null,
             uncertainty: event.magnitude_uncertainty ?? null,
             stationCount: event.magnitude_station_count ?? null,
             methodID: event.magnitude_method_id ?? null,
@@ -4927,9 +4925,10 @@ async function previewMergeWithAuthority(sourceCatalogues: SourceCatalogue[], co
   for (let i = 0; i < sourceCatalogues.length; i++) {
     const catalogue = sourceCatalogues[i];
     const catalogueIdStr = String(catalogue.id);
+    const sourceDocument = await loadSourceCatalogueDocument(catalogueIdStr);
     const eventsArray = await loadCompleteCatalogueEvents(catalogueIdStr);
     // The same agency identity the persist path uses, so preview and merge select alike.
-    const catalogueAgency = catalogueAgencyOf(catalogue, await loadSourceCatalogueDocument(catalogueIdStr));
+    const catalogueAgency = catalogueAgencyOf(catalogue, sourceDocument);
 
     // Assign color to catalogue
     catalogueColors[catalogueIdStr] = colors[i % colors.length];
@@ -5167,10 +5166,10 @@ function parseStoredSourceEvents(value: unknown): SourceEventEntry[] {
 export function rebuildMergedEventForReport(row: Record<string, unknown>, reportIndex: number): Record<string, unknown> {
   const entries = parseStoredSourceEvents(row.source_events);
   if (!Number.isInteger(reportIndex) || reportIndex < 0 || reportIndex >= entries.length) {
-    throw new Error(`No report ${reportIndex} in the merged event's provenance (${entries.length} reports)`);
+    throw new Error(`No entry ${reportIndex} in the merged event's provenance (${entries.length} entries)`);
   }
   if (entries[reportIndex].superseded) {
-    throw new Error(`Report ${reportIndex} is a superseded vintage of its agency's solution and cannot be published`);
+    throw new Error(`Entry ${reportIndex} is a superseded vintage of its agency's solution and cannot be published`);
   }
 
   const reports: EventData[] = entries.map(entry => ({
@@ -5200,7 +5199,13 @@ export function rebuildMergedEventForReport(row: Record<string, unknown>, report
   // The report may carry its own catalogue's review columns; the resolver writes this row's.
   clearReviewColumns(merged);
 
-  return buildMergedEventFields(merged, OPTIONAL_DB_FIELDS);
+  const fields = buildMergedEventFields(merged, OPTIONAL_DB_FIELDS);
+  // A collision-disambiguated row keeps its merge identity: restoring the report's raw
+  // key would recreate the collision when the held rows are resolved one by one.
+  if (typeof row.id === 'string' && row.source_id === `merge-row:${row.id}`) {
+    fields.source_id = row.source_id;
+  }
+  return fields;
 }
 
 export async function getMergedCatalogues() {

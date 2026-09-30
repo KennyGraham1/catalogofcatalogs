@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { validateMergeRequest, formatZodErrors } from '@/lib/validation';
 import { previewMerge } from '@/lib/merge';
 import { requireEditor } from '@/lib/auth/middleware';
+import { AppError } from '@/lib/errors';
 
 /**
  * POST /api/merge/preview
@@ -57,6 +58,13 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // Log the real error server-side; return a generic client-facing message.
     console.error('Merge preview error:', error);
+
+    if (error instanceof AppError && error.statusCode < 500) {
+      return NextResponse.json(
+        { error: error.message, code: error.code ?? 'PREVIEW_FAILED' },
+        { status: error.statusCode }
+      );
+    }
 
     const isNotFound = error instanceof Error && error.message.includes('not found');
 

@@ -114,7 +114,7 @@ describe('mergeCatalogues and previewMerge load the table once and run under it'
     db.getEventsByCatalogueIdCursor.mockImplementation(async (id: string) => ({
       data: rows[id] ?? [], pagination: { nextCursor: null, prevCursor: null, hasMore: false, limit: 10000 },
     }));
-    db.getCatalogueById.mockResolvedValue(undefined);
+    db.getCatalogueById.mockImplementation(async (id: string) => ({ id, status: 'complete' }));
     db.bulkInsertEvents.mockImplementation(async (saved: any[]) => saved.length);
   });
 

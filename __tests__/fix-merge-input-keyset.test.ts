@@ -26,7 +26,7 @@ function memoryCollection(rows: any[], onFind?: (findCount: number) => void) {
     );
   return {
     countDocuments: async (query: any) => rows.filter(r => matches(r, query)).length,
-    findOne: async () => null,
+    findOne: async (query: any) => query.id ? { id: query.id, status: 'complete' } : null,
     find: (query: any) => {
       finds++;
       onFind?.(finds);

@@ -103,7 +103,7 @@ describe('MergePreviewQC statistics', () => {
     render(
       <MergePreviewQC previewData={{ duplicateGroups: [heldGroup], statistics, catalogueColors: {} }} onProceedWithMerge={() => {}} onCancel={() => {}} />
     );
-    expect(screen.getByText("2 superseded reports (older vintages of one agency's solution)")).toBeInTheDocument();
+    expect(screen.getByText("2 superseded entries (older vintages of one agency's solution)")).toBeInTheDocument();
 
     cleanup();
     const { heldForReviewCount, supersededReportsCount, ...legacy } = statistics;
@@ -111,7 +111,7 @@ describe('MergePreviewQC statistics', () => {
     render(
       <MergePreviewQC previewData={{ duplicateGroups: [legacyGroup], statistics: legacy, catalogueColors: {} }} holdForReview onProceedWithMerge={() => {}} onCancel={() => {}} />
     );
-    expect(screen.queryByText(/superseded report/)).toBeNull();
+    expect(screen.queryByText(/superseded entr/)).toBeNull();
     expect(within(screen.getByText('Held for review').parentElement!).getByText('0')).toBeInTheDocument();
     expect(screen.queryByText('Held')).toBeNull();
   });
@@ -134,10 +134,10 @@ describe('MergePreviewQC separated reports', () => {
         onCancel={() => {}}
       />
     );
-    expect(screen.getByText(/1 report was matched but kept apart because its group failed validation/)).toBeInTheDocument();
+    expect(screen.getByText(/1 entry was matched but kept apart because its group failed validation/)).toBeInTheDocument();
     const tab = screen.getByRole('tab', { name: 'Separated (1)' });
     act(() => { fireEvent.mouseDown(tab, { button: 0, ctrlKey: false }); });
-    expect(screen.getByText('Single report')).toBeInTheDocument();
+    expect(screen.getByText('Single entry')).toBeInTheDocument();
     expect(screen.getByText('Separated')).toBeInTheDocument();
     expect(screen.getByText(/Reason: Large magnitude range/)).toBeInTheDocument();
     expect(screen.queryByText('GeoNet 2024')).toBeNull();

@@ -143,7 +143,7 @@ export function MergePreviewQC({ previewData, holdForReview = false, onProceedWi
 
           {(statistics.supersededReportsCount ?? 0) > 0 && (
             <p className="mt-3 text-sm text-muted-foreground">
-              {statistics.supersededReportsCount!.toLocaleString()} superseded {statistics.supersededReportsCount === 1 ? 'report' : 'reports'} (older vintages of one agency&apos;s solution)
+              {statistics.supersededReportsCount!.toLocaleString()} superseded {statistics.supersededReportsCount === 1 ? 'entry' : 'entries'} (older vintages of one agency&apos;s solution)
             </p>
           )}
 
@@ -151,7 +151,7 @@ export function MergePreviewQC({ previewData, holdForReview = false, onProceedWi
               their own; without this line the split would look like unrelated events. */}
           {(statistics.separatedReportsCount ?? 0) > 0 && (
             <p className="mt-3 text-sm text-muted-foreground">
-              {statistics.separatedReportsCount!.toLocaleString()} {statistics.separatedReportsCount === 1 ? 'report was' : 'reports were'} matched
+              {statistics.separatedReportsCount!.toLocaleString()} {statistics.separatedReportsCount === 1 ? 'entry was' : 'entries were'} matched
               but kept apart because {statistics.separatedReportsCount === 1 ? 'its group' : 'their groups'} failed validation;
               each is published on its own (see Separated).
             </p>

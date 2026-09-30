@@ -237,7 +237,7 @@ describe('POST /api/catalogues/[id]/review/[eventId]', () => {
   it.each([
     [404, 'Merged event not found', 'NOT_FOUND'],
     [409, 'Event is not pending review', 'NOT_PENDING'],
-    [400, 'Report 3 is superseded and cannot be published', 'BAD_REPORT'],
+    [400, 'Entry 3 is superseded and cannot be published', 'BAD_REPORT'],
   ])('maps the data layer\'s %s to the response and audits nothing', async (statusCode, message, code) => {
     resolveMock.mockRejectedValueOnce(new AppError(message, statusCode, code));
     const { status, body } = await decide({ choice: { report: 3 } });

@@ -22,6 +22,7 @@ function collectionOf(rows: any[]) {
         : fieldMatches(doc[key], condition)
     );
   return {
+    findOne: async (query: any) => ({ id: query.id, status: 'complete' }),
     countDocuments: async (query: any) => rows.filter(e => matches(e, query)).length,
     find: (query: any) => {
       let docs = rows.filter(e => matches(e, query));

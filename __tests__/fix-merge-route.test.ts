@@ -33,7 +33,7 @@ jest.mock('@/lib/db', () => ({
       }],
       pagination: { nextCursor: null, prevCursor: null, hasMore: false, limit: 10000 },
     })),
-    getCatalogueById: jest.fn(async () => undefined),
+    getCatalogueById: jest.fn(async (id: string) => ({ id, status: 'complete' })),
     bulkInsertEvents: jest.fn(async (rows: any[]) => rows.length),
     updateCatalogueGeoBounds: jest.fn(),
     updateCatalogueEventCount: jest.fn(),
@@ -42,6 +42,7 @@ jest.mock('@/lib/db', () => ({
 }));
 
 import { POST } from '@/app/api/merge/route';
+import { POST as previewPOST } from '@/app/api/merge/preview/route';
 import { dbQueries } from '@/lib/db';
 
 const db = dbQueries as unknown as Record<string, jest.Mock>;
@@ -67,6 +68,8 @@ const request = (config: Record<string, unknown> = {}, extra: Record<string, unk
 beforeEach(() => {
   auditInserts.length = 0;
   db.insertCatalogue.mockClear();
+  db.bulkInsertEvents.mockClear();
+  db.getCatalogueById.mockImplementation(async (id: string) => ({ id, status: 'complete' }));
 });
 
 describe('POST /api/merge', () => {
@@ -117,5 +120,22 @@ describe('POST /api/merge', () => {
     const response = await post(request({ priority: 'custom', priorityOrder: ['cat-b', 'cat-z'] }));
     expect(response.status).toBe(400);
     expect(db.insertCatalogue).not.toHaveBeenCalled();
+  });
+});
+
+
+describe.each([['save', POST], ['preview', previewPOST]] as const)('%s source validation', (_mode, handler) => {
+  it.each([
+    ['missing', undefined, 404, 'CATALOGUE_NOT_FOUND'],
+    ['processing', { id: 'cat-a', status: 'processing' }, 409, 'CATALOGUE_NOT_READY'],
+  ])('rejects a %s source with a useful client error', async (_label, catalogue, status, code) => {
+    db.getCatalogueById.mockResolvedValue(catalogue);
+    const response = await handler(new NextRequest('http://localhost/api/merge', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request()),
+    }));
+    expect(response.status).toBe(status);
+    expect(await response.json()).toMatchObject({ code });
+    expect(db.bulkInsertEvents).not.toHaveBeenCalled();
+    expect(auditInserts).toHaveLength(0);
   });
 });

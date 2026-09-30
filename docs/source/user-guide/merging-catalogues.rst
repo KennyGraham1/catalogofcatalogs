@@ -714,16 +714,16 @@ Reviewing held events
 
 A merged catalogue's page shows a **Needs review (N)** tab or section
 listing the pending events. Each entry shows the reasons it was held and a
-table of the contributing reports — catalogue/source, time, latitude,
-longitude, depth, magnitude and type, station count and azimuthal gap — with
-the provisional ``selected`` report marked and any superseded report greyed
-out (it cannot be published). Editors see two actions; viewers can inspect
+table of the contributing catalogue entries — catalogue/source, time,
+latitude, longitude, depth, magnitude and type, station count and azimuthal
+gap — with the provisional ``selected`` entry marked and any superseded entry
+greyed out (it cannot be published). Editors see two actions; viewers can inspect
 the queue but not resolve it:
 
-* **Publish this report** — the chosen report's solution is published
+* **Publish this solution** — the chosen entry's solution is published
   wholesale: its time, epicentre, depth, magnitude and *all* of its own
   metadata, with focal mechanisms per the merge's mechanism rule. The
-  ``source_events`` flags are rewritten so that this report is ``selected``
+  ``source_events`` flags are rewritten so that this entry is ``selected``
   (and supplies the depth and magnitude), the quality score and grade are
   recomputed, and the event records ``review_choice: report:<index>``.
 * **Keep provisional solution** — the row stays as the strategy produced it

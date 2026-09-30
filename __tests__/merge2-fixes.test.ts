@@ -4,8 +4,7 @@
  * Regression tests for the merge2 follow-up fixes:
  *  1. validateEventGroup's Mw-equivalence rescue must only apply to groups that actually
  *     MIX magnitude scales, and must not let conversion buy a looser threshold tier.
- *  2. executeMergeOperation must record the number of events MongoDB actually inserted,
- *     not the number submitted.
+ *  2. executeMergeOperation must reject a short write rather than silently losing events.
  *
  * Every expected value is derived by hand from the published relation / documented tier
  * table named in the comment, not by running the code and recording its output.
@@ -119,10 +118,10 @@ describe('validateEventGroup — Mw rescue applies only to mixed-scale groups', 
 });
 
 // ---------------------------------------------------------------------------
-// 2. executeMergeOperation — event_count is what was INSERTED, not what was submitted
+// 2. executeMergeOperation — every output group must be inserted
 // ---------------------------------------------------------------------------
 
-describe('mergeCatalogues — records inserted rows, not submitted rows', () => {
+describe('mergeCatalogues — requires every output row to be inserted', () => {
   const config: any = {
     timeThreshold: 30,
     distanceThreshold: 30,
@@ -158,18 +157,18 @@ describe('mergeCatalogues — records inserted rows, not submitted rows', () => 
     db.updateCatalogueStatus.mockResolvedValue(undefined);
   });
 
-  it('stores the count bulkInsertEvents reports, not the number of rows handed to it', async () => {
+  it('rejects a short insert so the transaction rolls back instead of losing a row', async () => {
     // One of the four rows collides with the (catalogue_id, source_id) unique index and is
     // skipped, so only three documents exist in the collection.
     db.bulkInsertEvents.mockResolvedValue(3);
 
-    const result: any = await mergeCatalogues('merged', sourceCatalogues, config, undefined, false);
+    await expect(mergeCatalogues('merged', sourceCatalogues, config, undefined, false))
+      .rejects.toThrow('Could not save every merged event');
 
     expect(db.bulkInsertEvents).toHaveBeenCalledTimes(1);
     expect(db.bulkInsertEvents.mock.calls[0][0]).toHaveLength(4); // four rows submitted
-    expect(db.updateCatalogueEventCount).toHaveBeenCalledWith(expect.any(String), 3, { id: 'session' });
-    expect(result.eventCount).toBe(3);
-    expect(result.originalEventCount).toBe(4);
+    expect(db.updateCatalogueEventCount).not.toHaveBeenCalled();
+    expect(db.updateCatalogueStatus).not.toHaveBeenCalled();
   });
 
   it('reports every row when nothing is deduplicated', async () => {

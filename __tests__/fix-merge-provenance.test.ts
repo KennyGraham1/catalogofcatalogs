@@ -65,7 +65,7 @@ beforeEach(() => {
     data: rowsOf[id] ?? [],
     pagination: { nextCursor: null, prevCursor: null, hasMore: false, limit: 10000 },
   }));
-  db.getCatalogueById.mockResolvedValue(undefined);
+  db.getCatalogueById.mockImplementation(async (id: string) => ({ id, status: 'complete' }));
   db.bulkInsertEvents.mockImplementation(async (rows: any[]) => rows.length);
 });
 

@@ -133,15 +133,15 @@ describe('listing', () => {
     expect(superseded).toHaveAttribute('aria-disabled', 'true');
     expect(superseded.className).toContain('opacity-50');
     expect(within(superseded).getByText('Superseded')).toBeInTheDocument();
-    expect(within(superseded).queryByRole('button', { name: 'Publish this report' })).toBeNull();
+    expect(within(superseded).queryByRole('button', { name: 'Publish this solution' })).toBeNull();
     // The two live reports each have one.
-    expect(within(card).getAllByRole('button', { name: 'Publish this report' })).toHaveLength(2);
+    expect(within(card).getAllByRole('button', { name: 'Publish this solution' })).toHaveLength(2);
     expect(within(card).getByRole('button', { name: 'Keep provisional solution' })).toBeInTheDocument();
   });
 
   it('shows no decision buttons to a viewer', async () => {
     await renderQueue(false);
-    expect(screen.queryByRole('button', { name: 'Publish this report' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Publish this solution' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Keep provisional solution' })).toBeNull();
     expect(screen.getAllByText('Superseded')).toHaveLength(2);
   });
@@ -166,10 +166,10 @@ describe('listing', () => {
     fireEvent.click(screen.getByRole('button', { name: /Resolved \(1\)/ }));
     const card = await screen.findByTestId('review-event-evt-0');
     expect(getCalls().filter(c => c.url.searchParams.get('status') === 'resolved')).toHaveLength(1);
-    expect(within(card).getByTestId('review-decision')).toHaveTextContent('Decision: published the USGS ComCat report');
+    expect(within(card).getByTestId('review-decision')).toHaveTextContent('Decision: published the USGS ComCat solution');
     expect(within(card).getByTestId('review-decision')).toHaveTextContent('by kenny');
     expect(within(card).getByText('Published')).toBeInTheDocument();
-    expect(within(card).queryByRole('button', { name: 'Publish this report' })).toBeNull();
+    expect(within(card).queryByRole('button', { name: 'Publish this solution' })).toBeNull();
   });
 
   it('shows the server\'s error when the queue cannot be loaded', async () => {
@@ -184,7 +184,7 @@ describe('deciding', () => {
     await renderQueue();
     const card = screen.getByTestId('review-event-evt-1');
     const second = within(card).getByTestId('review-report-evt-1-1');
-    fireEvent.click(within(second).getByRole('button', { name: 'Publish this report' }));
+    fireEvent.click(within(second).getByRole('button', { name: 'Publish this solution' }));
 
     await waitFor(() => expect(screen.queryByTestId('review-event-evt-1')).toBeNull());
     expect(postCalls()).toHaveLength(1);

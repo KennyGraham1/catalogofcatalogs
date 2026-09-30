@@ -215,7 +215,7 @@ function ReviewEventCard({ event, canReview, busy, catalogueNames, onResolve }: 
             {event.review_choice === 'keep'
               ? 'Decision: kept the provisional solution'
               : chosenReport
-                ? `Decision: published the ${reportLabel(chosenReport, catalogueNames)} report`
+                ? `Decision: published the ${reportLabel(chosenReport, catalogueNames)} solution`
                 : `Decision: ${event.review_choice ?? 'unknown'}`}
             {event.reviewed_at ? ` · ${formatOriginTime(event.reviewed_at)}` : ''}
             {event.reviewed_by ? ` · by ${event.reviewed_by}` : ''}
@@ -273,8 +273,8 @@ function ReviewEventCard({ event, canReview, busy, catalogueNames, onResolve }: 
                       {superseded && <Badge variant="outline">Superseded</Badge>}
                       {report.selected && (
                         <Badge variant="outline" title={pending
-                          ? 'The report whose solution the merge strategy published provisionally'
-                          : 'The report whose solution is published'}>
+                          ? 'The entry whose solution the merge strategy published provisionally'
+                          : 'The entry whose solution is published'}>
                           {pending ? 'Provisional' : 'Selected'}
                         </Badge>
                       )}
@@ -288,9 +288,9 @@ function ReviewEventCard({ event, canReview, busy, catalogueNames, onResolve }: 
                           size="sm"
                           disabled={busy}
                           onClick={() => onResolve(event, { report: index })}
-                          title="Publish this report's solution and metadata for the merged event"
+                          title="Publish this entry's solution and its metadata for the merged event"
                         >
-                          Publish this report
+                          Publish this solution
                         </Button>
                       )}
                     </TableCell>
@@ -421,7 +421,7 @@ export function ReviewQueue({ catalogueId, canReview, catalogueNames }: ReviewQu
         title: 'Review recorded',
         description: choice === 'keep'
           ? 'The provisional solution is now published.'
-          : `Report ${choice.report + 1} is now the published solution.`,
+          : `Entry ${choice.report + 1} is now the published solution.`,
       });
     } catch (err) {
       toast({
@@ -446,7 +446,7 @@ export function ReviewQueue({ catalogueId, canReview, catalogueNames }: ReviewQu
         <CardDescription>
           Merged events whose group was flagged during the merge and held instead of published.
           {canReview
-            ? ' Publish one report wholesale, or keep the solution the strategy produced.'
+            ? ' Publish one entry\'s solution, or keep the solution the strategy produced.'
             : ' Editors decide which solution is published.'}
         </CardDescription>
       </CardHeader>

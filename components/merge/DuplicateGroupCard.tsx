@@ -81,7 +81,7 @@ export function DuplicateGroupCard({ group, groupIndex, catalogueColors, onViewO
                 Group #{groupIndex + 1}
               </CardTitle>
               <Badge variant={groupSize === 2 ? 'default' : groupSize === 3 ? 'secondary' : 'destructive'}>
-                {groupSize === 1 ? 'Single report' : groupSize === 2 ? 'Duplicate' : groupSize === 3 ? 'Triplicate' : `${groupSize}× Match`}
+                {groupSize === 1 ? 'Single entry' : groupSize === 2 ? 'Duplicate' : groupSize === 3 ? 'Triplicate' : `${groupSize}× Match`}
               </Badge>
               {group.isSuspicious && (
                 <Badge variant="outline" className="border-orange-500 text-orange-700">
@@ -90,7 +90,7 @@ export function DuplicateGroupCard({ group, groupIndex, catalogueColors, onViewO
                 </Badge>
               )}
               {group.separated && (
-                <Badge variant="outline" className="border-orange-500 text-orange-700" title="Matched with another report, then kept apart because the group failed validation">
+                <Badge variant="outline" className="border-orange-500 text-orange-700" title="Matched with another entry, then kept apart because the group failed validation">
                   <AlertTriangle className="h-3 w-3 mr-1" />
                   Separated
                 </Badge>
@@ -98,7 +98,7 @@ export function DuplicateGroupCard({ group, groupIndex, catalogueColors, onViewO
               {/* The Average Values strategy publishes an epicentre no single report located,
                   so no report is selected (selectedEventIndex -1). */}
               {group.selectedEventIndex < 0 && groupSize > 1 && (
-                <Badge variant="outline" title="No single report is kept: the epicentre is averaged across the reports">
+                <Badge variant="outline" title="No single entry's solution is used: the epicentre is computed from all entries">
                   Averaged
                 </Badge>
               )}
