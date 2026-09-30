@@ -6,7 +6,7 @@ jest.mock('@/hooks/use-cached-fetch',()=>({useCachedFetch:()=>({data:catalogues,
 jest.mock('next/dynamic',()=>()=>function MockMap({earthquakes}:any){return <div data-testid="map">{earthquakes.length}</div>});
 jest.mock('@/hooks/use-seismological-worker',()=>({useSeismologicalAnalyses:()=>({grAnalysis:{data:null},completeness:{data:null},temporalAnalysis:{data:null},timeSeriesAnalysis:{data:null},momentAnalysis:{data:null}})}));
 jest.mock('@/components/charts',()=>({
- ...Object.fromEntries(['MagnitudeDistributionChart','DepthDistributionChart','RegionDistributionChart','CatalogueDistributionChart','MagnitudeDepthScatter','EventTimelineChart','GutenbergRichterChart','CompletenessChart','TemporalSeriesChart','MomentReleaseChart','MagnitudeTimeScatter','CumulativeReleaseChart','GoodnessOfFitChart'].map(n=>[n,()=>null])),
+ ...Object.fromEntries(['MagnitudeDistributionChart','DepthDistributionChart','RegionDistributionChart','CatalogueDistributionChart','MagnitudeDepthScatter','EventTimelineChart','GutenbergRichterChart','CompletenessChart','TemporalSeriesChart','MomentReleaseChart','MagnitudeTimeScatter','CumulativeReleaseChart','GoodnessOfFitChart','BValueStabilityChart'].map(n=>[n,()=>null])),
  MFDComparisonChart:({catalogues}:any)=><pre data-testid="mfd">{JSON.stringify(catalogues.map((c:any)=>({id:c.catalogueId,total:c.totalEvents,histogramTotal:c.histogram.reduce((sum:number,d:any)=>sum+d.count,0)})))}</pre>
 }));
 const originalFetch=global.fetch;

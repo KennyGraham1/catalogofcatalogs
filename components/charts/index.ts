@@ -13,6 +13,7 @@ export {
   MomentReleaseChart,
   CumulativeReleaseChart,
   GoodnessOfFitChart,
+  BValueStabilityChart,
   MFDComparisonChart,
 } from './ScienceCharts';
-export type { GRResult, MFDCatalogue, ReleasePoint } from './ScienceCharts';
+export type { GRResult, MFDCatalogue, ReleasePoint, BValueStabilityPoint } from './ScienceCharts';

@@ -51,7 +51,12 @@ function mockUser(id: string) {
 function makeRealisticCollection() {
   const docs: Array<Record<string, unknown>> = [];
   const matches = (doc: Record<string, unknown>, query: Record<string, unknown>) =>
-    Object.entries(query).every(([k, v]) => doc[k] === v);
+    Object.entries(query).every(([k, v]) => {
+      if (v && typeof v === 'object' && '$gt' in v) {
+        return doc[k] instanceof Date && v.$gt instanceof Date && (doc[k] as Date) > v.$gt;
+      }
+      return doc[k] === v;
+    });
 
   return {
     docs,
@@ -255,7 +260,7 @@ describe('POST /api/upload/chunk — chunkIndex validation', () => {
 // ---------------------------------------------------------------------------
 
 describe('Upload session ownership end-to-end', () => {
-  it('a session created by one user cannot receive chunks posted by another', async () => {
+  it('accepts chunks only for the owner while the session is unexpired', async () => {
     const collection = makeRealisticCollection();
     (getCollection as jest.Mock).mockResolvedValue(collection);
 
@@ -278,5 +283,12 @@ describe('Upload session ownership end-to-end', () => {
     mockUser('user-a');
     const okRes = await chunkPOST(chunkFormRequest({ sessionId, chunkIndex: '0', chunk: new Blob(['x']) }));
     expect(okRes.status).toBe(200);
+
+    // TTL cleanup has not run yet, but the expired session must not be revived.
+    collection.docs.find(doc => doc.chunk_index === -1)!.expires_at = new Date(Date.now() - 1);
+    const writesBefore = collection.replaceOne.mock.calls.length;
+    const expiredRes = await chunkPOST(chunkFormRequest({ sessionId, chunkIndex: '0', chunk: new Blob(['x']) }));
+    expect(expiredRes.status).toBe(404);
+    expect(collection.replaceOne).toHaveBeenCalledTimes(writesBefore);
   });
 });

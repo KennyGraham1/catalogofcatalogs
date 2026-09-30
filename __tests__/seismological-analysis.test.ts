@@ -103,7 +103,9 @@ describe('Completeness Magnitude Estimation', () => {
     
     expect(result.mc).toBeGreaterThan(0);
     expect(result.mc).toBeLessThan(10);
-    expect(result.method).toBe('MAXC');
+    // b-value stability is the default method (falling back to GFT, then MAXC).
+    expect(result.requestedMethod).toBe('MBS');
+    expect(result.method).toBe('MBS');
     expect(result.confidence).toBeGreaterThan(0);
     expect(result.confidence).toBeLessThanOrEqual(1);
     expect(result.magnitudeDistribution.length).toBeGreaterThan(0);

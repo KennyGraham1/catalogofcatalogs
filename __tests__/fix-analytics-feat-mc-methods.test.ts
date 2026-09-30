@@ -2,8 +2,10 @@
  * A2 items 1 and 2: the MAXC correction is adjustable (paper, sec:mc: "+0.2 correction
  * by default, which users can adjust") and the goodness-of-fit test (GFT; Wiemer & Wyss,
  * 2000) is available as an Mc method beside MAXC (docs, visualization.rst "Completeness
- * Magnitude"). Both run through the library AND the worker the Analytics page uses, which
- * must agree exactly; the worker is driven through its own `self.onmessage`.
+ * Magnitude"). b-value stability (MBS) is the default method, so the MAXC tests choose
+ * MAXC explicitly (MBS itself: __tests__/fix-science-mc-stability.test.ts). Both run
+ * through the library AND the worker the Analytics page uses, which must agree exactly;
+ * the worker is driven through its own `self.onmessage`.
  *
  * Expected values come from the construction of each catalogue, or from an independent
  * re-derivation of the GFT statistic written out in this file; never from running the
@@ -87,33 +89,33 @@ describe('item 1: the MAXC correction is adjustable and reported', () => {
   const events = completeFromTwo();
 
   it('defaults to +0.2 and reports the value used, in the library and the worker', () => {
-    const lib = estimateCompletenessMagnitude(events);
+    const lib = estimateCompletenessMagnitude(events, undefined, undefined, { method: 'MAXC' });
     // Modal bin M2.0 (2000 events) + 0.2.
     expect(lib.mc).toBeCloseTo(2.2, 10);
     expect(lib.maxcCorrection).toBe(0.2);
     expect(DEFAULT_MAXC_CORRECTION).toBe(0.2);
     expect(lib.method).toBe('MAXC');
-    const worker = loadWorker()({ type: 'completeness', events });
+    const worker = loadWorker()({ type: 'completeness', events, mcMethod: 'MAXC' });
     expect(worker.mc).toBe(lib.mc);
     expect(worker.maxcCorrection).toBe(0.2);
   });
 
   it.each([0, 0.1, 0.3, 0.5])('applies a correction of +%s to the modal bin in both copies', correction => {
     const expected = Number((2.0 + correction).toFixed(2));
-    const lib = estimateCompletenessMagnitude(events, 0.1, correction);
+    const lib = estimateCompletenessMagnitude(events, 0.1, correction, { method: 'MAXC' });
     expect(lib.mc).toBe(expected);
     expect(lib.maxcCorrection).toBe(correction);
-    const worker = loadWorker()({ type: 'completeness', events, maxcCorrection: correction });
+    const worker = loadWorker()({ type: 'completeness', events, mcMethod: 'MAXC', maxcCorrection: correction });
     expect(worker.mc).toBe(expected);
     expect(worker.maxcCorrection).toBe(correction);
   });
 
   it('feeds the G-R fit, which reports the correction and the method behind its Mc', () => {
-    const lib = calculateGutenbergRichter(events, undefined, 0.1, { maxcCorrection: 0.3 });
+    const lib = calculateGutenbergRichter(events, undefined, 0.1, { method: 'MAXC', maxcCorrection: 0.3 });
     expect(lib.completeness).toBe(2.3);
     expect(lib.mcSource).toBe('MAXC');
     expect(lib.maxcCorrection).toBe(0.3);
-    const worker = loadWorker()({ type: 'gutenberg-richter', events, maxcCorrection: 0.3 });
+    const worker = loadWorker()({ type: 'gutenberg-richter', events, mcMethod: 'MAXC', maxcCorrection: 0.3 });
     expect(worker.completeness).toBe(2.3);
     expect(worker.mcSource).toBe('MAXC');
     expect(worker.maxcCorrection).toBe(0.3);
@@ -252,9 +254,10 @@ describe('item 2: the goodness-of-fit test (Wiemer & Wyss, 2000)', () => {
   it('keys the worker cache on the Mc settings', () => {
     const run = loadWorker();
     const events = completeFromTwo();
-    expect(run({ type: 'completeness', events }).mc).toBeCloseTo(2.2, 10);
+    expect(run({ type: 'completeness', events, mcMethod: 'MAXC' }).mc).toBeCloseTo(2.2, 10);
     // Same events, different settings: must not be answered from the first result.
-    expect(run({ type: 'completeness', events, maxcCorrection: 0.1 }).mc).toBeCloseTo(2.1, 10);
-    expect(run({ type: 'completeness', events, mcMethod: 'GFT' }).mc).toBe(2.0);
+    expect(run({ type: 'completeness', events, mcMethod: 'MAXC', maxcCorrection: 0.1 }).mc).toBeCloseTo(2.1, 10);
+    expect(run({ type: 'completeness', events, mcMethod: 'GFT' }).method).toBe('GFT');
+    expect(run({ type: 'completeness', events }).method).toBe('MBS');
   });
 });

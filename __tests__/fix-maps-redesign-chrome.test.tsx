@@ -27,6 +27,9 @@ jest.mock('react-leaflet', () => ({
   CircleMarker: (props: any) => { markerRender(props); return <button data-testid="marker" onClick={props.eventHandlers?.click}>Event</button>; },
   Popup: ({ children }: any) => <div data-testid="popup">{children}</div>,
 }));
+// EarthquakeCircleMap draws the active faults by default; there is no fault file under jsdom,
+// and these tests do not look at faults: a load that never settles adds no state update.
+jest.mock('@/lib/fault-data', () => ({ loadFaultData: jest.fn(() => new Promise(() => {})) }));
 jest.mock('@/components/map/MapLayerControl', () => ({ MapLayerControl: () => null }));
 let mockIsDark = false;
 jest.mock('@/hooks/use-map-theme', () => ({ useMapColors: () => ({ isDark: mockIsDark, markerOpacity: 0.78 }) }));

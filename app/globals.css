@@ -215,6 +215,55 @@ div.leaflet-container {
 }
 .leaflet-container .leaflet-popup a.leaflet-popup-close-button:hover { color: hsl(var(--foreground)); }
 
+/* Fractional zoom (MAP_ZOOM_OPTIONS.zoomSnap 0.25) scales the tile grid, so tile edges fall
+   at sub-pixel positions and their anti-aliased edges let the background through as
+   hairline seams. Leaflet 1.9.4 adds the neighbours' edges instead (mix-blend-mode:
+   plus-lighter, Chromium issue 600120), but that draws a bright line wherever Chromium
+   overlaps two tiles. Here each base tile blends normally and is drawn 1 px larger than
+   its 256 px cell (a 0.4% stretch), so neighbours always overlap. The container is also
+   painted in the active basemap's ocean colour (BaseLayerConfig.background). Measured in
+   Chromium at zoom 5.75, this leaves no seam over land or sea. The label pane keeps
+   Leaflet's rule: its tiles are transparent. */
+.leaflet-container .leaflet-tile-pane img.leaflet-tile {
+  mix-blend-mode: normal;
+  width: 257px !important;
+  height: 257px !important;
+}
+
+/* Event hover card (lib/map-event-card.ts): the summary shown while pointing at an event. */
+.leaflet-container .leaflet-tooltip.eq-hover-card {
+  padding: 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px);
+  background-color: hsl(var(--popover) / 0.97);
+  color: hsl(var(--popover-foreground));
+  box-shadow: 0 6px 16px -4px rgb(0 0 0 / 0.22);
+  white-space: normal;
+  pointer-events: none;
+}
+.leaflet-container .leaflet-tooltip.eq-hover-card::before { display: none; }
+.eq-card { width: 268px; padding: 10px 12px 9px; font-size: 12px; line-height: 1.35; }
+.eq-card-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.eq-card-rows { display: grid; gap: 2px; }
+.eq-card-row { display: flex; justify-content: space-between; gap: 12px; }
+.eq-card-label { color: hsl(var(--muted-foreground)); white-space: nowrap; }
+.eq-card-value { text-align: right; font-variant-numeric: tabular-nums; }
+.eq-card-gap-good { color: #0f766e; }
+.eq-card-gap-fair { color: #b45309; }
+.eq-card-gap-poor { color: #c2410c; }
+.dark .eq-card-gap-good { color: #2dd4bf; }
+.dark .eq-card-gap-fair { color: #fbbf24; }
+.dark .eq-card-gap-poor { color: #fb923c; }
+.eq-card-footer {
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px solid hsl(var(--border));
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.eq-card-muted, .eq-card-id { color: hsl(var(--muted-foreground)); }
+.eq-card-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; margin-top: 1px; }
+
 .dark .leaflet-draw-toolbar a {
   background-color: hsl(var(--card));
   border-color: hsl(var(--border));

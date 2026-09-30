@@ -112,7 +112,8 @@ describe('the rate series counts events at or above Mc', () => {
   /**
    * 1000 events on the 0.1 grid, one per hour from 1 Mar 2024: 300 at M1.0 (under-
    * detected), 400 at M1.2 (the fullest bin), then a declining tail. MAXC + 0.2 = 1.4,
-   * so the rate counts the events at M1.4 and above.
+   * so with MAXC chosen the rate counts the events at M1.4 and above. (The catalogue is
+   * built around its MAXC peak, so these tests choose MAXC; the default is MBS.)
    */
   function catalogue(): EarthquakeEvent[] {
     const magnitudes = [
@@ -127,8 +128,8 @@ describe('the rate series counts events at or above Mc', () => {
 
   it('uses the estimated Mc as the threshold, stating the method', () => {
     const events = catalogue();
-    const result = bothCopies(events);
-    expect(estimateCompletenessMagnitude(events).mc).toBeCloseTo(1.4, 10);
+    const result = bothCopies(events, { mcMethod: 'MAXC' });
+    expect(estimateCompletenessMagnitude(events, 0.1, 0.2, { method: 'MAXC' }).mc).toBeCloseTo(1.4, 10);
     expect(result.rate.threshold).toBeCloseTo(1.4, 10);
     expect(result.rate.thresholdSource).toBe('mc');
     expect(result.rate.mcMethod).toBe('MAXC');
@@ -142,9 +143,19 @@ describe('the rate series counts events at or above Mc', () => {
   });
 
   it('follows the Mc settings: a +0.4 correction raises the threshold to 1.6', () => {
-    const result = bothCopies(catalogue(), { maxcCorrection: 0.4 });
+    const result = bothCopies(catalogue(), { mcMethod: 'MAXC', maxcCorrection: 0.4 });
     expect(result.rate.threshold).toBeCloseTo(1.6, 10);
     expect(result.rate.eventCount).toBe(40 + 20 + 10);
+  });
+
+  it('estimates the threshold by b-value stability by default, as the Mc tab does', () => {
+    const events = catalogue();
+    const result = bothCopies(events);
+    const mc = estimateCompletenessMagnitude(events);
+    expect(result.rate.requestedMcMethod).toBe('MBS');
+    expect(result.rate.mcMethod).toBe(mc.method);
+    expect(result.rate.threshold).toBe(mc.mc);
+    expect(result.rate.eventCount).toBe(mc.eventsAboveMc);
   });
 
   it("uses the user's explicit cut-off instead of an estimate", () => {
@@ -166,7 +177,7 @@ describe('the rate series counts events at or above Mc', () => {
 
   it('places no event without a valid origin time, and counts it', () => {
     const events = [...catalogue(), { ...event('2024-03-02T00:00:00Z', 5.0), time: 'not a time' }];
-    const result = bothCopies(events);
+    const result = bothCopies(events, { mcMethod: 'MAXC' });
     expect(result.untimedEvents).toBe(1);
     expect(result.rate.bins.reduce((s, b) => s + b.count, 0)).toBe(150);
   });

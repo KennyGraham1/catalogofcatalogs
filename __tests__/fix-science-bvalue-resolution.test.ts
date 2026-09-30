@@ -82,9 +82,9 @@ function asEvents(mags: number[]): EarthquakeEvent[] {
 }
 
 /** Runs the same fit through the library and the worker and checks they agree exactly. */
-function fitBoth(events: EarthquakeEvent[], minMagnitude?: number) {
-  const lib = calculateGutenbergRichter(events, minMagnitude);
-  const worker = loadWorker()({ type: 'gutenberg-richter', events, minMagnitude });
+function fitBoth(events: EarthquakeEvent[], minMagnitude?: number, mcMethod?: 'MAXC' | 'GFT' | 'MBS') {
+  const lib = calculateGutenbergRichter(events, minMagnitude, 0.1, { method: mcMethod });
+  const worker = loadWorker()({ type: 'gutenberg-richter', events, minMagnitude, mcMethod });
   expect(worker.error).toBeUndefined();
   expect(worker.bValue).toBeCloseTo(lib.bValue, 12);
   expect(worker.completeness).toBe(lib.completeness);
@@ -121,9 +121,9 @@ describe('b-value binning correction follows the reporting resolution of the mag
     expect(result.binningCorrection).toBeCloseTo(0.05, 12);
   });
 
-  it('recovers b on the automatic MAXC path for continuous magnitudes', () => {
-    // A detection roll-off below M2.0 gives MAXC a peak; the complete part above it
-    // is continuous. The UI never passes a cut-off, so this is the Analytics path.
+  it('recovers b on the automatic Mc paths for continuous magnitudes', () => {
+    // A detection roll-off below M2.0 under a law complete from M2.0; the complete part
+    // above it is continuous. The UI never passes a cut-off, so this is the Analytics path.
     const rng = mulberry32(14);
     const tail: number[] = [];
     for (let i = 0; i < 20000; i++) {
@@ -131,12 +131,26 @@ describe('b-value binning correction follows the reporting resolution of the mag
       // Detection probability rises from 0 at M1.0 to 1 at M2.0.
       if (rng() < m - 1.0) tail.push(m);
     }
-    const result = fitBoth(asEvents([...grMagnitudes(15, MC, 0), ...tail]));
-    // MAXC (peak bin 2.0) + 0.2.
-    expect(result.completeness).toBeCloseTo(2.2, 10);
-    const nAboveMc = Math.round(N * Math.pow(10, -B_TRUE * 0.2));
-    expect(Math.abs(result.bValue - B_TRUE)).toBeLessThan((3 * B_TRUE) / Math.sqrt(nAboveMc));
-    expect(result.binningCorrection).toBeLessThan(1e-6);
+    const events = asEvents([...grMagnitudes(15, MC, 0), ...tail]);
+    const recovered = (result: ReturnType<typeof fitBoth>) => {
+      const nAboveMc = Math.round(N * Math.pow(10, -B_TRUE * (result.completeness - MC)));
+      expect(Math.abs(result.bValue - B_TRUE)).toBeLessThan((3 * B_TRUE) / Math.sqrt(nAboveMc));
+      expect(result.binningCorrection).toBeLessThan(1e-6);
+    };
+    // MAXC on bins centred on the 0.1 grid: [2.05, 2.15) holds 40000 (10^-0.05 - 10^-0.15)
+    // = 7,332 events, more than [1.95, 2.05) (4,350 at M2.0 and above plus ~975 of the
+    // roll-off) or [2.15, 2.25) (5,824), so the peak is 2.1 and Mc = 2.1 + 0.2. (Binned
+    // by lower edge the peak was [2.0, 2.1), labelled 2.0, and Mc 2.2.)
+    const maxc = fitBoth(events, undefined, 'MAXC');
+    expect(maxc.completeness).toBeCloseTo(2.3, 10);
+    recovered(maxc);
+    // b-value stability, the default, keeps a cut-off at or above the true Mc and at most
+    // 0.3 above it (with 40,000 events db is ~0.005, so the stable plateau is narrow).
+    const mbs = fitBoth(events);
+    expect(mbs.mcSource).toBe('MBS');
+    expect(mbs.completeness).toBeGreaterThanOrEqual(MC);
+    expect(mbs.completeness).toBeLessThanOrEqual(MC + 0.3 + 1e-9);
+    recovered(mbs);
   });
 
   it('weights the correction by share when a catalogue mixes resolutions', () => {

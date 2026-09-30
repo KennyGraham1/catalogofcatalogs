@@ -174,6 +174,8 @@ export interface PasswordResetToken {
   id: string;
   user_id: string;
   token_hash: string;
+  /** Credential version at issuance; legacy tokens belong to version zero. */
+  jwt_version?: number;
   created_at: string;
   expires_at: Date;
   used_at?: Date | null;

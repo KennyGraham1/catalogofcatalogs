@@ -48,6 +48,9 @@ jest.mock('react-leaflet', () => {
   };
 });
 // The react-leaflet layer control is stubbed; the QC map uses the real attachBaseLayers.
+// EarthquakeCircleMap draws the active faults by default; there is no fault file under jsdom,
+// and these tests do not look at faults: a load that never settles adds no state update.
+jest.mock('@/lib/fault-data', () => ({ loadFaultData: jest.fn(() => new Promise(() => {})) }));
 jest.mock('@/components/map/MapLayerControl', () => ({
   ...jest.requireActual('@/components/map/MapLayerControl'),
   MapLayerControl: () => null,

@@ -502,7 +502,8 @@ export class GeoNetImportService {
     // the CATALOGUE:
     // * `errors` — the STORED catalogue is not the import it claims to be: a window
     // GeoNet truncated at its result-set cap (events silently missing) or a bulk
-    // insert that never reached the collection. Only these mark the catalogue `error`.
+    // insert that never reached the collection, or failed metadata updates.
+    // These mark the catalogue `error`.
     // * `eventIssues` — per-event problems: a record that fails validation and is
     // skipped. They are reported, and they make `success` false, but the catalogue
     // itself is still what it claims to be.
@@ -579,7 +580,9 @@ export class GeoNetImportService {
       // Mark the target catalogue in-progress for the duration of the run; the final
       // status is derived from `errors` below (matches the upload path in
       // app/api/catalogues/route.ts, which is the only other writer of this field).
-      await this.setCatalogueStatus(catalogueId, 'processing', runId);
+      if (!await this.setCatalogueStatus(catalogueId, 'processing', runId)) {
+        throw new Error(`Catalogue ${catalogueId} no longer available for import`);
+      }
 
       // 3. Process events with bulk insert optimization
       const result = await this.processEventsBulk(events, catalogueId, options.updateExisting || false);
@@ -607,7 +610,7 @@ export class GeoNetImportService {
             // (plain Math.min/Math.max on longitude would destroy the west>east crossing
             // convention). Reading, merging and writing back here let two imports into
             // one catalogue each write union(own, old), losing the other's extension.
-            await getDbQueries().updateCatalogueGeoBounds(
+            const boundsUpdated = await getDbQueries().updateCatalogueGeoBounds(
               catalogueId,
               importedEventsBounds.minLatitude,
               importedEventsBounds.maxLatitude,
@@ -616,6 +619,7 @@ export class GeoNetImportService {
               undefined,
               { merge: true }
             );
+            if (boundsUpdated === false) throw new Error('Catalogue no longer available for bounds update');
             console.log(`[GeoNetImportService] Updated geographic bounds for catalogue ${catalogueId}`);
           }
         }
@@ -625,11 +629,12 @@ export class GeoNetImportService {
         // `newEvents > 0` guard: a run whose inserts all failed must still write the
         // true count instead of leaving a stale one on a catalogue it just touched.
         const actualCount = await getDbQueries().countEventsByCatalogue(catalogueId);
-        await getDbQueries().updateCatalogueEventCount(catalogueId, actualCount);
+        const countUpdated = await getDbQueries().updateCatalogueEventCount(catalogueId, actualCount);
+        if (countUpdated === false) throw new Error('Catalogue no longer available for event count update');
         console.log(`[GeoNetImportService] Updated event count for catalogue ${catalogueId}: ${actualCount} (+${newEvents} this run)`);
       } catch (error) {
         console.error(`[GeoNetImportService] Failed to update catalogue metadata:`, error);
-        // Don't fail the import if metadata update fails
+        errors.push(`Failed to update catalogue metadata: ${error instanceof Error ? error.message : String(error)}`);
       }
 
       // Everything the caller and the import history are told about, in one list.
@@ -654,7 +659,12 @@ export class GeoNetImportService {
       // Events skipped for invalid data are a property of the SOURCE data, not of the
       // catalogue: condemning the whole catalogue for one bad record in 100,000 hid
       // otherwise successful imports behind a broken-looking status.
-      await this.setCatalogueStatus(catalogueId, errors.length === 0 ? 'complete' : 'error', runId);
+      const statusUpdated = await this.setCatalogueStatus(catalogueId, errors.length === 0 ? 'complete' : 'error', runId);
+      if (!statusUpdated) {
+        // A newer run may own completion now. Report that this run could not
+        // publish its status without falsely marking the newer run as failed.
+        reportedIssues.push('Catalogue status was not updated; the catalogue was removed or the import was superseded');
+      }
 
       console.log(
         `[GeoNetImportService] Import complete: ${newEvents} new, ${updatedEvents} updated, ${skippedEvents} unchanged, ` +
@@ -683,7 +693,13 @@ export class GeoNetImportService {
       errors.push(errorMsg);
 
       if (activeCatalogueId && catalogueTouched) {
-        await this.setCatalogueStatus(activeCatalogueId, 'error', runId);
+        try {
+          await this.setCatalogueStatus(activeCatalogueId, 'error', runId);
+        } catch (statusError) {
+          // The database may still be unavailable. Preserve the original failure
+          // and committed counts in the response even if this recovery write fails.
+          console.error('[GeoNetImportService] Failed to record error status:', statusError);
+        }
       }
 
       return {
@@ -702,18 +718,15 @@ export class GeoNetImportService {
   }
 
   /**
-   * Set the catalogue's status, never failing the import because of it.
+   * Propagate database errors and report writes that no longer match the catalogue.
    */
   private async setCatalogueStatus(
     catalogueId: string,
     status: 'processing' | 'complete' | 'error',
     runId?: string
-  ): Promise<void> {
-    try {
-      await getDbQueries().updateCatalogueStatus(status, catalogueId, undefined, runId ? { runId } : undefined);
-    } catch (error) {
-      console.error(`[GeoNetImportService] Failed to set catalogue ${catalogueId} status to '${status}':`, error);
-    }
+  ): Promise<boolean> {
+    const updated = await getDbQueries().updateCatalogueStatus(status, catalogueId, undefined, runId ? { runId } : undefined);
+    return updated !== false;
   }
 
   /**

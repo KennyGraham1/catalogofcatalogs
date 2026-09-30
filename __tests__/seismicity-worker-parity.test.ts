@@ -145,8 +145,9 @@ describe('worker and lib agree on the Gutenberg-Richter fit', () => {
   });
 
   it('withholds the fit in both copies when fewer than 10 events sit above Mc', () => {
-    // Same 52-event catalogue as __tests__/seismicity-hard-floors.test.ts: MAXC
-    // gives Mc = 1.2 and only 8 events are at or above it.
+    // Same 52-event catalogue as __tests__/seismicity-hard-floors.test.ts: too few
+    // events for b-value stability or a 90% goodness of fit, so the default falls
+    // back to MAXC, which gives Mc = 1.2 with only 8 events at or above it.
     const events = eventsWithMagnitudes([
       ...new Array(42).fill(1.0), 1.1, 1.1, 1.2, 1.3, 1.5, 1.8, 2.2, 2.7, 3.4, 4.6,
     ]);
@@ -196,8 +197,9 @@ describe('the worker copy survives a national-scale catalogue', () => {
 describe('worker and lib agree on the completeness magnitude', () => {
   it('returns an identical Mc and non-cumulative FMD at the default bin width', () => {
     const events = syntheticCatalogue();
-    const expected = estimateCompletenessMagnitude(events, 0.1);
-    const actual = loadWorker()({ type: 'completeness', events });
+    // MAXC chosen explicitly: the independent check below is of its modal bin.
+    const expected = estimateCompletenessMagnitude(events, 0.1, 0.2, { method: 'MAXC' });
+    const actual = loadWorker()({ type: 'completeness', events, mcMethod: 'MAXC' });
 
     expect(actual.mc).toBe(expected.mc);
     expect(actual.method).toBe('MAXC');

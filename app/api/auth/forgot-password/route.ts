@@ -67,6 +67,7 @@ export async function POST(request: NextRequest) {
       id: `reset_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
       user_id: user.id,
       token_hash: tokenHash,
+      jwt_version: user.jwt_version ?? 0,
       created_at: new Date(now).toISOString(),
       expires_at: expiresAt,
       used_at: null,

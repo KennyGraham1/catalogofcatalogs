@@ -10,7 +10,8 @@
  *    ball is ever drawn, regardless of what the events contain.
  *  - Overlays are drawn only for the plotted events and further capped (largest
  *    magnitude first) so a big catalogue cannot stall the browser with thousands of
- *    64-point polygons or rasterised icons; a note under the switch reports the cap.
+ *    64-point polygons or rasterised icons: 150 ellipses (a note under the switch reports
+ *    the cap) and, in mechanisms mode, 300 beach balls (the status chip reports it).
  */
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen } from '@testing-library/react';
@@ -153,8 +154,8 @@ describe('focal-mechanism beach-ball overlay, gated by showFocalMechanisms', () 
 });
 
 describe('overlay cap (largest magnitude first) and its visible note', () => {
-  // 151 events, one more than the map's overlay cap, so exactly one — the smallest
-  // magnitude — must be dropped from each overlay.
+  // 151 events, one more than the map's ellipse cap, so exactly one — the smallest
+  // magnitude — must be dropped from the ellipses (beach balls are capped at 300).
   const many = Array.from({ length: 151 }, (_, i) => ({
     id: `m${i + 1}`,
     latitude: -41 + i * 0.001,
@@ -184,17 +185,16 @@ describe('overlay cap (largest magnitude first) and its visible note', () => {
     expect(screen.getByText(exactTextNode('Showing the 150 largest of 151 plotted events.'))).toBeInTheDocument();
   });
 
-  it('draws beach balls for only the cap-many largest-magnitude events and says so', async () => {
+  it('draws a beach ball for every one of them: mechanisms mode caps at 300, not the ellipse cap', async () => {
     render(<UnifiedEarthquakeMap earthquakes={many} showFocalMechanisms />);
     fireEvent.click(screen.getByRole('switch', { name: 'Focal mechanisms' }));
     await act(async () => {});
 
     const drawnBeachBallIds = new Set(beachBallRender.mock.calls.map(([props]) => props.eventId));
-    expect(drawnBeachBallIds.size).toBe(150);
+    expect(drawnBeachBallIds.size).toBe(151);
     expect(drawnBeachBallIds).toContain('m151');
-    expect(drawnBeachBallIds).not.toContain('m1');
-
-    // 151 mechanisms <= 300, so they are drawn at this national zoom (5) - capped.
-    expect(screen.getByText(exactTextNode('Showing the 150 largest of 151 plotted events.'))).toBeInTheDocument();
+    expect(drawnBeachBallIds).toContain('m1');
+    // All drawn, so no "Showing N of M focal mechanisms" chip.
+    expect(screen.queryByRole('status')).toBeNull();
   });
 });

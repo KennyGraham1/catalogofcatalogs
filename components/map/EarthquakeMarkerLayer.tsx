@@ -33,7 +33,15 @@ export interface EarthquakeMarkerLayerProps<T extends MarkerEvent> {
   selectedId?: string | number | null;
   /** @deprecated Fill opacity comes from MARKER_STYLE; an explicit value still overrides it. */
   opacity?: number;
+  /**
+   * HTML for the hover card of an event (lib/map-event-card.ts buildEventCardHtml), or
+   * null for none. Bound to the hovered marker only and removed on mouse-out or click.
+   */
+  hoverCard?: (event: T) => string | null;
 }
+
+/** Leaflet tooltip options for the event hover card. */
+const HOVER_CARD_OPTIONS: L.TooltipOptions = { direction: 'top', offset: [0, -8], opacity: 1, className: 'eq-hover-card' };
 
 /** A Leaflet path we can restyle (react-leaflet test doubles hand handlers DOM events). */
 function asPath(target: unknown): L.Path | null {
@@ -48,7 +56,7 @@ function asPath(target: unknown): L.Path | null {
  * never re-render the marker list.
  */
 export const EarthquakeMarkerLayer = memo(function EarthquakeMarkerLayer<T extends MarkerEvent>({
-  events, getColor, onEventClick, isDark: isDarkProp, selectedId, opacity,
+  events, getColor, onEventClick, isDark: isDarkProp, selectedId, opacity, hoverCard,
 }: EarthquakeMarkerLayerProps<T>) {
   const { bounds } = useMapViewport();
   const colors = useMapColors();
@@ -93,12 +101,20 @@ export const EarthquakeMarkerLayer = memo(function EarthquakeMarkerLayer<T exten
           mouseover: (e) => {
             const layer = asPath(e.target);
             if (layer && selected.current?.layer !== layer) layer.setStyle(hoverStroke);
+            const html = hoverCard?.(event);
+            const target = e.target as L.Layer | undefined;
+            if (html && target && typeof target.bindTooltip === 'function') target.bindTooltip(html, HOVER_CARD_OPTIONS).openTooltip();
           },
           mouseout: (e) => {
             const layer = asPath(e.target);
             if (layer && selected.current?.layer !== layer) layer.setStyle(baseStroke);
+            const target = e.target as L.Layer | undefined;
+            if (target && typeof target.unbindTooltip === 'function') target.unbindTooltip();
           },
           click: (e) => {
+            // The popup replaces the hover card.
+            const clicked = e?.target as L.Layer | undefined;
+            if (clicked && typeof clicked.unbindTooltip === 'function') clicked.unbindTooltip();
             const layer = asPath(e?.target);
             if (layer && trackSelection) {
               if (selected.current && selected.current.layer !== layer) selected.current.layer.setStyle(baseStroke);
@@ -111,7 +127,7 @@ export const EarthquakeMarkerLayer = memo(function EarthquakeMarkerLayer<T exten
         }}
       />;
     });
-  }, [ordered, bounds, getColor, isDark, fillOpacity, renderer, trackSelection, onEventClick]);
+  }, [ordered, bounds, getColor, isDark, fillOpacity, renderer, trackSelection, onEventClick, hoverCard]);
 
   // Drop the highlight when the selection moves on (popup closed, another event chosen),
   // and re-apply it after a rebuild restyled the selected marker.

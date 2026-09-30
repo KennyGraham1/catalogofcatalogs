@@ -7,12 +7,13 @@ import { FocalMechanism, generateBeachBallSVG, getMechanismFaultType, selectPlan
 import { magnitudeRadius } from '@/lib/map-style';
 
 /**
- * Beach-ball symbology (analytics map, spec: focal mechanisms). Lower-hemisphere
- * double-couple, dilatational quadrants white, compressional quadrants filled with the
- * caller's colour (the event's depth colour, or dark grey), thin dark outline.
+ * Beach-ball symbology (the event maps' focal-mechanism mode, components/map/MapOverlays).
+ * Lower-hemisphere double-couple, dilatational quadrants white, compressional quadrants
+ * filled with the caller's colour (the event's colour in the map's colour mode), thin dark
+ * outline.
  */
 export const BEACH_BALL_STYLE = Object.freeze({
-  /** Compressional fill when no event colour applies (colour modes other than depth). */
+  /** Compressional fill when no event colour is given, and the legend glyph's shading. */
   neutralFill: '#374151',
   background: '#FFFFFF',
   stroke: '#1F2937',
@@ -119,20 +120,4 @@ export function BeachBallMarker({
   }, [map, lat, lng, icon, title, clickable, zIndexOffset, eventId]);
 
   return null;
-}
-
-/** Legend row for the beach-ball overlay: a small ball and what its shading means. */
-export function BeachBallLegendKey({ fill = BEACH_BALL_STYLE.neutralFill, label = 'Focal mechanism (shaded: compressional)' }: { fill?: string; label?: string }) {
-  // A strike-slip ball: two opposite shaded quadrants.
-  return (
-    <div data-legend="focal-mechanisms" className="flex items-center gap-1.5">
-      <svg width="20" height="14" viewBox="0 0 20 14" className="flex-shrink-0" aria-hidden>
-        <circle cx="10" cy="7" r="6" fill={BEACH_BALL_STYLE.background} />
-        <path d="M10 7 L10 1 A6 6 0 0 1 16 7 Z" fill={fill} />
-        <path d="M10 7 L10 13 A6 6 0 0 1 4 7 Z" fill={fill} />
-        <circle cx="10" cy="7" r="6" fill="none" stroke={BEACH_BALL_STYLE.stroke} strokeWidth="1" />
-      </svg>
-      <span className="text-[11px] leading-4">{label}</span>
-    </div>
-  );
 }

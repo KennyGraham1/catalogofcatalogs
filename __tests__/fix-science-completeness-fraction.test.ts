@@ -44,8 +44,8 @@ function completeCatalogue(): EarthquakeEvent[] {
 
 it('returns the events at or above Mc and the bin width, identically in both copies', () => {
   const events = completeCatalogue();
-  const lib = estimateCompletenessMagnitude(events);
-  const worker = loadWorker()({ type: 'completeness', events });
+  const lib = estimateCompletenessMagnitude(events, 0.1, 0.2, { method: 'MAXC' });
+  const worker = loadWorker()({ type: 'completeness', events, mcMethod: 'MAXC' });
   // MAXC picks the lowest bin (M2.0), so Mc = 2.2 and the kept share is ~10^-0.2.
   expect(lib.mc).toBeCloseTo(2.2, 10);
   const expectedAbove = events.filter(e => e.magnitude >= 2.2 - 1e-9).length;
@@ -56,4 +56,13 @@ it('returns the events at or above Mc and the bin width, identically in both cop
   expect(worker.eventsAboveMc).toBe(lib.eventsAboveMc);
   expect(worker.binWidth).toBe(lib.binWidth);
   expect(worker.confidence).toBeCloseTo(lib.confidence, 12);
+});
+
+it('keeps the whole of a perfectly complete catalogue under b-value stability, the default', () => {
+  const events = completeCatalogue();
+  const lib = estimateCompletenessMagnitude(events);
+  // b is stable from the lowest bin, so nothing complete is set aside.
+  expect([lib.mc, lib.method, lib.confidence]).toEqual([2.0, 'MBS', 1]);
+  const worker = loadWorker()({ type: 'completeness', events });
+  expect([worker.mc, worker.method, worker.confidence]).toEqual([2.0, 'MBS', 1]);
 });

@@ -99,9 +99,14 @@ def run_engine(built, workdir):
         return json.load(fh)
 
 
-def _bin_lower_edge(m, width=0.1):
-    """The platform's magnitude binning (lib/seismological-analysis.ts binLowerEdge)."""
-    return np.floor(np.asarray(m) / width + 1e-9) * width
+MAGNITUDE_TOLERANCE = 2.0 ** -20   # lib/seismological-analysis.ts MAGNITUDE_TOLERANCE
+
+
+def _bin_centre(m, width=0.1):
+    """The platform's non-cumulative FMD binning (lib/seismological-analysis.ts binCentre):
+    the nearest multiple of ``width``, so the bin labelled M holds [M - width/2, M + width/2),
+    as in ZMAP and Wiemer & Wyss (2000); its fullest bin is the maximum-curvature peak."""
+    return np.floor((np.asarray(m) + MAGNITUDE_TOLERANCE) / width + 0.5) * width
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -270,10 +275,10 @@ def make_gap_quality(built, res):
 #  Figure 3 - completeness, b-value and declustering
 # ══════════════════════════════════════════════════════════════════════════════
 def _mark_cutoffs(ax, marks, cut):
-    """Vertical lines at the Mc estimates, labelled just above the axes: the lower
-    estimate to the left of its line and the others to the right, so that labels 0.2
-    magnitude units apart do not overlap."""
-    for k, (x, text) in enumerate(marks):
+    """Vertical lines at the Mc estimates, labelled just above the axes: the lowest
+    estimate to the left of its line and the others to the right, so that labels a
+    bin or two apart do not overlap."""
+    for k, (x, text) in enumerate(sorted(marks)):
         ax.axvline(x, color=INK2, lw=0.8, ls='--' if x == cut else ':')
         left = k == 0
         ax.annotate(text, xy=(x, 1.0), xycoords=ax.get_xaxis_transform(), xytext=(-2 if left else 2, 2),
@@ -290,24 +295,29 @@ def make_fmd(res):
     comp, an = res['completeness'], res['analysis']
     cut = an['cutoff']
     maxc, gft = comp['retained_maxc']['mc'], comp['retained_gft']['mc']
+    # The cut-off is the merged catalogue's b-value-stability (MBS) estimate, unless the
+    # MBS found no stable cut-off.
+    cut_name = 'MBS' if an['cutoff_source'] == 'b-value stability' else 'cut-off'
 
     fig = plt.figure(figsize=(8.6, 7.4))
     layout = fig.add_gridspec(2, 2, height_ratios=[1.0, 0.95])
     axes = [fig.add_subplot(layout[0, 0]), fig.add_subplot(layout[0, 1]), fig.add_subplot(layout[1, :])]
 
-    # (a) non-cumulative FMD of the merged and the quality-filtered catalogues.
+    # (a) non-cumulative FMD of the merged and the quality-filtered catalogues, in bins
+    #     centred on multiples of 0.1 as the platform's Mc tab draws it.
     ax = axes[0]
-    edges = np.round(np.arange(0.0, 7.01, 0.1), 1)
+    centres = np.round(np.arange(0.0, 7.01, 0.1), 1)
     def counts(m):
-        k = np.round(_bin_lower_edge(m), 1)
-        return np.array([(k == e).sum() for e in edges[:-1]], float)
+        k = np.round(_bin_centre(m), 1)
+        return np.array([(k == c).sum() for c in centres], float)
     c_all, c_ret = counts(mag), counts(mag[retained])
-    ax.bar(edges[:-1] + 0.05, c_ret, width=0.086, color=BLUE, alpha=0.85, lw=0,
+    ax.bar(centres, c_ret, width=0.086, color=BLUE, alpha=0.85, lw=0,
            label=f'Quality-filtered (Q ≥ {res["quality"]["min_quality"]})')
-    ax.step(np.append(edges[:-1], edges[-1]), np.append(c_all, c_all[-1]), where='post', color=AQUA,
+    edges = np.append(centres - 0.05, centres[-1] + 0.05)
+    ax.step(edges, np.append(c_all, c_all[-1]), where='post', color=AQUA,
             lw=1.4, label='Merged, unfiltered')
-    ax.set_yscale('log'); ax.set_xlim(0.8, 5.0); ax.set_ylim(0.8, None)
-    _mark_cutoffs(ax, ((maxc, f'MAXC {maxc:.1f}'), (gft, f'GFT {gft:.1f}'), (cut, f'stable {cut:.1f}')), cut)
+    ax.set_yscale('log'); ax.set_xlim(0.75, 5.05); ax.set_ylim(0.8, None)
+    _mark_cutoffs(ax, ((maxc, f'MAXC {maxc:.1f}'), (gft, f'GFT {gft:.1f}'), (cut, f'{cut_name} {cut:.1f}')), cut)
     ax.set_xlabel('Magnitude'); ax.set_ylabel('Events per 0.1 bin')
     ax.set_title('(a) Merged and quality-filtered FMD', pad=14)
     ax.legend(loc='upper right', framealpha=0.95, fontsize=8)
@@ -350,7 +360,7 @@ def make_fmd(res):
     ax.axhline(sc.B_BACKGROUND, color=INK, lw=0.9, ls=':')
     ax.text(x[0] + 0.02, sc.B_BACKGROUND - 0.008, f'planted background b = {sc.B_BACKGROUND:.2f}',
             fontsize=7, color=INK, va='top')
-    _mark_cutoffs(ax, ((maxc, 'MAXC'), (gft, 'GFT'), (cut, 'stable')), cut)
+    _mark_cutoffs(ax, ((maxc, 'MAXC'), (gft, 'GFT'), (cut, cut_name)), cut)
     ax.set_xlabel('Magnitude cut-off'); ax.set_ylabel(r'$\hat{b}$ (± formal $\sigma_b$)')
     ax.set_title('(c) b-value against the cut-off', pad=14)
     ax.legend(loc='lower right', framealpha=0.95, fontsize=8)
@@ -399,6 +409,7 @@ def summarise(built, res):
             'grades': c['grades'], 'gap_over_180_pct': pct(c['gap_over_180']),
             'mc_maxc': c['maxc']['mc'], 'mc_gft': c['gft']['mc'], 'gft_source': c['gft']['mc_source'],
             'gft_level': c['gft']['gft_level'],
+            'mc_mbs': c['mbs']['mc'], 'mbs_source': c['mbs']['mc_source'],
             'median_q_by_gap': _median_q_by_gap(np.array(c['q']), built['reports'][agency]['azimuthal_gap']),
         } for c, agency in ((g, 'GeoNet-like'), (b, 'Agency B'))],
         'merge': {k: v for k, v in m.items() if k != 'config'},
@@ -446,7 +457,8 @@ def print_summary(s):
     print(line)
     for cat in (g, b):
         print(f" {cat['name']:<34}: {cat['events']:>8,} events, median Q {cat['median_q']:g}, "
-              f"gap>180 {cat['gap_over_180_pct']}%, Mc MAXC {cat['mc_maxc']} / GFT {cat['mc_gft']}")
+              f"gap>180 {cat['gap_over_180_pct']}%, Mc MBS {cat['mc_mbs']} ({cat['mbs_source']})"
+              f" / GFT {cat['mc_gft']} / MAXC {cat['mc_maxc']}")
     print(f" Merge (Quality-based, {s['inputs']['baseline_windows'][0]} s / {s['inputs']['baseline_windows'][1]} km):"
           f" {m['ingested']:,} -> {m['merged']:,} ({m['duplicate_groups']:,} duplicate groups)")
     print(f"   injected pairs {m['injected_pairs']:,}; found {m['true_pairs_found']:,} ({mp['recall']}%);"
@@ -455,11 +467,11 @@ def print_summary(s):
     print(f" Q >= {s['inputs']['min_quality']}: retained {q['retained']:,} ({q['retained_pct']}%), removed {q['removed']:,};"
           f" {q['gap_over_180_removed_pct']}% of the {q['gap_over_180_merged']:,} gap>180 events removed")
     print('   retention by magnitude:', ', '.join(f"M{r['lo']}-{r['hi']}: {r['retained_pct']}%" for r in q['retention_by_magnitude_pct']))
-    for k in ('retained_maxc', 'retained_gft', 'merged_maxc', 'merged_gft'):
+    for k in ('retained_mbs', 'retained_gft', 'retained_maxc', 'merged_mbs', 'merged_gft', 'merged_maxc'):
         v = c[k]
         print(f"   {k:<14} Mc {v['mc']} ({v['mc_source']}{'' if v['gft_level'] is None else ' ' + str(v['gft_level']) + '%'}):"
               f" b = {v['b']:.3f} +/- {v['sigma_b']:.3f} (N={v['n']:,})")
-    print(f"   b-value stability cut-off of the merged catalogue: {c['merged_stability_cutoff']}")
+    print(f"   b-value stability (MBS) cut-off of the merged catalogue: {c['merged_stability_cutoff']}")
     print(f" At M >= {a['cutoff']} ({a['cutoff_source']}): {a['retained_above']:,} filtered events")
     for k in ('gr_merged', 'gr_retained', 'gr_merged_background', 'gr_retained_background',
               'gr_retained_aftershocks', 'gr_declustered', 'gr_symmetric', 'gr_concatenated'):

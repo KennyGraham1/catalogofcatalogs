@@ -1,8 +1,9 @@
 /**
  * A2 UI: the Analytics page features the paper and docs describe.
  *
- *  1/2  Mc settings (method MAXC | GFT, MAXC correction 0-0.5) on the G-R and Mc tabs,
- *       passed to the analyses and reported with each Mc.
+ *  1/2  Mc settings (method MBS (default) | GFT | MAXC, MAXC correction 0-0.5, offered
+ *       when MAXC is chosen or used) on the G-R and Mc tabs, passed to the analyses and
+ *       reported with each Mc; the b-value stability chart on the Mc tab.
  *  3/4  Temporal tab time-series panels: seismicity rate above Mc with Auto/Day/Week/
  *       Month bins, magnitude-vs-time scatter, cumulative moment / energy release.
  *  5    Analysis filters: minimum quality Q (stored score first), maximum azimuthal
@@ -46,7 +47,8 @@ jest.mock('@/hooks/use-seismological-worker', () => ({
 jest.mock('@/components/charts', () => Object.fromEntries([
   'MagnitudeDistributionChart', 'DepthDistributionChart', 'RegionDistributionChart', 'CatalogueDistributionChart',
   'MagnitudeDepthScatter', 'MagnitudeTimeScatter', 'EventTimelineChart', 'GutenbergRichterChart', 'CompletenessChart',
-  'TemporalSeriesChart', 'MomentReleaseChart', 'CumulativeReleaseChart', 'GoodnessOfFitChart', 'MFDComparisonChart',
+  'TemporalSeriesChart', 'MomentReleaseChart', 'CumulativeReleaseChart', 'GoodnessOfFitChart', 'BValueStabilityChart',
+  'MFDComparisonChart',
 ].map(name => [name, (props: any) => { mockChartProps[name] = props; return null; }])));
 jest.mock('@/components/ui/slider', () => ({
   Slider: ({ min, max, value, onValueChange }: any) => (
@@ -125,27 +127,87 @@ describe('Mc settings on the G-R and Mc tabs (items 1 and 2)', () => {
     mockRows = { a: sixtyMl() };
   });
 
-  it('defaults to MAXC + 0.2 and passes a changed method and correction to the analyses', async () => {
+  it('defaults to b-value stability and passes a changed method and correction to the analyses', async () => {
     await openCatalogue(60);
     openTab(/G-R/);
     await waitFor(() => expect(mockAnalysesCalls[mockAnalysesCalls.length - 1][1]).toBe('gutenberg-richter'));
-    expect(lastAnalysesOptions()).toMatchObject({ mcMethod: 'MAXC', maxcCorrection: 0.2 });
-    fireEvent.change(selectOffering(/Goodness-of-fit test/), { target: { value: 'GFT' } });
+    expect(lastAnalysesOptions()).toMatchObject({ mcMethod: 'MBS', maxcCorrection: 0.2 });
+    const method = selectOffering(/b-value stability \(MBS\)/);
+    expect(method.value).toBe('MBS');
+    expect(within(method).getAllByRole('option').map(o => o.textContent)).toEqual([
+      'b-value stability (MBS)', 'Goodness of fit (GFT)', 'Maximum curvature (MAXC)',
+    ]);
+    // The MAXC correction is offered only once MAXC is chosen.
+    expect(screen.queryByText('MAXC correction')).not.toBeInTheDocument();
+    fireEvent.change(method, { target: { value: 'GFT' } });
     await waitFor(() => expect(lastAnalysesOptions().mcMethod).toBe('GFT'));
+    expect(screen.queryByText('MAXC correction')).not.toBeInTheDocument();
+    fireEvent.change(selectOffering(/Maximum curvature \(MAXC\)/), { target: { value: 'MAXC' } });
+    await waitFor(() => expect(lastAnalysesOptions().mcMethod).toBe('MAXC'));
     fireEvent.change(selectOffering(/^\+0\.3$/), { target: { value: '0.3' } });
     await waitFor(() => expect(lastAnalysesOptions().maxcCorrection).toBe(0.3));
     // The settings are shared: the Mc tab shows the same choices.
     openTab(/^Mc$/);
     await waitFor(() => expect(mockAnalysesCalls[mockAnalysesCalls.length - 1][1]).toBe('completeness'));
-    expect(selectOffering(/Goodness-of-fit test/).value).toBe('GFT');
-    expect(lastAnalysesOptions()).toMatchObject({ mcMethod: 'GFT', maxcCorrection: 0.3 });
+    expect(selectOffering(/Maximum curvature \(MAXC\)/).value).toBe('MAXC');
+    expect(selectOffering(/^\+0\.3$/).value).toBe('0.3');
+    expect(lastAnalysesOptions()).toMatchObject({ mcMethod: 'MAXC', maxcCorrection: 0.3 });
   });
 
   it('offers corrections from +0.0 to +0.5 only', async () => {
     await openCatalogue(60);
     openTab(/^Mc$/);
-    const options = within(selectOffering(/^\+0\.3$/)).getAllByRole('option').map(o => o.textContent);
+    fireEvent.change(selectOffering(/Maximum curvature \(MAXC\)/), { target: { value: 'MAXC' } });
+    const options = within(await waitFor(() => selectOffering(/^\+0\.3$/))).getAllByRole('option').map(o => o.textContent);
     expect(options).toEqual(['+0.0', '+0.1', '+0.2 (default)', '+0.3', '+0.4', '+0.5']);
+  });
+
+  it('offers the MAXC correction when another method fell back to MAXC', async () => {
+    mockMc = {
+      mc: 2.4, method: 'MAXC', requestedMethod: 'MBS', maxcCorrection: 0.2, gftLevel: null, gftFit: null, gftCurve: [],
+      mbsCurve: [], confidence: 0.4, eventsAboveMc: 24, binWidth: 0.1, magnitudeDistribution: [],
+      fallbackReason: 'No cut-off had a stable b-value and no cut-off reached a 90% goodness of fit, so Mc is maximum curvature + 0.2',
+    };
+    await openCatalogue(60);
+    openTab(/^Mc$/);
+    expect(await screen.findByText(/b-value stability requested: No cut-off had a stable b-value/)).toBeInTheDocument();
+    expect(selectOffering(/b-value stability \(MBS\)/).value).toBe('MBS');
+    expect(screen.getByText('MAXC correction')).toBeInTheDocument();
+    const mcCard = screen.getByText('Completeness Magnitude').closest('.rounded-lg') as HTMLElement;
+    expect(mcCard).toHaveTextContent(/maximum curvature \+ 0\.2 \(neither b-value stability nor the goodness-of-fit test found an Mc\)/);
+  });
+
+  it('shows an MBS Mc with its b-value stability chart, and the chart under any method', async () => {
+    const mbsCurve = [
+      { magnitude: 2.2, b: 0.993, deltaB: 0.029, bAve: 1.046, n: 1028 },
+      { magnitude: 2.3, b: 1.029, deltaB: 0.034, bAve: 1.057, n: 845 },
+      { magnitude: 2.4, b: 1.048, deltaB: 0.039, bAve: null, n: 677 },
+    ];
+    mockMc = {
+      mc: 2.3, method: 'MBS', requestedMethod: 'MBS', maxcCorrection: 0.2, mbsCurve,
+      confidence: 0.172, eventsAboveMc: 845, binWidth: 0.1, magnitudeDistribution: [],
+    };
+    await openCatalogue(60);
+    openTab(/^Mc$/);
+    expect(await screen.findByText('MBS')).toBeInTheDocument();
+    expect(screen.getByText(
+      'Lowest cut-off where b is within its uncertainty of the mean b over the next 0.5 units (b = 1.029 ± 0.034, mean 1.057)'
+    )).toBeInTheDocument();
+    const mcCard = screen.getByText('Completeness Magnitude').closest('.rounded-lg') as HTMLElement;
+    expect(mcCard).toHaveTextContent('M2.3 ± 0.1');
+    expect(mcCard).toHaveTextContent(/Estimated by b-value stability; ± one bin width/);
+    expect(screen.getByText('b-value stability')).toBeInTheDocument();
+    expect(mockChartProps.BValueStabilityChart).toMatchObject({ curve: mbsCurve, mc: 2.3 });
+    expect(mockChartProps.GoodnessOfFitChart).toBeUndefined();
+    expect(screen.queryByText('MAXC correction')).not.toBeInTheDocument();
+    cleanup();
+    delete mockChartProps.BValueStabilityChart;
+    mockMc = { ...mockMc, mc: 1.9, method: 'MAXC', requestedMethod: 'MAXC' };
+    await openCatalogue(60);
+    openTab(/^Mc$/);
+    await screen.findByText('MAXC');
+    // Drawn for a MAXC Mc too, marking that Mc.
+    expect(mockChartProps.BValueStabilityChart).toMatchObject({ curve: mbsCurve, mc: 1.9 });
   });
 
   it('states how the G-R Mc was estimated', async () => {
@@ -162,6 +224,18 @@ describe('Mc settings on the G-R and Mc tabs (items 1 and 2)', () => {
     await openCatalogue(60);
     openTab(/G-R/);
     expect(await screen.findByText(/Estimated by the goodness-of-fit test at the 90% level/)).toBeInTheDocument();
+    cleanup();
+    mockGr = { ...mockGr, completeness: 2.3, mcSource: 'MBS', requestedMcMethod: 'MBS', gftLevel: undefined };
+    await openCatalogue(60);
+    openTab(/G-R/);
+    expect(await screen.findByText(/Estimated by b-value stability; ± one bin width/)).toBeInTheDocument();
+    cleanup();
+    mockGr = { ...mockGr, completeness: 2.0, mcSource: 'GFT', requestedMcMethod: 'MBS', gftLevel: 95 };
+    await openCatalogue(60);
+    openTab(/G-R/);
+    expect(await screen.findByText(
+      /Estimated by the goodness-of-fit test at the 95% level \(b-value stability found no stable cut-off\)/
+    )).toBeInTheDocument();
   });
 
   it('shows the GFT level, R, the goodness-of-fit curve, and a fallback when it happens', async () => {

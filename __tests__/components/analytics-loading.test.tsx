@@ -16,7 +16,7 @@ jest.mock('@/hooks/use-seismological-worker', () => ({ useSeismologicalAnalyses:
 jest.mock('@/components/charts', () => Object.fromEntries([
   'MagnitudeDistributionChart', 'DepthDistributionChart', 'RegionDistributionChart', 'CatalogueDistributionChart',
   'MagnitudeDepthScatter', 'EventTimelineChart', 'GutenbergRichterChart', 'CompletenessChart', 'TemporalSeriesChart', 'MomentReleaseChart', 'MFDComparisonChart',
-  'MagnitudeTimeScatter', 'CumulativeReleaseChart', 'GoodnessOfFitChart',
+  'MagnitudeTimeScatter', 'CumulativeReleaseChart', 'GoodnessOfFitChart', 'BValueStabilityChart',
 ].map(name => [name, () => null])));
 
 it('keeps the preview map usable while loading and unlocks analyses after completion', async () => {

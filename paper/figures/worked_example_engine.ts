@@ -11,7 +11,10 @@
  *     (lib/merge.ts), which is what mergeCatalogues runs (performMerge), with the
  *     Quality-based strategy; the merged row, and its Q, from buildMergedEventFields;
  *   - completeness magnitude, b-value and sigma_b: calculateGutenbergRichter
- *     (lib/seismological-analysis.ts), with Mc estimated by the platform's MAXC + 0.2;
+ *     (lib/seismological-analysis.ts), with Mc estimated by each of the platform's methods,
+ *     named explicitly: b-value stability (MBS, its default), the goodness-of-fit test (GFT)
+ *     and maximum curvature (MAXC) + 0.2; the analysis cut-off is the platform's MBS
+ *     estimate for the merged catalogue (stabilityCutoff);
  *   - declustering: gardnerKnopoffDeclustering (lib/seismological-analysis.ts).
  *
  * The one computation the platform does NOT offer is the symmetric-window Gardner-Knopoff
@@ -39,6 +42,7 @@ import {
   getGardnerKnopoffWindow,
   type EarthquakeEvent,
   type GutenbergRichterResult,
+  type McMethod,
 } from '@/lib/seismological-analysis';
 import type { MergeConfig, SourceCatalogue } from '@/lib/validation';
 
@@ -70,8 +74,9 @@ export interface WorkedExampleOptions {
   minQuality: number;
   /**
    * Magnitude cut-off for the final b-value and declustering: a number; 'stability' for the
-   * lowest cut-off at which the merged catalogue's b-value is stable (stabilityCutoff); or
-   * null for the platform's own MAXC + 0.2 estimate on the quality-filtered catalogue.
+   * lowest cut-off at which the merged catalogue's b-value is stable (stabilityCutoff: the
+   * platform's MBS estimate); or null for the platform's MAXC + 0.2 estimate on the
+   * quality-filtered catalogue.
    */
   analysisCutoff: number | 'stability' | null;
 }
@@ -263,33 +268,6 @@ export function symmetricGardnerKnopoff(events: EarthquakeEvent[]): EarthquakeEv
 
 
 // ---------------------------------------------------------------------------
-// b-value stability (MBS; Cao and Gao 2002, in the form of Woessner and Wiemer 2005):
-// NOT a platform option. Applied to the platform's own b-values at 0.1-unit cut-offs, it
-// returns the lowest cut-off Mi at which |b_ave - b(Mi)| <= sigma_b(Mi), b_ave being the
-// mean b over Mi ... Mi + 0.5, and sigma_b the platform's b / sqrt(N).
-// ---------------------------------------------------------------------------
-export function stabilityCutoff(series: Array<{ cutoff: number; b: number | null; sigma: number | null }>): number | null {
-  const at = new Map<string, { b: number; sigma: number }>();
-  series.forEach(p => {
-    if (p.b != null && p.sigma != null) at.set(p.cutoff.toFixed(1), { b: p.b, sigma: p.sigma });
-  });
-  for (const p of series) {
-    const here = at.get(p.cutoff.toFixed(1));
-    if (!here) continue;
-    const window: number[] = [];
-    for (let k = 0; k <= 5; k++) {
-      const next = at.get((p.cutoff + k / 10).toFixed(1));
-      if (!next) break;
-      window.push(next.b);
-    }
-    if (window.length < 6) continue;
-    const bAve = window.reduce((sum, b) => sum + b, 0) / window.length;
-    if (Math.abs(bAve - here.b) <= here.sigma) return p.cutoff;
-  }
-  return null;
-}
-
-// ---------------------------------------------------------------------------
 // The pipeline
 // ---------------------------------------------------------------------------
 type Provenance = 'first-only' | 'second-only' | 'duplicate-first' | 'duplicate-second';
@@ -304,10 +282,33 @@ function grAt(events: EarthquakeEvent[], cutoff: number): GrSummary | null {
   }
 }
 
-/** The platform's Mc estimate (MAXC + 0.2 by default, or its GFT) and the b-value above it. */
-function estimated(events: EarthquakeEvent[], method: 'MAXC' | 'GFT'): GrSummary & { mc_source: string; gft_level: number | null } {
+type Estimate = GrSummary & { mc_source: string; gft_level: number | null };
+
+/**
+ * The platform's Mc estimate by the method named (MBS, which falls back to the GFT when no
+ * cut-off is stable; the GFT, which falls back to MAXC + 0.2 below a 90% fit; or MAXC + 0.2)
+ * and the b-value above it. mc_source is the method that produced Mc.
+ */
+function estimated(events: EarthquakeEvent[], method: McMethod): Estimate {
   const gr = calculateGutenbergRichter(events, undefined, 0.1, { method });
   return { ...grSummary(gr), mc_source: gr.mcSource, gft_level: gr.gftLevel ?? null };
+}
+
+/** Mc of a b-value-stability estimate, or null when the MBS found no stable cut-off. */
+function stableCutoffOf(mbs: Estimate): number | null {
+  return mbs.mc_source === 'MBS' ? mbs.mc : null;
+}
+
+/**
+ * The lowest cut-off at which the b-value of `events` is stable: the platform's own
+ * b-value-stability estimate (MBS; Cao and Gao 2002, in the form of Woessner and Wiemer
+ * 2005; lib/seismological-analysis.ts), i.e. the lowest bin edge Mi with
+ * |b_ave(Mi..Mi+0.5) - b(Mi)| <= db(Mi), db the Shi and Bolt (1982) uncertainty, every
+ * cut-off holding at least 50 events. Null when no cut-off is stable (the platform then
+ * falls back to the GFT).
+ */
+export function stabilityCutoff(events: EarthquakeEvent[]): number | null {
+  return stableCutoffOf(estimated(events, 'MBS'));
 }
 
 /** Cut-offs of the b-versus-cut-off diagnostic (magnitude units, 0.1 steps). */
@@ -328,7 +329,8 @@ export interface WorkedExampleResult {
     grades: Record<string, number>;
     gap_over_180: number;
     maxc: GrSummary;
-    gft: GrSummary & { mc_source: string; gft_level: number | null };
+    gft: Estimate;
+    mbs: Estimate;
     q: number[];
   }>;
   merge: {
@@ -361,11 +363,14 @@ export interface WorkedExampleResult {
     retention_by_magnitude: Array<{ lo: number; hi: number; events: number; retained: number }>;
   };
   completeness: {
-    retained_maxc: GrSummary & { mc_source: string; gft_level: number | null };
-    retained_gft: GrSummary & { mc_source: string; gft_level: number | null };
-    merged_maxc: GrSummary & { mc_source: string; gft_level: number | null };
-    merged_gft: GrSummary & { mc_source: string; gft_level: number | null };
-    concatenated_maxc: GrSummary & { mc_source: string; gft_level: number | null };
+    retained_maxc: Estimate;
+    retained_gft: Estimate;
+    retained_mbs: Estimate;
+    merged_maxc: Estimate;
+    merged_gft: Estimate;
+    merged_mbs: Estimate;
+    concatenated_maxc: Estimate;
+    /** The merged catalogue's MBS Mc, or null when the MBS fell back. */
     merged_stability_cutoff: number | null;
   };
   analysis: {
@@ -472,8 +477,9 @@ export function runWorkedExample(
       median_q: median(q),
       grades: gradeCounts(rows),
       gap_over_180: gaps.filter(g => g > 180).length / gaps.length,
-      maxc: grSummary(calculateGutenbergRichter(events)),
+      maxc: grSummary(calculateGutenbergRichter(events, undefined, 0.1, { method: 'MAXC' })),
       gft: estimated(events, 'GFT'),
+      mbs: estimated(events, 'MBS'),
       q,
     };
   });
@@ -617,18 +623,20 @@ export function runWorkedExample(
       retained_background: grAt(retainedAbove.filter(i => !mergedTruth[i].aftershock).map(i => mergedEvents[i]), cutoff),
     };
   });
-  const stability = stabilityCutoff(
-    bVsCutoff.map(p => ({ cutoff: p.cutoff, b: p.merged?.b ?? null, sigma: p.merged?.sigma_b ?? null }))
-  );
 
   // ---- completeness estimates the platform offers ---------------------------------------------
   const concatenatedEvents = rowsByCatalogue.reduce<Row[]>((all, rows) => all.concat(rows), []).map(asAnalysisEvent);
   const retainedMaxc = estimated(retainedEvents, 'MAXC');
+  const mergedMbs = estimated(mergedEvents, 'MBS');
+  // The cut-off from which the merged catalogue's b-value is stable: its MBS estimate.
+  const stability = stableCutoffOf(mergedMbs);
   const completeness = {
     retained_maxc: retainedMaxc,
     retained_gft: estimated(retainedEvents, 'GFT'),
+    retained_mbs: estimated(retainedEvents, 'MBS'),
     merged_maxc: estimated(mergedEvents, 'MAXC'),
     merged_gft: estimated(mergedEvents, 'GFT'),
+    merged_mbs: mergedMbs,
     concatenated_maxc: estimated(concatenatedEvents, 'MAXC'),
     merged_stability_cutoff: stability,
   };

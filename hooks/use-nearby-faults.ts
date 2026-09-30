@@ -46,10 +46,14 @@ export function useNearbyFaults({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setData(null);
+    setError(null);
+    setLoading(false);
     if (!enabled || latitude === undefined || longitude === undefined) {
       return;
     }
 
+    const controller = new AbortController();
     const fetchNearbyFaults = async () => {
       setLoading(true);
       setError(null);
@@ -62,23 +66,25 @@ export function useNearbyFaults({
           limit: limit.toString(),
         });
 
-        const response = await fetch(`/api/faults/nearby?${params}`);
+        const response = await fetch(`/api/faults/nearby?${params}`, { signal: controller.signal });
         
         if (!response.ok) {
           throw new Error(`Failed to fetch nearby faults: ${response.statusText}`);
         }
 
         const result = await response.json();
-        setData(result);
+        if (!controller.signal.aborted) setData(result);
       } catch (err) {
+        if (controller.signal.aborted) return;
         console.error('Error fetching nearby faults:', err);
         setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     };
 
     fetchNearbyFaults();
+    return () => controller.abort();
   }, [latitude, longitude, radius, limit, enabled]);
 
   return {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useIsDarkTheme } from '@/hooks/use-map-theme';
@@ -11,6 +11,8 @@ import { attachBaseLayers, type BaseLayerControlHandle } from '@/components/map/
 import { MAP_SCALE_OPTIONS } from '@/components/map/MapScaleBar';
 import { ensureLeafletDefaultIcon } from '@/components/map/leaflet-default-icon';
 import { CatalogueColorKey, LegendSection, MapLegend } from '@/components/map/MapLegend';
+import { ActiveFaultsToggle, useFaultData } from '@/components/map/MapOverlays';
+import { attachFaultsLayer, type FaultsLayerHandle } from '@/components/map/faults-layer';
 import {
   GROUP_FIT_OPTIONS, GROUP_MARKER_RADIUS, computedEpicentrePopupHtml, connectorStyle, entryRole,
   epicentreCrossSvg, groupCatalogueColors, groupCatalogueLegend, groupEntryPopupHtml, groupMarkerStyle,
@@ -102,8 +104,13 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px', cl
   const baseLayersRef = useRef<BaseLayerControlHandle | null>(null);
   const overlayRef = useRef<L.LayerGroup | null>(null);
   const fittedGroupRef = useRef<DuplicateGroup | null>(null);
+  const faultsRef = useRef<FaultsLayerHandle | null>(null);
   const isDark = useIsDarkTheme();
   const isDarkRef = useRef(isDark);
+  // Active faults for tectonic context: off by default on this small map, loaded (once per
+  // page, shared with the other maps) the first time the reader switches them on.
+  const [showFaults, setShowFaults] = useState(false);
+  const faultData = useFaultData(showFaults);
 
   const events = useMemo(() => group.events ?? [], [group.events]);
   const hasEvents = events.length > 0;
@@ -149,7 +156,20 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px', cl
   useEffect(() => {
     isDarkRef.current = isDark;
     baseLayersRef.current?.setDark(isDark);
+    faultsRef.current?.setDark(isDark);
   }, [isDark]);
+
+  // Fault traces in their pane under the entries (same style and attribution as every map).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !showFaults || !faultData?.features?.length) return;
+    const handle = attachFaultsLayer(map, faultData, { isDark: isDarkRef.current });
+    faultsRef.current = handle;
+    return () => {
+      handle.remove();
+      if (faultsRef.current === handle) faultsRef.current = null;
+    };
+  }, [showFaults, faultData, hasEvents]);
 
   // Draw the group.
   useEffect(() => {
@@ -268,6 +288,9 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px', cl
               </li>
             )}
           </ul>
+        </LegendSection>
+        <LegendSection title="Overlays">
+          <ActiveFaultsToggle checked={showFaults} onCheckedChange={setShowFaults} isDark={isDark} />
         </LegendSection>
       </MapLegend>
     </div>

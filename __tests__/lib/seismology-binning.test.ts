@@ -95,7 +95,7 @@ describe('completeness magnitude on the 0.1 grid', () => {
     for (let i = 0; i < 120; i++) magnitudes.push(2.4);
     for (let i = 0; i < 40; i++) magnitudes.push(2.5);
 
-    const result = estimateCompletenessMagnitude(eventsWithMagnitudes(magnitudes), 0.1);
+    const result = estimateCompletenessMagnitude(eventsWithMagnitudes(magnitudes), 0.1, 0.2, { method: 'MAXC' });
 
     // Before the fix the M2.3 events were counted in the 2.2 bin, moving the
     // peak and putting Mc 0.1 too low.

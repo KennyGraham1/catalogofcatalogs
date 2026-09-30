@@ -28,7 +28,7 @@ export interface SeismologicalWorkerOptions {
   /** Explicit magnitude cut-off (G-R fit, time series). */
   minMagnitude?: number;
   binWidth?: number;
-  /** How Mc is estimated wherever it is: MAXC (default) or the goodness-of-fit test. */
+  /** How Mc is estimated wherever it is: b-value stability (default), the goodness-of-fit test or MAXC. */
   mcMethod?: McMethod;
   /** Correction added to the MAXC bin (default 0.2). */
   maxcCorrection?: number;

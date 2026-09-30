@@ -35,6 +35,12 @@ export interface BaseLayerConfig {
   /** Set on the two gray canvas bases: the theme they belong to and their label layer. */
   theme?: 'light' | 'dark';
   labelsUrl?: string;
+  /**
+   * The base's open-ocean colour, painted behind its tiles (attachBaseLayers). At a
+   * fractional zoom tiles sit at sub-pixel offsets, and any hairline between them then
+   * shows this colour rather than a light seam; tiles still loading show it too.
+   */
+  background?: string;
 }
 
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
@@ -55,6 +61,7 @@ export const BASE_LAYERS: BaseLayerConfig[] = [
     maxNativeZoom: 16,
     theme: 'light',
     labelsUrl: `${ESRI}/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}`,
+    background: '#d0cfd4',
   },
   {
     name: DARK_GRAY_BASE,
@@ -64,6 +71,7 @@ export const BASE_LAYERS: BaseLayerConfig[] = [
     maxNativeZoom: 16,
     theme: 'dark',
     labelsUrl: `${ESRI}/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`,
+    background: '#222327',
   },
   {
     // Bathymetry: trenches and the Hikurangi margin read here.
@@ -72,18 +80,22 @@ export const BASE_LAYERS: BaseLayerConfig[] = [
     attribution: 'Tiles &copy; Esri &mdash; Sources: GEBCO, NOAA, CHS, OSU, UNH, CSUMB, National Geographic, DeLorme, NAVTEQ, and Esri',
     maxZoom: 19,
     maxNativeZoom: 13,
+    // Bathymetry shading varies; a mid-depth blue.
+    background: '#8fb3dc',
   },
   {
     name: 'Satellite',
     url: `${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`,
     attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
     maxZoom: 19,
+    background: '#0e3f52',
   },
   {
     name: 'Streets (OpenStreetMap)',
     url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     maxZoom: 19,
+    background: '#aad3df',
   },
 ];
 

@@ -13,6 +13,8 @@ export interface MapStatusChipProps {
   total: number;
   /** Trailing hint; default "zoom in for more". */
   hint?: string;
+  /** Replaces the "3,319 of 4,907 events shown" count text (e.g. for focal mechanisms). */
+  label?: string;
   className?: string;
 }
 
@@ -21,7 +23,7 @@ export interface MapStatusChipProps {
  * muted chip, hidden when every event is drawn. Place it inside the map's `relative`
  * wrapper, as a sibling of <MapContainer>.
  */
-export function MapStatusChip({ shown, total, hint = 'zoom in for more', className }: MapStatusChipProps) {
+export function MapStatusChip({ shown, total, hint = 'zoom in for more', label, className }: MapStatusChipProps) {
   if (!(shown < total)) return null;
   return (
     <div
@@ -32,7 +34,7 @@ export function MapStatusChip({ shown, total, hint = 'zoom in for more', classNa
         MAP_STATUS_POSITION, className,
       )}
     >
-      {formatCount(shown)} of {formatCount(total)} events shown{hint ? ` · ${hint}` : ''}
+      {label ?? `${formatCount(shown)} of ${formatCount(total)} events shown`}{hint ? ` · ${hint}` : ''}
     </div>
   );
 }

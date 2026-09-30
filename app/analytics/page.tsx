@@ -87,6 +87,7 @@ import {
   MomentReleaseChart,
   CumulativeReleaseChart,
   GoodnessOfFitChart,
+  BValueStabilityChart,
   MFDComparisonChart,
 } from '@/components/charts';
 import { aggregateEventTimeline } from '@/lib/event-timeline';
@@ -181,7 +182,7 @@ const MAGNITUDE_SLIDER: [number, number] = [-3, 10];
 const DEPTH_SLIDER: [number, number] = [-5, 700];
 
 // Magnitude bin width the analysis workers use (their default); one bin width is
-// the lower bound on the uncertainty of a MAXC Mc (Woessner & Wiemer, 2005).
+// a lower bound on the uncertainty of an estimated Mc (Woessner & Wiemer, 2005).
 const ANALYSIS_BIN_WIDTH = 0.1;
 
 // Quality (Q, 0-100) and azimuthal-gap filter sliders. As above, a handle left at its
@@ -227,15 +228,49 @@ interface McProvenance {
   fallbackReason?: string;
 }
 
+/** Names of the Mc methods, as the Mc settings offer them and as prose. */
+const MC_METHOD_LABELS: Record<McMethod, string> = {
+  MBS: 'b-value stability (MBS)',
+  GFT: 'Goodness of fit (GFT)',
+  MAXC: 'Maximum curvature (MAXC)',
+};
+const MC_METHOD_NAMES: Record<McMethod, string> = {
+  MBS: 'b-value stability',
+  GFT: 'Goodness-of-fit test',
+  MAXC: 'Maximum curvature',
+};
+
 /** A short statement of how Mc was estimated, for the G-R, Mc and Temporal tabs. */
 function describeMcEstimate(result: McProvenance): string {
   const method = result.mcSource ?? result.method;
-  const correction = Number((result.maxcCorrection ?? DEFAULT_MAXC_CORRECTION).toFixed(2));
-  if (method === 'GFT') return `the goodness-of-fit test at the ${result.gftLevel ?? 95}% level`;
   const requested = result.requestedMcMethod ?? result.requestedMethod;
-  return requested === 'GFT'
-    ? `maximum curvature + ${correction} (the goodness-of-fit test reached no 90% fit)`
-    : `maximum curvature + ${correction}`;
+  const correction = Number((result.maxcCorrection ?? DEFAULT_MAXC_CORRECTION).toFixed(2));
+  if (method === 'MBS') return 'b-value stability';
+  if (method === 'GFT') {
+    const gft = `the goodness-of-fit test at the ${result.gftLevel ?? 95}% level`;
+    return requested === 'MBS' ? `${gft} (b-value stability found no stable cut-off)` : gft;
+  }
+  const maxc = `maximum curvature + ${correction}`;
+  if (requested === 'MBS') return `${maxc} (neither b-value stability nor the goodness-of-fit test found an Mc)`;
+  return requested === 'GFT' ? `${maxc} (the goodness-of-fit test reached no 90% fit)` : maxc;
+}
+
+/** How the Mc tab's method card explains the method that produced Mc. */
+function describeMcMethodCard(result: {
+  mc: number; method: McMethod; maxcCorrection?: number; gftLevel?: 95 | 90 | null; gftFit?: number | null;
+  mbsCurve?: { magnitude: number; b: number; deltaB: number; bAve: number | null }[];
+}): string {
+  if (result.method === 'MBS') {
+    const at = result.mbsCurve?.find(point => Math.abs(point.magnitude - result.mc) < 1e-6);
+    const values = at && at.bAve != null
+      ? ` (b = ${at.b.toFixed(3)} ± ${at.deltaB.toFixed(3)}, mean ${at.bAve.toFixed(3)})`
+      : '';
+    return `Lowest cut-off where b is within its uncertainty of the mean b over the next 0.5 units${values}`;
+  }
+  if (result.method === 'GFT') {
+    return `Lowest cut-off whose Gutenberg-Richter fit reproduces ${result.gftLevel}% of the observed cumulative counts (R = ${result.gftFit?.toFixed(1)}%)`;
+  }
+  return `Maximum curvature of the FMD + ${Number((result.maxcCorrection ?? DEFAULT_MAXC_CORRECTION).toFixed(2))}`;
 }
 
 /** What one bin of the seismicity-rate series spans. */
@@ -460,53 +495,59 @@ const MagnitudeTypeTable = memo(function MagnitudeTypeTable({
 });
 
 // Mc estimation settings shared by the G-R and Mc tabs (and the Temporal tab's rate
-// threshold): the method, and the correction added to the MAXC bin.
+// threshold): the method, and the correction added to the MAXC bin, offered only when
+// MAXC is chosen or a fallback used it (`usedMaxc`).
 const McSettings = memo(function McSettings({
   method,
   onMethodChange,
   correction,
   onCorrectionChange,
+  usedMaxc = false,
 }: {
   method: McMethod;
   onMethodChange: (method: McMethod) => void;
   correction: number;
   onCorrectionChange: (correction: number) => void;
+  usedMaxc?: boolean;
 }) {
   return (
     <div className="flex flex-wrap items-end gap-4 p-3 rounded-lg border bg-muted/30" aria-label="Mc estimation settings" role="group">
       <div className="space-y-1">
         <div className="flex items-center gap-1.5">
           <Label className="text-xs font-medium">Mc method</Label>
-          <InfoTooltip content="Maximum curvature (MAXC): the fullest magnitude bin of the frequency-magnitude distribution plus a correction (Wiemer & Wyss, 2000). Goodness-of-fit test (GFT): the lowest cut-off at which a Gutenberg-Richter law fitted above it reproduces 95% of the observed cumulative counts, else 90%; if neither is reached, MAXC is used and the page says so (Wiemer & Wyss, 2000)." />
+          <InfoTooltip content="b-value stability (MBS): the lowest cut-off whose b-value is within its uncertainty of the mean b over the next 0.5 units (Cao & Gao, 2002; Woessner & Wiemer, 2005); falls back to GFT. Goodness of fit (GFT): the lowest cut-off above which a fitted Gutenberg-Richter law reproduces 95% (else 90%) of the observed cumulative counts (Wiemer & Wyss, 2000); falls back to MAXC. Maximum curvature (MAXC): the fullest magnitude bin plus a correction (Wiemer & Wyss, 2000)." />
         </div>
         <Select value={method} onValueChange={value => onMethodChange(value as McMethod)}>
           <SelectTrigger className="h-8 w-[280px] text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="MAXC">Maximum curvature (MAXC)</SelectItem>
-            <SelectItem value="GFT">Goodness-of-fit test (GFT, 95% / 90%)</SelectItem>
+            <SelectItem value="MBS">{MC_METHOD_LABELS.MBS}</SelectItem>
+            <SelectItem value="GFT">{MC_METHOD_LABELS.GFT}</SelectItem>
+            <SelectItem value="MAXC">{MC_METHOD_LABELS.MAXC}</SelectItem>
           </SelectContent>
         </Select>
       </div>
-      <div className="space-y-1">
-        <div className="flex items-center gap-1.5">
-          <Label className="text-xs font-medium">MAXC correction</Label>
-          <InfoTooltip content="Added to the MAXC bin, because maximum curvature underestimates Mc by about 0.1-0.2 for typical networks (Woessner & Wiemer, 2005). Default +0.2. Also applies when the goodness-of-fit test falls back to MAXC." />
+      {(method === 'MAXC' || usedMaxc) && (
+        <div className="space-y-1">
+          <div className="flex items-center gap-1.5">
+            <Label className="text-xs font-medium">MAXC correction</Label>
+            <InfoTooltip content="Added to the MAXC bin, because maximum curvature underestimates Mc by about 0.1-0.2 for typical networks (Woessner & Wiemer, 2005). Default +0.2. Also applies when another method falls back to MAXC." />
+          </div>
+          <Select value={String(correction)} onValueChange={value => onCorrectionChange(Number(value))}>
+            <SelectTrigger className="h-8 w-[160px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MAXC_CORRECTION_CHOICES.map(choice => (
+                <SelectItem key={choice} value={String(choice)}>
+                  +{choice.toFixed(1)}{choice === DEFAULT_MAXC_CORRECTION ? ' (default)' : ''}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-        <Select value={String(correction)} onValueChange={value => onCorrectionChange(Number(value))}>
-          <SelectTrigger className="h-8 w-[160px] text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {MAXC_CORRECTION_CHOICES.map(choice => (
-              <SelectItem key={choice} value={String(choice)}>
-                +{choice.toFixed(1)}{choice === DEFAULT_MAXC_CORRECTION ? ' (default)' : ''}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      )}
     </div>
   );
 });
@@ -564,7 +605,7 @@ export default function AnalyticsPage() {
 
   // Mc estimation (G-R and Mc tabs, and the Temporal tab's rate threshold) and the
   // Temporal tab's time bins and release quantity.
-  const [mcMethod, setMcMethod] = useState<McMethod>('MAXC');
+  const [mcMethod, setMcMethod] = useState<McMethod>('MBS');
   const [maxcCorrection, setMaxcCorrection] = useState<number>(DEFAULT_MAXC_CORRECTION);
   const [rateInterval, setRateInterval] = useState<RateIntervalOption>('auto');
   const [releaseQuantity, setReleaseQuantity] = useState<'moment' | 'energy'>('moment');
@@ -2257,7 +2298,8 @@ export default function AnalyticsPage() {
               ) : (
                 <div className="space-y-6">
                   {magnitudeCutoff == null ? (
-                    <McSettings method={mcMethod} onMethodChange={setMcMethod} correction={maxcCorrection} onCorrectionChange={setMaxcCorrection} />
+                    <McSettings method={mcMethod} onMethodChange={setMcMethod} correction={maxcCorrection} onCorrectionChange={setMaxcCorrection}
+                      usedMaxc={grAnalysis?.mcSource === 'MAXC'} />
                   ) : (
                     <p role="note" className="text-xs text-muted-foreground">
                       The Mc settings do not apply while the magnitude filter&apos;s lower bound, M ≥ {magnitudeCutoff.toFixed(1)}, is the fit&apos;s cut-off.
@@ -2508,7 +2550,8 @@ export default function AnalyticsPage() {
                 <PooledCataloguesNotice count={pooledCatalogueCount('completeness')} />
               ) : (
                 <div className="space-y-6">
-                  <McSettings method={mcMethod} onMethodChange={setMcMethod} correction={maxcCorrection} onCorrectionChange={setMaxcCorrection} />
+                  <McSettings method={mcMethod} onMethodChange={setMcMethod} correction={maxcCorrection} onCorrectionChange={setMaxcCorrection}
+                    usedMaxc={completeness?.method === 'MAXC'} />
                   {completeness ? (
                     <div className="space-y-6">
                       <MixedScaleWarning summary={fitMagnitudeTypes} />
@@ -2549,7 +2592,7 @@ export default function AnalyticsPage() {
                                 <span className="w-2 h-2 bg-teal-500 rounded-full"></span>
                                 Events at or above Mc
                               </CardTitle>
-                              <InfoTooltip content="Share of the analysed events at or above Mc: the sample a b-value fit keeps. It is not a completeness score: with a MAXC correction c, even a perfectly complete catalogue shows only about 10^(-c b) (63% at b = 1 for the default c = 0.2), because the correction sets aside the lowest c magnitude units." />
+                              <InfoTooltip content="Share of the analysed events at or above Mc: the sample a b-value fit keeps. It is not a completeness score: events below Mc are set aside whether or not they are complete (MAXC + 0.2 alone sets aside about 37% of a perfectly complete b = 1 catalogue)." />
                             </div>
                           </CardHeader>
                           <CardContent>
@@ -2571,7 +2614,7 @@ export default function AnalyticsPage() {
                                 <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
                                 Detection Method
                               </CardTitle>
-                              <InfoTooltip content="Method used to estimate Mc: maximum curvature plus a correction (MAXC), or the goodness-of-fit test (GFT). Choose it in the Mc settings above." />
+                              <InfoTooltip content="Method that produced Mc: b-value stability (MBS), the goodness-of-fit test (GFT), or maximum curvature plus a correction (MAXC). Choose it in the Mc settings above." />
                             </div>
                           </CardHeader>
                           <CardContent>
@@ -2579,13 +2622,11 @@ export default function AnalyticsPage() {
                               {completeness.method === 'GFT' ? `GFT (${completeness.gftLevel}%)` : completeness.method}
                             </div>
                             <p className="text-xs text-muted-foreground mt-2">
-                              {completeness.method === 'GFT'
-                                ? `Lowest cut-off whose Gutenberg-Richter fit reproduces ${completeness.gftLevel}% of the observed cumulative counts (R = ${completeness.gftFit?.toFixed(1)}%)`
-                                : `Maximum curvature of the FMD + ${Number((completeness.maxcCorrection ?? DEFAULT_MAXC_CORRECTION).toFixed(2))}`}
+                              {describeMcMethodCard(completeness)}
                             </p>
                             {completeness.fallbackReason && (
                               <p role="note" className="text-xs text-amber-700 dark:text-amber-400 mt-1">
-                                Goodness-of-fit test requested: {completeness.fallbackReason}.
+                                {MC_METHOD_NAMES[completeness.requestedMethod as McMethod] ?? 'Another method'} requested: {completeness.fallbackReason}.
                               </p>
                             )}
                           </CardContent>
@@ -2600,17 +2641,42 @@ export default function AnalyticsPage() {
                             <TechnicalTermTooltip term="magnitudeFrequencyDistribution" />
                           </div>
                           <CardDescription>
-                            Number of events per magnitude bin with completeness threshold
+                            Events per magnitude bin, bins centred on multiples of {completeness.binWidth ?? ANALYSIS_BIN_WIDTH}; the tallest is the maximum-curvature peak
                           </CardDescription>
                           <AxisLegendHints
-                            axes="X: magnitude bin. Y: event count."
+                            axes="X: bin centre magnitude. Y: event count."
                             legend="Bars above Mc are complete; dashed line marks Mc."
                           />
                         </CardHeader>
                         <CardContent>
-                          <CompletenessChart distribution={completeness.magnitudeDistribution} mc={completeness.mc} height={420} />
+                          <CompletenessChart distribution={completeness.magnitudeDistribution} mc={completeness.mc} binWidth={completeness.binWidth} height={420} />
                         </CardContent>
                       </Card>
+
+                      {Array.isArray(completeness.mbsCurve) && (
+                        <Card className="border border-border/50">
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-base">b-value stability</CardTitle>
+                            <CardDescription>
+                              b above each cut-off Mi with its Shi &amp; Bolt (1982) uncertainty δb, and the mean b over Mi to Mi + 0.5
+                              (Woessner &amp; Wiemer, 2005); MBS takes the lowest Mi where |b̄ − b| ≤ δb.
+                            </CardDescription>
+                            <AxisLegendHints
+                              axes="X: cut-off magnitude Mi. Y: b-value."
+                              legend="Points: b ± δb. Line: mean b over the next 0.5 units. Dashed line marks Mc. Cut-offs with fewer than 50 events above them are not shown."
+                            />
+                          </CardHeader>
+                          <CardContent>
+                            {completeness.mbsCurve.length > 0 ? (
+                              <BValueStabilityChart curve={completeness.mbsCurve} mc={completeness.mc} height={300} />
+                            ) : (
+                              <p className="text-sm text-muted-foreground py-6 text-center">
+                                No cut-off has at least 50 events in 3 populated bins above it.
+                              </p>
+                            )}
+                          </CardContent>
+                        </Card>
+                      )}
 
                       {Array.isArray(completeness.gftCurve) && (
                         <Card className="border border-border/50">
@@ -2659,7 +2725,7 @@ export default function AnalyticsPage() {
                               <li>• Statistical analyses should use M ≥ Mc only</li>
                               <li>• Lower Mc indicates better network coverage</li>
                               <li>• Mc may vary spatially and temporally</li>
-                              <li>• MAXC takes the fullest magnitude bin plus a correction (default +0.2); the goodness-of-fit test takes the lowest cut-off above which a Gutenberg-Richter law reproduces 95% (else 90%) of the observed counts. Check either against the plot.</li>
+                              <li>• b-value stability (the default) takes the lowest cut-off whose b is within δb of the mean b over the next 0.5 units; the goodness-of-fit test, the lowest above which a Gutenberg-Richter law reproduces 95% (else 90%) of the counts; MAXC, the fullest bin plus a correction. Check any of them against the plots.</li>
                             </ul>
                           </div>
                         </div>

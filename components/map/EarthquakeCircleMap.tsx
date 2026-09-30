@@ -1,5 +1,7 @@
 'use client';
 
+import { buildEventCardHtml } from '@/lib/map-event-card';
+import { LocalitiesAttribution, useNzLocalities } from './use-nz-localities';
 import { useCallback, useMemo, useState, memo } from 'react';
 import { MapContainer, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -8,7 +10,7 @@ import { useEventMapPopup } from '@/hooks/use-event-map-popup';
 import { useMapColors } from '@/hooks/use-map-theme';
 import type { MapDetail } from '@/lib/map-event-selection';
 import { getEarthquakeColor } from '@/lib/earthquake-utils';
-import { getAzimuthalGapColor } from '@/lib/uncertainty-utils';
+import { calculateUncertaintyEllipse, getAzimuthalGapColor } from '@/lib/uncertainty-utils';
 import { getQualityColor } from '@/lib/quality-scoring';
 import { FIT_BOUNDS_OPTIONS, MAP_ZOOM_OPTIONS } from '@/lib/map-style';
 import { eventsFitBounds } from '@/lib/map-view';
@@ -27,6 +29,11 @@ import {
   COLOR_MODE_LABELS, ColorModeLegendSection, LegendSection, MagnitudeSizeKey, MapLegend,
   UNKNOWN_SOURCE_KEY, buildCatalogueColorScale, resolveSourceCatalogue, type MapColorMode,
 } from './MapLegend';
+import {
+  EllipsePopupRow, FaultsOverlay, FocalMechanismLegendSection, FocalMechanismStatus, FocalMechanismsOverlay,
+  MapOverlayLegendSection, MapOverlayToggles, OVERLAY_UNAVAILABLE_REASONS, OverlayStyleInfo,
+  UncertaintyEllipsesOverlay, useEventOverlays, useFaultData, useOverlayDataAvailability,
+} from './MapOverlays';
 
 export interface CircleMapEvent {
   id: string | number;
@@ -59,6 +66,22 @@ export interface CircleMapEvent {
   source_catalogue_ids?: string[] | null;
   /** Full per-source provenance JSON; only present when the caller fetched full events. */
   source_events?: string | null;
+
+  // Uncertainty-ellipse overlay (all kept by the events summary view, EVENT_SUMMARY_PROJECTION):
+  // QuakeML OriginUncertainty ellipse (km, azimuth clockwise from north) and its confidence
+  // level, the circular horizontal uncertainty, or the lat/lon marginals.
+  horizontal_uncertainty?: number | null;
+  min_horizontal_uncertainty?: number | null;
+  max_horizontal_uncertainty?: number | null;
+  azimuth_max_horizontal_uncertainty?: number | null;
+  confidence_level?: number | null;
+  latitude_uncertainty?: number | null;
+  longitude_uncertainty?: number | null;
+
+  // Focal-mechanism overlay (also in the summary view).
+  focal_mechanisms?: string | null;
+  /** QuakeML preferredFocalMechanismID: which of focal_mechanisms is authoritative. */
+  preferred_focal_mechanism_id?: string | null;
 }
 
 interface EarthquakeCircleMapProps {
@@ -90,8 +113,8 @@ const STYLE_INFO = (
     Colour shows the chosen attribute; marker size always shows magnitude. <b>Quality</b> is the
     location quality score (Q 0–100). <b>Azimuthal gap</b> is the largest angle between recording
     stations seen from the epicentre. <b>Source catalogue</b> is, for a merged event, the catalogue
-    whose solution the row publishes. <b>Map detail</b> caps how many events are drawn at once;
-    zoom in to see more.
+    whose solution the row publishes. <OverlayStyleInfo faults /> <b>Map detail</b> caps how many
+    events are drawn at once; zoom in to see more.
   </>
 );
 
@@ -108,9 +131,21 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
 }: EarthquakeCircleMapProps) {
   const { isDark } = useMapColors();
   const [colorMode, setColorMode] = useState<MapColorMode>('depth');
+  // Overlays, as on the analytics map: active faults on by default (tectonic context for
+  // every catalogue), ellipses on demand, and focal mechanisms as a mode that replaces the
+  // event circles with beach balls.
+  const [showFaults, setShowFaults] = useState(true);
+  const [showUncertainty, setShowUncertainty] = useState(false);
+  const [showFocalMechanisms, setShowFocalMechanisms] = useState(false);
 
-  const { sampled: sampledEvents, displayCount, visibleCount, onViewportChange } = useMapEventSelection(events, sampleSize);
+  const { sampled: sampledEvents, displayCount, visibleCount, onViewportChange, getPosition } = useMapEventSelection(events, sampleSize);
   const { activePopup, onEventClick, closePopup } = useEventMapPopup(events, mapKey);
+  // Hover card (lib/map-event-card.ts): localities from the LINZ Gazetteer once loaded.
+  const places = useNzLocalities();
+  const hoverCard = useCallback((event: CircleMapEvent) => buildEventCardHtml(event, places), [places]);
+
+  // The fault traces: fetched once per page load and shared with every other map.
+  const faultData = useFaultData(showFaults);
 
   // Frame the events (antimeridian aware; NZ when empty). MapContainer reads the bounds once,
   // on creation; FitMapToEvents keeps framing them while events stream in.
@@ -150,10 +185,25 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
     return getEarthquakeColor(event.depth, isDark);
   }, [colorMode, qualityScoreMap, isDark, sourceCatalogueInfoMap, sourceCatalogueScale]);
 
+  // A switch whose overlay has nothing to draw in this catalogue is disabled, with the reason.
+  const available = useOverlayDataAvailability(events);
+  const uncertaintyOn = showUncertainty && available.uncertainty;
+  const mechanismsMode = showFocalMechanisms && available.focalMechanisms;
+  const overlays = useEventOverlays({
+    events: sampledEvents,
+    getPosition,
+    showUncertainty: uncertaintyOn,
+    showFocalMechanisms: mechanismsMode,
+  });
+
   const popupEvent = activePopup?.event;
   const popupQuality = useMemo(
     () => (popupEvent && colorMode === 'quality' ? resolveEventQuality(popupEvent) : null),
     [popupEvent, colorMode]
+  );
+  const popupEllipse = useMemo(
+    () => (popupEvent && uncertaintyOn ? calculateUncertaintyEllipse(popupEvent) : null),
+    [popupEvent, uncertaintyOn]
   );
 
   return (
@@ -169,15 +219,24 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
       >
         <MapLayerControl position="topright" />
         <MapScaleBar />
+        <LocalitiesAttribution active={places.length > 0} />
         {bounds && <FitMapToEvents bounds={bounds} />}
         <MapViewportObserver onChange={onViewportChange} />
-        <EarthquakeMarkerLayer
-          events={sampledEvents}
-          getColor={getEventColor}
-          isDark={isDark}
-          selectedId={popupEvent?.id ?? null}
-          onEventClick={onEventClick}
-        />
+        {/* Faults (pane 380) and ellipses (390) under the event canvas; beach balls above it. */}
+        {showFaults && <FaultsOverlay data={faultData} isDark={isDark} />}
+        <UncertaintyEllipsesOverlay items={overlays.ellipses.items} getColor={getEventColor} />
+        {/* The event circles - replaced by the beach balls in mechanisms mode. */}
+        {!mechanismsMode && (
+          <EarthquakeMarkerLayer
+            events={sampledEvents}
+            getColor={getEventColor}
+            isDark={isDark}
+            selectedId={popupEvent?.id ?? null}
+            onEventClick={onEventClick}
+            hoverCard={hoverCard}
+          />
+        )}
+        <FocalMechanismsOverlay items={overlays.mechanisms.items} getFill={getEventColor} onEventClick={onEventClick} />
         {activePopup && (
           <Popup
             key={activePopup.seq}
@@ -187,7 +246,9 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
             autoPanPadding={[48, 48]}
             eventHandlers={{ remove: () => closePopup(activePopup.seq) }}
           >
-            <OptimizedEventPopup event={activePopup.event} quality={popupQuality} />
+            <OptimizedEventPopup event={activePopup.event} quality={popupQuality}>
+              {popupEllipse && <EllipsePopupRow ellipse={popupEllipse} />}
+            </OptimizedEventPopup>
           </Popup>
         )}
       </MapContainer>
@@ -200,19 +261,50 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
           onChange={setColorMode}
           options={COLOR_MODE_OPTIONS}
         />
+        <MapOverlayToggles
+          faults={{ checked: showFaults, onCheckedChange: setShowFaults }}
+          uncertainty={{
+            checked: showUncertainty,
+            onCheckedChange: setShowUncertainty,
+            note: overlays.ellipseNote,
+            unavailableReason: available.uncertainty ? null : OVERLAY_UNAVAILABLE_REASONS.uncertainty,
+          }}
+          focalMechanisms={{
+            checked: showFocalMechanisms,
+            onCheckedChange: setShowFocalMechanisms,
+            unavailableReason: available.focalMechanisms ? null : OVERLAY_UNAVAILABLE_REASONS.focalMechanisms,
+          }}
+        />
         <StylePanelSection>
           <MapDetailControl value={sampleSize} onChange={onSampleSizeChange} />
         </StylePanelSection>
       </MapStylePanel>
 
-      <MapStatusChip shown={displayCount} total={visibleCount} />
+      {mechanismsMode ? (
+        <FocalMechanismStatus
+          shown={overlays.mechanisms.items.length}
+          total={overlays.mechanisms.total}
+          catalogueHasAny={available.focalMechanisms}
+        />
+      ) : (
+        <MapStatusChip shown={displayCount} total={visibleCount} />
+      )}
 
       {/* Legend: every key is generated from the functions that colour and size the markers. */}
       <MapLegend>
         <ColorModeLegendSection mode={colorMode} isDark={isDark} catalogueLegend={sourceCatalogueScale.legend} />
-        <LegendSection title="Magnitude">
-          <MagnitudeSizeKey isDark={isDark} />
-        </LegendSection>
+        {mechanismsMode ? (
+          <FocalMechanismLegendSection />
+        ) : (
+          <LegendSection title="Magnitude">
+            <MagnitudeSizeKey isDark={isDark} />
+          </LegendSection>
+        )}
+        <MapOverlayLegendSection
+          isDark={isDark}
+          showFaults={showFaults}
+          ellipses={overlays.ellipses.items.map(({ ellipse }) => ellipse)}
+        />
       </MapLegend>
     </div>
   );

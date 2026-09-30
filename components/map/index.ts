@@ -32,6 +32,15 @@ export { FitMapToEvents } from './FitMapToEvents';
 export { ensureMapPane, ensureLabelsPane } from './map-panes';
 export { ensureLeafletDefaultIcon } from './leaflet-default-icon';
 export {
+  FaultsOverlay, UncertaintyEllipsesOverlay, FocalMechanismsOverlay, MapOverlayToggles, OverlayToggle,
+  MapOverlayLegendSection, FocalMechanismLegendSection, FocalMechanismStatus, MapNotice, ActiveFaultsToggle,
+  EllipsePopupRow, OverlayStyleInfo, useFaultData, useEventOverlays, useOverlayDataAvailability,
+  drawableFocalMechanism, uncertaintyOverlayNote, MAX_MAP_OVERLAYS, MAX_FOCAL_MECHANISMS, OVERLAY_LABELS,
+  OVERLAY_UNAVAILABLE_REASONS, FOCAL_MECHANISM_DESCRIPTION, NO_FOCAL_MECHANISMS,
+  type OverlayEvent, type OverlayToggleState, type EventOverlays, type MapUncertaintyEllipse, type MapFocalMechanism,
+} from './MapOverlays';
+export { attachFaultsLayer, type FaultsLayerHandle } from './faults-layer';
+export {
   MapLegend, LegendSection, DepthColorBar, MagnitudeSizeKey, QualityColorKey, AzimuthalGapColorBar,
   CatalogueColorKey, FaultLineKey, ColorModeLegendSection, COLOR_MODE_LABELS, COLOR_MODE_LEGEND_TITLES,
   MAP_LEGEND_POSITION, buildCatalogueColorScale, resolveSourceCatalogue, UNKNOWN_SOURCE_KEY,

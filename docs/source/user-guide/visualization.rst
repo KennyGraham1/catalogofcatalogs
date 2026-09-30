@@ -68,8 +68,39 @@ Navigate to **Analytics** or **Catalogues** → **View on Map**
      - Zoom at cursor position
    * - Double-click
      - Zoom in at point
+   * - Point at marker
+     - Show the event's summary card (see below)
    * - Click marker
      - View event details popup
+
+Event Summary Card
+==================
+
+Pointing at an event shows a compact card in the form seismic observatories use:
+
+* **Title** — where the event is, described against the nearest named place
+  (for example "18 km east of Seddon"). Places are the cities, towns,
+  villages, localities and islands of the LINZ New Zealand Gazetteer
+  that the Gazetteer gives a map label level of 12 or better (about 480
+  places, ``public/data/nz-localities.json``, built by
+  ``scripts/build-nz-localities.mjs``). Distances are great-circle, directions
+  are to the nearest of eight compass points, and the distance is rounded to
+  the nearest kilometre below 20 km and to the nearest 5 km beyond. Within
+  3 km the card says "Near *place*". Beyond 300 km from every place (or before
+  the place list has loaded) the title falls back to the event's stored
+  region, then to its epicentre.
+* **Magnitude** with its type (e.g. ML 3.5), **depth** (marked "fixed" when
+  the depth was held fixed), and the **epicentre**.
+* **Azimuthal gap** with a judgement of how well the network surrounds the
+  event: well constrained (≤ 90°), moderately constrained (≤ 180°) or poorly
+  constrained (> 180°), coloured green, amber and orange.
+* **Origin time** in UTC and, for events in the New Zealand region
+  (28–53° S, 165° E–175° W), New Zealand local time with its date (NZST or
+  NZDT). The two dates often differ.
+* The agency's **event ID**.
+
+Clicking the event opens the full record. While the place names are in use,
+the map's attribution credits them: "Place names © LINZ (CC BY 4.0)".
 
 Map Colour Modes
 =================
@@ -180,10 +211,14 @@ M5 11.1 px, M6 16.7 px, M7 25 px. An event with no magnitude is drawn at 3 px.
 The legend draws M2-M6 circles at exactly these radii. Larger events are
 drawn on top.
 
-Overlays (Analytics Page Map)
-==============================
+Overlays
+========
 
-The **Overlays** section of the map's Style panel has three switches:
+The **Overlays** section of the Style panel on the catalogue map, the
+dashboard map, the merge-results map and the Analytics map has three switches.
+The duplicate-group map on the merge page and the region selector offer the
+**Active faults** switch alone, off by default.
+
 
 * **Active faults** (on by default) — GNS Science active fault traces (NZ
   Active Faults Database) as thin dark-red lines (light red in the dark
@@ -204,19 +239,22 @@ The **Overlays** section of the map's Style panel has three switches:
   (e.g. "Error ellipse, 90% confidence", or "confidence not recorded"), and
   an event's popup gives its own error ("Location error 8.0 × 2.0 km, 90%
   confidence").
-* **Focal mechanisms** (off by default) — draws a lower-hemisphere beach ball
-  for each plotted event with a resolvable nodal plane, preferring the event's
-  ``preferred_focal_mechanism_id``. Beach balls are sized by magnitude (19 px
-  at M2 to 45 px at M6, at most 48 px), larger events on top, and clicking one
-  opens its event's popup. To avoid burying the events at national scale they
-  are drawn only at zoom 6 or closer, or when at most **300** plotted events
-  have a mechanism; otherwise the panel says how many there are and to zoom
-  in.
+* **Focal mechanisms** (off by default) — a display mode: while it is on,
+  the event circles are hidden and each plotted event with a resolvable nodal
+  plane is drawn as its lower-hemisphere beach ball instead, preferring the
+  event's ``preferred_focal_mechanism_id``. Beach balls are sized by magnitude
+  (19 px at M2 to 45 px at M6, at most 48 px), larger events on top, and
+  clicking one opens its event's popup. At most the **300** largest-magnitude
+  events with a mechanism are drawn, at any zoom; the status chip says how
+  many are shown and zooming in brings in the rest. The legend shows the beach
+  ball key in place of the magnitude key, and a notice says when the
+  catalogue, or the current view, has no mechanisms. The switch is disabled
+  with the reason when the catalogue has none.
 
-The ellipse and beach-ball overlays act only on the events currently plotted
-(the spatially sampled set shown at the current view) and are capped at the
-**150** largest-magnitude events; when more qualify, the note under the switch
-reads "Showing the 150 largest of *N* plotted events."
+The ellipse overlay and the beach balls act only on the events currently
+plotted (the spatially sampled set shown at the current view). Ellipses are
+capped at the **150** largest-magnitude events; when more qualify, the note
+under the switch reads "Showing the 150 largest of *N* plotted events."
 
 There is no "Show Stations" toggle: the platform does not store per-event
 station coordinates, so station positions cannot be drawn on the map. Use the
@@ -428,31 +466,37 @@ Completeness Magnitude
 ======================
 
 The **Mc method** control (Mc tab, and the G-R tab when its magnitude
-filter has no lower bound) offers:
+filter has no lower bound) offers three methods. Every candidate cut-off Mi
+is a 0.1-magnitude bin edge and means the events with M >= Mi; b above it
+is the Aki-Utsu maximum-likelihood value with the same reporting-resolution
+correction the b-value fit uses (half the rounding step for magnitudes
+rounded to a fixed step, zero for full-precision magnitudes).
 
-* **Maximum curvature (MAXC)** -- the default. Mc is the lower edge of the
-  fullest 0.1-magnitude bin of the non-cumulative frequency-magnitude
-  distribution (the lowest such bin on a tie), plus a **MAXC correction**
-  chosen from a menu of +0.0 to +0.5 in 0.1 steps (default **+0.2**). The
-  same correction is applied when the goodness-of-fit test below falls back
-  to MAXC.
-* **Goodness-of-fit test (GFT, 95% / 90%)** -- following Wiemer & Wyss
-  (2000) and Woessner & Wiemer (2005). Every 0.1-magnitude bin edge Mi
-  (ascending) is a candidate once it has at least 10 events at or above it
-  across at least 3 populated bins. For each candidate, b is fitted by
-  Aki-Utsu maximum likelihood on events with M >= Mi, with the same
-  reporting-resolution correction the b-value fit itself uses (half the
-  rounding step for magnitudes rounded to a fixed step, zero for
-  full-precision magnitudes); a = log10 N(>= Mi) + b * Mi; the predicted
-  cumulative count at every bin edge Mj >= Mi is Sj = N(>= Mi) *
-  10^(-b(Mj-Mi)), compared against the observed cumulative count Bj = N(>=
-  Mj). The goodness of fit is R = 100 - 100 * sum(|Bj - Sj|) / sum(Bj) --
-  summed only up to the bin holding the largest analysed magnitude, not
-  beyond it (an empty bin above the data would otherwise pull R down and
-  shift Mc in a small catalogue). Mc is the lowest Mi reaching R >= 95%,
-  else the lowest reaching R >= 90%. If no candidate reaches even 90%, Mc
-  falls back to MAXC + the same correction, with the message "No cut-off
-  reached a 90% goodness of fit, so Mc is maximum curvature + c".
+* **b-value stability (MBS)** -- the default (Cao & Gao, 2002, in the form
+  of Woessner & Wiemer, 2005). For each Mi with at least 50 events across at
+  least 3 populated bins at or above it, the uncertainty of b is Shi & Bolt's
+  (1982) db = 2.3 b^2 sqrt(sum((M - mean M)^2) / (N(N-1))), and b_ave is the
+  mean b over the six cut-offs Mi, Mi+0.1, ..., Mi+0.5. Mc is the lowest Mi
+  with ``|b_ave - b(Mi)| <= db(Mi)``: the lowest cut-off whose b agrees, within
+  its uncertainty, with b over the next 0.5 units. If no cut-off qualifies,
+  Mc falls back to the goodness-of-fit test, and the page says why ("Too
+  few events for b-value stability ..." or "No cut-off had a stable
+  b-value ...").
+* **Goodness of fit (GFT)** -- following Wiemer & Wyss (2000). Every Mi
+  with at least 10 events across at least 3 populated bins at or above it is
+  a candidate. With a = log10 N(>= Mi) + b * Mi, the predicted cumulative
+  count at every bin edge Mj >= Mi is Sj = N(>= Mi) * 10^(-b(Mj-Mi)),
+  compared against the observed Bj = N(>= Mj). The goodness of fit is
+  ``R = 100 - 100 * sum(|Bj - Sj|) / sum(Bj)``, summed only up to the bin
+  holding the largest analysed magnitude. Mc is the lowest Mi reaching
+  R >= 95%, else the lowest reaching R >= 90%. If none reaches 90%, Mc falls
+  back to MAXC + the correction ("No cut-off reached a 90% goodness of fit,
+  so Mc is maximum curvature + c").
+* **Maximum curvature (MAXC)** -- the fullest bin of the non-cumulative
+  frequency-magnitude distribution, bins centred on multiples of 0.1 (each
+  magnitude rounded to the nearest 0.1, as in ZMAP; the lowest bin on a tie),
+  plus a **MAXC correction** from +0.0 to +0.5 (default **+0.2**). The
+  correction control appears when MAXC is chosen or a fallback used it.
 
 A magnitude is treated as lying on a reporting step (e.g. the common 0.1 or
 0.01 rounding) when it is within 2^-20 of an exact multiple of that step --
@@ -465,25 +509,27 @@ instead (a value on a 0.1 grid also lands on a 0.5 grid one time in five, by
 chance alone, and that share is subtracted out rather than gating a
 yes/no test).
 
-Either method needs at least 50 analysed events to estimate Mc at all. The
-result is shown as "M{mc} +/- 0.1" with one of three explanations
-("Estimated by maximum curvature + c" / "...the goodness-of-fit test at the
-95%/90% level" / "...maximum curvature + c (the goodness-of-fit test
-reached no 90% fit)"), each ending with the reminder that the +/- one bin
-width shown is only a lower bound on the true uncertainty. The Mc tab's
-method card names the method used ("MAXC" or "GFT (95%)"/"GFT (90%)") with
-its R value, and a request for GFT adds a "Goodness-of-Fit Test" chart
-plotting R against every candidate cut-off, with the 95%/90% reference
-lines and the chosen Mc marked. The "events at or above Mc" share shown
-alongside it uses the same tolerant (2^-20) comparison as the fit itself,
-so a magnitude reported exactly at Mc is never excluded by floating-point
-rounding.
+Every method needs at least 50 analysed events to estimate Mc at all. The
+result is shown as "M{mc} +/- 0.1", "Estimated by" the method used (with the
+requested method in brackets after a fallback); +/- one bin width is only a
+lower bound on the uncertainty. The Mc tab's method card names the method
+used ("MBS", "GFT (95%)"/"GFT (90%)" or "MAXC"). Under the frequency-magnitude
+distribution (the centred bins MAXC uses, so its tallest bar is the MAXC
+peak), a **b-value stability** chart plots b(Mi) with its db error bar and
+the b_ave line against the cut-off, with Mc marked, whatever the method: a
+check on any Mc. When the goodness-of-fit test ran, a "Goodness-of-Fit Test"
+chart plots R against every candidate. The "events at or above Mc" share
+uses the same tolerant (2^-20) comparison as the fit itself, so a magnitude
+reported exactly at Mc is never excluded by floating-point rounding.
 
 .. note::
-   ZMAP's classic implementation of this test differs in its search range
+   ZMAP's classic goodness-of-fit implementation differs in its search range
    and event floor (it scans MAXC -0.9 to +1.5 and needs 25 events per
    candidate rather than 10); results are not directly comparable between
-   the two tools.
+   the two tools. b-value stability assumes a Gutenberg-Richter law above
+   Mc: where b drifts with the cut-off (an excess of large events, mixed
+   sequences) or db is very small (tens of thousands of events), it returns
+   a higher, more conservative Mc than GFT or MAXC.
 
 Seismic Moment
 ==============

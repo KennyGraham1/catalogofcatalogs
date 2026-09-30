@@ -167,7 +167,7 @@ describe('C9 — chunked-upload ownership', () => {
     const result = await getUploadSession('s1', 'user-b');
 
     expect(result).toBeNull();
-    expect(findOne).toHaveBeenCalledWith({ session_id: 's1', chunk_index: -1, owner_id: 'user-b' });
+    expect(findOne).toHaveBeenCalledWith({ session_id: 's1', chunk_index: -1, owner_id: 'user-b', expires_at: { $gt: expect.any(Date) } });
   });
 
   it('getUploadSession without an ownerId does not filter by owner (back-compat for finalize)', async () => {
@@ -180,7 +180,7 @@ describe('C9 — chunked-upload ownership', () => {
     expect(result?.owner_id).toBe('user-a');
     // No owner_id key at all — an explicit `owner_id: undefined` could
     // serialise to a real query clause and break the "no filter" contract.
-    expect(findOne).toHaveBeenCalledWith({ session_id: 's1', chunk_index: -1 });
+    expect(findOne).toHaveBeenCalledWith({ session_id: 's1', chunk_index: -1, expires_at: { $gt: expect.any(Date) } });
   });
 });
 

@@ -61,6 +61,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Bind the link to the credentials at issuance. This also covers an issuance
+    // request that read the old user record but inserted its token after a change.
+    if ((tokenDoc.jwt_version ?? 0) !== (user.jwt_version ?? 0)) {
+      return NextResponse.json({ error: 'Invalid or expired reset token' }, { status: 400 });
+    }
+
     const newPasswordHash = await hashPassword(newPassword);
     // Claim after hashing, but before changing credentials. Only one request can
     // consume this token, including across application instances. If a later write

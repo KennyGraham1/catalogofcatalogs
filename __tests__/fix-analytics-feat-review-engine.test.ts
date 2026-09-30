@@ -331,15 +331,16 @@ describe('6: every "at or above Mc" count uses the same tolerant test', () => {
     const magnitudes = counts.flatMap(([m, n]) => repeat(m, n));
     magnitudes.push(...repeat(2.3 - 0.1, 560)); // 2.1999999999999997: the 2.2 bin, the fullest
     const events = eventsWithMagnitudes(magnitudes);
-    // MAXC: bin 2.2 (560) + 0.2 would be 2.4, but bins 2.0 (900) is fullest: Mc = 2.2.
-    const mc = estimateCompletenessMagnitude(events);
+    // MAXC (chosen, as the catalogue is built around its peak): bin 2.2 (560) + 0.2
+    // would be 2.4, but bin 2.0 (900) is fullest: Mc = 2.2.
+    const mc = estimateCompletenessMagnitude(events, 0.1, 0.2, { method: 'MAXC' });
     expect(mc.mc).toBeCloseTo(2.2, 10);
     // Everything from the 2.2 bin up: 560 + 450 + 350 + 280 + 220 + 180 + 90 + 30.
     const byHand = 560 + 450 + 350 + 280 + 220 + 180 + 90 + 30;
     expect(mc.eventsAboveMc).toBe(byHand);
-    expect(calculateGutenbergRichter(events).eventsAboveMc).toBe(byHand);
-    expect(analyzeSeismicityTimeSeries(events).rate.eventCount).toBe(byHand);
-    expect(loadWorker()({ type: 'completeness', events }).eventsAboveMc).toBe(byHand);
+    expect(calculateGutenbergRichter(events, undefined, 0.1, { method: 'MAXC' }).eventsAboveMc).toBe(byHand);
+    expect(analyzeSeismicityTimeSeries(events, { mcMethod: 'MAXC' }).rate.eventCount).toBe(byHand);
+    expect(loadWorker()({ type: 'completeness', events, mcMethod: 'MAXC' }).eventsAboveMc).toBe(byHand);
   });
 });
 

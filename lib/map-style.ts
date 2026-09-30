@@ -267,7 +267,7 @@ export function catalogueColorAt(index: number, isDark = false): string {
 }
 
 // ---------------------------------------------------------------------------------------
-// Faults (analytics map)
+// Faults (every map with an active-faults overlay; see components/map/MapOverlays.tsx)
 // ---------------------------------------------------------------------------------------
 
 export const FAULT_STYLE = Object.freeze({
@@ -280,6 +280,9 @@ export const FAULT_STYLE = Object.freeze({
 });
 
 export const FAULT_LEGEND_LABEL = 'Active faults (GNS Science NZ AFDB)';
+
+/** Leaflet attribution for the fault traces (HTML), on every map that draws them. */
+export const FAULT_ATTRIBUTION = 'Active faults &copy; GNS Science (CC BY 3.0 NZ)';
 
 /** Path options for fault lines at the given zoom. Draw them in MAP_PANES.faults. */
 export function faultPathOptions(isDark: boolean, zoom = 0): PathOptions {

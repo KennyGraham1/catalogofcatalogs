@@ -25,6 +25,7 @@ jest.mock('bcryptjs', () => ({
   hash: async (password: string) => `hash:${password}`,
   compare: async (password: string, hash: string) => hash === `hash:${password}`,
 }));
+jest.mock('next-auth', () => ({ getServerSession: async () => ({ user: { id: 'u1' } }) }));
 jest.mock('next/headers', () => ({ cookies: async () => ({ set: () => {} }) }));
 
 type Doc = Record<string, any>;
@@ -123,6 +124,7 @@ jest.mock('@/lib/mongodb', () => ({
 import { NextRequest } from 'next/server';
 import { authOptions } from '@/lib/auth/config';
 import { POST as forgot } from '@/app/api/auth/forgot-password/route';
+import { POST as changePassword } from '@/app/api/auth/change-password/route';
 import { POST as reset } from '@/app/api/auth/reset-password/route';
 
 const OWNER = 'seismologist@institute.example';
@@ -240,5 +242,30 @@ describe('a completed reset lets that browser in', () => {
     expect(await signIn('new password 123', '198.51.100.99')).toBe('AccountProtected');
     // ...but the browser that completed it is now a known device.
     expect(await signIn('new password 123', '198.51.100.77', cookie)).toBe('ok');
+  });
+});
+
+
+describe('reset links are bound to the credentials that issued them', () => {
+  it('rejects an old link after a password change and accepts a newly requested link', async () => {
+    await requestReset(OWNER);
+    const oldToken = tokenFrom(mockEmails[0]);
+    const changed = await changePassword(post('/api/auth/change-password', {
+      currentPassword: 'correct horse battery', newPassword: 'changed password 123',
+    }, '198.51.100.201'));
+    expect(changed.status).toBe(200);
+
+    const stale = await reset(post('/api/auth/reset-password', {
+      token: oldToken, newPassword: 'stale link password',
+    }, '198.51.100.202'));
+    expect(stale.status).toBe(400);
+    expect((await mockCollection('users').findOne({ id: 'u1' }))?.password_hash)
+      .toBe('hash:changed password 123');
+
+    await requestReset(OWNER);
+    const fresh = await reset(post('/api/auth/reset-password', {
+      token: tokenFrom(mockEmails[1]), newPassword: 'fresh link password',
+    }, '198.51.100.203'));
+    expect(fresh.status).toBe(200);
   });
 });

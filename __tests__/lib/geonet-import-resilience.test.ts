@@ -202,3 +202,48 @@ describe('GeoNet import resilience', () => {
     expect(db.updateCatalogueStatus).toHaveBeenLastCalledWith('error', 'cat-1', undefined, { runId: expect.any(String) });
   });
 });
+
+
+describe('GeoNet import catalogue write failures', () => {
+  it.each(['database error', 'missing catalogue'])('does not write events after a failed processing status: %s', async (failure) => {
+    client.fetchEventsText.mockResolvedValue([row('a', 10)]);
+    if (failure === 'database error') db.updateCatalogueStatus.mockRejectedValue(new Error('status unavailable'));
+    else db.updateCatalogueStatus.mockResolvedValue(false);
+
+    const result = await new GeoNetImportService().importEvents({ catalogueId: 'cat-1' });
+    expect(result.success).toBe(false);
+    expect(result.newEvents).toBe(0);
+    expect(db.bulkInsertEvents).not.toHaveBeenCalled();
+    expect(result.errors.join(' ')).toMatch(/status|catalogue/i);
+  });
+
+  it('reports a failed recount in the response and history, preserving committed counts', async () => {
+    client.fetchEventsText.mockResolvedValue([row('a', 10)]);
+    db.countEventsByCatalogue.mockRejectedValue(new Error('recount unavailable'));
+    const result = await new GeoNetImportService().importEvents({ catalogueId: 'cat-1' });
+    expect(result.success).toBe(false);
+    expect(result.newEvents).toBe(1);
+    expect(result.errors.join(' ')).toContain('recount unavailable');
+    expect(JSON.stringify(db.insertImportHistory.mock.calls)).toContain('recount unavailable');
+    expect(db.updateCatalogueStatus).toHaveBeenLastCalledWith('error', 'cat-1', undefined, { runId: expect.any(String) });
+  });
+
+  it('does not mark a newer import failed when this run is superseded at completion', async () => {
+    client.fetchEventsText.mockResolvedValue([row('a', 10)]);
+    db.updateCatalogueStatus.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const result = await new GeoNetImportService().importEvents({ catalogueId: 'cat-1' });
+    expect(result.success).toBe(false);
+    expect(result.newEvents).toBe(1);
+    expect(result.errors.join(' ')).toContain('superseded');
+    expect(db.updateCatalogueStatus.mock.calls.map(call => call[0])).toEqual(['processing', 'complete']);
+  });
+
+  it('reports final status failure even when the error status also cannot be written', async () => {
+    client.fetchEventsText.mockResolvedValue([row('a', 10)]);
+    db.updateCatalogueStatus.mockResolvedValueOnce(true).mockRejectedValue(new Error('status unavailable'));
+    const result = await new GeoNetImportService().importEvents({ catalogueId: 'cat-1' });
+    expect(result.success).toBe(false);
+    expect(result.newEvents).toBe(1);
+    expect(result.errors.join(' ')).toContain('status unavailable');
+  });
+});

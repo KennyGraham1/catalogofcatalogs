@@ -6,8 +6,9 @@ it('withholds a fit when incomplete bins are the only bins meeting the safeguard
 });
 it('scores an identical complete sample identically despite different incomplete tails', () => {
   const tail = Array.from({ length: 29 }, (_, i) => [Number((2.2 + i * .1).toFixed(1)), Math.round(100 * 10 ** (-i * .1))]);
-  const a = calculateGutenbergRichter(events([[2, 200], [2.1, 150], ...tail]));
-  const b = calculateGutenbergRichter(events([[2, 10000], [2.1, 9000], ...tail]));
+  // MAXC, whose peak (and so Mc) the two tails share; the tails set other MBS/GFT cut-offs.
+  const a = calculateGutenbergRichter(events([[2, 200], [2.1, 150], ...tail]), undefined, 0.1, { method: 'MAXC' });
+  const b = calculateGutenbergRichter(events([[2, 10000], [2.1, 9000], ...tail]), undefined, 0.1, { method: 'MAXC' });
   expect(a.completeness).toBe(b.completeness);
   expect(a.bValue).toBe(b.bValue);
   expect(a.aValue).toBe(b.aValue);

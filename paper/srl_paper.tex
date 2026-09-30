@@ -96,15 +96,18 @@ letter grades) evaluates each event across five dimensions: location precision,
 network geometry, solution fit, magnitude quality, and analyst-evaluation status.
 Standard seismological analyses run client-side in the browser:
 Gutenberg-Richter $b$-value estimation by maximum likelihood, magnitude of
-completeness ($M_c$) by Maximum Curvature (MAXC) or a goodness-of-fit test,
+completeness ($M_c$) by $b$-value stability (the default), a goodness-of-fit test
+or Maximum Curvature (MAXC),
 Gardner-Knopoff declustering, and cumulative seismic moment and energy.  A fully
 synthetic two-catalogue New Zealand example (no real event data), processed end to
 end by the platform's own engine, illustrates the workflow and quantifies the
 biases an analyst must control: the matcher pairs 93\% of the earthquakes both
 agencies report, with 98\% of its pairs correct; a quality threshold removes 95\%
 of the events with azimuthal gap above $180^{\circ}$ but also favours larger
-events, lowering $b$ by 0.06; global $M_c$ estimates fall below the completeness
-of the merged catalogue; and window declustering lowers $b$ by a further 0.12.
+events, lowering $b$ by 0.06; the MAXC and goodness-of-fit estimates of $M_c$
+fall well below the completeness of the merged catalogue, which the more
+conservative $b$-value-stability estimate reaches; and window declustering lowers
+$b$ by a further 0.12.
 Above a stable cut-off, the estimator recovers the planted $b = 1.00$ of the
 independent events ($1.01 \pm 0.01$).  These values characterise the controlled
 synthetic inputs, not real New Zealand seismicity.
@@ -465,7 +468,8 @@ consequential statistical biases (Section~\ref{sec:biases}).
 \label{sec:contributions}
 
 The individual algorithms CofC employs are deliberately standard: maximum-likelihood
-$b$-value estimation \citep{aki1965,utsu1965}, MAXC completeness estimation
+$b$-value estimation \citep{aki1965,utsu1965}, completeness estimation by $b$-value
+stability \citep{caogao2002,woessner2005}, goodness of fit or maximum curvature
 \citep{wiemer2000}, and Gardner-Knopoff \citep{gardner1974} and Reasenberg
 \citep{reasenberg1985} declustering.  The contribution of this work is therefore not
 a new estimator but the \emph{integration} of the multi-catalogue
@@ -693,7 +697,9 @@ locations stand out spatially.
 
 \textbf{Frequency-magnitude distribution.}  The Gutenberg-Richter and $M_c$
 tabs plot the cumulative and non-cumulative event counts by magnitude bin and
-overlay the fitted GR line and the $M_c$ estimate.  When the magnitude filter
+overlay the fitted GR line and the $M_c$ estimate; under the frequency-magnitude
+distribution the $M_c$ tab plots the $b$-value stability test at every cut-off,
+whichever method set $M_c$ (Section~\ref{sec:mc}).  When the magnitude filter
 has a lower bound, the fit uses it as an explicit cut-off (and says so); the
 filter's upper bound is never applied to the fit, which needs the distribution's
 upper tail, and $M_c$ itself is always estimated from the untruncated
@@ -1149,22 +1155,44 @@ plot (cumulative and non-cumulative) and the fitted line.
 \subsection{Magnitude of completeness}
 \label{sec:mc}
 
-The magnitude of completeness $M_c$ is estimated by one of two methods, chosen
-in the $M_c$ settings of the Analysis page.  The default is the Maximum
-Curvature (MAXC) method \citep{wiemer2000}:
+The magnitude of completeness $M_c$ is estimated by one of three methods, chosen
+in the $M_c$ settings of the Analysis page.  The default is the $b$-value
+stability method (MBS) of \citet{caogao2002}, in the form of
+\citet{woessner2005}.  Each bin edge $M_i$, in steps of $0.1$, with at least 50
+events at or above it in at least three populated bins is a candidate cut-off;
+$b(M_i)$ is estimated from the $n$ events at or above it by
+equation~\eqref{eq:aki} (with the reporting-step correction), with the
+uncertainty of \citet{shibolt1982},
 \begin{equation}
-  M_c^{\mathrm{MAXC}} = \operatorname*{arg\,max}_{M}
-    \; N_{\mathrm{non\text{-}cum}}(M) + c,
-  \label{eq:maxc}
+  \delta b(M_i) = 2.3\,b^2(M_i)
+    \sqrt{\frac{\sum_{k=1}^{n} (M_k - \bar{M})^2}{n(n-1)}},
+  \label{eq:shibolt}
 \end{equation}
-i.e.\ the lower edge of the $0.1$-wide magnitude bin containing the most events in
-the non-cumulative frequency-magnitude distribution (the lowest such bin on a tie),
-plus a correction $c$.  MAXC is fast and makes no assumption about the GR model,
-but tends to underestimate $M_c$ by $\sim 0.1$--$0.2$ magnitude units for typical
-networks \citep{woessner2005}; CofC therefore adds $c = 0.2$ by default, which the
-user can set from $0$ to $0.5$ in steps of $0.1$, and every result states the
-correction it used.  The alternative is the Goodness-of-Fit Test (GFT) of
-\citet{wiemer2000}, in the form of \citet{woessner2005}.  Each bin edge $M_i$ with
+and $\bar{b}(M_i)$ is the mean of $b$ over the six cut-offs $M_i$, $M_i + 0.1$,
+\ldots, $M_i + 0.5$, every one of them a candidate.  $M_c$ is the lowest $M_i$ with
+\begin{equation}
+  \left|\bar{b}(M_i) - b(M_i)\right| \leq \delta b(M_i),
+  \label{eq:mbs}
+\end{equation}
+so the test needs at least 50 events at or above $M_i + 0.5$, some 160 at or
+above $M_i$ for $b = 1$.  If no candidate passes, CofC reports the
+goodness-of-fit estimate below, or failing that the MAXC estimate, and says so.
+MBS is conservative by construction: it accepts a cut-off only where $\hat{b}$
+has stopped changing, within its own uncertainty, over the next half magnitude
+unit.  Because $\delta b \approx \hat{b}/\sqrt{n}$, about $0.005$ for 40\,000
+events at $b = 1$, on a large catalogue it also rejects cut-offs at which
+$\hat{b}$ still drifts by only a few hundredths, whether from residual
+incompleteness, a mixture of populations with different $b$-values, or an
+excess of large events over the GR law, and $M_c$ rises accordingly: on the
+worked example's catalogues of about $10^5$ events it lies 0.7--0.9 units above
+the goodness-of-fit estimate (Section~\ref{sec:example}).  Whichever method is
+selected, the $M_c$ tab therefore plots $b(M_i) \pm \delta b(M_i)$ and
+$\bar{b}(M_i)$ against the cut-off, with $M_c$ marked, so that a cut-off raised by
+a drift the analyst judges immaterial can be recognised and replaced by an
+explicit one.
+
+The first alternative is the Goodness-of-Fit Test (GFT) of \citet{wiemer2000},
+in the form of \citet{woessner2005}.  Each bin edge $M_i$ with
 at least 10 events at or above it in at least three populated bins is a
 candidate cut-off; $b$ is estimated above it by equation~\eqref{eq:aki} (with the
 same reporting-step correction), the predicted cumulative counts
@@ -1174,19 +1202,37 @@ largest magnitude, and the fit is
 $R = 100 - 100\sum_j |B_j - S_j| / \sum_j B_j$.  $M_c$ is the lowest candidate
 with $R \geq 95\%$, else the lowest with $R \geq 90\%$; if no candidate reaches
 $90\%$, CofC reports the MAXC estimate and says so.  The Analysis page plots $R$
-against the candidate cut-off, with the chosen $M_c$ marked.
+against the candidate cut-off, with the chosen $M_c$ marked.  The second
+alternative is the Maximum Curvature (MAXC) method \citep{wiemer2000}:
+\begin{equation}
+  M_c^{\mathrm{MAXC}} = \operatorname*{arg\,max}_{M}
+    \; N_{\mathrm{non\text{-}cum}}(M) + c,
+  \label{eq:maxc}
+\end{equation}
+i.e.\ the centre of the $0.1$-wide magnitude bin containing the most events in
+the non-cumulative frequency-magnitude distribution (the lowest such bin on a tie),
+plus a correction $c$.  As in \citet{wiemer2000}, each magnitude is binned to its
+nearest multiple of $0.1$, so the bin labelled $M$ holds $[M - 0.05, M + 0.05)$
+and the $M_c$ tab plots the same bins; for magnitudes reported to $0.1$ this is
+the reported value, whereas labelling the bins by their lower edges would bias
+the estimate for full-precision magnitudes low by half a bin on average.  MAXC is
+fast and makes no assumption about the GR model, but tends to underestimate $M_c$
+by $\sim 0.1$--$0.2$ magnitude units for typical networks \citep{woessner2005};
+CofC therefore adds $c = 0.2$ by default (also when MBS or the GFT falls back to
+MAXC), which the user can set from $0$ to $0.5$ in steps of $0.1$, and every
+result states the correction it used.
 
 The formal uncertainty on $M_c$ is at least $\pm 0.1$ (one bin width), but
 \citet{woessner2005} showed empirically that the true uncertainty is typically
-$0.2$--$0.3$ magnitude units because the non-cumulative FMD peak is broad and
-sensitive to sample fluctuations.  CofC displays $M_c$ with the bin width as a
-lower bound on its uncertainty and recommends visual verification against the FMD
-plot.  Both methods estimate a single $M_c$ for the events under analysis; where
-completeness varies in space or time, as in most merged catalogues, that value
-can lie well below the completeness of parts of the catalogue
+$0.2$--$0.3$ magnitude units, for MAXC because the non-cumulative FMD peak is
+broad and sensitive to sample fluctuations.  CofC displays $M_c$ with the bin
+width as a lower bound on its uncertainty and recommends visual verification
+against the FMD and $b$-value stability plots.  All three methods estimate a
+single $M_c$ for the events under analysis; where completeness varies in space or
+time, as in most merged catalogues, the MAXC and goodness-of-fit values in
+particular can lie well below the completeness of parts of the catalogue
 (Section~\ref{sec:example}).  The Entire Magnitude Range method
-\citep{woessner2005} and $b$-value-stability methods \citep{caogao2002} remain
-external post-processing.
+\citep{woessner2005} remains external post-processing.
 
 A commonly adopted minimum for a reliable $b$-value estimate is $N \approx 200$
 events above $M_c$ (cf.\ \citealt{marzocchi2003}); below this the formal
@@ -1199,7 +1245,8 @@ events; a Gutenberg-Richter fit requires at least 10 events at or above its
 cut-off, spread over at least three populated magnitude bins (and, when the fit
 estimates its own $M_c$, the 50 events above); and the $b$-value of an individual
 aftershock sequence is reported only for sequences of at least 50 events, above
-the sequence's own $M_c$, since short-term incompleteness early in a sequence
+the sequence's own $M_c$ (by $b$-value stability, with its fallbacks), since
+short-term incompleteness early in a sequence
 raises its $M_c$ above the background network's.  The $N \approx 200$ figure is a
 guideline the analyst should apply when interpreting results.
 

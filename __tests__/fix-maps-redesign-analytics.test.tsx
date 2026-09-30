@@ -4,9 +4,9 @@
  * popup, fit to data), depth as the default colour with no 'Magnitude' colour mode (size
  * encodes magnitude), and the three overlays restyled: active faults (spec S4: thin, own
  * pane under the events, legend line naming the source), uncertainty ellipses (thin, in
- * the event's own colour, confidence level in the legend) and focal-mechanism beach balls
- * (depth-coloured compressional quadrants, sized by magnitude, only at zoom >= 6 or when
- * <= 300 are plotted).
+ * the event's own colour, confidence level in the legend) and focal mechanisms (a mode:
+ * beach balls replace the event circles, compressional quadrants in the event's colour,
+ * sized by magnitude, the 300 largest plotted at any zoom).
  */
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
@@ -60,7 +60,7 @@ jest.mock('@/components/advanced-viz/BeachBallMarker', () => ({
 }));
 
 import UnifiedEarthquakeMap, {
-  BEACH_BALL_MAX_UNZOOMED, BEACH_BALL_MIN_ZOOM, MAX_MAP_OVERLAYS, normalizeColorMode,
+  MAX_FOCAL_MECHANISMS, normalizeColorMode,
 } from '@/components/visualize/UnifiedEarthquakeMap';
 import { getEarthquakeColor, getMagnitudeColor, getMagnitudePixelRadius } from '@/lib/earthquake-utils';
 import { getQualityColor } from '@/lib/quality-scoring';
@@ -215,40 +215,60 @@ describe('active faults (spec S4)', () => {
   });
 });
 
-describe('focal-mechanism beach balls', () => {
-  it('say when they are drawn, before being switched on', async () => {
+describe('focal mechanisms: beach balls instead of event circles', () => {
+  it('say what they do, before being switched on', async () => {
     render(<UnifiedEarthquakeMap earthquakes={EVENTS} showFocalMechanisms />);
     await act(async () => {});
-    expect(screen.getByText(`Drawn at zoom ≥ ${BEACH_BALL_MIN_ZOOM}, or when ≤ ${BEACH_BALL_MAX_UNZOOMED} are plotted.`)).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Focal mechanisms' })).toHaveAccessibleDescription('Show beach balls instead of event circles.');
   });
 
-  it('are held back at national zoom when more than 300 are plotted, and drawn once zoomed in', async () => {
-    const many = manyMechanisms(BEACH_BALL_MAX_UNZOOMED + 1);
+  it('replace the event circles; switching off brings the events back as they were', async () => {
+    render(<UnifiedEarthquakeMap earthquakes={EVENTS} showFocalMechanisms />);
+    await act(async () => {});
+    fireEvent.click(screen.getByLabelText('Quality'));
+    await act(async () => {});
+    expect(screen.getAllByTestId('marker')).toHaveLength(2);
+
+    toggle('Focal mechanisms');
+    await act(async () => {});
+    expect(screen.queryAllByTestId('marker')).toHaveLength(0);
+    expect(new Set(beachBallRender.mock.calls.map(([props]) => props.eventId))).toEqual(new Set(['a', 'b']));
+    // Legend: the beach-ball key replaces the circle magnitude key; the colour key stays.
+    expect(legend().querySelector('[data-legend="focal-mechanisms"]')).not.toBeNull();
+    expect(legend().querySelector('[data-legend="magnitude"]')).toBeNull();
+    expect(legend().querySelector('[data-legend="quality"]')).not.toBeNull();
+
+    toggle('Focal mechanisms');
+    await act(async () => {});
+    expect(screen.getAllByTestId('marker')).toHaveLength(2);
+    expect(screen.getByLabelText('Quality')).toBeChecked();
+    expect(lastDrawn(-39.2).pathOptions.fillColor).toBe(getQualityColor(40));
+    expect(legend().querySelector('[data-legend="magnitude"]')).not.toBeNull();
+    expect(legend().querySelector('[data-legend="focal-mechanisms"]')).toBeNull();
+  });
+
+  it('draw the 300 largest at any zoom, and the status chip says so', async () => {
+    const many = manyMechanisms(MAX_FOCAL_MECHANISMS + 1);
     render(<UnifiedEarthquakeMap earthquakes={many} showFocalMechanisms />);
     toggle('Focal mechanisms');
     await act(async () => {});
-    expect(beachBallRender).not.toHaveBeenCalled();
-    expect(screen.getByText('301 plotted events have one: zoom in to draw them.')).toBeInTheDocument();
-    expect(legend().querySelector('[data-legend="focal-mechanisms"]')).toBeNull();
-
-    mockZoom = BEACH_BALL_MIN_ZOOM;
-    await act(async () => { mockHandlers.zoomend?.forEach((fn) => fn()); });
     const drawn = new Set(beachBallRender.mock.calls.map(([props]) => props.eventId));
-    expect(drawn.size).toBe(MAX_MAP_OVERLAYS);
+    expect(drawn.size).toBe(MAX_FOCAL_MECHANISMS);
     expect(drawn).toContain('fm301'); // the largest magnitudes are kept
     expect(drawn).not.toContain('fm1');
-    expect(screen.getByText('Showing the 150 largest of 301 plotted events.')).toBeInTheDocument();
-    expect(legend().querySelector('[data-legend="focal-mechanisms"]')).not.toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('Showing 300 of 301 focal mechanisms (largest) · zoom in for more');
   });
 
-  it('are drawn at national zoom when at most 300 are plotted', async () => {
-    render(<UnifiedEarthquakeMap earthquakes={manyMechanisms(BEACH_BALL_MAX_UNZOOMED)} showFocalMechanisms />);
+  it('show a notice instead of an empty map when there are none', async () => {
+    const plain = EVENTS.map(({ focal_mechanisms: _fm, ...event }) => event);
+    render(<UnifiedEarthquakeMap earthquakes={plain} showFocalMechanisms />);
     toggle('Focal mechanisms');
     await act(async () => {});
-    expect(new Set(beachBallRender.mock.calls.map(([props]) => props.eventId)).size).toBe(MAX_MAP_OVERLAYS);
+    expect(beachBallRender).not.toHaveBeenCalled();
+    expect(screen.getByRole('status')).toHaveTextContent('No focal mechanisms in this catalogue');
   });
 
-  it('take the depth colour in depth mode and dark grey otherwise, are sized by magnitude and open the popup', async () => {
+  it('take the event colour of the current colour mode, are sized by magnitude and open the popup', async () => {
     render(<UnifiedEarthquakeMap earthquakes={EVENTS} showFocalMechanisms />);
     toggle('Focal mechanisms');
     await act(async () => {});
@@ -259,10 +279,22 @@ describe('focal-mechanism beach balls', () => {
 
     fireEvent.click(screen.getByLabelText('Quality'));
     await act(async () => {});
-    expect(byId().a.fill).toBe(BEACH_BALL_STYLE.neutralFill);
+    expect(byId().a.fill).toBe(getQualityColor(80));
+    expect(byId().b.fill).toBe(getQualityColor(40));
 
     await act(async () => byId().b.onClick());
     expect(within(screen.getByTestId('popup')).getByText('M 5.4')).toBeInTheDocument();
+  });
+
+  it('keep the faults and the ellipses', async () => {
+    render(<UnifiedEarthquakeMap earthquakes={EVENTS} showFocalMechanisms />);
+    toggle('Uncertainty ellipses');
+    toggle('Focal mechanisms');
+    await act(async () => {});
+    expect(new Set(ellipseRender.mock.calls.map(([props]) => props.eventId))).toEqual(new Set(['a', 'b']));
+    expect(geoJsonRender).toHaveBeenCalled();
+    expect(legend().querySelector('[data-legend="faults"]')).not.toBeNull();
+    expect(legend().querySelector('[data-legend="uncertainty"]')).not.toBeNull();
   });
 });
 

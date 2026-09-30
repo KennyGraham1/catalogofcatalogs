@@ -6,6 +6,7 @@ import { MapContainer, FeatureGroup } from 'react-leaflet';
 import { MapLayerControl } from '@/components/map/MapLayerControl';
 import { MapScaleBar } from '@/components/map/MapScaleBar';
 import { ensureLeafletDefaultIcon } from '@/components/map/leaflet-default-icon';
+import { ActiveFaultsToggle, FaultsOverlay, useFaultData } from '@/components/map/MapOverlays';
 import { EditControl } from 'react-leaflet-draw';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -157,6 +158,10 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
   const [selectedBounds, setSelectedBounds] = useState<GeographicBounds | null>(initialBounds);
   const drawnPolygonRef = useRef<L.Layer | null>(null);
   const isDark = useIsDarkTheme();
+  // Active faults for tectonic context while choosing a region: off by default, loaded
+  // (once per page, shared with the other maps) the first time they are switched on.
+  const [showFaults, setShowFaults] = useState(false);
+  const faultData = useFaultData(showFaults);
 
   // Default marker icon from this origin (the cdnjs images the CSP blocks are not used).
   useEffect(() => { ensureLeafletDefaultIcon(); }, []);
@@ -300,6 +305,7 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
             Clear
           </Button>
         )}
+        <ActiveFaultsToggle className="ml-auto" checked={showFaults} onCheckedChange={setShowFaults} isDark={isDark} />
       </div>
 
       {/* Selected bounds */}
@@ -329,6 +335,8 @@ export const RegionSelectorMap = memo(function RegionSelectorMap({
         >
           <MapLayerControl position="topright" />
           <MapScaleBar />
+          {/* Fault traces in their own pane (z 380), under the drawn region. */}
+          {showFaults && <FaultsOverlay data={faultData} isDark={isDark} />}
 
           <FeatureGroup ref={featureGroupRef}>
             <EditControl

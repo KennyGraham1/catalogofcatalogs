@@ -50,21 +50,33 @@
     }
    },
    "grTab": {
-    "bValue": "0.882",
-    "bUncertainty": "0.019",
-    "aValue": "4.92",
-    "rSquared": "0.963",
-    "mc": "M1.8 \u00b1 0.1",
-    "eventsAboveMc": 2151,
+    "bValue": "1.029",
+    "bUncertainty": "0.035",
+    "aValue": "5.29",
+    "rSquared": "0.954",
+    "mc": "M2.3 \u00b1 0.1",
+    "mcSource": "MBS",
+    "eventsAboveMc": 845,
     "magnitudeResolution": 0,
     "binningCorrection": 0
    },
    "mcTab": {
-    "mc": "M1.8 \u00b1 0.1",
-    "method": "MAXC",
-    "eventsAtOrAboveMc": "43.7%",
-    "eventsAtOrAboveMcDetail": "2,151 of 4,922 events",
-    "modalBin": 1.6
+    "mc": "M2.3 \u00b1 0.1",
+    "method": "MBS",
+    "requestedMethod": "MBS",
+    "eventsAtOrAboveMc": "17.2%",
+    "eventsAtOrAboveMcDetail": "845 of 4,922 events",
+    "modalBin": 1.7,
+    "stabilityAtMc": {
+     "b": "1.029",
+     "deltaB": "0.034",
+     "bAve": "1.057",
+     "n": 845
+    },
+    "stabilityCutoffs": 34,
+    "maxcMc": 1.9,
+    "gftMc": 2.2,
+    "gftMethod": "GFT (95%)"
    },
    "workerMatchesLibrary": true
   },
@@ -118,21 +130,33 @@
     }
    },
    "grTab": {
-    "bValue": "0.760",
-    "bUncertainty": "0.017",
-    "aValue": "4.46",
-    "rSquared": "0.944",
-    "mc": "M1.5 \u00b1 0.1",
-    "eventsAboveMc": 2113,
+    "bValue": "0.904",
+    "bUncertainty": "0.032",
+    "aValue": "4.80",
+    "rSquared": "0.972",
+    "mc": "M2.1 \u00b1 0.1",
+    "mcSource": "MBS",
+    "eventsAboveMc": 798,
     "magnitudeResolution": 0.1,
-    "binningCorrection": 0.050000000000000044
+    "binningCorrection": 0.04999999999999982
    },
    "mcTab": {
-    "mc": "M1.5 \u00b1 0.1",
-    "method": "MAXC",
-    "eventsAtOrAboveMc": "47.9%",
-    "eventsAtOrAboveMcDetail": "2,113 of 4,411 events",
-    "modalBin": 1.3
+    "mc": "M2.1 \u00b1 0.1",
+    "method": "MBS",
+    "requestedMethod": "MBS",
+    "eventsAtOrAboveMc": "18.1%",
+    "eventsAtOrAboveMcDetail": "798 of 4,411 events",
+    "modalBin": 1.3,
+    "stabilityAtMc": {
+     "b": "0.904",
+     "deltaB": "0.031",
+     "bAve": "0.933",
+     "n": 798
+    },
+    "stabilityCutoffs": 36,
+    "maxcMc": 1.5,
+    "gftMc": 2,
+    "gftMethod": "GFT (95%)"
    },
    "workerMatchesLibrary": true
   }

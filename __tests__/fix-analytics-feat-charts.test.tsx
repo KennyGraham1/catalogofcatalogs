@@ -15,7 +15,8 @@ jest.mock('echarts-for-react', () => ({
 }));
 
 import {
-  EventTimelineChart, MagnitudeTimeScatter, CumulativeReleaseChart, GoodnessOfFitChart,
+  EventTimelineChart, MagnitudeTimeScatter, CumulativeReleaseChart, GoodnessOfFitChart, BValueStabilityChart,
+  CompletenessChart,
 } from '@/components/charts';
 import { sampleMagnitudeTime } from '@/lib/plot-sampling';
 
@@ -147,5 +148,55 @@ describe('GoodnessOfFitChart', () => {
   it('marks no Mc after a fallback to MAXC', () => {
     const option = build(<GoodnessOfFitChart curve={[{ magnitude: 1, fit: 82 }]} mc={null} />);
     expect(option.series[0].markLine.data).toHaveLength(2);
+  });
+});
+
+describe('BValueStabilityChart', () => {
+  const curve = [
+    { magnitude: 2.2, b: 0.993, deltaB: 0.029, bAve: 1.046, n: 1028 },
+    { magnitude: 2.3, b: 1.029, deltaB: 0.034, bAve: 1.057, n: 845 },
+    { magnitude: 2.4, b: 1.048, deltaB: 0.039, bAve: null, n: 677 },
+  ];
+
+  it('plots b with its uncertainty, the mean b above it, and the chosen Mc against the cut-off', () => {
+    const option = build(<BValueStabilityChart curve={curve} mc={2.3} />);
+    const [bars, points, mean] = option.series;
+    expect(bars.type).toBe('custom');
+    expect(bars.data).toEqual([[2.2, 0.993 - 0.029, 0.993 + 0.029], [2.3, 1.029 - 0.034, 1.029 + 0.034], [2.4, 1.048 - 0.039, 1.048 + 0.039]]);
+    expect(points.data).toEqual([[2.2, 0.993], [2.3, 1.029], [2.4, 1.048]]);
+    // No mean where the 0.5 window runs out.
+    expect(mean.data).toEqual([[2.2, 1.046], [2.3, 1.057]]);
+    expect(points.markLine.data).toEqual([{ xAxis: 2.3 }]);
+    expect(points.markLine.label.formatter).toBe('Mc = 2.3');
+    expect(option.xAxis.name).toBe('Cut-off magnitude Mi');
+    expect(option.yAxis.name).toBe('b-value');
+  });
+
+  it('says in the tooltip whether a cut-off meets the stability criterion', () => {
+    const option = build(<BValueStabilityChart curve={curve} mc={2.3} />);
+    const at = (m: number) => option.tooltip.formatter([{ value: [m, 0] }]);
+    expect(at(2.3)).toContain('1.029 ± 0.034');
+    expect(at(2.3)).toContain('Stable: |b̄ − b| ≤ δb'); // |1.057 - 1.029| = 0.028 <= 0.034
+    expect(at(2.2)).toContain('Not stable: |b̄ − b| &gt; δb'); // 0.053 > 0.029
+    expect(at(2.4)).not.toContain('table');
+  });
+
+  it('draws error bars from the axis coordinates of b - db and b + db', () => {
+    const option = build(<BValueStabilityChart curve={curve} mc={2.3} />);
+    const values = [2.3, 0.995, 1.063];
+    const api = { value: (i: number) => values[i], coord: ([x, y]: number[]) => [x * 100, 1000 - y * 100] };
+    const group = option.series[0].renderItem({}, api);
+    const [stem] = group.children;
+    const expected = { x1: 230, y1: 900.5, x2: 230, y2: 893.7 };
+    for (const [key, value] of Object.entries(expected)) expect(stem.shape[key]).toBeCloseTo(value, 9);
+    expect(group.children).toHaveLength(3);
+  });
+});
+
+describe('CompletenessChart', () => {
+  it('names the range a centred bin holds', () => {
+    const distribution = [{ magnitude: 1.6, count: 380 }, { magnitude: 1.7, count: 393 }];
+    const option = build(<CompletenessChart distribution={distribution} mc={1.9} binWidth={0.1} />);
+    expect(option.tooltip.formatter([{ axisValue: '1.7', value: 393 }])).toContain('Bin M 1.65–1.75');
   });
 });

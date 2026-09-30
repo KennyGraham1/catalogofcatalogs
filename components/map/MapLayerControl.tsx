@@ -39,8 +39,9 @@ export function createBaseTileLayer(config: BaseLayerConfig): L.TileLayer {
 
 /**
  * Add the shared base-layer switcher to an imperative Leaflet map: a collapsed layers
- * control listing BASE_LAYERS, the theme's gray base active, and - while a gray base is
- * active - its place-label layer in the click-through 'labels' pane above the data.
+ * control listing BASE_LAYERS, the theme's gray base active, the active base's background
+ * colour behind its tiles, and - while a gray base is active - its place-label layer in the
+ * click-through 'labels' pane above the data.
  * MapLayerControl wraps this for react-leaflet maps; imperative maps call it directly.
  */
 export function attachBaseLayers(
@@ -52,9 +53,11 @@ export function attachBaseLayers(
   const bases = new Map<string, L.TileLayer>();
   const labels = new Map<string, L.TileLayer>();
   const themeOf = new Map<string, 'light' | 'dark' | undefined>();
+  const backgroundOf = new Map<string, string | undefined>();
   for (const config of layers) {
     bases.set(config.name, createBaseTileLayer(config));
     themeOf.set(config.name, config.theme);
+    backgroundOf.set(config.name, config.background);
     if (config.labelsUrl) {
       labels.set(config.name, L.tileLayer(config.labelsUrl, {
         pane: MAP_PANES.labels.name,
@@ -76,6 +79,8 @@ export function attachBaseLayers(
   const onBaseLayerChange = (event: L.LayersControlEvent) => {
     if (!bases.has(event.name) || bases.get(event.name) !== event.layer) return;
     active = event.name;
+    // Empty falls back to the stylesheet's map background (app/globals.css).
+    map.getContainer().style.backgroundColor = backgroundOf.get(event.name) ?? '';
     if (activeLabels) map.removeLayer(activeLabels);
     activeLabels = labels.get(event.name) ?? null;
     activeLabels?.addTo(map);
@@ -108,6 +113,7 @@ export function attachBaseLayers(
       control.remove();
       bases.forEach(layer => { if (map.hasLayer(layer)) map.removeLayer(layer); });
       labels.forEach(layer => { if (map.hasLayer(layer)) map.removeLayer(layer); });
+      map.getContainer().style.backgroundColor = '';
       active = null;
       activeLabels = null;
     },

@@ -3,7 +3,8 @@
 /**
  * Seismology plots (Apache ECharts): Gutenberg-Richter, frequency-magnitude
  * completeness, cumulative temporal series, moment release (by magnitude and over
- * time), the goodness-of-fit Mc test, and multi-catalogue MFD comparison. These preserve the scientific content of the previous recharts
+ * time), the goodness-of-fit and b-value stability Mc tests, and multi-catalogue MFD
+ * comparison. These preserve the scientific content of the previous recharts
  * versions (Mc reference lines, log axes, per-catalogue series) and add a few
  * tasteful touches (shaded incomplete region, zoomable axes).
  */
@@ -109,10 +110,13 @@ export const GutenbergRichterChart = memo(function GutenbergRichterChart({
 export const CompletenessChart = memo(function CompletenessChart({
   distribution,
   mc,
+  binWidth,
   height = 420,
 }: {
   distribution: { magnitude: number; count: number }[];
   mc: number;
+  /** Width of the bins, each centred on its magnitude; the tooltip then gives the bin's range. */
+  binWidth?: number;
   height?: number;
 }) {
   const { resolvedTheme } = useTheme();
@@ -136,7 +140,10 @@ export const CompletenessChart = memo(function CompletenessChart({
           const p = params[0];
           const m = Number(p.axisValue);
           const complete = m >= mc;
-          return ttHeader(c, `Magnitude M ${m.toFixed(1)}`) +
+          const header = binWidth
+            ? `Bin M ${Number((m - binWidth / 2).toFixed(4))}–${Number((m + binWidth / 2).toFixed(4))}`
+            : `Magnitude M ${m.toFixed(1)}`;
+          return ttHeader(c, header) +
             ttRow(c, 'Events', (Number(p.value) || 0).toLocaleString(), SEISMIC_COLORS.frequency.dark) +
             ttBadge(c, complete ? `Complete (≥ Mc ${mc.toFixed(1)})` : `Incomplete (< Mc ${mc.toFixed(1)})`, complete ? c.fit : c.reference);
         },
@@ -163,7 +170,7 @@ export const CompletenessChart = memo(function CompletenessChart({
         },
       ],
     }),
-    [distribution, mc, mcBin, c]
+    [distribution, mc, mcBin, binWidth, c]
   );
   return <EChart option={option} height={height} exportData={distribution} exportName="completeness-fmd" aria-label="Frequency-magnitude completeness" />;
 });
@@ -460,6 +467,108 @@ export const GoodnessOfFitChart = memo(function GoodnessOfFitChart({
     } as EChartsOption;
   }, [curve, mc, c]);
   return <EChart option={option} height={height} exportData={curve} exportName="mc-goodness-of-fit" aria-label="Goodness-of-fit test for the completeness magnitude" />;
+});
+
+// ---------------------------------------------------------------------------
+// b-value stability for Mc: b(Mi) with its uncertainty, and the mean b above it
+// ---------------------------------------------------------------------------
+export interface BValueStabilityPoint {
+  /** Cut-off Mi. */
+  magnitude: number;
+  b: number;
+  /** Shi & Bolt (1982) uncertainty of b. */
+  deltaB: number;
+  /** Mean b over the cut-offs Mi to Mi + 0.5, or null where the window runs out. */
+  bAve: number | null;
+  n: number;
+}
+
+export const BValueStabilityChart = memo(function BValueStabilityChart({
+  curve,
+  mc,
+  height = 300,
+}: {
+  curve: BValueStabilityPoint[];
+  /** The Mc to mark, whichever method chose it. */
+  mc: number;
+  height?: number;
+}) {
+  const { resolvedTheme } = useTheme();
+  const c = chartColors(resolvedTheme === 'dark');
+  const option = useMemo<EChartsOption>(() => {
+    const pointColor = SEISMIC_COLORS.frequency.dark;
+    return {
+      grid: grid({ top: 36, left: 60, right: 28, bottom: 52 }),
+      legend: legend(c, { top: 4, right: 36, data: ['b ± δb', 'Mean b over next 0.5'] }),
+      tooltip: tooltip(c, {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          if (!params?.length) return '';
+          const x = Number(params[0].value?.[0] ?? params[0].axisValue);
+          const point = curve.find(p => Math.abs(p.magnitude - x) < 1e-6);
+          if (!point) return '';
+          const stable = point.bAve != null && Math.abs(point.bAve - point.b) <= point.deltaB;
+          return ttHeader(c, `Cut-off M ${point.magnitude.toFixed(1)}`) +
+            ttRow(c, 'b ± δb', `${point.b.toFixed(3)} ± ${point.deltaB.toFixed(3)}`, pointColor) +
+            (point.bAve != null ? ttRow(c, 'Mean b over next 0.5', point.bAve.toFixed(3), c.fit) : '') +
+            ttRow(c, 'Events ≥ cut-off', point.n.toLocaleString()) +
+            (point.bAve != null ? ttBadge(c, stable ? 'Stable: |b̄ − b| ≤ δb' : 'Not stable: |b̄ − b| > δb', stable ? c.fit : c.reference) : '');
+        },
+      }),
+      xAxis: { ...axis(c, { name: 'Cut-off magnitude Mi', nameGap: 30 }), scale: true },
+      yAxis: { ...axis(c, { name: 'b-value', nameGap: 44 }), scale: true },
+      series: [
+        {
+          type: 'custom',
+          name: 'b ± δb',
+          silent: true,
+          z: 1,
+          itemStyle: { color: pointColor }, // the legend swatch, shared with the points
+          encode: { x: 0, y: [1, 2] },
+          data: curve.map(p => [p.magnitude, p.b - p.deltaB, p.b + p.deltaB]),
+          renderItem: (_params: any, api: any) => {
+            const x = api.value(0);
+            const low = api.coord([x, api.value(1)]);
+            const high = api.coord([x, api.value(2)]);
+            const style = { stroke: pointColor, lineWidth: 1.5, opacity: 0.7 };
+            return {
+              type: 'group',
+              children: [
+                { type: 'line', shape: { x1: low[0], y1: low[1], x2: high[0], y2: high[1] }, style },
+                { type: 'line', shape: { x1: low[0] - 4, y1: low[1], x2: low[0] + 4, y2: low[1] }, style },
+                { type: 'line', shape: { x1: high[0] - 4, y1: high[1], x2: high[0] + 4, y2: high[1] }, style },
+              ],
+            };
+          },
+        },
+        {
+          type: 'scatter',
+          name: 'b ± δb',
+          z: 3,
+          symbolSize: 8,
+          itemStyle: { color: pointColor, borderColor: c.background, borderWidth: 1 },
+          data: curve.map(p => [p.magnitude, p.b]),
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            lineStyle: { color: c.reference, type: 'dashed', width: 2 },
+            label: { formatter: `Mc = ${mc.toFixed(1)}`, color: c.reference, fontWeight: 'bold', position: 'insideEndTop' },
+            data: [{ xAxis: mc }],
+          },
+        },
+        {
+          type: 'line',
+          name: 'Mean b over next 0.5',
+          z: 2,
+          showSymbol: false,
+          lineStyle: { color: c.fit, width: 2 },
+          itemStyle: { color: c.fit },
+          data: curve.filter(p => p.bAve != null).map(p => [p.magnitude, p.bAve as number]),
+        },
+      ],
+    } as EChartsOption;
+  }, [curve, mc, c]);
+  return <EChart option={option} height={height} exportData={curve as unknown as Record<string, unknown>[]} exportName="mc-b-value-stability" aria-label="b-value stability against cut-off magnitude" />;
 });
 
 // ---------------------------------------------------------------------------

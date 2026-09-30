@@ -16,7 +16,7 @@ interface EarthquakeEvent {
   magnitude_type?: string;
 }
 
-type McMethod = 'MAXC' | 'GFT';
+type McMethod = 'MAXC' | 'GFT' | 'MBS';
 type RateInterval = 'day' | 'week' | 'month';
 type RateIntervalOption = RateInterval | 'auto';
 
@@ -145,6 +145,11 @@ function topBinEdge(max: number, binWidth: number): number {
   return Math.ceil((max - MAGNITUDE_TOLERANCE) / binWidth) * binWidth;
 }
 
+/** Centre of the bin [c - binWidth/2, c + binWidth/2) holding `magnitude` (half-way rounds up). */
+function binCentre(magnitude: number, binWidth: number): number {
+  return Math.floor((magnitude + MAGNITUDE_TOLERANCE) / binWidth + 0.5) * binWidth;
+}
+
 function binKey(edge: number): number {
   return Number(edge.toFixed(4));
 }
@@ -241,13 +246,15 @@ const MIN_EVENTS_FOR_MC = 50;
 
 /**
  * Mc estimation options, floors and estimators, identical to lib/seismological-analysis.ts
- * (resolveMcOptions, goodnessOfFitMc, estimateMcFromBins).
+ * (resolveMcOptions, goodnessOfFitMc, bValueStabilityMc, estimateMcFromBins).
  */
 const DEFAULT_MAXC_CORRECTION = 0.2;
 const MAXC_CORRECTION_RANGE = { min: 0, max: 0.5 } as const;
 const MIN_EVENTS_ABOVE_MC = 10;
 const MIN_POPULATED_BINS = 3;
 const GFT_LEVELS = [95, 90] as const;
+const MBS_WINDOW = 0.5;
+const MBS_MIN_EVENTS = MIN_EVENTS_FOR_MC;
 
 interface GoodnessOfFitOutcome {
   mc: number | null;
@@ -256,19 +263,33 @@ interface GoodnessOfFitOutcome {
   curve: { magnitude: number; fit: number }[];
 }
 
+interface BValueStabilityPoint {
+  magnitude: number;
+  b: number;
+  deltaB: number;
+  bAve: number | null;
+  n: number;
+}
+
+interface StabilityOutcome {
+  mc: number | null;
+  curve: BValueStabilityPoint[];
+}
+
 interface McEstimate {
   mc: number;
   method: McMethod;
   requestedMethod: McMethod;
   maxcCorrection: number;
   gft?: GoodnessOfFitOutcome;
+  mbs?: StabilityOutcome;
   fallbackReason?: string;
 }
 
 function resolveMcOptions(options: { method?: McMethod; maxcCorrection?: number } | undefined): { method: McMethod; maxcCorrection: number } {
-  const method = options?.method ?? 'MAXC';
-  if (method !== 'MAXC' && method !== 'GFT') {
-    throw new Error(`Unknown Mc method "${String(method)}" (expected MAXC or GFT)`);
+  const method = options?.method ?? 'MBS';
+  if (method !== 'MBS' && method !== 'GFT' && method !== 'MAXC') {
+    throw new Error(`Unknown Mc method "${String(method)}" (expected MBS, GFT or MAXC)`);
   }
   const maxcCorrection = options?.maxcCorrection ?? DEFAULT_MAXC_CORRECTION;
   if (!Number.isFinite(maxcCorrection) ||
@@ -281,50 +302,84 @@ function resolveMcOptions(options: { method?: McMethod; maxcCorrection?: number 
 }
 
 /**
+ * A sample's magnitudes sorted ascending with suffix totals (sum, squared deviation from
+ * the mean by Welford's update, count on each reporting grid), as in the library.
+ */
+interface CutoffTotals {
+  sorted: number[];
+  suffixSum: Float64Array;
+  suffixSquaredDeviation: Float64Array;
+  suffixOnGrid: Float64Array[];
+}
+
+function cutoffTotals(magnitudes: number[]): CutoffTotals {
+  const sorted = [...magnitudes].sort((a, b) => a - b);
+  const n = sorted.length;
+  const grids = [...REPORTING_GRIDS, ...COARSE_REPORTING_GRIDS];
+  const suffixSum = new Float64Array(n + 1);
+  const suffixSquaredDeviation = new Float64Array(n + 1);
+  const suffixOnGrid = grids.map(() => new Float64Array(n + 1));
+  let mean = 0;
+  for (let i = n - 1; i >= 0; i--) {
+    const m = sorted[i];
+    suffixSum[i] = suffixSum[i + 1] + m;
+    const delta = m - mean;
+    mean += delta / (n - i);
+    suffixSquaredDeviation[i] = suffixSquaredDeviation[i + 1] + delta * (m - mean);
+    for (let k = 0; k < grids.length; k++) {
+      suffixOnGrid[k][i] = suffixOnGrid[k][i + 1] + (isOnGrid(m, grids[k]) ? 1 : 0);
+    }
+  }
+  return { sorted, suffixSum, suffixSquaredDeviation, suffixOnGrid };
+}
+
+/** Aki-Utsu MLE b of sorted[start..] above `cutoff`, with the reporting-resolution correction. */
+function akiUtsuAbove(totals: CutoffTotals, start: number, cutoff: number): number {
+  const count = totals.sorted.length - start;
+  const shareOn = totals.suffixOnGrid.map(onGrid => onGrid[start] / count);
+  const { lowerBound } = lowerBoundFromGridShares(
+    cutoff, shareOn.slice(0, REPORTING_GRIDS.length), shareOn.slice(REPORTING_GRIDS.length)
+  );
+  return Math.LOG10E / (totals.suffixSum[start] / count - lowerBound);
+}
+
+function populatedFrom(sortedBins: Array<[number, number]>): number[] {
+  const populated = new Array<number>(sortedBins.length);
+  let count = 0;
+  for (let j = sortedBins.length - 1; j >= 0; j--) {
+    if (sortedBins[j][1] > 0) count++;
+    populated[j] = count;
+  }
+  return populated;
+}
+
+/**
  * Goodness-of-fit test for Mc (Wiemer & Wyss, 2000): the lowest bin edge Mi whose MLE
  * Gutenberg-Richter law reproduces R >= 95% (else 90%) of the observed cumulative
  * counts at and above it, R = 100 - 100 sum|B_j - S_j| / sum B_j, summed up to the
  * last populated bin (not the empty bin above the largest continuous magnitude).
  */
-function goodnessOfFitMc(magnitudes: number[], sortedBins: Array<[number, number]>): GoodnessOfFitOutcome {
-  const sorted = [...magnitudes].sort((a, b) => a - b);
+function goodnessOfFitMc(totals: CutoffTotals, sortedBins: Array<[number, number]>): GoodnessOfFitOutcome {
+  const { sorted } = totals;
   const n = sorted.length;
-  const suffixSum = new Float64Array(n + 1);
-  const grids = [...REPORTING_GRIDS, ...COARSE_REPORTING_GRIDS];
-  const suffixOnGrid = grids.map(() => new Float64Array(n + 1));
-  for (let i = n - 1; i >= 0; i--) {
-    suffixSum[i] = suffixSum[i + 1] + sorted[i];
-    for (let k = 0; k < grids.length; k++) {
-      suffixOnGrid[k][i] = suffixOnGrid[k][i + 1] + (isOnGrid(sorted[i], grids[k]) ? 1 : 0);
-    }
-  }
   const nBins = sortedBins.length;
   const cumulative = new Array<number>(nBins);
-  const populatedFrom = new Array<number>(nBins);
   let running = 0;
-  let populated = 0;
   let lastPopulated = -1;
   for (let j = nBins - 1; j >= 0; j--) {
     running += sortedBins[j][1];
-    if (sortedBins[j][1] > 0) {
-      populated++;
-      if (lastPopulated < 0) lastPopulated = j;
-    }
+    if (sortedBins[j][1] > 0 && lastPopulated < 0) lastPopulated = j;
     cumulative[j] = running;
-    populatedFrom[j] = populated;
   }
+  const populated = populatedFrom(sortedBins);
 
   const curve: { magnitude: number; fit: number }[] = [];
   for (let i = 0; i < nBins; i++) {
     const cutoff = sortedBins[i][0];
     const start = firstIndexAtOrAfter(sorted, cutoff - MAGNITUDE_TOLERANCE);
     const count = n - start;
-    if (count < MIN_EVENTS_ABOVE_MC || populatedFrom[i] < MIN_POPULATED_BINS) break;
-    const shareOn = suffixOnGrid.map(onGrid => onGrid[start] / count);
-    const { lowerBound } = lowerBoundFromGridShares(
-      cutoff, shareOn.slice(0, REPORTING_GRIDS.length), shareOn.slice(REPORTING_GRIDS.length)
-    );
-    const bValue = Math.LOG10E / (suffixSum[start] / count - lowerBound);
+    if (count < MIN_EVENTS_ABOVE_MC || populated[i] < MIN_POPULATED_BINS) break;
+    const bValue = akiUtsuAbove(totals, start, cutoff);
     if (!Number.isFinite(bValue) || bValue <= 0) continue;
     let misfit = 0;
     let observed = 0;
@@ -341,33 +396,115 @@ function goodnessOfFitMc(magnitudes: number[], sortedBins: Array<[number, number
   return { mc: null, level: null, fit: null, curve };
 }
 
-/** Mc from a sample's magnitudes and non-cumulative FMD: MAXC + correction, or the GFT. */
+/**
+ * b-value stability test for Mc (MBS; Cao & Gao, 2002; Woessner & Wiemer, 2005): the
+ * lowest bin edge Mi with |b_ave - b(Mi)| <= db(Mi), b the Aki-Utsu MLE above Mi, db its
+ * Shi & Bolt (1982) uncertainty 2.3 b^2 sqrt(sum (M - mean M)^2 / (n (n - 1))), and b_ave
+ * the mean b over the cut-offs Mi to Mi + 0.5; every cut-off tried needs 50 events in 3
+ * populated bins above it.
+ */
+function bValueStabilityMc(
+  totals: CutoffTotals,
+  sortedBins: Array<[number, number]>,
+  binWidth: number
+): StabilityOutcome {
+  const { sorted } = totals;
+  const n = sorted.length;
+  const populated = populatedFrom(sortedBins);
+  const tried: Array<BValueStabilityPoint | null> = [];
+  for (let i = 0; i < sortedBins.length; i++) {
+    const cutoff = sortedBins[i][0];
+    const start = firstIndexAtOrAfter(sorted, cutoff - MAGNITUDE_TOLERANCE);
+    const count = n - start;
+    if (count < MBS_MIN_EVENTS || populated[i] < MIN_POPULATED_BINS) break;
+    const b = akiUtsuAbove(totals, start, cutoff);
+    if (!Number.isFinite(b) || b <= 0) { tried.push(null); continue; }
+    const deltaB = 2.3 * b * b * Math.sqrt(totals.suffixSquaredDeviation[start] / (count * (count - 1)));
+    tried.push({ magnitude: cutoff, b, deltaB, bAve: null, n: count });
+  }
+  const steps = Math.max(1, Math.round(MBS_WINDOW / binWidth));
+  const curve: BValueStabilityPoint[] = [];
+  let mc: number | null = null;
+  for (let i = 0; i < tried.length; i++) {
+    const point = tried[i];
+    if (!point) continue;
+    if (i + steps < tried.length) {
+      let sum = 0;
+      let k = 0;
+      for (; k <= steps; k++) {
+        const next = tried[i + k];
+        if (!next) break;
+        sum += next.b;
+      }
+      if (k > steps) point.bAve = sum / (steps + 1);
+    }
+    if (mc == null && point.bAve != null && Math.abs(point.bAve - point.b) <= point.deltaB) mc = point.magnitude;
+    curve.push(point);
+  }
+  return { mc, curve };
+}
+
+/** Non-cumulative FMD in bins centred on multiples of binWidth, as [centre, count]. */
+function centredFmd(magnitudes: number[], binWidth: number): Array<[number, number]> {
+  const first = binCentre(minOf(magnitudes), binWidth);
+  const nBins = Math.round((binCentre(maxOf(magnitudes), binWidth) - first) / binWidth) + 1;
+  const counts = new Array<number>(nBins).fill(0);
+  for (const m of magnitudes) counts[Math.round((binCentre(m, binWidth) - first) / binWidth)]++;
+  return counts.map((count, i): [number, number] => [binKey(first + i * binWidth), count]);
+}
+
+/**
+ * Mc from a sample's magnitudes and lower-edge FMD: MBS (falling back to the GFT), the
+ * GFT (falling back to MAXC), or MAXC + correction on the centred FMD.
+ */
 function estimateMcFromBins(
   magnitudes: number[],
   sortedBins: Array<[number, number]>,
+  binWidth: number,
   options: { method: McMethod; maxcCorrection: number }
 ): McEstimate {
-  let peakMag = sortedBins[0][0];
-  let peakCount = -1;
-  for (const [mag, count] of sortedBins) {
-    if (count > peakCount) { peakCount = count; peakMag = mag; }
-  }
   const { method, maxcCorrection } = options;
-  const maxcMc = Number((peakMag + maxcCorrection).toFixed(2));
+  const maxcMc = () => {
+    let peakMag = 0;
+    let peakCount = -1;
+    for (const [mag, count] of centredFmd(magnitudes, binWidth)) {
+      if (count > peakCount) { peakCount = count; peakMag = mag; }
+    }
+    return Number((peakMag + maxcCorrection).toFixed(2));
+  };
   if (method === 'MAXC') {
-    return { mc: maxcMc, method: 'MAXC', requestedMethod: 'MAXC', maxcCorrection };
+    return { mc: maxcMc(), method: 'MAXC', requestedMethod: 'MAXC', maxcCorrection };
   }
-  const gft = goodnessOfFitMc(magnitudes, sortedBins);
+  const totals = cutoffTotals(magnitudes);
+  let mbs: StabilityOutcome | undefined;
+  let mbsFailure = '';
+  if (method === 'MBS') {
+    mbs = bValueStabilityMc(totals, sortedBins, binWidth);
+    if (mbs.mc != null) {
+      return { mc: mbs.mc, method: 'MBS', requestedMethod: 'MBS', maxcCorrection, mbs };
+    }
+    mbsFailure = mbs.curve.some(point => point.bAve != null)
+      ? 'No cut-off had a stable b-value'
+      : `Too few events for b-value stability (it needs ${MBS_MIN_EVENTS} at or above Mc + ${MBS_WINDOW})`;
+  }
+  const gft = goodnessOfFitMc(totals, sortedBins);
   if (gft.mc != null) {
-    return { mc: gft.mc, method: 'GFT', requestedMethod: 'GFT', maxcCorrection, gft };
+    return {
+      mc: gft.mc, method: 'GFT', requestedMethod: method, maxcCorrection, gft,
+      ...(mbs && { mbs, fallbackReason: `${mbsFailure}, so Mc is from the goodness-of-fit test` }),
+    };
   }
+  const maxc = `maximum curvature + ${Number(maxcCorrection.toFixed(2))}`;
   return {
-    mc: maxcMc,
+    mc: maxcMc(),
     method: 'MAXC',
-    requestedMethod: 'GFT',
+    requestedMethod: method,
     maxcCorrection,
     gft,
-    fallbackReason: `No cut-off reached a 90% goodness of fit, so Mc is maximum curvature + ${Number(maxcCorrection.toFixed(2))}`,
+    ...(mbs && { mbs }),
+    fallbackReason: mbs
+      ? `${mbsFailure} and no cut-off reached a 90% goodness of fit, so Mc is ${maxc}`
+      : `No cut-off reached a 90% goodness of fit, so Mc is ${maxc}`,
   };
 }
 
@@ -424,17 +561,17 @@ function calculateGutenbergRichter(
     }
   }
 
-  // Completeness magnitude Mc when no explicit cut-off is supplied: MAXC (Wiemer &
-  // Wyss 2000) plus the correction (default +0.2; Woessner & Wiemer 2005), or the
-  // goodness-of-fit test, as in lib/seismological-analysis.ts. The Aki-Utsu MLE is
-  // only valid above Mc and the mean MUST be taken over events with M >= Mc; the
-  // previous code averaged the FULL (incomplete) magnitude array, biasing b.
+  // Completeness magnitude Mc when no explicit cut-off is supplied: b-value stability
+  // (the default), the goodness-of-fit test, or MAXC (Wiemer & Wyss 2000) plus the
+  // correction (default +0.2; Woessner & Wiemer 2005), as in lib/seismological-analysis.ts.
+  // The Aki-Utsu MLE is only valid above Mc and the mean MUST be taken over events with
+  // M >= Mc; the previous code averaged the FULL (incomplete) magnitude array, biasing b.
   let mc: number;
   let estimate: McEstimate | undefined;
   if (minMagnitude != null) {
     mc = minMagnitude;
   } else {
-    estimate = estimateMcFromBins(magnitudes, sortedBins, resolvedMcOptions);
+    estimate = estimateMcFromBins(magnitudes, sortedBins, binWidth, resolvedMcOptions);
     mc = estimate.mc;
   }
   const magsAboveMc = magnitudes.filter(m => magnitudeAtOrAbove(m, mc));
@@ -533,18 +670,14 @@ function estimateCompleteness(
     const key = binKey(binLowerEdge(event.magnitude, binWidth));
     counts.set(key, (counts.get(key) || 0) + 1);
   }
-  const distribution: { magnitude: number; count: number }[] = Array.from(counts.entries())
-    .sort((a, b) => a[0] - b[0])
-    .map(([magnitude, count]) => ({ magnitude, count }));
+  const sortedBins = Array.from(counts.entries()).sort((a, b) => a[0] - b[0]);
 
-  // Mc by maximum curvature (peak of the non-cumulative FMD) plus the correction, or
-  // by the goodness-of-fit test; the estimator the G-R fit uses, as in the library.
-  const estimate = estimateMcFromBins(
-    magnitudes,
-    distribution.map(({ magnitude, count }): [number, number] => [magnitude, count]),
-    mcOptions
-  );
+  // The estimator the G-R fit uses, as in the library; the stability test is shown
+  // whatever the method, and the FMD displayed is the centred one MAXC takes the peak of.
+  const estimate = estimateMcFromBins(magnitudes, sortedBins, binWidth, mcOptions);
   const mc = estimate.mc;
+  const mbs = estimate.mbs ?? bValueStabilityMc(cutoffTotals(magnitudes), sortedBins, binWidth);
+  const distribution = centredFmd(magnitudes, binWidth).map(([magnitude, count]) => ({ magnitude, count }));
 
   // Share of events at or above Mc, which the fit keeps; not a completeness score
   // (see CompletenessResult in lib/seismological-analysis.ts).
@@ -561,6 +694,7 @@ function estimateCompleteness(
       gftFit: estimate.gft.fit,
       gftCurve: estimate.gft.curve,
     }),
+    mbsCurve: mbs.curve,
     ...(estimate.fallbackReason && { fallbackReason: estimate.fallbackReason }),
     confidence,
     eventsAboveMc,
@@ -1102,7 +1236,7 @@ function analyzeSeismicityTimeSeries(
       mcMethod: completeness.method,
       requestedMcMethod: completeness.requestedMethod,
       maxcCorrection: completeness.maxcCorrection,
-      ...(completeness.requestedMethod === 'GFT' && { gftLevel: completeness.gftLevel ?? null }),
+      ...(completeness.gftLevel !== undefined && { gftLevel: completeness.gftLevel }),
     };
   } else {
     thresholdSource = 'none';

@@ -120,6 +120,20 @@ describe('attachBaseLayers (the MapLayerControl core)', () => {
     handle.remove();
   });
 
+  it("paints the active base's ocean colour behind its tiles, so a sub-pixel gap between tiles shows no seam", () => {
+    const rgb = (hex: string) => `rgb(${[1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
+    for (const layer of BASE_LAYERS) expect(layer.background).toMatch(/^#[0-9a-f]{6}$/);
+    const handle = attachBaseLayers(map, { isDark: false });
+    expect(container.style.backgroundColor).toBe(rgb(getThemeBaseLayer(false).background!));
+    handle.setDark(true);
+    expect(container.style.backgroundColor).toBe(rgb(getThemeBaseLayer(true).background!));
+    const osm = (handle.control as any)._layers.find((entry: any) => entry.name === 'Streets (OpenStreetMap)').layer as L.TileLayer;
+    map.addLayer(osm);
+    expect(container.style.backgroundColor).toBe(rgb('#aad3df'));
+    handle.remove();
+    expect(container.style.backgroundColor).toBe('');
+  });
+
   it('remove() takes the control, bases and labels off the map', () => {
     const handle = attachBaseLayers(map, { isDark: false });
     handle.remove();

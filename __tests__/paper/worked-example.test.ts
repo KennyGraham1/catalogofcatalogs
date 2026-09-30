@@ -82,7 +82,10 @@ describe('SRL worked example — real platform estimators on a seeded synthetic 
   });
 
   it('estimates a plausible completeness magnitude near the planted Mc', () => {
-    const mc = estimateCompletenessMagnitude(events);
+    // MAXC chosen explicitly (the default is b-value stability): the 30 injected M5.0-5.8
+    // mainshocks, ~6 times the b = 1 expectation, make b fall steadily with the cut-off,
+    // which b-value stability reads as instability.
+    const mc = estimateCompletenessMagnitude(events, 0.1, 0.2, { method: 'MAXC' });
     expect(mc.method).toBe('MAXC');
     expect(mc.mc).toBeGreaterThanOrEqual(2.0); // MAXC(2.0) + 0.2 correction
     expect(mc.mc).toBeLessThanOrEqual(2.5);

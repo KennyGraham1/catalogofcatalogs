@@ -6,7 +6,7 @@ import { Binary } from 'mongodb';
 import { getCollection, COLLECTIONS } from './mongodb';
 import { createId } from './id';
 import { createWriteStream } from 'fs';
-import { once } from 'events';
+import { pipeline } from 'stream/promises';
 import type { Delimiter } from './delimiter-detector';
 
 // 3 MB per chunk — well under Vercel's 4.5 MB body limit.
@@ -157,6 +157,8 @@ export async function getUploadSession(sessionId: string, ownerId?: string): Pro
   const doc = await col.findOne({
     session_id: sessionId,
     chunk_index: -1,
+    // TTL deletion is asynchronous; expired sessions must not be revived by a chunk.
+    expires_at: { $gt: new Date() },
     ...(ownerId ? { owner_id: ownerId } : {}),
   });
   if (!doc) return null;
@@ -298,11 +300,13 @@ export async function assembleChunksToFile(
     .find({ session_id: sessionId, chunk_index: { $gte: 0 } })
     .sort({ chunk_index: 1 });
 
-  const stream = createWriteStream(outputPath, { flags: 'w' });
   let expectedIndex = 0;
   let bytesWritten = 0;
 
-  try {
+  // Register stream error handling before the first database read. A file-open
+  // or disk-write error can occur while the cursor is awaiting its next chunk.
+  // pipeline also closes the file and iterator when either side fails.
+  await pipeline((async function* () {
     for await (const doc of cursor) {
       if (doc.chunk_index !== expectedIndex) {
         throw new Error(
@@ -319,10 +323,7 @@ export async function assembleChunksToFile(
         throw new UploadSizeLimitError(bytesWritten, maxBytes);
       }
 
-      if (!stream.write(buffer)) {
-        await once(stream, 'drain');
-      }
-
+      yield buffer;
       expectedIndex += 1;
     }
 
@@ -331,13 +332,7 @@ export async function assembleChunksToFile(
         `Incomplete upload: expected ${totalChunks} chunks, found ${expectedIndex}`
       );
     }
-  } catch (error) {
-    stream.destroy();
-    throw error;
-  }
-
-  stream.end();
-  await once(stream, 'finish');
+  })(), createWriteStream(outputPath, { flags: 'w' }));
 
   return { bytesWritten };
 }

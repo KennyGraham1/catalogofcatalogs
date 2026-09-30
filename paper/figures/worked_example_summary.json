@@ -34,6 +34,8 @@
    "mc_gft": 1.9,
    "gft_source": "GFT",
    "gft_level": 95,
+   "mc_mbs": 2.7,
+   "mbs_source": "MBS",
    "median_q_by_gap": {
     "0-90": 87.0,
     "90-180": 70.0,
@@ -59,6 +61,8 @@
    "mc_gft": 1.9,
    "gft_source": "GFT",
    "gft_level": 95,
+   "mc_mbs": 2.6,
+   "mbs_source": "MBS",
    "median_q_by_gap": {
     "0-90": 87.0,
     "90-180": 70.0,
@@ -156,10 +160,10 @@
  },
  "completeness": {
   "retained_maxc": {
-   "mc": 1.7,
-   "b": 0.8107300615091606,
-   "sigma_b": 0.003894815985180421,
-   "n": 43329,
+   "mc": 1.8,
+   "b": 0.838152790897134,
+   "sigma_b": 0.004354936672138633,
+   "n": 37041,
    "mc_source": "MAXC",
    "gft_level": null
   },
@@ -170,6 +174,14 @@
    "n": 31402,
    "mc_source": "GFT",
    "gft_level": 95
+  },
+  "retained_mbs": {
+   "mc": 2.8,
+   "b": 1.007537801976521,
+   "sigma_b": 0.014001685756338433,
+   "n": 5178,
+   "mc_source": "MBS",
+   "gft_level": null
   },
   "merged_maxc": {
    "mc": 1.6,
@@ -187,11 +199,19 @@
    "mc_source": "GFT",
    "gft_level": 95
   },
+  "merged_mbs": {
+   "mc": 2.7,
+   "b": 1.060637404137053,
+   "sigma_b": 0.011466517832914707,
+   "n": 8556,
+   "mc_source": "MBS",
+   "gft_level": null
+  },
   "concatenated_maxc": {
-   "mc": 1.6,
-   "b": 0.7975208220384346,
-   "sigma_b": 0.0023994624434284877,
-   "n": 110473,
+   "mc": 1.7,
+   "b": 0.8289217107897412,
+   "sigma_b": 0.0026864801499387305,
+   "n": 95205,
    "mc_source": "MAXC",
    "gft_level": null
   },

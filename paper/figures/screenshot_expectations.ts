@@ -11,7 +11,11 @@
  *   - the Analysis page's header cards and Quality tab are counted as the page counts them;
  *   - the G-R and Mc tabs are run through the page's own web worker
  *     (workers/seismological-worker.ts, driven through its onmessage handler) with the
- *     default Mc settings (MAXC, +0.2), and cross-checked against the library;
+ *     default Mc settings (b-value stability, MBS, falling back to the goodness-of-fit
+ *     test and then to MAXC + 0.2), and cross-checked against the library. What the Mc
+ *     tab shows is read off the worker's result, whatever method produced Mc: the tallest
+ *     bar of its centred FMD (the maximum-curvature peak), the stability test at Mc, and
+ *     the MAXC and GFT estimates the method selector would give;
  *   - the merge preview is performMergeWithGroups, the function the preview route calls,
  *     with the settings the capture spec prescribes.
  * The values are written to <out.json> and printed.
@@ -84,6 +88,18 @@ function workerEvents(rows: Row[]): EarthquakeEvent[] {
   } as EarthquakeEvent));
 }
 
+/** The Mc tab's FMD bars (centred on the 0.1 grid): the tallest, the lowest on a tie. */
+function tallestBin(distribution: Array<{ magnitude: number; count: number }>): number {
+  let best = distribution[0];
+  for (const bin of distribution) if (bin.count > best.count) best = bin;
+  return best.magnitude;
+}
+
+/** The Mc tab's "Detection Method" card headline (app/analytics/page.tsx). */
+function methodHeadline(mc: { method: string; gftLevel?: number | null }): string {
+  return mc.method === 'GFT' ? `GFT (${mc.gftLevel}%)` : mc.method;
+}
+
 const GRADES = ['A+', 'A', 'B+', 'B', 'C', 'D', 'F'];
 
 /** The Analysis page's header cards and Quality tab (app/analytics/page.tsx statistics). */
@@ -129,10 +145,22 @@ function main(): void {
       const events = workerEvents(c.rows);
       const gr = run({ type: 'gutenberg-richter', events });
       const mc = run({ type: 'completeness', events });
+      // The other two methods of the Mc settings, for the caption's comparison.
+      const maxc = run({ type: 'completeness', events, mcMethod: 'MAXC' });
+      const gft = run({ type: 'completeness', events, mcMethod: 'GFT' });
       // Cross-check: the worker must agree with the library (the parity the tests enforce).
       const libGr = calculateGutenbergRichter(events);
       const libMc = estimateCompletenessMagnitude(events);
-      const agrees = Math.abs(libGr.bValue - gr.bValue) < 1e-9 && libMc.mc === mc.mc && libGr.completeness === gr.completeness;
+      const agrees = Math.abs(libGr.bValue - gr.bValue) < 1e-9 && libMc.mc === mc.mc && libGr.completeness === gr.completeness &&
+        libMc.method === mc.method && libGr.mcSource === gr.mcSource;
+      // The tallest FMD bar is the maximum-curvature peak whatever method set Mc; under
+      // MAXC it is Mc less the correction.
+      const modalBin = tallestBin(mc.magnitudeDistribution);
+      if (Math.abs(Number((maxc.mc - maxc.maxcCorrection).toFixed(2)) - modalBin) > 1e-9) {
+        throw new Error(`MAXC peak ${maxc.mc - maxc.maxcCorrection} is not the tallest FMD bar ${modalBin}`);
+      }
+      const stable = (mc.mbsCurve as Array<{ magnitude: number; b: number; deltaB: number; bAve: number | null; n: number }>)
+        .find(p => Math.abs(p.magnitude - mc.mc) < 1e-6);
       return {
         id: c.id,
         name: c.name,
@@ -143,16 +171,29 @@ function main(): void {
           aValue: gr.aValue.toFixed(2),
           rSquared: gr.rSquared.toFixed(3),
           mc: `M${gr.completeness.toFixed(1)} ± 0.1`,
+          mcSource: gr.mcSource,
           eventsAboveMc: gr.eventsAboveMc,
           magnitudeResolution: gr.magnitudeResolution,
           binningCorrection: gr.binningCorrection,
         },
         mcTab: {
           mc: `M${mc.mc.toFixed(1)} ± ${mc.binWidth}`,
-          method: mc.method,
+          method: methodHeadline(mc),
+          requestedMethod: mc.requestedMethod,
+          ...(mc.fallbackReason && { fallbackReason: mc.fallbackReason }),
           eventsAtOrAboveMc: `${(mc.confidence * 100).toFixed(1)}%`,
           eventsAtOrAboveMcDetail: `${mc.eventsAboveMc.toLocaleString('en-US')} of ${events.length.toLocaleString('en-US')} events`,
-          modalBin: Number((mc.mc - mc.maxcCorrection).toFixed(2)),
+          // Centre of the tallest bar of the FMD chart (the maximum-curvature peak).
+          modalBin,
+          // The b-value stability chart at Mc (the method card quotes these when MBS set Mc).
+          stabilityAtMc: stable
+            ? { b: stable.b.toFixed(3), deltaB: stable.deltaB.toFixed(3), bAve: stable.bAve == null ? null : stable.bAve.toFixed(3), n: stable.n }
+            : null,
+          stabilityCutoffs: mc.mbsCurve.length,
+          // What the method selector's other settings give.
+          maxcMc: Number(maxc.mc.toFixed(1)),
+          gftMc: Number(gft.mc.toFixed(1)),
+          gftMethod: methodHeadline(gft),
         },
         workerMatchesLibrary: agrees,
       };

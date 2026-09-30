@@ -63,31 +63,58 @@ export interface FaultCollection {
   features: FaultFeature[];
 }
 
-let cachedFaultData: FaultCollection | null = null;
+/**
+ * The map copy of the bundled GNS Science AF250 layer: every trace and vertex, coordinates
+ * to 5 decimals (~1 m), only the name / slip type / AFDB id, minified - 3.9 MB (0.8 MB
+ * gzipped) instead of the 20 MB full extract every map used to download and parse.
+ * Rebuild it with scripts/build-fault-map-data.mjs after scripts/download-fault-data.ts.
+ */
+export const FAULT_DATA_URL = '/data/nz-active-faults.map.geojson';
 
 /**
- * Load fault data from local GeoJSON file
- * Data is cached after first load
+ * The one in-flight or settled load, shared by every caller for the life of the page: the
+ * analytics, catalogue, dashboard, merge and region maps all draw the same file, and two
+ * maps (or a map remounted for another catalogue) asking at once must not fetch and parse
+ * it twice. Cleared after a failure so a later caller can retry.
  */
-export async function loadFaultData(): Promise<FaultCollection> {
-  if (cachedFaultData) {
-    return cachedFaultData;
-  }
+let faultDataPromise: Promise<FaultCollection> | null = null;
 
-  try {
-    const response = await fetch('/data/nz-active-faults.geojson');
-    if (!response.ok) {
-      throw new Error(`Failed to load fault data: ${response.statusText}`);
-    }
-    
-    const data = await response.json();
-    cachedFaultData = data;
-    return data;
-  } catch (error) {
-    console.error('Error loading fault data:', error);
-    // Return empty collection on error
-    return { type: 'FeatureCollection', features: [] };
+function isFaultCollection(data: unknown): data is FaultCollection {
+  return typeof data === 'object' && data !== null
+    && (data as FaultCollection).type === 'FeatureCollection'
+    && Array.isArray((data as FaultCollection).features);
+}
+
+async function fetchFaultData(): Promise<FaultCollection> {
+  const response = await fetch(FAULT_DATA_URL);
+  if (!response.ok) {
+    throw new Error(`Failed to load fault data: ${response.statusText}`);
   }
+  const data: unknown = await response.json();
+  if (!isFaultCollection(data)) throw new Error('Fault data is not a GeoJSON FeatureCollection');
+  return data;
+}
+
+/**
+ * Load the NZ active-fault traces from the local GeoJSON file. Fetched once per page load:
+ * concurrent and later callers share the same promise. On failure it resolves to an empty
+ * collection (the maps simply draw no faults) and the next call tries again.
+ */
+export function loadFaultData(): Promise<FaultCollection> {
+  if (!faultDataPromise) {
+    const attempt: Promise<FaultCollection> = fetchFaultData().catch((error) => {
+      console.error('Error loading fault data:', error);
+      if (faultDataPromise === attempt) faultDataPromise = null;
+      return { type: 'FeatureCollection', features: [] };
+    });
+    faultDataPromise = attempt;
+  }
+  return faultDataPromise;
+}
+
+/** Forget the shared load (tests; or to force a re-fetch). */
+export function resetFaultDataCache(): void {
+  faultDataPromise = null;
 }
 
 /**

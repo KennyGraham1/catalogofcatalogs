@@ -135,6 +135,20 @@ describe('assembleChunks — cap applied to the stored bytes', () => {
 });
 
 describe('assembleChunksToFile — cap applied to the written bytes', () => {
+  it('rejects file-open errors while waiting for the database cursor', async () => {
+    const collection = makeCollection([]);
+    collection.find.mockReturnValue({ sort: jest.fn().mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        // The file open fails before MongoDB has yielded its first chunk.
+        await new Promise(resolve => setTimeout(resolve, 20));
+        yield chunkDoc(0, 'data');
+      },
+    }) });
+    (getCollection as jest.Mock).mockResolvedValue(collection);
+    await expect(assembleChunksToFile('s1', 1, path.join(tmpdir(), `missing-${process.pid}`, 'upload.xml')))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   const outPath = path.join(tmpdir(), `infra-upload-size-limits-${process.pid}.tmp`);
 
   afterEach(() => rmSync(outPath, { force: true }));

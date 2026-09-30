@@ -40,7 +40,7 @@ jest.mock('@/hooks/use-seismological-worker', () => ({
 jest.mock('@/components/charts', () => Object.fromEntries([
   'MagnitudeDistributionChart', 'DepthDistributionChart', 'RegionDistributionChart', 'CatalogueDistributionChart',
   'MagnitudeDepthScatter', 'EventTimelineChart', 'GutenbergRichterChart', 'CompletenessChart', 'TemporalSeriesChart',
-  'MomentReleaseChart', 'MFDComparisonChart', 'MagnitudeTimeScatter', 'CumulativeReleaseChart', 'GoodnessOfFitChart',
+  'MomentReleaseChart', 'MFDComparisonChart', 'MagnitudeTimeScatter', 'CumulativeReleaseChart', 'GoodnessOfFitChart', 'BValueStabilityChart',
 ].map(name => [name, (props: any) => { mockChartProps[name] = props; return null; }])));
 jest.mock('@/components/ui/slider', () => ({
   Slider: ({ min, max, value, onValueChange }: any) => (
