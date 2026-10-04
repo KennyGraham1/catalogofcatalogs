@@ -37,6 +37,7 @@ import {
   type EventFilters,
 } from './event-filter-params';
 import { AppError, ValidationError } from './errors';
+import type { MergeQcSummary } from './merge-qc';
 
 export interface MergedCatalogue {
   id: string;
@@ -390,6 +391,13 @@ export interface DbQueries {
 
   // Events and import history whose catalogue no longer exists (finding #63).
   sweepOrphans: (options?: OrphanSweepOptions) => Promise<OrphanSweepReport>;
+
+  // A merged catalogue's QC summary (lib/merge-qc.ts): written once, in the merge's
+  // transaction (pass its session), and deleted with the catalogue. getMergeQcSummary
+  // resolves to null when the catalogue has none (not a merge, or merged before summaries
+  // were kept).
+  insertMergeQcSummary: (catalogueId: string, summary: MergeQcSummary, session?: ClientSession) => Promise<void>;
+  getMergeQcSummary: (catalogueId: string) => Promise<StoredMergeQcSummary | null>;
 
   getFilteredEvents: (catalogueId: string, filters: EventFilters, options?: FilteredEventsOptions) => Promise<FilteredEventsResult>;
 
@@ -1744,6 +1752,14 @@ export interface ImportHistoryBreakdown {
   excluded_event_types?: Record<string, number>;
 }
 
+/** A document of the merge_qc_summaries collection. */
+export interface StoredMergeQcSummary {
+  catalogue_id: string;
+  /** ISO 8601 UTC. */
+  created_at: string;
+  summary: MergeQcSummary;
+}
+
 export interface OrphanSweepOptions {
   /** Delete what is found. The default only reports it. */
   apply?: boolean;
@@ -2556,7 +2572,7 @@ if (typeof window === 'undefined') {
     //  1. mark the catalogue 'deleting': it vanishes from every read at once, and event
     //     writes refuse it (a batch already in flight removes its own rows again, see
     //     insertEventRows);
-    //  2. delete its events, then its import history;
+    //  2. delete its events, then its import history and merge QC summary;
     //  3. delete the catalogue row last.
     // A failure part-way leaves a hidden 'deleting' catalogue, not a visible empty one;
     // repeating the DELETE, or the integrity sweep, finishes the job. Resolves to
@@ -2565,6 +2581,7 @@ if (typeof window === 'undefined') {
       const collection = await getCollection(COLLECTIONS.CATALOGUES);
       const eventsCollection = await getCollection(COLLECTIONS.EVENTS);
       const historyCollection = await getCollection(COLLECTIONS.IMPORT_HISTORY);
+      const qcCollection = await getCollection(COLLECTIONS.MERGE_QC_SUMMARIES);
 
       const marked = await collection.updateOne(
         { id },
@@ -2575,6 +2592,7 @@ if (typeof window === 'undefined') {
 
       await eventsCollection.deleteMany({ catalogue_id: id });
       await historyCollection.deleteMany({ catalogue_id: id });
+      await qcCollection.deleteMany({ catalogue_id: id });
       await collection.deleteOne({ id, status: 'deleting' });
 
       // Readers between the mark and the event deletion may have cached a partial view.
@@ -2586,15 +2604,17 @@ if (typeof window === 'undefined') {
       const catalogues = await getCollection(COLLECTIONS.CATALOGUES);
       const events = await getCollection(COLLECTIONS.EVENTS);
       const history = await getCollection(COLLECTIONS.IMPORT_HISTORY);
+      const qcSummaries = await getCollection(COLLECTIONS.MERGE_QC_SUMMARIES);
       const cutoff = new Date(Date.now() - (options.staleDeletionMs ?? 15 * 60 * 1000)).toISOString();
 
       // Referencing IDs first, catalogue rows second: a catalogue row is always written
       // before its events, so an ID seen in the events has its row visible by the time
       // the rows are read, and a catalogue being created right now is never mistaken
-      // for an orphan.
+      // for an orphan. A merge QC summary is written in its catalogue's transaction.
       const referenced = Array.from(new Set([
         ...(await events.distinct('catalogue_id')),
         ...(await history.distinct('catalogue_id')),
+        ...(await qcSummaries.distinct('catalogue_id')),
       ].map(String)));
       const rows = await catalogues
         .find({}, { projection: { _id: 0, id: 1, status: 1, deleting_at: 1 } })
@@ -2620,6 +2640,7 @@ if (typeof window === 'undefined') {
       if (options.apply && orphanedCatalogueIds.length > 0) {
         await events.deleteMany(filter);
         await history.deleteMany(filter);
+        await qcSummaries.deleteMany(filter);
       }
       if (options.apply && staleDeletions.length > 0) {
         await catalogues.deleteMany({ id: { $in: staleDeletions }, status: 'deleting' });
@@ -2636,6 +2657,28 @@ if (typeof window === 'undefined') {
         orphanedImportHistory,
         staleDeletions: staleDeletions.sort(),
         applied: Boolean(options.apply),
+      };
+    },
+
+    insertMergeQcSummary: async (catalogueId: string, summary: MergeQcSummary, session?: ClientSession): Promise<void> => {
+      if (!catalogueId) throw new Error('A merge QC summary needs its catalogue id');
+      const collection = await getCollection(COLLECTIONS.MERGE_QC_SUMMARIES);
+      // One per catalogue (unique index on catalogue_id, lib/event-indexes.ts). Inside the
+      // merge's transaction, so a merge that rolls back leaves no summary.
+      await collection.insertOne(
+        { catalogue_id: catalogueId, created_at: new Date().toISOString(), summary },
+        session ? { session } : undefined
+      );
+    },
+
+    getMergeQcSummary: async (catalogueId: string): Promise<StoredMergeQcSummary | null> => {
+      const collection = await getCollection(COLLECTIONS.MERGE_QC_SUMMARIES);
+      const doc = await collection.findOne({ catalogue_id: catalogueId }, { projection: { _id: 0 } });
+      if (!doc || typeof doc.summary !== 'object' || doc.summary === null) return null;
+      return {
+        catalogue_id: String(doc.catalogue_id),
+        created_at: String(doc.created_at ?? ''),
+        summary: doc.summary as MergeQcSummary,
       };
     },
 

@@ -122,10 +122,13 @@ describe('worked-example summary - the paper quotes the computed values', () => 
       thin(m.false_associations), thin(m.missed_pairs),
       thin(m.missed_by_reason['gate:magnitude_range']), thin(m.missed_by_reason['gate:depth_range']),
       `${m.missed_by_reason['outside matching window']} lie outside`,
-      `in ${m.missed_by_reason['paired with a closer report']} each report`,
+      `in ${m.missed_by_reason['paired with a closer entry']} each entry`,
+      `${thin(m.magnitude_widened_groups)} groups that pass the magnitude gate only within`,
       thin(m.resolved_to['synthetic-agency-b']), thin(m.resolved_to['synthetic-geonet-like']),
       pct(summary.merge_pct.resolved_to_agency_b),
     ]);
+    // The text says no wrong pairing is among the groups the widened tolerance accepted.
+    expect(m.magnitude_widened_false).toBe(0);
   });
 
   it('step 3: quality filter', () => {
@@ -156,7 +159,8 @@ describe('worked-example summary - the paper quotes the computed values', () => 
     ]);
     // The rounded shifts the text quotes.
     expect(fixed(a.gr_merged.b - a.gr_retained.b, 2)).toBe('0.06');
-    expect(fixed(a.gr_retained.b - a.gr_declustered.b, 2)).toBe('0.12');
+    expect(fixed(a.gr_retained.b - a.gr_declustered.b, 2)).toBe('0.11');
+    expect(fixed(1 - a.gr_declustered.b, 2)).toBe('0.12');
     expect(fixed(a.gr_declustered.b - a.gr_symmetric.b, 2)).toBe('0.06');
   });
 
@@ -200,9 +204,16 @@ describe('supplement - the captions quote the screen-capture values', () => {
   it('the main paper quotes the merge-preview values', () => {
     const p = shots.mergePreview;
     expect(p.config).toMatchObject({ timeThreshold: 60, distanceThreshold: 50, mergeStrategy: 'quality' });
+    // The QC summary's totals tiles, by their labels, and the tab counts.
+    const tiles = p.tiles as Record<string, number>;
+    expect(tiles['Entries combined']).toBe(tiles['Entries before'] - tiles['Events after']);
     expectQuoted(paper, [
-      `${thin(p.eventsBefore)} records form ${thin(p.duplicateGroups)} duplicate groups`,
-      `merge into\n    ${thin(p.eventsAfter)} events`,
+      ...['Entries before', 'Events after', 'Matched groups', 'Entries combined', 'Flagged groups']
+        .map(label => `\\emph{${label}} ${thin(tiles[label])}`),
+      `${thin(p.keptApartEntries)} entries\n    of ${thin(p.splits)} groups that failed the gates are kept apart`,
+      ...p.perCatalogue.map((c: any) => `${c.matchedPercent.replace(' %', '')}\\%`),
+      `\\emph{Flagged} (${thin(p.tabs.Flagged)})`, `\\emph{Kept apart} (${thin(p.tabs['Kept apart'])})`,
+      `\\emph{Matched} (${thin(p.tabs.Matched)})`,
       `${thin(shots.catalogues[0].statistics.totalEvents)} GeoNet-like and ${thin(shots.catalogues[1].statistics.totalEvents)}`,
     ]);
   });

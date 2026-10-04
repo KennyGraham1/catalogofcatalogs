@@ -3,8 +3,9 @@
  *
  * Origin times are UTC by definition (QuakeML 1.2 / ISO 8601 "Z"). The Kaikoura mainshock
  * originated at 2016-11-13T11:02:56Z, which is 14/11/2016 00:02:56 in Pacific/Auckland, so a
- * renderer on the host zone shows a different calendar day with no zone label. Expected
- * strings are derived by hand from the UTC instant.
+ * renderer on the host zone shows a different calendar day with no zone label. The QC card
+ * writes ISO 8601 date and time with the zone (no day/month ambiguity), as the map hover
+ * card does. Expected strings are derived by hand from the UTC instant.
  */
 import '@testing-library/jest-dom';
 import * as React from 'react';
@@ -37,9 +38,9 @@ import { DuplicateGroupCard } from '@/components/merge/DuplicateGroupCard';
 import { MergeActions } from '@/components/merge/MergeActions';
 
 const KAIKOURA_UTC = '2016-11-13T11:02:56.000Z';
-const EXPECTED_UTC = '13/11/2016, 11:02:56 UTC';
-/** What Pacific/Auckland (UTC+13 in November) shows for the same instant. */
-const NZ_LOCAL_DAY = /14\/11\/2016/;
+const EXPECTED_UTC = '2016-11-13 11:02:56 UTC';
+/** What Pacific/Auckland (UTC+13 in November) shows for the same instant, in either order. */
+const NZ_LOCAL_DAY = /14\/11\/2016|2016-11-14/;
 
 describe('#31 merge QC card shows origin times in UTC with the zone', () => {
   it('renders every event time in the expanded group table as UTC', () => {
@@ -54,13 +55,14 @@ describe('#31 merge QC card shows origin times in UTC with the zone', () => {
       ],
     };
     render(<DuplicateGroupCard group={group} groupIndex={0} catalogueColors={{}} onViewOnMap={() => {}} />);
-    // Expand the per-event table (the chevron button beside "View on Map").
-    const buttons = screen.getAllByRole('button');
-    fireEvent.click(buttons[buttons.length - 1]);
+    // Expand the per-entry table.
+    fireEvent.click(screen.getByRole('button', { name: /Show entries/ }));
 
-    expect(screen.getByText(EXPECTED_UTC)).toBeInTheDocument();
-    expect(screen.getByText('13/11/2016, 11:02:59 UTC')).toBeInTheDocument();
+    const table = screen.getByRole('table', { name: 'Entries of Group #1' });
+    expect(within(table).getByText(EXPECTED_UTC)).toBeInTheDocument();
+    expect(within(table).getByText('2016-11-13 11:02:59 UTC')).toBeInTheDocument();
     expect(screen.queryByText(NZ_LOCAL_DAY)).toBeNull();
+    expect(screen.queryByText(/\d{2}\/\d{2}\/\d{4}/)).toBeNull();
   });
 
   it('shows an unparseable time verbatim instead of throwing', () => {
@@ -72,8 +74,7 @@ describe('#31 merge QC card shows origin times in UTC with the zone', () => {
       ],
     };
     render(<DuplicateGroupCard group={group} groupIndex={0} catalogueColors={{}} onViewOnMap={() => {}} />);
-    const buttons = screen.getAllByRole('button');
-    fireEvent.click(buttons[buttons.length - 1]);
+    fireEvent.click(screen.getByRole('button', { name: /Show entries/ }));
     expect(screen.getByText('not-a-time')).toBeInTheDocument();
   });
 });

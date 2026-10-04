@@ -14,7 +14,8 @@
  *      dependents of their own foreshocks);
  *   3. the symmetric-window variant the paper compares against differs from the platform's
  *      forward window only by reaching back T(M) before each head;
- *   4. the b-value-stability criterion that sets the example's cut-off;
+ *   4. the b-value-stability cut-off of the example, the platform's own MBS estimate, is
+ *      the completeness level of a planted G-R sample and is withheld when b never settles;
  *   5. the most the azimuthal gap can move equation 1 on its own (12.5 points), which the
  *      paper quotes when it attributes the low Q of high-gap events.
  *
@@ -158,23 +159,65 @@ describe('SRL worked example - Gardner-Knopoff windows and cluster heads', () =>
 });
 
 describe('SRL worked example - the b-value-stability cut-off', () => {
-  // b rises until 2.3 and then stays within one sigma_b (0.02) of its value there for the
-  // next half magnitude unit, so 2.3 is the lowest cut-off with |b_ave - b| <= sigma_b.
-  const series = [
-    { cutoff: 2.0, b: 0.80 }, { cutoff: 2.1, b: 0.86 }, { cutoff: 2.2, b: 0.92 },
-    { cutoff: 2.3, b: 0.99 }, { cutoff: 2.4, b: 1.00 }, { cutoff: 2.5, b: 1.01 },
-    { cutoff: 2.6, b: 0.99 }, { cutoff: 2.7, b: 1.00 }, { cutoff: 2.8, b: 1.01 },
-    { cutoff: 2.9, b: 1.00 }, { cutoff: 3.0, b: 0.99 }, { cutoff: 3.1, b: 1.00 },
-    { cutoff: 3.2, b: 1.00 }, { cutoff: 3.3, b: 1.00 },
-  ].map(p => ({ ...p, sigma: 0.02 }));
+  // stabilityCutoff(events) is the platform's own MBS estimate (Cao & Gao 2002, in the
+  // form of Woessner & Wiemer 2005): the lowest 0.1 cut-off Mi with
+  // |b_ave(Mi) - b(Mi)| <= db(Mi), b_ave the mean b over Mi .. Mi + 0.5 and
+  // db = 2.3 b^2 sd(M) / sqrt(n) the Shi & Bolt (1982) uncertainty, which is b / sqrt(n)
+  // for a G-R sample (sd(M) = log10(e) / b); or null when the MBS finds no stable cut-off
+  // and the platform falls back to another method. The MBS itself is tested in
+  // __tests__/fix-science-mc-stability.test.ts; these tests pin what the paper's cut-off
+  // means. The magnitudes are reported on the 0.1 grid, so b(Mi) is the Aki-Utsu MLE with
+  // the half-bin lower bound Mi - 0.05.
 
-  it('returns the lowest cut-off at which b stays within its formal error', () => {
-    expect(stabilityCutoff(series)).toBe(2.3);
+  /** Events with `count(m)` magnitudes m on the 0.1 grid, m = from, from + 0.1, ..., to. */
+  function gridSample(from: number, to: number, count: (m: number) => number) {
+    const mags: number[] = [];
+    for (let k = Math.round(from * 10); k <= Math.round(to * 10); k++) {
+      const m = Number((k / 10).toFixed(1));
+      for (let i = 0; i < count(m); i++) mags.push(m);
+    }
+    return asEvents(mags);
+  }
+
+  // A b = 1 law complete from M2.0 to M6.0, round(10^4 x 10^-(m - 2)) events at m, whose
+  // detection halves with each 0.1 bin below M2.0, down to M1.5.
+  //   Above any Mi >= 2.0 the sample is geometric with ratio q = 10^-0.1 (memoryless), so
+  //   b(Mi) = log10(e) / (0.1 q/(1 - q) + 0.05) = 0.9956 at every such cut-off (the cap at
+  //   M6.0 raises it by under 0.002 up to M2.5), and |b_ave(2.0) - b(2.0)| is about 0
+  //   against db(2.0) = 0.9956 / sqrt(48,617) = 0.0045: M2.0 passes.
+  //   At M1.9 the 6,295 events of the half-detected bin join them: the mean magnitude is
+  //   (6,295 x 1.9 + 48,617 x 2.386) / 54,912 = 2.330, so b(1.9) = 0.4343 / (2.330 - 1.85)
+  //   = 0.904, b_ave(1.9) = (0.904 + 5 x 0.996) / 6 = 0.981, and |b_ave - b| = 0.077 is
+  //   twenty times db(1.9) = 0.904 / sqrt(54,912) = 0.0039: M1.9 fails. The same arithmetic
+  //   gives b = 0.55, 0.62, 0.70 and 0.80 at M1.5-1.8, rising to 0.90 at M1.9, so each lower
+  //   cut-off fails by more (|b_ave - b| of 0.15 or more against db < 0.003).
+  //   The stable cut-off is therefore the planted completeness magnitude, M2.0.
+  const completeFrom2 = gridSample(1.5, 6.0, m => Math.round(
+    1e4 * Math.pow(10, -(m - 2)) * (m < 2 ? Math.pow(0.5, Math.round((2 - m) * 10)) : 1)
+  ));
+
+  it('is the platform MBS estimate: the planted completeness of a G-R sample', () => {
+    expect(stabilityCutoff(completeFrom2)).toBe(2.0);
+    const gr = calculateGutenbergRichter(completeFrom2, undefined, 0.1, { method: 'MBS' });
+    expect(gr.mcSource).toBe('MBS');
+    expect(gr.completeness).toBe(2.0);
+    expect(gr.eventsAboveMc).toBe(48617);
+    expect(Math.abs(gr.bValue - 0.9956)).toBeLessThan(0.002);
   });
 
-  it('returns null when b never settles within the series', () => {
-    const rising = series.map((p, k) => ({ ...p, b: 0.8 + 0.05 * k }));
-    expect(stabilityCutoff(rising)).toBeNull();
+  // A curved FMD whose b never settles: round(10^4 x 10^-(x + 0.5 x^2)) events at
+  // m = 2 + x, x = 0 .. 2. Its local slope 1 + x rises by 0.1 per 0.1 bin, and b(Mi) by
+  // about 0.08 (from 1.46 at M2.0 to 2.27 at M3.0), so b_ave(Mi) - b(Mi) is about
+  // 2.5 x 0.08 = 0.2 at every cut-off with a whole 0.5 window (Mi <= 3.0, the last with
+  // 50 events at or above Mi + 0.5), while db(Mi), about b / sqrt(n), is at most about
+  // 2.27 / sqrt(798) = 0.08, at M3.0. No cut-off is stable, and although the platform
+  // still reports an Mc (from its fallback), stabilityCutoff does not.
+  it('returns null when b never settles, whatever the fallback Mc', () => {
+    const curved = gridSample(2.0, 4.0, m => Math.round(1e4 * Math.pow(10, -(m - 2) - 0.5 * (m - 2) ** 2)));
+    expect(stabilityCutoff(curved)).toBeNull();
+    const gr = calculateGutenbergRichter(curved, undefined, 0.1, { method: 'MBS' });
+    expect(gr.requestedMcMethod).toBe('MBS');
+    expect(gr.mcSource).not.toBe('MBS');
   });
 });
 

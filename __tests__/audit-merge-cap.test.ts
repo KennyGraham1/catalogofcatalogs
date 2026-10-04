@@ -66,5 +66,8 @@ it('merges every source event even with the unpaginated API cap enabled', async 
   expect(result.events).toHaveLength(6);
   const preview = await previewMerge([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], { timeThreshold: 10, distanceThreshold: 10, mergeStrategy: 'priority', priority: 'quality' });
   expect(preview.statistics.totalEventsBefore).toBe(6);
-  expect(preview.duplicateGroups.flatMap((g: any) => g.events)).toHaveLength(6);
+  // The preview lists only groups worth reviewing (none here: six unmatched entries); the
+  // QC summary accounts for every entry it read.
+  expect(preview.qc.totals.entriesBefore).toBe(6);
+  expect(preview.qc.perCatalogue.map((c: any) => c.entries)).toEqual([3, 3]);
 });

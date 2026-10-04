@@ -1,6 +1,6 @@
 /**
  * The merge QC preview after contract M4: the "Held for review" tile, the Held badge, the
- * superseded-report markings and the superseded-reports line, plus the page's wiring of the
+ * superseded-entry markings and the superseded-entries line, plus the page's wiring of the
  * hold setting into the preview. Components are rendered directly (the QC map with the real
  * installed Leaflet under jsdom, as in fix-merge-ui-maps.test.tsx).
  */
@@ -87,27 +87,27 @@ afterEach(() => cleanup());
 describe('MergePreviewQC statistics', () => {
   it('shows the Held for review tile only when the merge holds flagged groups', () => {
     const { rerender } = render(
-      <MergePreviewQC previewData={{ duplicateGroups: [heldGroup], statistics, catalogueColors: {} }} onProceedWithMerge={() => {}} onCancel={() => {}} />
+      <MergePreviewQC previewData={{ duplicateGroups: [heldGroup], statistics, catalogueColors: {} }} />
     );
     expect(screen.queryByText('Held for review')).toBeNull();
     rerender(
-      <MergePreviewQC previewData={{ duplicateGroups: [heldGroup], statistics, catalogueColors: {} }} holdForReview onProceedWithMerge={() => {}} onCancel={() => {}} />
+      <MergePreviewQC previewData={{ duplicateGroups: [heldGroup], statistics, catalogueColors: {} }} holdForReview />
     );
     const tile = screen.getByText('Held for review').parentElement!;
     expect(within(tile).getByText('1')).toBeInTheDocument();
   });
 
-  it('counts superseded reports and renders an older server response without them', () => {
+  it('counts superseded entries and renders an older server response without them', () => {
     render(
-      <MergePreviewQC previewData={{ duplicateGroups: [heldGroup], statistics, catalogueColors: {} }} onProceedWithMerge={() => {}} onCancel={() => {}} />
+      <MergePreviewQC previewData={{ duplicateGroups: [heldGroup], statistics, catalogueColors: {} }} />
     );
-    expect(screen.getByText("2 superseded entries (older vintages of one agency's solution)")).toBeInTheDocument();
+    expect(screen.getByText("2 superseded entries (older vintages of one agency's solution, kept as provenance).")).toBeInTheDocument();
 
     cleanup();
     const { heldForReviewCount, supersededReportsCount, ...legacy } = statistics;
     const { heldForReview, supersededEventIndexes, ...legacyGroup } = heldGroup;
     render(
-      <MergePreviewQC previewData={{ duplicateGroups: [legacyGroup], statistics: legacy, catalogueColors: {} }} holdForReview onProceedWithMerge={() => {}} onCancel={() => {}} />
+      <MergePreviewQC previewData={{ duplicateGroups: [legacyGroup], statistics: legacy, catalogueColors: {} }} holdForReview />
     );
     expect(screen.queryByText(/superseded entr/)).toBeNull();
     expect(within(screen.getByText('Held for review').parentElement!).getByText('0')).toBeInTheDocument();
@@ -115,38 +115,38 @@ describe('MergePreviewQC statistics', () => {
   });
 });
 
-describe('MergePreviewQC separated reports', () => {
-  // A report the windows matched but the validity gate split off: published alone, flagged
-  // apart from the suspicious merges so that count keeps its meaning.
+describe('MergePreviewQC kept-apart entries', () => {
+  // An entry the windows matched but the consistency checks split off: published alone, and
+  // counted apart from the flagged groups so that count keeps its meaning. This one comes
+  // from a server that predates splitKey, so it is a cluster of its own.
   const separatedGroup = {
     id: 'g2', selectedEventIndex: 0, isSuspicious: false, separated: true,
-    validationWarnings: ['Matched with another report but separated because the group failed consistency validation. Reason: Large magnitude range'],
+    validationWarnings: ['Matched with another entry but kept apart because the group failed consistency validation. Reason: Large magnitude range'],
     events: [report('d', 'ISC')],
   };
 
-  it('counts them, lists them under their own tab and badges the card', () => {
+  it('counts them, lists them under Kept apart and gives the reason', () => {
     render(
       <MergePreviewQC
         previewData={{ duplicateGroups: [heldGroup, separatedGroup], statistics: { ...statistics, separatedReportsCount: 1 }, catalogueColors: {} }}
-        onProceedWithMerge={() => {}}
-        onCancel={() => {}}
       />
     );
-    expect(screen.getByText(/1 entry was matched but kept apart because its group failed validation/)).toBeInTheDocument();
-    const tab = screen.getByRole('tab', { name: 'Separated (1)' });
+    expect(screen.getByText(/1 entry was matched but kept apart because its group failed the consistency checks/)).toBeInTheDocument();
+    const tab = screen.getByRole('tab', { name: 'Kept apart (1)' });
     act(() => { fireEvent.mouseDown(tab, { button: 0, ctrlKey: false }); });
-    expect(screen.getByText('Single entry')).toBeInTheDocument();
-    expect(screen.getByText('Separated')).toBeInTheDocument();
-    expect(screen.getByText(/Reason: Large magnitude range/)).toBeInTheDocument();
-    expect(screen.queryByText('GeoNet 2024')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Kept apart' })).toBeInTheDocument();
+    expect(screen.getByTestId('split-outcome')).toHaveTextContent('Published on its own');
+    expect(screen.getByTestId('split-reason')).toHaveTextContent('Kept apart because: Large magnitude range');
+    // The flagged group is not in this list.
+    expect(screen.queryByText('Group #1')).toBeNull();
   });
 
-  it('shows no tab or line when nothing was separated', () => {
+  it('shows an empty Kept apart list and no line when nothing was kept apart', () => {
     render(
-      <MergePreviewQC previewData={{ duplicateGroups: [heldGroup], statistics, catalogueColors: {} }} onProceedWithMerge={() => {}} onCancel={() => {}} />
+      <MergePreviewQC previewData={{ duplicateGroups: [heldGroup], statistics, catalogueColors: {} }} />
     );
-    expect(screen.queryByRole('tab', { name: /Separated/ })).toBeNull();
-    expect(screen.queryByText(/kept apart/)).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Kept apart (0)' })).toBeInTheDocument();
+    expect(screen.queryByText(/kept apart because/)).toBeNull();
   });
 });
 
@@ -154,8 +154,7 @@ describe('DuplicateGroupCard', () => {
   it('badges a held group and greys its superseded report', () => {
     render(<DuplicateGroupCard group={heldGroup} groupIndex={0} catalogueColors={{}} onViewOnMap={() => {}} />);
     expect(screen.getByText('Held')).toBeInTheDocument();
-    const buttons = screen.getAllByRole('button');
-    fireEvent.click(buttons[buttons.length - 1]);
+    fireEvent.click(screen.getByRole('button', { name: /Show entries/ }));
 
     const rows = screen.getAllByRole('row').slice(1);
     expect(rows).toHaveLength(3);
@@ -171,8 +170,7 @@ describe('DuplicateGroupCard', () => {
     const { heldForReview, supersededEventIndexes, ...legacyGroup } = heldGroup;
     render(<DuplicateGroupCard group={legacyGroup} groupIndex={0} catalogueColors={{}} onViewOnMap={() => {}} />);
     expect(screen.queryByText('Held')).toBeNull();
-    const buttons = screen.getAllByRole('button');
-    fireEvent.click(buttons[buttons.length - 1]);
+    fireEvent.click(screen.getByRole('button', { name: /Show entries/ }));
     expect(screen.queryByText('superseded')).toBeNull();
   });
 });
@@ -226,7 +224,7 @@ describe('merge page passes the hold setting to the preview', () => {
     (global as any).ResizeObserver = originalResizeObserver;
   });
 
-  it('sets holdForReview from the flagged-group radio', async () => {
+  it('sets holdForReview from the flagged-group radio, and passes the strategy and priority', async () => {
     render(<MergePage />);
     for (const name of ['Alpha catalogue', 'Bravo catalogue']) fireEvent.click(screen.getByRole('checkbox', { name }));
     fireEvent.click(screen.getByRole('button', { name: /Configure Merge/ }));
@@ -236,5 +234,9 @@ describe('merge page passes the hold setting to the preview', () => {
     expect(await screen.findByTestId('qc-stub')).toHaveTextContent('hold');
     await waitFor(() => expect(qcProps[qcProps.length - 1].holdForReview).toBe(true));
     expect(qcProps[qcProps.length - 1].previewData.statistics.heldForReviewCount).toBe(1);
+    // The panel explains each published solution by the strategy, and has no merge actions.
+    expect(qcProps[qcProps.length - 1]).toMatchObject({ strategy: 'priority', priority: 'newest' });
+    expect(qcProps[qcProps.length - 1]).not.toHaveProperty('onProceedWithMerge');
+    expect(qcProps[qcProps.length - 1]).not.toHaveProperty('onCancel');
   });
 });

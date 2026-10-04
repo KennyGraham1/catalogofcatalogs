@@ -9,7 +9,9 @@ import { AppError } from '@/lib/errors';
  * POST /api/merge/preview
  *
  * Preview merge operation without saving to database
- * Returns duplicate groups for QC visualization
+ * Returns the QC preview (MergePreviewPayload, lib/merge-qc.ts): every flagged, kept-apart
+ * and held group, the matched groups with the largest discrepancy, the statistics, and the
+ * QC summary of the whole merge (the one a saved merge keeps)
  *
  * Requires Editor role or higher since this is a precursor to actual merge operations
  */
@@ -21,7 +23,13 @@ export async function POST(request: NextRequest) {
       return authResult;
     }
 
-    const body = await request.json();
+    // A missing or malformed body is the client's error (400), not a failed merge (500).
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body', code: 'INVALID_JSON' }, { status: 400 });
+    }
 
     // Validate request body
     const validation = validateMergeRequest(body);

@@ -126,7 +126,7 @@ describe('two different events of one agency', () => {
     expect(groups.map(g => [g.separated, g.isSuspicious, g.heldForReview])).toEqual([[true, false, true], [true, false, true]]);
     for (const group of groups) {
       expect(group.validationWarnings).toEqual([
-        expect.stringMatching(/^Matched with another report but separated.*Two different GeoNet events in one group: 2020p000001 vs 2020p000002/),
+        expect.stringMatching(/^Matched with another entry but kept apart.*Two different GeoNet events in one group: 2020p000001 vs 2020p000002/),
       ]);
     }
   });

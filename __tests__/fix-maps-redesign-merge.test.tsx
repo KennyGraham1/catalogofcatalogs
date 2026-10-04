@@ -305,24 +305,24 @@ describe('merge preview map card (MergePreviewQC)', () => {
   const statistics = { totalEventsBefore: 4, totalEventsAfter: 1, duplicateGroupsCount: 1, duplicatesRemoved: 3, suspiciousGroupsCount: 0 };
 
   it('opens the group in a plain card whose map colours match the group card dots', () => {
-    render(<MergePreviewQC previewData={{ duplicateGroups: [GROUP], statistics, catalogueColors: SERVER_COLORS }} onProceedWithMerge={() => {}} onCancel={() => {}} />);
-    fireEvent.click(screen.getByRole('button', { name: /View on Map/ }));
+    render(<MergePreviewQC previewData={{ duplicateGroups: [GROUP], statistics, catalogueColors: SERVER_COLORS }} />);
+    // A clean match: listed under Matched, the only non-empty list.
+    fireEvent.click(screen.getByRole('button', { name: /View on map/ }));
 
-    const card = screen.getByRole('region', { name: 'Duplicate group map' });
+    const card = screen.getByRole('region', { name: 'Matched group map' });
     expect(card).not.toHaveClass('border-blue-500');
     expect(within(card).getByText('Group #1 on the map')).toBeInTheDocument();
     expect(within(card).getByText(/4 entries from 4 catalogues/)).toBeInTheDocument();
 
     // Expand the group card's table: each catalogue dot is its colour on the map.
-    const groupCard = screen.getByText('Group #1').closest('.rounded-lg') as HTMLElement;
-    const buttons = within(groupCard).getAllByRole('button');
-    fireEvent.click(buttons[buttons.length - 1]);
-    const dots = Array.from(groupCard.querySelectorAll<HTMLElement>('tbody div.rounded-full.w-3')).map(dot => dot.style.backgroundColor);
+    const groupCard = screen.getByText('Group #1').closest('[data-group-id]') as HTMLElement;
+    fireEvent.click(within(groupCard).getByRole('button', { name: /Show entries/ }));
+    const dots = Array.from(groupCard.querySelectorAll<HTMLElement>('tbody span.rounded-full.w-3')).map(dot => dot.style.backgroundColor);
     const swatches = Array.from(card.querySelectorAll<HTMLElement>('li[data-catalogue-key] [data-swatch]')).map(s => s.style.backgroundColor);
     expect(dots).toEqual(swatches);
 
     fireEvent.click(within(card).getByRole('button', { name: /Close map/ }));
-    expect(screen.queryByRole('region', { name: 'Duplicate group map' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Matched group map' })).toBeNull();
   });
 });
 

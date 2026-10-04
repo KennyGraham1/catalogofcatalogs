@@ -8,8 +8,9 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
-// Origin times are UTC by definition; shown exactly as the merge QC card shows them.
-import { formatOriginTime } from '@/components/map/OptimizedEventPopup';
+// Origin times are UTC by definition; shown as ISO 8601 date and time with the zone, exactly
+// as the merge QC card and the map hover card show them.
+import { formatOriginTimeUtc as formatOriginTime } from '@/lib/map-format';
 
 /**
  * One contributing report of a held merged event, as the row's source_events records it

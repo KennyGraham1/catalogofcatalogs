@@ -73,137 +73,139 @@
  ],
  "merge": {
   "ingested": 215233,
-  "merged": 170377,
-  "duplicate_groups": 44856,
-  "removed": 44856,
+  "merged": 168124,
+  "duplicate_groups": 47109,
+  "removed": 47109,
   "resolved_to": {
-   "synthetic-geonet-like": 14389,
-   "synthetic-agency-b": 30467
+   "synthetic-geonet-like": 15239,
+   "synthetic-agency-b": 31870
   },
-  "first_only": 68571,
-  "second_only": 56950,
+  "first_only": 66318,
+  "second_only": 54697,
   "injected_pairs": 47109,
-  "true_pairs_found": 43936,
-  "false_associations": 920,
-  "false_associations_with_aftershock": 915,
-  "missed_pairs": 3173,
+  "true_pairs_found": 46353,
+  "false_associations": 756,
+  "false_associations_with_aftershock": 753,
+  "magnitude_widened_groups": 1742,
+  "magnitude_widened_false": 0,
+  "missed_pairs": 756,
   "missed_by_reason": {
-   "gate:depth_range": 691,
-   "gate:magnitude_range": 2315,
-   "paired with a closer report": 26,
-   "outside matching window": 141
+   "gate:magnitude_range": 572,
+   "paired with a closer entry": 27,
+   "outside matching window": 141,
+   "gate:depth_range": 16
   }
  },
  "merge_pct": {
-  "recall": 93.3,
-  "precision": 97.9,
-  "resolved_to_agency_b": 67.9
+  "recall": 98.4,
+  "precision": 98.4,
+  "resolved_to_agency_b": 67.7
  },
  "quality": {
-  "retained": 86468,
-  "removed": 83909,
-  "retained_pct": 50.8,
+  "retained": 86028,
+  "removed": 82096,
+  "retained_pct": 51.2,
   "merged_median_q": 70,
-  "gap_over_180_merged": 39160,
-  "gap_over_180_removed_pct": 94.5,
-  "removed_with_gap_over_180_pct": 44.1,
+  "gap_over_180_merged": 37951,
+  "gap_over_180_removed_pct": 94.3,
+  "removed_with_gap_over_180_pct": 43.6,
   "removed_share_by_provenance_pct": {
-   "first-only": 44.9,
-   "second-only": 42.9,
-   "duplicate-second": 6.6,
-   "duplicate-first": 5.5
+   "first-only": 44.3,
+   "second-only": 42.5,
+   "duplicate-second": 7.2,
+   "duplicate-first": 6.0
   },
   "retention_by_magnitude_pct": [
    {
     "lo": 1,
     "hi": 1.5,
-    "events": 57344,
-    "retained_pct": 41.8
+    "events": 56845,
+    "retained_pct": 42.0
    },
    {
     "lo": 1.5,
     "hi": 2,
-    "events": 52382,
-    "retained_pct": 58.0
+    "events": 51710,
+    "retained_pct": 58.4
    },
    {
     "lo": 2,
     "hi": 2.5,
-    "events": 25994,
-    "retained_pct": 62.9
+    "events": 25463,
+    "retained_pct": 63.7
    },
    {
     "lo": 2.5,
     "hi": 3,
-    "events": 9511,
-    "retained_pct": 69.0
+    "events": 9262,
+    "retained_pct": 70.5
    },
    {
     "lo": 3,
     "hi": 3.5,
-    "events": 2931,
-    "retained_pct": 78.6
+    "events": 2844,
+    "retained_pct": 80.9
    },
    {
     "lo": 3.5,
     "hi": 4,
-    "events": 816,
-    "retained_pct": 83.2
+    "events": 792,
+    "retained_pct": 85.6
    },
    {
     "lo": 4,
     "hi": 10,
-    "events": 365,
-    "retained_pct": 87.7
+    "events": 352,
+    "retained_pct": 90.3
    }
   ]
  },
  "completeness": {
   "retained_maxc": {
    "mc": 1.8,
-   "b": 0.838152790897134,
-   "sigma_b": 0.004354936672138633,
-   "n": 37041,
+   "b": 0.8371787954698156,
+   "sigma_b": 0.0043626737708195255,
+   "n": 36824,
    "mc_source": "MAXC",
    "gft_level": null
   },
   "retained_gft": {
    "mc": 1.9,
-   "b": 0.864595192992676,
-   "sigma_b": 0.004879037566062367,
-   "n": 31402,
+   "b": 0.8632294594304212,
+   "sigma_b": 0.004885978370399717,
+   "n": 31214,
    "mc_source": "GFT",
    "gft_level": 95
   },
   "retained_mbs": {
    "mc": 2.8,
-   "b": 1.007537801976521,
-   "sigma_b": 0.014001685756338433,
-   "n": 5178,
+   "b": 1.0079975783495991,
+   "sigma_b": 0.014024335342400392,
+   "n": 5166,
    "mc_source": "MBS",
    "gft_level": null
   },
   "merged_maxc": {
    "mc": 1.6,
-   "b": 0.8366062641390213,
-   "sigma_b": 0.002964304201214264,
-   "n": 79652,
+   "b": 0.8403129411280904,
+   "sigma_b": 0.0030053757233665323,
+   "n": 78178,
    "mc_source": "MAXC",
    "gft_level": null
   },
   "merged_gft": {
    "mc": 1.9,
-   "b": 0.9263440527174568,
-   "sigma_b": 0.004231690660147097,
-   "n": 47920,
+   "b": 0.9296579815308587,
+   "sigma_b": 0.004293677297112729,
+   "n": 46880,
    "mc_source": "GFT",
    "gft_level": 95
   },
   "merged_mbs": {
    "mc": 2.7,
-   "b": 1.060637404137053,
-   "sigma_b": 0.011466517832914707,
-   "n": 8556,
+   "b": 1.0617275873153236,
+   "sigma_b": 0.011644858393895738,
+   "n": 8313,
    "mc_source": "MBS",
    "gft_level": null
   },
@@ -220,29 +222,29 @@
  "analysis": {
   "cutoff": 2.7,
   "cutoff_source": "b-value stability",
-  "retained_above": 6465,
-  "below_cutoff_removed": 80003,
+  "retained_above": 6446,
+  "below_cutoff_removed": 79582,
   "concatenated_above": 13312,
-  "injected_aftershock_share": 0.14756380510440836,
-  "declustered": 3927,
-  "removed_by_gk": 2538,
-  "gk_recall_of_injected": 0.9654088050314465,
-  "gk_background_removed": 1617,
-  "gk_background_removed_b": 1.1922762824563962,
-  "gk_background_removed_mean_magnitude": 3.045672783549788,
-  "retained_mean_magnitude": 3.1200177149265356,
-  "symmetric_removed": 3508,
+  "injected_aftershock_share": 0.1476884889854173,
+  "declustered": 3921,
+  "removed_by_gk": 2525,
+  "gk_recall_of_injected": 0.9653361344537815,
+  "gk_background_removed": 1606,
+  "gk_background_removed_b": 1.1931835763957976,
+  "gk_background_removed_mean_magnitude": 3.04539305043587,
+  "retained_mean_magnitude": 3.1201213209742558,
+  "symmetric_removed": 3493,
   "gr_retained": {
-   "b": 0.9984919025344081,
-   "sigma_b": 0.01241824668163991,
-   "a": 6.506496666059315,
-   "n": 6465
+   "b": 0.998242112875032,
+   "sigma_b": 0.012433423795998844,
+   "a": 6.504544005938902,
+   "n": 6446
   },
   "gr_merged": {
-   "b": 1.060637404137053,
-   "sigma_b": 0.011466517832914707,
-   "a": 6.795991767069534,
-   "n": 8556
+   "b": 1.0617275873153236,
+   "sigma_b": 0.011644858393895738,
+   "a": 6.786422266253268,
+   "n": 8313
   },
   "gr_concatenated": {
    "b": 1.0156463277030352,
@@ -251,455 +253,455 @@
    "n": 13312
   },
   "gr_retained_background": {
-   "b": 0.9552020300790642,
-   "sigma_b": 0.01286708089230093,
-   "a": 6.320275892238945,
-   "n": 5511
+   "b": 0.9551237568292847,
+   "sigma_b": 0.012885916709594707,
+   "a": 6.318722798523613,
+   "n": 5494
   },
   "gr_merged_background": {
-   "b": 1.0107275199639612,
-   "sigma_b": 0.011905751942672595,
-   "a": 6.586718825962137,
-   "n": 7207
+   "b": 1.0116316113580461,
+   "sigma_b": 0.01209303814031506,
+   "a": 6.576379288813612,
+   "n": 6998
   },
   "gr_retained_aftershocks": {
-   "b": 1.352607324108453,
-   "sigma_b": 0.043792279040914345,
-   "a": 6.631588149796919,
-   "n": 954
+   "b": 1.3499388615873757,
+   "sigma_b": 0.04375176983243534,
+   "a": 6.623471874670389,
+   "n": 952
   },
   "gr_declustered": {
-   "b": 0.8832757920724792,
-   "sigma_b": 0.01409502586836981,
-   "a": 5.978905539866112,
-   "n": 3927
+   "b": 0.8833320505750558,
+   "sigma_b": 0.014106704445835165,
+   "a": 5.978393378852857,
+   "n": 3921
   },
   "gr_symmetric": {
-   "b": 0.8234394031669462,
-   "sigma_b": 0.015142792898369638,
-   "a": 5.694137713076873,
-   "n": 2957
+   "b": 0.8236033536994556,
+   "sigma_b": 0.015156062338534584,
+   "a": 5.693992501953609,
+   "n": 2953
   }
  },
  "b_vs_cutoff": [
   {
    "cutoff": 1.5,
    "merged": [
-    0.8,
+    0.804,
     0.003,
-    91999
+    90423
    ],
    "retained": [
     0.74,
     0.003,
-    56562
+    56258
    ],
    "retained_declustered": [
     0.602,
     0.004,
-    21818
+    21789
    ],
    "merged_background": [
-    0.746,
+    0.749,
     0.003,
-    65521
+    64386
    ],
    "retained_background": [
     0.681,
     0.003,
-    40244
+    40033
    ]
   },
   {
    "cutoff": 1.6,
    "merged": [
-    0.837,
+    0.84,
     0.003,
-    79652
+    78178
    ],
    "retained": [
     0.778,
     0.003,
-    49930
+    49651
    ],
    "retained_declustered": [
     0.636,
-    0.004,
-    19993
+    0.005,
+    19960
    ],
    "merged_background": [
-    0.782,
+    0.786,
     0.003,
-    57644
+    56576
    ],
    "retained_background": [
-    0.719,
+    0.718,
     0.004,
-    36134
+    35944
    ]
   },
   {
    "cutoff": 1.7,
    "merged": [
-    0.868,
+    0.871,
     0.003,
-    67876
+    66546
    ],
    "retained": [
-    0.811,
+    0.81,
     0.004,
-    43329
+    43081
    ],
    "retained_declustered": [
     0.666,
     0.005,
-    18032
+    17991
    ],
    "merged_background": [
-    0.813,
+    0.817,
     0.004,
-    49871
+    48896
    ],
    "retained_background": [
-    0.752,
+    0.751,
     0.004,
-    31909
+    31737
    ]
   },
   {
    "cutoff": 1.8,
    "merged": [
-    0.898,
+    0.901,
     0.004,
-    57287
+    56088
    ],
    "retained": [
-    0.838,
+    0.837,
     0.004,
-    37041
+    36824
    ],
    "retained_declustered": [
-    0.696,
+    0.695,
     0.005,
-    16099
+    16058
    ],
    "merged_background": [
-    0.844,
+    0.848,
     0.004,
-    42761
+    41878
    ],
    "retained_background": [
     0.781,
     0.005,
-    27797
+    27649
    ]
   },
   {
    "cutoff": 1.9,
    "merged": [
-    0.926,
+    0.93,
     0.004,
-    47920
+    46880
    ],
    "retained": [
-    0.865,
+    0.863,
     0.005,
-    31402
+    31214
    ],
    "retained_declustered": [
-    0.722,
+    0.721,
     0.006,
-    14190
+    14149
    ],
    "merged_background": [
-    0.873,
+    0.876,
     0.005,
-    36271
+    35484
    ],
    "retained_background": [
-    0.809,
+    0.808,
     0.005,
-    23954
+    23822
    ]
   },
   {
    "cutoff": 2,
    "merged": [
-    0.951,
+    0.954,
     0.005,
-    39617
+    38713
    ],
    "retained": [
-    0.882,
+    0.881,
     0.005,
-    26203
+    26049
    ],
    "retained_declustered": [
-    0.746,
+    0.745,
     0.007,
-    12386
+    12350
    ],
    "merged_background": [
-    0.898,
+    0.901,
     0.005,
-    30444
+    29741
    ],
    "retained_background": [
-    0.831,
+    0.83,
     0.006,
-    20377
+    20267
    ]
   },
   {
    "cutoff": 2.1,
    "merged": [
-    0.976,
+    0.979,
     0.005,
-    32570
+    31786
    ],
    "retained": [
-    0.902,
+    0.901,
     0.006,
-    21815
+    21694
    ],
    "retained_declustered": [
     0.77,
     0.007,
-    10744
+    10714
    ],
    "merged_background": [
-    0.926,
+    0.929,
     0.006,
-    25441
+    24831
    ],
    "retained_background": [
-    0.854,
+    0.853,
     0.007,
-    17251
+    17167
    ]
   },
   {
    "cutoff": 2.2,
    "merged": [
-    0.998,
+    1.001,
     0.006,
-    26528
+    25873
    ],
    "retained": [
-    0.92,
+    0.918,
     0.007,
-    18023
+    17933
    ],
    "retained_declustered": [
-    0.79,
+    0.789,
     0.008,
-    9203
+    9178
    ],
    "merged_background": [
-    0.949,
+    0.952,
     0.007,
-    21009
+    20481
    ],
    "retained_background": [
-    0.873,
+    0.872,
     0.007,
-    14454
+    14387
    ]
   },
   {
    "cutoff": 2.3,
    "merged": [
-    1.019,
+    1.021,
     0.007,
-    21468
+    20915
    ],
    "retained": [
-    0.939,
+    0.938,
     0.008,
-    14854
+    14787
    ],
    "retained_declustered": [
-    0.809,
+    0.808,
     0.009,
-    7845
+    7824
    ],
    "merged_background": [
-    0.968,
-    0.007,
-    17178
+    0.97,
+    0.008,
+    16724
    ],
    "retained_background": [
-    0.893,
+    0.892,
     0.008,
-    12048
+    11997
    ]
   },
   {
    "cutoff": 2.4,
    "merged": [
-    1.031,
+    1.033,
     0.008,
-    17141
+    16689
    ],
    "retained": [
-    0.953,
+    0.952,
     0.009,
-    12119
+    12073
    ],
    "retained_declustered": [
-    0.825,
+    0.824,
     0.01,
-    6621
+    6607
    ],
    "merged_background": [
-    0.98,
+    0.982,
     0.008,
-    13892
+    13514
    ],
    "retained_background": [
     0.905,
     0.009,
-    9932
+    9895
    ]
   },
   {
    "cutoff": 2.5,
    "merged": [
-    1.041,
+    1.042,
     0.009,
-    13623
+    13250
    ],
    "retained": [
-    0.968,
+    0.967,
     0.01,
-    9861
+    9830
    ],
    "retained_declustered": [
     0.845,
     0.011,
-    5594
+    5585
    ],
    "merged_background": [
-    0.987,
+    0.988,
     0.009,
-    11151
+    10838
    ],
    "retained_background": [
     0.92,
     0.01,
-    8173
+    8149
    ]
   },
   {
    "cutoff": 2.6,
    "merged": [
-    1.048,
+    1.05,
     0.01,
-    10779
+    10489
    ],
    "retained": [
     0.983,
     0.011,
-    7995
+    7973
    ],
    "retained_declustered": [
-    0.864,
+    0.865,
     0.013,
-    4702
+    4696
    ],
    "merged_background": [
-    0.995,
+    0.997,
     0.011,
-    8945
+    8697
    ],
    "retained_background": [
-    0.935,
+    0.936,
     0.011,
-    6713
+    6695
    ]
   },
   {
    "cutoff": 2.7,
    "merged": [
-    1.061,
-    0.011,
-    8556
+    1.062,
+    0.012,
+    8313
    ],
    "retained": [
     0.998,
     0.012,
-    6465
+    6446
    ],
    "retained_declustered": [
     0.883,
     0.014,
-    3927
+    3921
    ],
    "merged_background": [
-    1.011,
+    1.012,
     0.012,
-    7207
+    6998
    ],
    "retained_background": [
     0.955,
     0.013,
-    5511
+    5494
    ]
   },
   {
    "cutoff": 2.8,
    "merged": [
-    1.067,
+    1.068,
     0.013,
-    6736
+    6543
    ],
    "retained": [
     1.008,
     0.014,
-    5178
+    5166
    ],
    "retained_declustered": [
-    0.893,
+    0.894,
     0.016,
-    3236
+    3233
    ],
    "merged_background": [
-    1.023,
-    0.013,
-    5771
+    1.024,
+    0.014,
+    5601
    ],
    "retained_background": [
     0.967,
     0.014,
-    4471
+    4459
    ]
   },
   {
    "cutoff": 2.9,
    "merged": [
-    1.064,
+    1.065,
     0.015,
-    5252
+    5099
    ],
    "retained": [
     1.015,
     0.016,
-    4131
+    4122
    ],
    "retained_declustered": [
     0.905,
     0.018,
-    2665
+    2662
    ],
    "merged_background": [
     1.02,
     0.015,
-    4545
+    4411
    ],
    "retained_background": [
     0.975,
     0.016,
-    3603
+    3594
    ]
   },
   {
@@ -707,139 +709,139 @@
    "merged": [
     1.065,
     0.017,
-    4112
+    3988
    ],
    "retained": [
-    1.027,
+    1.029,
     0.018,
-    3302
+    3297
    ],
    "retained_declustered": [
-    0.912,
+    0.914,
     0.02,
-    2179
+    2177
    ],
    "merged_background": [
     1.02,
     0.017,
-    3592
+    3483
    ],
    "retained_background": [
-    0.985,
+    0.987,
     0.018,
-    2903
+    2898
    ]
   },
   {
    "cutoff": 3.1,
    "merged": [
-    1.069,
+    1.068,
     0.019,
-    3227
+    3126
    ],
    "retained": [
-    1.026,
+    1.027,
     0.02,
-    2603
+    2598
    ],
    "retained_declustered": [
-    0.92,
+    0.921,
     0.022,
-    1779
+    1777
    ],
    "merged_background": [
-    1.026,
+    1.024,
     0.019,
-    2853
+    2763
    ],
    "retained_background": [
-    0.986,
-    0.02,
-    2315
+    0.987,
+    0.021,
+    2310
    ]
   },
   {
    "cutoff": 3.2,
    "merged": [
-    1.04,
+    1.043,
     0.021,
-    2460
+    2392
    ],
    "retained": [
-    1.013,
-    0.022,
-    2032
+    1.016,
+    0.023,
+    2029
    ],
    "retained_declustered": [
-    0.909,
+    0.911,
     0.024,
-    1423
+    1422
    ],
    "merged_background": [
-    1.0,
-    0.021,
-    2200
+    1.002,
+    0.022,
+    2138
    ],
    "retained_background": [
-    0.974,
+    0.977,
     0.023,
-    1824
+    1821
    ]
   },
   {
    "cutoff": 3.3,
    "merged": [
-    1.016,
-    0.023,
-    1894
+    1.018,
+    0.024,
+    1840
    ],
    "retained": [
-    0.993,
+    0.996,
     0.025,
-    1578
+    1575
    ],
    "retained_declustered": [
-    0.892,
-    0.026,
-    1133
+    0.894,
+    0.027,
+    1132
    ],
    "merged_background": [
-    0.984,
+    0.985,
     0.024,
-    1721
+    1670
    ],
    "retained_background": [
-    0.959,
+    0.962,
     0.025,
-    1435
+    1432
    ]
   },
   {
    "cutoff": 3.4,
    "merged": [
-    1.028,
-    0.026,
-    1514
+    1.031,
+    0.027,
+    1471
    ],
    "retained": [
-    1.0,
+    1.003,
     0.028,
-    1263
+    1260
    ],
    "retained_declustered": [
-    0.911,
+    0.913,
     0.03,
-    940
+    939
    ],
    "merged_background": [
-    0.995,
+    0.997,
     0.027,
-    1385
+    1345
    ],
    "retained_background": [
-    0.968,
-    0.028,
-    1161
+    0.971,
+    0.029,
+    1158
    ]
   },
   {
@@ -847,27 +849,27 @@
    "merged": [
     1.016,
     0.03,
-    1181
+    1144
    ],
    "retained": [
-    0.996,
+    1.0,
     0.032,
-    999
+    996
    ],
    "retained_declustered": [
-    0.924,
+    0.927,
     0.033,
-    772
+    771
    ],
    "merged_background": [
     0.989,
     0.03,
-    1094
+    1060
    ],
    "retained_background": [
-    0.969,
+    0.972,
     0.032,
-    928
+    925
    ]
   }
  ]

@@ -58,6 +58,10 @@ function stubFetch(catalogue: Record<string, unknown>) {
     if (url.pathname === '/api/catalogues/cat-1/events') {
       return Promise.resolve(jsonResponse({ data: EVENTS, pagination: { hasMore: false, nextCursor: null, prevCursor: null, limit: 500 } }));
     }
+    // The merge QC summary card (feat-merge-qc-summary.test.tsx): no stored summary here.
+    if (url.pathname === '/api/catalogues/cat-1/merge-qc') {
+      return Promise.resolve({ ok: false, status: 404, headers: { get: () => null }, json: async () => ({ error: 'Not found' }) } as unknown as Response);
+    }
     throw new Error(`Unexpected fetch: ${url.pathname}${url.search}`);
   });
 }

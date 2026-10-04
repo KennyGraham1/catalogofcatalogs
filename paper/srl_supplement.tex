@@ -130,18 +130,20 @@ Reported values & True epicentre, depth, origin time and magnitude plus errors o
   \centering
   \includegraphics[width=\linewidth]{figures/app_analytics_gr_c.png}
   \caption{Gutenberg-Richter analysis of the reduced GeoNet-like catalogue,
-  computed client-side with the default $M_c$ settings (maximum curvature plus
-  $0.2$).  The platform reports $\hat{b}$ with its counting-statistics
-  uncertainty, the $a$-value, the goodness of fit and $M_c$; the
-  frequency-magnitude plot marks the range below $M_c$ and overlays the fitted
-  relation.  Above $M_c = M1.8 \pm 0.1$ the fit gives
-  $\hat{b} = 0.882 \pm 0.019$ ($N = 2{,}151$; $a = 4.92$, $R^2 = 0.963$).  As in
-  the worked example of the main paper, this lies below the $b = 1.00$ planted in
-  the synthetic background, because the synthetic networks are not complete at
-  $M1.8$ offshore and at depth: a single global $M_c$ is set by the best-covered
-  part of the catalogue.  The magnitudes are reported to full precision, so no
-  binning correction is applied.  The capture is a check of the platform's
-  behaviour on a controlled input, not a measurement of New Zealand seismicity.}
+  computed client-side with the default $M_c$ settings ($b$-value stability,
+  which falls back to the goodness-of-fit test and then to maximum curvature
+  plus $0.2$).  The platform reports $\hat{b}$ with its counting-statistics
+  uncertainty, the $a$-value, the goodness of fit and $M_c$ with the method that
+  produced it; the frequency-magnitude plot shades the range below $M_c$ and
+  overlays the fitted relation.  Above $M_c = M2.3 \pm 0.1$ the fit gives
+  $\hat{b} = 1.029 \pm 0.035$ ($N = 845$; $a = 5.29$, $R^2 = 0.954$), within its
+  uncertainty of the $b = 1.00$ planted in the synthetic background (the sample
+  also holds aftershocks planted with $b = 1.30$).  With 845 events that
+  uncertainty is wide, and on the full-scale catalogue of the main paper the same
+  method places $M_c$ higher (Figure~\ref{fig:s_mc}).  The magnitudes are
+  reported to full precision, so no binning correction is applied.  The capture
+  is a check of the platform's behaviour on a controlled input, not a
+  measurement of New Zealand seismicity.}
   \label{fig:s_gr}
 \end{figure}
 
@@ -149,15 +151,26 @@ Reported values & True epicentre, depth, origin time and magnitude plus errors o
   \centering
   \includegraphics[width=\linewidth]{figures/app_analytics_mc.png}
   \caption{Magnitude-of-completeness panel for the same catalogue, with the
-  default settings (maximum curvature, correction $+0.2$; the goodness-of-fit
-  test is the alternative method, and the correction can be set from 0 to 0.5).
-  The fullest bin of the non-cumulative distribution is $M1.6$, so
-  $M_c = M1.8 \pm 0.1$ (one bin width, a lower bound on its uncertainty), and
-  $43.7\,\%$ of the events ($2{,}151$ of $4{,}922$) lie at or above it.  That
-  share is not a completeness score: for a perfectly complete catalogue with
-  $b = 1$ the $+0.2$ correction alone would limit it to about $63\,\%$.  The
-  estimate is shown with its method and correction, so that the completeness
-  assumption behind any subsequent $b$-value is visible at the point of use.}
+  default method, $b$-value stability (the main paper's $M_c$ section; Woessner
+  and Wiemer, 2005); the goodness-of-fit test and maximum curvature, with a
+  correction from 0 to 0.5, are the alternatives.  $M_c = M2.3 \pm 0.1$ (one bin
+  width, a lower bound on its uncertainty) is the lowest cut-off at which
+  $\hat{b}$ lies within its Shi and Bolt (1982) uncertainty of its mean over the
+  cut-offs $M2.3$--$M2.8$: the method card quotes $\hat{b} = 1.029$,
+  $\delta b = 0.034$ and a mean of $1.057$.  At or above $M_c$ lie $17.2\,\%$ of
+  the events ($845$ of $4{,}922$), the sample a $b$-value fit keeps; the share
+  is not a completeness score.  The distribution is drawn in bins centred on
+  multiples of 0.1, and the fullest bin of the non-cumulative distribution is
+  $M1.7$, so maximum curvature with its default $+0.2$ correction would give
+  $M1.9$, and the goodness-of-fit test gives $M2.2$ at the 95\,\% level.  Below
+  the distribution the tab plots the stability test itself, $\hat{b} \pm \delta b$
+  and the mean over the next 0.5 units at every cut-off with at least 50 events
+  above it, whichever method set $M_c$.  $b$-value stability is conservative on
+  large samples, because $\delta b$ falls as $1/\sqrt{N}$: on the full-scale
+  GeoNet-like catalogue of the main paper, 23 times larger, it gives $M2.7$.
+  The estimate is shown with its method and the values behind it, so that the
+  completeness assumption behind any subsequent $b$-value is visible at the
+  point of use.}
   \label{fig:s_mc}
 \end{figure}
 
@@ -192,6 +205,9 @@ Reported values & True epicentre, depth, origin time and magnitude plus errors o
   \emph{Tectonophysics} \textbf{2}, no.~6, 483--514.}
 \bibitemx{Omori, F. (1894). On the after-shocks of earthquakes, \emph{Journal of
   the College of Science, Imperial University of Tokyo} \textbf{7}, 111--200.}
+\bibitemx{Shi, Y., and B.~A. Bolt (1982). The standard error of the
+  magnitude-frequency $b$ value, \emph{Bulletin of the Seismological Society of
+  America} \textbf{72}, no.~5, 1677--1687.}
 \bibitemx{Utsu, T. (1961). A statistical study on the occurrence of aftershocks,
   \emph{Geophysical Magazine} \textbf{30}, 521--605.}
 \bibitemx{Utsu, T. (1970). Aftershocks and earthquake statistics (1): Some
@@ -202,6 +218,10 @@ Reported values & True epicentre, depth, origin time and magnitude plus errors o
   among magnitude, rupture length, rupture width, rupture area, and surface
   displacement, \emph{Bulletin of the Seismological Society of America}
   \textbf{84}, no.~4, 974--1002.}
+\bibitemx{Woessner, J., and S. Wiemer (2005). Assessing the quality of earthquake
+  catalogues: Estimating the magnitude of completeness and its uncertainty,
+  \emph{Bulletin of the Seismological Society of America} \textbf{95}, no.~2,
+  684--698.}
 }
 
 \end{document}

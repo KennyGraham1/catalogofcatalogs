@@ -30,7 +30,7 @@ The platform also applies underlying algorithm improvements. Some run for **ever
 * **Date Line Normalisation** *(all strategies)*: Spatial matching near ±180° uses unit-vector averaging to avoid arithmetic errors in the Pacific region.
 * **Validation Gates** *(all strategies)*: Rejects physically inconsistent duplicate groups before any strategy is applied (e.g., an M4.0 matched against an M7.0, or a group spanning > 200 km).
 * **Magnitude Type Preference** *(Average and Median strategies)*: Selects (never averages) a magnitude by a size-dependent type preference — Mw always leads; below M6.2 (the group's median Mw-equivalent) the order is ML > mb/mB/mbLg > Ms > Md, and from M6.2 up it is Ms > mB > ML > mb > Md — which avoids saturation errors from mixing incompatible scales. Other strategies keep the winning event's existing magnitude unchanged unless a magnitude rule says otherwise (see :ref:`per-field-rules`).
-* **Depth Uncertainty Selection** *(Average and Median strategies)*: Selects the depth from the best-constrained report that solved for depth (a fixed or operator-assigned depth is used only when no free depth exists), rather than a simple mean. Other strategies inherit depth directly from the winning event unless a depth rule says otherwise (see :ref:`per-field-rules`).
+* **Depth Uncertainty Selection** *(Average and Median strategies)*: Selects the depth from the best-constrained entry that solved for depth (a fixed or operator-assigned depth is used only when no free depth exists), rather than a simple mean. Other strategies inherit depth directly from the winning event unless a depth rule says otherwise (see :ref:`per-field-rules`).
 * **Same-Agency Supersession** *(all strategies)*: When two catalogues carry the same agency's solution for one event (the same agency event identifier), only the most recently computed vintage takes part in the merge; the older one is kept as provenance only. Two events from one agency with *different* identifiers are never merged (see :ref:`same-agency-reports`).
 * **Review Holds** *(all strategies)*: Groups the preview flags as suspicious can be held for a reviewer's decision instead of being resolved silently (see :ref:`review-holds`).
 
@@ -111,14 +111,57 @@ below). Magnitude is **not** a matching criterion — a candidate pair is
 accepted or rejected on time and distance alone. Magnitude is used in two
 other ways only:
 
-* **Tie-breaking:** when a report could pair with more than one equally
+* **Tie-breaking:** when an entry could pair with more than one equally
   close candidate, the pairing with the closer magnitude (converted to a
   common Mw scale where possible) is preferred.
-* **Group consistency, after matching:** once a group of matched reports is
-  formed, its magnitudes must agree within a tolerance that scales with the
-  group's mean magnitude (0.5 below M4.0, 0.8 below M5.5, 1.2 below M7.0,
-  otherwise 1.5). A group that fails this check is split and re-associated
-  rather than merged as-is.
+* **Group consistency, after matching:** once a group of matched entries is
+  formed, its magnitudes and depths must agree. A group that fails is split
+  and re-associated rather than merged as-is (see *Consistency checks* below).
+
+.. _consistency-checks:
+
+Consistency checks
+==================
+
+**Magnitude.** The base tolerance T scales with the group's mean magnitude:
+0.5 below M4.0, 0.8 below M5.5, 1.2 below M7.0, otherwise 1.5. Two agencies'
+magnitudes for one earthquake routinely differ by 0.2–0.3 (one standard
+deviation: different station sets, attenuation corrections and ML
+definitions), so a fixed 0.5 would split genuine pairs. The tolerance is
+therefore widened, by the uncertainties, to
+
+.. math::
+
+   T^{*} = \min\left\{2T,\; \max\left[T,\; 3\sqrt{\sigma_1^2 + \sigma_2^2 + 0.2^2}\right]\right\}
+
+where σ₁ and σ₂ are the entries' reported magnitude uncertainties (0 when
+not reported) and 0.2 is the scatter between agencies that no reported
+uncertainty describes. The widening applies only when the two solutions agree
+closely in time and place — together within a tenth of their matching windows
+(for 60 s and 50 km: 6 s at the same epicentre, or 5 km at the same time), and
+within three combined standard deviations where both report time and location
+uncertainties — and only when the pairing was uncontested. In a dense
+aftershock sequence, where a refused alternative was nearly as close,
+magnitude is the main way to tell neighbours apart and the base tolerance T
+applies. The cap of 2T guards against bulletins that report the scatter of
+station magnitudes rather than the error of their mean. Magnitudes of
+different scales are compared on the common Mw scale, with the conversion
+uncertainty added; a raw comparison across scales that cannot be converted
+always uses T.
+
+**Depth.** A fixed or operator-assigned depth carries no depth information
+and is not compared. Depths that were solved for must agree within the larger
+of the depth tier (30 km above 70 km depth below M5, 50 km from M5; 50/100 km
+to 300 km depth; 100/150 km deeper) and three times the combined reported
+depth uncertainty.
+
+On the platform's synthetic worked example, with known ground truth, these
+checks raised the share of true duplicate pairs merged from 93.3 % to 98.4 %
+while the share of merged pairs that were truly one earthquake rose from
+97.9 % to 98.4 %. The widened magnitude tolerance admitted no false pairings.
+When a group is accepted only because of the widening, or because a fixed
+depth was left out of the comparison, the QC preview says so in a note that
+does not flag the group.
 
 There is no separate, user-configurable "magnitude difference" threshold.
 
@@ -167,7 +210,7 @@ Strategy Decision Guide
        Auth{"Do you have one<br/>authoritative source?"}
        Recent{"Different origin times,<br/>newer = more reliable?"}
        Matter{"Which matters more?"}
-       Robust{"Guard against one<br/>outlying report?"}
+       Robust{"Guard against one<br/>outlying entry?"}
 
        Quality("Use Quality-Based<br/>(Recommended)")
        Priority("Use Priority-Based")
@@ -209,10 +252,10 @@ Priority-Based Strategy
 
 **How it works:**
 
-Choose which report wins when the same event appears in more than one
+Choose which entry wins when the same event appears in more than one
 catalogue:
 
-* **GeoNet > Others** / **GNS > Others** — keeps the GeoNet report when the
+* **GeoNet > Others** / **GNS > Others** — keeps the GeoNet entry when the
   group has one. GeoNet is recognised by its agency code (e.g. ``WEL``) or
   the catalogue's own provider/import metadata, never by matching words in
   a catalogue's name.
@@ -227,11 +270,11 @@ catalogue:
 Whenever the preferred agency/solution is not present in a group (or, for
 Custom Order, when catalogues tie), the network-authority ranking decides
 instead (by default GeoNet, GCMT, ISC, USGS, then other agencies; an
-administrator can edit the table — see :ref:`network-authority`). Reports
+administrator can edit the table — see :ref:`network-authority`). Entries
 that are equally authoritative (the same rank, or no ranking applies to
 either) are then compared the same way the Quality-Based strategy compares
-them: only the metrics every one of the tied reports states, never an
-absolute score that would penalise a report for a field the others simply
+them: only the metrics every one of the tied entries states, never an
+absolute score that would penalise an entry for a field the others simply
 didn't state.
 
 This approach follows the principle of network authority, where local
@@ -306,17 +349,17 @@ Average Values Strategy
 
 **How it works:**
 
-* **Location:** average every report's epicentre, weighted by inverse
-  variance (1/σ²) when *every* report in the group states a horizontal
-  uncertainty (a report twice as precise counts four times as much);
-  otherwise every report is weighted equally rather than guessing an
+* **Location:** average every entry's epicentre, weighted by inverse
+  variance (1/σ²) when *every* entry in the group states a horizontal
+  uncertainty (an entry twice as precise counts four times as much);
+  otherwise every entry is weighted equally rather than guessing an
   uncertainty for the ones that stated none
 * **Magnitude:** selected, not averaged, by a size-dependent type
   preference — Mw first; below M6.2, ML ranks ahead of mb/mB/mbLg, then
   Ms, then Md; from M6.2 up, Ms leads, then mB, then ML, then mb, then Md;
   a magnitude an agency marked "rejected" is skipped
-* **Depth:** taken from the best-constrained report that actually solved
-  for depth (a fixed/operator-assigned depth is used only when no report
+* **Depth:** taken from the best-constrained entry that actually solved
+  for depth (a fixed/operator-assigned depth is used only when no entry
   in the group solved freely for depth)
 * **Time:** the earliest reported origin time across the group
 * Origin metadata that belongs to one agency's solution alone (agency,
@@ -324,9 +367,9 @@ Average Values Strategy
   evaluation status) is **not** carried onto the averaged row — an
   averaged epicentre is not any single agency's solution. The one
   exception is depth: the published depth's own ``depth_type`` and
-  ``depth_uncertainty`` *are* carried over, from the specific report the
+  ``depth_uncertainty`` *are* carried over, from the specific entry the
   depth was selected from (never blended or reset), since the depth
-  itself is a single report's value, not an average.
+  itself is a single entry's value, not an average.
 
 Statistical averaging and uncertainty propagation follow Bayesian 
 principles for combining independent seismic observations (Schorlemmer 
@@ -356,9 +399,9 @@ et al., 2024).
 
 .. note::
    The Average strategy is actually a **hybrid** approach:
-   * **Location**: Weighted average using inverse-variance (lower uncertainty = higher weight), or equal weights when any report states no uncertainty.
+   * **Location**: Weighted average using inverse-variance (lower uncertainty = higher weight), or equal weights when any entry states no uncertainty.
    * **Magnitude**: Selected by a size-dependent **type preference** (Mw first, then whichever remaining scale is best calibrated and unsaturated at that earthquake's size) rather than averaged, to avoid saturation errors.
-   * **Depth**: Selects the depth from the **best-constrained report that solved for it**, not a simple mean.
+   * **Depth**: Selects the depth from the **best-constrained entry that solved for it**, not a simple mean.
 
 .. mermaid::
    :align: center
@@ -405,20 +448,20 @@ Median Values Strategy
 
 **How it works:**
 
-* **Location:** the component-wise median of every report's latitude and of
-  every report's longitude (longitudes are first unwrapped around the date
-  line, as the Average strategy does). Every report counts equally — stated
+* **Location:** the component-wise median of every entry's latitude and of
+  every entry's longitude (longitudes are first unwrapped around the date
+  line, as the Average strategy does). Every entry counts equally — stated
   uncertainties are not used as weights.
-* **Time:** the median of the reported origin times (for two reports, their
+* **Time:** the median of the reported origin times (for two entries, their
   mean)
 * **Magnitude:** selected, not averaged, by the same size-dependent type
   preference as the Average strategy
-* **Depth:** taken from the best-constrained report that solved for depth,
-  as the Average strategy does, together with that report's own
+* **Depth:** taken from the best-constrained entry that solved for depth,
+  as the Average strategy does, together with that entry's own
   ``depth_type`` and ``depth_uncertainty``
 * Origin metadata that belongs to one agency's solution alone is cleared,
   exactly as for the Average strategy; the published row's source is
-  ``merged``, no report is flagged ``selected`` and no location weights
+  ``merged``, no entry is flagged ``selected`` and no location weights
   are recorded
 
 **Example:**
@@ -434,14 +477,14 @@ Median Values Strategy
 
 **Best for:**
 
-* Three or more independent reports where one may be badly located
-* A consensus epicentre that no single report can dominate
-* Groups whose reports state no usable horizontal uncertainty
+* Three or more independent entries where one may be badly located
+* A consensus epicentre that no single entry can dominate
+* Groups whose entries state no usable horizontal uncertainty
 
 **Considerations:**
 
-* With only two reports the median is the equal-weight mean of the pair
-* Ignores stated uncertainties entirely — a precise report and a rough one
+* With only two entries the median is the equal-weight mean of the pair
+* Ignores stated uncertainties entirely — a precise entry and a rough one
   count the same
 * Like the Average strategy, the published epicentre is not any single
   agency's solution
@@ -455,11 +498,11 @@ Most Recent Solution Strategy
   (QuakeML ``creationInfo``/``creationTime``, or else the record's creation
   and modification time) — not simply the latest origin (event) time, which
   says nothing about which analysis is newer
-* When not every report in the group states a determination time,
+* When not every entry in the group states a determination time,
   evaluation status decides instead (final/reviewed beats preliminary),
   then quality score
-* A report its own agency marked "rejected" never wins while another
-  report is available
+* An entry its own agency marked "rejected" never wins while another
+  entry is available
 * The platform's own upload time is never used
 
 **Example:**
@@ -602,15 +645,15 @@ Depth rule
    * - Rule
      - Published depth
    * - ``strategy`` (default)
-     - What the strategy would publish anyway: the best-constrained report's
-       depth for Average and Median, otherwise the winning report's own depth
+     - What the strategy would publish anyway: the best-constrained entry's
+       depth for Average and Median, otherwise the winning entry's own depth
    * - ``best-constrained``
-     - The report that solved freely for depth with the smallest reported
-       uncertainty (a fixed depth only when no report solved for depth)
+     - The entry that solved freely for depth with the smallest reported
+       uncertainty (a fixed depth only when no entry solved for depth)
    * - ``quality``
-     - The depth of the report ranked first by the quality score
+     - The depth of the entry ranked first by the quality score
    * - ``authority``
-     - The depth of the report ranked first by network authority
+     - The depth of the entry ranked first by network authority
    * - ``newest``
      - The depth of the most recently computed solution (the Most Recent
        Solution ordering)
@@ -629,12 +672,12 @@ Magnitude rule
      - Published magnitude
    * - ``strategy`` (default)
      - What the strategy would publish anyway: the type-preference selection
-       for Average and Median, otherwise the winning report's own magnitude
+       for Average and Median, otherwise the winning entry's own magnitude
    * - ``type-preference``
      - The size-dependent magnitude type preference applied across every
-       report in the group (as the Average strategy does)
+       entry in the group (as the Average strategy does)
    * - ``quality`` / ``authority`` / ``newest`` / ``catalogue``
-     - The report chosen as for the depth rule of the same name; its own
+     - The entry chosen as for the depth rule of the same name; its own
        preferred magnitude is published — value, type, uncertainty and
        preferred magnitude ID together
 
@@ -648,11 +691,11 @@ Focal mechanism rule
    * - Rule
      - Published focal mechanisms
    * - ``hierarchy`` (default)
-     - Every mechanism reported by every report in the group is united, and
+     - Every mechanism reported by every entry in the group is united, and
        the preferred one is chosen by the authority hierarchy described under
        *How Metadata is Merged* below
    * - ``strategy``
-     - Only the winning report's own mechanisms and its own preferred
+     - Only the winning entry's own mechanisms and its own preferred
        mechanism
    * - ``catalogue``
      - Only the mechanisms reported by the catalogue you name
@@ -661,22 +704,22 @@ Rules that apply to every field
 ===============================
 
 * A rule that cannot be honoured falls back rather than failing: when the
-  named catalogue has no report in the group, or the chosen report has no
+  named catalogue has no entry in the group, or the chosen entry has no
   depth (or no focal mechanism), the depth and magnitude rules fall back to
   ``strategy`` and the mechanism rule to ``hierarchy``.
 * Metadata always travels with the quantity it describes. A published depth
   carries its *own* ``depth_type`` and ``depth_uncertainty`` (from the
-  report's preferred QuakeML origin, in kilometres, or its
+  entry's preferred QuakeML origin, in kilometres, or its
   ``depth_uncertainty`` column); a published magnitude carries its own
-  metadata. One report's metadata is never attached to another report's
+  metadata. One entry's metadata is never attached to another entry's
   value.
-* A report superseded by a newer vintage of the same agency's solution
+* An entry superseded by a newer vintage of the same agency's solution
   (see :ref:`same-agency-reports`) takes no part in any rule.
 * The choice is recorded. In each merged event's ``source_events``, the
-  report whose depth was published is flagged ``depthSelected``, the report
-  whose magnitude was published ``magnitudeSelected``, and the report whose
-  focal mechanism was published ``mechanismSelected`` (one report each, and
-  only when one report's value was chosen). The rules themselves are stored
+  entry whose depth was published is flagged ``depthSelected``, the entry
+  whose magnitude was published ``magnitudeSelected``, and the entry whose
+  focal mechanism was published ``mechanismSelected`` (one entry each, and
+  only when one entry's value was chosen). The rules themselves are stored
   in ``merge_parameters.fieldRules``.
 
 .. _review-holds:
@@ -685,21 +728,21 @@ Rules that apply to every field
 Flagged groups: resolve or hold for review
 ------------------------------------------
 
-The merge preview flags a duplicate group as suspicious when it was split
-after failing consistency validation, when a pairing was ambiguous, when a
-validation gate failed, when the group's magnitudes are inconsistent, or when
-its depths span too wide a range (the ``validationWarnings`` the preview
-shows). Exactly the same test decides what the merge writes, so the preview's
-counts equal the stored result.
+The QC preview flags a matched group when it was salvaged from a larger
+cluster that failed consistency validation, when its pairing was ambiguous
+(another entry was nearly as close), or when its magnitudes or depths fail the
+consistency checks (the group's warnings). Exactly the same test decides what
+the merge writes, so the preview's counts equal the stored result.
 
-A report the windows matched but the validation split left on its own is not a
-suspicious *merge* — it is published as its own event — but it is flagged as
-**separated**, with the reason the group failed (for example a magnitude
+An entry the windows matched but the validation split off is not a flagged
+*merge* — it is published as its own event — but it is listed as **kept
+apart**, with the reason the group failed (for example a magnitude
 disagreement, or two different events of one agency). The preview counts these
-reports separately (*N reports were matched but kept apart*) and lists them
-under a **Separated** tab, so a split is never mistaken for two unrelated
-events. With *hold*, separated reports are held too; the only resolution for a
-single-report row is to keep it.
+entries separately (*N entries were matched but kept apart*), and its **Kept
+apart** tab shows the parts of one split together on one card (*Published as
+N separate events*), so a split is never mistaken for unrelated events. With
+*hold*, kept-apart entries are held too; the only resolution for a
+single-entry row is to keep it.
 
 The ``config.onConflict`` setting chooses what happens to a flagged group:
 
@@ -747,40 +790,40 @@ nothing to any other event.
 .. _same-agency-reports:
 
 ----------------------------
-Reports from the same agency
+Entries from the same agency
 ----------------------------
 
-One *catalogue* never contributes two reports to a merged event (see
+One *catalogue* never contributes two entries to a merged event (see
 *Same-Catalogue Mismatch* below). Two *different* catalogues can, however,
 carry the same agency's solution — a GeoNet download from 2023 and another
 from 2025, say, or a QuakeML file and an FDSN import of the same bulletin.
-Before any strategy runs, the reports in a group are compared agency by
-agency. The rule is deliberately conservative: a report takes part only when
+Before any strategy runs, the entries in a group are compared agency by
+agency. The rule is deliberately conservative: an entry takes part only when
 its catalogue is recognised as that agency's (from its provider, data source,
-import source or name) and the report's own origin author, if it states one,
+import source or name) and the entry's own origin author, if it states one,
 is the same agency. An ISC bulletin row whose prime hypocentre was authored by
-GeoNet is therefore not a GeoNet report here, and rows of an earlier merge
+GeoNet is therefore not a GeoNet entry here, and rows of an earlier merge
 never take part. Agency event identifiers (the QuakeML event ``publicID``, else
 the source ID) are compared in their bare form: ``smi:nz.org.geonet/2024p100000``,
 ``2024p100000`` and a merge-qualified ``GeoNet:2024p100000`` are one identifier.
 
-* **Equal identifiers → supersession.** The reports are vintages of one
+* **Equal identifiers → supersession.** The entries are vintages of one
   solution. The most recently computed one (the Most Recent Solution
   ordering) stays in play; every older vintage is flagged ``superseded`` in
   ``source_events`` and takes no part in selection, averaging, the quality
   ranking, the per-field rules or the validity checks (so a preliminary and a
   reviewed magnitude of one event are not split for disagreeing). Superseded
-  reports are kept for provenance, and their catalogues still appear in
+  entries are kept for provenance, and their catalogues still appear in
   ``source_catalogue_ids``.
 * **Different identifiers of the same kind → split.** Two public IDs, or two
   source IDs, of one network namespace that differ are two different
   earthquakes (ComCat's ``us…`` and ``nc…`` IDs are different namespaces: one
   earthquake carries both, so they decide nothing). The group fails
   validation with the reason *Two different <agency> events in one group*;
-  each report the split leaves on its own is flagged *separated* with that
+  each entry the split leaves on its own is flagged *separated* with that
   reason.
-* **No comparable identifiers → neither.** Both reports take part in the
-  merge as independent reports, as they would from two agencies. An
+* **No comparable identifiers → neither.** Both entries take part in the
+  merge as independent entries, as they would from two agencies. An
   identifier this platform generated from a row ID (a re-imported export of a
   row that had no agency ID) is not an agency identifier.
 
@@ -805,7 +848,7 @@ as possible.
    solution from at least 20 station polarities, then an automatic solution
    — with ties within a tier broken by variance reduction, then station
    polarity count, then misfit. The focal mechanism rule
-   (:ref:`per-field-rules`) can restrict this to one report's mechanisms.
+   (:ref:`per-field-rules`) can restrict this to one entry's mechanisms.
 
 ---------------------------
 Advanced Quality Control
@@ -820,11 +863,16 @@ process to prevent "over-matching" or physical inconsistencies:
   calculates the spatial spread. If it exceeds the magnitude-scaled threshold
   (100 km for M < 5, 150 km for M 5–6, 200 km for M ≥ 6), the group is
   rejected and each event is kept as a separate unique event.
+* **Magnitude and Depth Consistency**: Every matched group must pass the
+  :ref:`consistency-checks`: magnitudes within a tolerance widened by the
+  reported uncertainties for closely agreeing, uncontested pairs; solved-for
+  depths within the depth tier or three combined uncertainties (fixed depths
+  are not compared). A failing group is split and its members re-offered.
 * **Same-Catalogue Mismatch**: If the same source *catalogue* would
-  contribute two different reports to the same group, the platform treats
+  contribute two different entries to the same group, the platform treats
   them as likely distinct events (e.g., a foreshock/aftershock pair) and
   keeps them separate rather than merging them — one catalogue never
-  contributes more than one report to a merged event. The same *agency*
+  contributes more than one entry to a merged event. The same *agency*
   reported by two different catalogues is handled separately: see
   :ref:`same-agency-reports`.
 
@@ -841,14 +889,14 @@ rigour:
 * **Date Line Normalization**: Merging events near the International Date 
   Line (±180°) uses Cartesian unit-vector averaging to avoid mathematical 
   errors that occur with simple arithmetic means.
-* **Uncertainty-Weighted Locations**: When every report in a group states a
+* **Uncertainty-Weighted Locations**: When every entry in a group states a
   horizontal location uncertainty, the platform weights the averaged
-  location by **inverse variance** (1/σ², so a report twice as precise
-  counts four times as much) — σ is taken from the report's error ellipse
+  location by **inverse variance** (1/σ², so an entry twice as precise
+  counts four times as much) — σ is taken from the entry's error ellipse
   or circle where available, otherwise from its latitude/longitude
   uncertainties converted to kilometres (the larger of the two, using
-  cos(latitude) for the longitude term). If any report in the group states
-  no uncertainty, every report is weighted equally instead.
+  cos(latitude) for the longitude term). If any entry in the group states
+  no uncertainty, every entry is weighted equally instead.
 * **Regional Authority Hierarchy**: The platform recognizes regional
   boundaries. By default it prioritizes GeoNet for events within New
   Zealand and JMA for events in Japan. This preference is supported by
@@ -927,7 +975,7 @@ never a pairwise matching criterion (see *Understanding Duplicates* above).
 Both thresholds are the values you enter *before* adaptive scaling: the
 platform automatically widens them for larger and deeper events (Tanaka et
 al., 2022), as larger earthquakes typically have larger location and timing
-uncertainties in global reports (Benz et al., 2019). Specifically, your
+uncertainties in global bulletins (Benz et al., 2019). Specifically, your
 configured values apply as-is below M4.0 and scale up by magnitude to 1.5×
 (M4.0–5.5), 2× time / 2.5× distance (M5.5–7.0), and 3× time / 4× distance at
 M7.0 and above; on top of that, distance gets a further 1.2× between 100 and
@@ -978,8 +1026,8 @@ Step 4: Choose Merge Strategy
 
 Select your conflict resolution strategy:
 
-* **Quality-Based (Recommended)** - Scores each duplicate event 0–100 and keeps the highest-scoring one (station count, azimuthal gap, RMS, magnitude uncertainty, magnitude type, review status); falls back to network authority when a report in the group states none of these metrics.
-* **Priority-Based** - Choose GeoNet/GNS, Most Recent Solution, Quality-Based, or your own Custom Order to decide which report wins (see :ref:`merge-strategies` above).
+* **Quality-Based (Recommended)** - Scores each duplicate event 0–100 and keeps the highest-scoring one (station count, azimuthal gap, RMS, magnitude uncertainty, magnitude type, review status); falls back to network authority when an entry in the group states none of these metrics.
+* **Priority-Based** - Choose GeoNet/GNS, Most Recent Solution, Quality-Based, or your own Custom Order to decide which entry wins (see :ref:`merge-strategies` above).
 * **Average Values** - Computes a weighted-average location, selects (does not average) the magnitude by type preference, and picks the depth from the best-constrained solution.
 * **Median Values** - Takes the component-wise median epicentre and median origin time, with magnitude and depth resolved as for Average Values (see :ref:`merge-strategies` above).
 * **Most Recent Solution** - Keeps the solution whose origin was computed last.
@@ -1045,72 +1093,91 @@ Provide a descriptive name:
    - "merged"
    - "test123"
 
-Step 7: Execute Merge
-=====================
+Step 7: Review the QC Preview and Merge
+=======================================
 
-Click **Merge Catalogues** to begin processing.
+On the **Preview & Merge** step, click **Generate QC Preview**. The preview
+runs the complete merge without writing anything and shows the merge QC
+summary (see :ref:`merge-qc-summary`) above the matched groups. **Start
+Merge** becomes available only once a preview exists for the current
+selection and settings; changing either invalidates the preview, so a merge is
+never committed unseen.
 
-**Processing Steps:**
+The groups are listed in three tabs:
+
+* **Flagged** — groups that failed or only narrowly passed the checks (see
+  *Flagged groups* below), with their warnings.
+* **Kept apart** — entries the matching windows paired but the consistency
+  checks split, one card per split (*Published as N separate events*) with
+  the reason.
+* **Matched** — the remaining matched groups, largest disagreement first;
+  they can also be sorted by origin time, filtered by catalogue, and are
+  shown 50 per page. For a large merge the preview lists every flagged and
+  kept-apart group and the 2,000 matched groups with the largest
+  disagreement; the summary covers every group.
+
+Each group card lists its entries — catalogue, origin time (ISO 8601, UTC),
+epicentre, depth and its uncertainty, magnitude and type, station count,
+azimuthal gap, quality score Q and offset from the published solution — and
+says which solution is published and why, for example *Published: Agency B
+catalogue · highest quality score (Q 82 vs 64)*. **View on map** shows the
+entries around the published solution. Groups are measured from the
+published solution (or, for the Average and Median strategies, from the
+computed epicentre); a group's disagreement is the largest offset of an entry
+in units of its matching window.
+
+**Processing steps** (the same for the preview and the merge):
 
 1. Load events from all source catalogues
 2. Build spatial grid index for efficient geographic lookups
 3. Find candidate duplicate pairs within the adaptive time and distance windows
-4. Associate pairs one-to-one, closest match first (magnitude only breaks ties), and validate each group — a group that fails validation (including two different events from one agency) is split and its members re-offered
+4. Associate pairs one-to-one, closest match first (magnitude only breaks ties), and apply the :ref:`consistency-checks` to each group — a group that fails (including two different events from one agency) is split and its members re-offered
 5. Within each group, mark older vintages of the same agency's solution as superseded
 6. Resolve remaining conflicts using the selected strategy and per-field rules; with *hold*, flagged groups are written as provisional solutions awaiting review
 7. Record provenance for all events
 8. Calculate quality scores for merged events
-9. Generate summary statistics
+9. Compute the merge QC summary; a saved merge stores it with the catalogue, in the same database transaction as its events
 
-**Progress Display:**
+.. _merge-qc-summary:
 
-.. code-block:: text
+-----------------
+Merge QC Summary
+-----------------
 
-   Merging catalogues...
-   [████████████████████░░░░░░░░░░░░] 65%
+Every merge produces a QC summary: in the preview, again after the merge is
+written (for the merge actually performed), and permanently with the saved
+catalogue, whose page shows it in a collapsible **Merge QC summary** card.
+It can be downloaded as JSON (the whole summary) or as CSV (the flagged,
+kept-apart and held groups, one row per entry: group, kinds, reasons,
+published or not, catalogue, source ID, origin time, latitude, longitude,
+depth, magnitude, magnitude type, quality score). The same files are served at
+``GET /api/catalogues/{id}/merge-qc`` and ``?format=csv``. Catalogues merged
+before the summary existed have none.
 
-   Loaded:     27,429 events from 3 catalogues
-   Candidates: 1,247 potential duplicate groups
-   Processing: Group 812 of 1,247
+The summary records the merge settings, the source catalogues, the time and
+the platform version, and:
 
---------------
-Merge Results
---------------
-
-After completion, review the summary:
-
-.. code-block:: text
-
-   Merge Complete!
-   ===============
-
-   Source Catalogues:     3
-   Total Input Events:    27,429
-
-   Duplicate Analysis:
-   -------------------
-   Unique Events:         24,891 (retained)
-   Duplicate Groups:      1,269
-   Total Duplicates:      2,538 (resolved)
-
-   By Source:
-   - GeoNet:              15,432 events → 14,210 unique
-   - USGS:                3,241 events  → 2,891 unique
-   - Local Network:       8,756 events  → 7,790 unique
-
-   Final Catalogue:       24,891 events
-
-   Processing Time:       12.5 seconds
-
-Detailed Statistics
-===================
-
-View additional merge statistics:
-
-* **Duplicate size distribution:** How many events per duplicate group
-* **Match criteria breakdown:** Which criteria matched
-* **Source contribution:** Events from each catalogue
-* **Quality impact:** How quality scores changed
+* **Totals** — entries before, events after, matched groups, entries combined
+  (kept as provenance of the event they joined, not deleted), flagged groups,
+  kept-apart entries and splits, events held for review, and superseded
+  entries.
+* **Per catalogue** — entries, matched (with the share), only in this
+  catalogue, published from it (matched groups whose published solution is
+  this catalogue's entry), and superseded.
+* **Per catalogue pair** — how the matched solutions differ, second catalogue
+  minus first: origin time and depth as the median, the robust standard
+  deviation (1.4826 × the median absolute deviation) and the 5th–95th
+  percentile range; epicentral separation as the median, 90th and 95th
+  percentiles and maximum; and magnitude, overall and for every
+  magnitude-type pair with at least 10 pairs. Depth differences use only
+  solved-for depths. A systematic magnitude offset between two agencies shows
+  here, and the summary points it out when the median difference is at least
+  0.1 over 30 or more pairs.
+* **Window use** — matched pairs that used more than 80 % of their (adaptive)
+  time or distance window. A large share means the result depends on the
+  thresholds; try the preview with wider and narrower windows.
+* **Listed groups** — the flagged, kept-apart and held groups with their
+  reasons, most severe first, up to 5,000 groups (the total is stated).
 
 -----------------
 Source Tracking
@@ -1123,8 +1190,8 @@ Every event in the merged catalogue includes:
 
 * **merge_strategy:** How conflicts were resolved (``quality``, ``priority``, ``newest``, ``complete``, ``average`` or ``median``)
 * **merge_parameters:** The effective configuration used — thresholds, priority option, priority order (for Custom Order), confirmation that adaptive windows were applied, the per-field rules (``fieldRules``, when given), the conflict setting (``onConflict``) and the network-authority table used (``authority``: ``default`` or ``custom@<timestamp>``)
-* **source_catalogue_ids:** Every catalogue that contributed a report to this event, superseded reports included
-* **source_events:** One entry per contributing report, with its original data and flags: ``selected`` on the entry whose solution was published (none for an Average- or Median-strategy merge, since no single report's solution is published); ``depthSelected``, ``magnitudeSelected`` and ``mechanismSelected`` on the entries whose depth, magnitude or focal mechanism was published when one report's was chosen; ``superseded`` on an older vintage of the same agency's solution; and ``locationWeight`` on each entry of an averaged epicentre
+* **source_catalogue_ids:** Every catalogue that contributed an entry to this event, superseded entries included
+* **source_events:** One entry per contributing entry, with its original data and flags: ``selected`` on the entry whose solution was published (none for an Average- or Median-strategy merge, since no single entry's solution is published); ``depthSelected``, ``magnitudeSelected`` and ``mechanismSelected`` on the entries whose depth, magnitude or focal mechanism was published when one entry's was chosen; ``superseded`` on an older vintage of the same agency's solution; and ``locationWeight`` on each entry of an averaged epicentre
 * **review_status**, **review_reasons**, **reviewed_by**, **reviewed_at**, **review_choice:** Present on every merged event; ``null`` unless the group was held for review (see :ref:`review-holds`)
 * **quality_score** / **quality_grade:** Computed from the published row at merge time
 

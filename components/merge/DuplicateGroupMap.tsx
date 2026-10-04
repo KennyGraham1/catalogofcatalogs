@@ -45,6 +45,8 @@ interface DuplicateGroup {
   supersededEventIndexes?: number[];
   /** The averaged / median epicentre the merge publishes when no entry is selected. */
   computedEpicentre?: { latitude: number; longitude: number; time: string } | null;
+  /** Several published entries (a kept-apart cluster): ringed, without connectors. */
+  publishedEventIndexes?: number[];
 }
 
 interface DuplicateGroupMapProps {
@@ -228,8 +230,9 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px', cl
       labelOffset = CROSS_SIZE / 2 + 5;
       labelNeighbours = events.map(event => at(event));
     } else {
+      // One tag for one published entry; a kept-apart cluster's rings speak for themselves.
       const published = roles.indexOf('published');
-      if (published >= 0) {
+      if (published >= 0 && roles.lastIndexOf('published') === published) {
         labelPosition = at(events[published]);
         labelNeighbours = events.filter((_, index) => index !== published).map(event => at(event));
       }
@@ -274,7 +277,7 @@ export function DuplicateGroupMap({ group, catalogueColors, height = '400px', cl
         </LegendSection>
         <LegendSection title="Entries">
           <ul data-legend="group-roles" className="space-y-1">
-            {reference && !reference.computed && <RoleKey role="published" isDark={isDark} label="published" />}
+            {((reference && !reference.computed) || roles.includes('published')) && <RoleKey role="published" isDark={isDark} label="published" />}
             {hasDuplicates && <RoleKey role="duplicate" isDark={isDark} label={reference?.computed ? 'averaged entry' : 'duplicate'} />}
             {hasSuperseded && <RoleKey role="superseded" isDark={isDark} label="superseded (older vintage)" />}
             {reference?.computed && (

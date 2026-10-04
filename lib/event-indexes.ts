@@ -85,6 +85,14 @@ export const DATABASE_INDEXES: ReadonlyArray<IndexDefinition> = [
   { collection: COLLECTIONS.CATALOGUES, name: 'catalogues_name_idx', key: { name: 1 } },
   { collection: COLLECTIONS.CATALOGUES, name: 'catalogues_status_idx', key: { status: 1 } },
 
+  // One merge QC summary per merged catalogue (lib/merge-qc.ts), read by catalogue id.
+  {
+    collection: COLLECTIONS.MERGE_QC_SUMMARIES,
+    name: 'merge_qc_catalogue_unique_idx',
+    key: { catalogue_id: 1 },
+    options: unique,
+  },
+
   idIndex(COLLECTIONS.MAPPING_TEMPLATES),
   { collection: COLLECTIONS.MAPPING_TEMPLATES, name: 'idx_name', key: { name: 1 } },
 

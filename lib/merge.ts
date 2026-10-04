@@ -18,6 +18,20 @@ import {
   type MergeAuthorityTable,
   type RegionalAuthority,
 } from './merge-authority';
+import {
+  QC_PREVIEW_MAX_MATCHED,
+  buildMergeQcSummary,
+  type MergePreviewPayload,
+  type MergeQcSummary,
+  type QcEntryInput,
+  type QcGroupInput,
+  type QcPreviewEntry,
+  type QcPreviewGroup,
+} from './merge-qc';
+import packageJson from '../package.json';
+
+/** Who wrote a merge QC summary: the platform and its package version. */
+export const QC_GENERATED_BY = `Earthquake Catalogue Platform ${packageJson.version}`;
 
 /** Rows per keyset page when reading a source catalogue for a merge. */
 const MERGE_INPUT_PAGE_SIZE = 10000;
@@ -664,7 +678,8 @@ async function executeMergeOperation(
     }
 
     // Perform the merge
-    const mergedEvents = performMerge(allEvents, config);
+    const resolvedGroups = performMerge(allEvents, config);
+    const mergedEvents = resolvedGroups.map(resolved => resolved.merged);
 
     // If export-only mode, return full event records without saving to database.
     // Uses the same field extraction as the DB save path so exports contain all
@@ -697,6 +712,14 @@ async function executeMergeOperation(
       reservedSourceIds.add(row.source_id as string);
     }
 
+    // The merge's QC summary (lib/merge-qc.ts), from the grouping these rows were written
+    // from; a listed group is identified by its merged event's id.
+    const qc = buildMergeQc(
+      resolvedGroups.map((resolved, i) => describeResolvedGroup(resolved, eventRows[i].id, config)),
+      sourceCatalogues,
+      config
+    );
+
     if (exportOnly) {
       return {
         success: true,
@@ -705,6 +728,7 @@ async function executeMergeOperation(
         originalEventCount: allEvents.length,
         heldForReviewCount,
         events: eventRows,
+        qc,
       };
     }
 
@@ -741,6 +765,12 @@ async function executeMergeOperation(
       throw new Error('Could not save every merged event; the merge was rolled back');
     }
 
+    // Kept with the catalogue, in the same transaction: a merge that rolls back leaves no
+    // summary behind. Adapters without QC storage (test doubles) skip it.
+    if (typeof dbQueries.insertMergeQcSummary === 'function') {
+      await dbQueries.insertMergeQcSummary(catalogueId, qc, session);
+    }
+
     // Extract and update geographic bounds
     const bounds = extractBoundsFromEvents(mergedEvents);
     if (bounds) {
@@ -764,6 +794,7 @@ async function executeMergeOperation(
       eventCount: insertedEventCount,
       originalEventCount: allEvents.length,
       heldForReviewCount,
+      qc,
     };
   } catch (error) {
     // In the transactional (non-export) path this runs INSIDE the open transaction, and the
@@ -1245,19 +1276,26 @@ interface PairSeparation {
   cost: number;
 }
 
-function pairSeparation(
-  event1: EventData,
-  event2: EventData,
+/**
+ * A pair's adaptive matching windows: the configured time window (s) and distance window
+ * (km), widened for the pair's mean magnitude and greater depth. The windows pairSeparation
+ * judges a pair by, and the ones the merge QC measures window use against.
+ */
+function pairMatchingWindows(
+  event1: { magnitude?: number | null; depth?: number | null },
+  event2: { magnitude?: number | null; depth?: number | null },
   configTimeThreshold: number,
   configDistanceThreshold: number
-): PairSeparation {
+): { timeWindow: number; distanceWindow: number } {
   // Use average magnitude for threshold calculation. Only average over finite
   // magnitudes: at runtime `magnitude` can be null (coerces to 0) or undefined
   // (coerces to NaN), either of which would corrupt the adaptive widening — a null
   // paired with a real M7 would deflate the average to 3.5 and defeat the widening,
   // while an undefined would poison it to NaN. Falling back to the known magnitude
   // (or 0 when neither is known) keeps the threshold conservative and finite.
-  const finiteMags = [event1.magnitude, event2.magnitude].filter(m => Number.isFinite(m));
+  const finiteMags = [event1.magnitude, event2.magnitude].filter(
+    (m): m is number => typeof m === 'number' && Number.isFinite(m)
+  );
   const avgMagnitude = finiteMags.length > 0
     ? finiteMags.reduce((sum, m) => sum + m, 0) / finiteMags.length
     : 0;
@@ -1274,8 +1312,20 @@ function pairSeparation(
   const distanceMultiplier = getDistanceMultiplier(avgMagnitude);
   const depthMultiplier = getDepthMultiplier(maxDepth);
 
-  const effectiveTimeThreshold = configTimeThreshold * timeMultiplier;
-  const effectiveDistanceThreshold = configDistanceThreshold * distanceMultiplier * depthMultiplier;
+  return {
+    timeWindow: configTimeThreshold * timeMultiplier,
+    distanceWindow: configDistanceThreshold * distanceMultiplier * depthMultiplier,
+  };
+}
+
+function pairSeparation(
+  event1: EventData,
+  event2: EventData,
+  configTimeThreshold: number,
+  configDistanceThreshold: number
+): PairSeparation {
+  const { timeWindow: effectiveTimeThreshold, distanceWindow: effectiveDistanceThreshold } =
+    pairMatchingWindows(event1, event2, configTimeThreshold, configDistanceThreshold);
 
   // Calculate actual differences (from the pre-computed timestamps when grouping set them).
   const timeDiff =
@@ -1487,6 +1537,11 @@ interface MatchGroup {
   regrouped: boolean;
   // Why the parent group failed validation (the gate's messages), when regrouped.
   splitReasons: string[];
+  // When regrouped: a key shared by every group the same failed cluster was split into
+  // (its salvaged sub-groups and the reports left on their own), so the QC can show the
+  // split as one unit. A report in several failed clusters takes the last one, as for
+  // splitReasons. "split-1", "split-2", ... in output order; null when not regrouped.
+  splitKey: string | null;
   // True when a member of this group lost an alternative pairing that was nearly as close
   // as the one kept (AMBIGUITY_FACTOR): another report inside its matching window that the
   // one-to-one rule assigned elsewhere. The closest pairing was kept; the preview flags the
@@ -1685,9 +1740,14 @@ function associateBestFirst(
     if (kept !== undefined && refused <= AMBIGUITY_FACTOR * kept + AMBIGUITY_MARGIN) contested[x] = 1;
   });
 
-  return Array.from(members.values())
+  const clusters = Array.from(members.values())
     .filter(cluster => cluster.length > 1)
     .map(cluster => cluster.slice().sort((x, y) => x - y));
+  // What the consistency gate (and the preview) need to know of how each entry was paired.
+  for (const cluster of clusters) {
+    for (const x of cluster) recordAssociation(sorted[x], config, contested[x] === 1);
+  }
+  return clusters;
 }
 
 /**
@@ -1735,6 +1795,10 @@ function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGro
   // refused (magnitudes irreconcilable, two different events of one agency) are exactly
   // what a reviewer should see, and published silently as unrelated events they were not.
   const splitReasons = new Map<number, string[]>();
+  // The last failed cluster each report was in, numbered in the order they failed; the
+  // groups that cluster was split into share a split key (MatchGroup.splitKey).
+  const splitCluster = new Map<number, number>();
+  let failedClusters = 0;
   const eligible = (edge: CandidateEdge) =>
     !assigned[edge.a] && !assigned[edge.b] && !exhausted.has(pairKey(edge.a, edge.b));
   let pending = order;
@@ -1762,7 +1826,11 @@ function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGro
         continue;
       }
       anyFailed = true;
-      cluster.forEach(i => splitReasons.set(i, reasons));
+      const clusterNumber = failedClusters++;
+      cluster.forEach(i => {
+        splitReasons.set(i, reasons);
+        splitCluster.set(i, clusterNumber);
+      });
       for (let p = 0; p < cluster.length; p++) {
         for (let q = p + 1; q < cluster.length; q++) exhausted.add(pairKey(cluster[p], cluster[q]));
       }
@@ -1787,27 +1855,66 @@ function groupMatchingEvents(events: EventData[], config: MergeConfig): MatchGro
   // Output in record order of each group's earliest report, as the sweep produced it.
   found.sort((g, h) => g.members[0] - h.members[0]);
 
+  // Split keys are numbered in output order, so they do not depend on the order clusters
+  // happened to fail in. A salvaged sub-group's members all come from one cluster; a
+  // report left alone carries its last one.
+  const splitKeys = new Map<number, string>();
+  const splitKeyOf = (members: number[]): string | null => {
+    const clusterNumber = splitCluster.get(members[0]);
+    if (clusterNumber === undefined) return null;
+    let key = splitKeys.get(clusterNumber);
+    if (key === undefined) {
+      key = `split-${splitKeys.size + 1}`;
+      splitKeys.set(clusterNumber, key);
+    }
+    return key;
+  };
+
   return found.map(({ members, regrouped }) => ({
     events: members.map(i => sorted[i]),
     regrouped,
     splitReasons: regrouped
       ? Array.from(new Set(members.flatMap(i => splitReasons.get(i) ?? [])))
       : [],
+    splitKey: regrouped ? splitKeyOf(members) : null,
     ambiguous: members.length > 1 && members.some(i => contested[i] === 1),
   }));
 }
 
 /**
+ * One association group as the merge resolves it: the row it publishes, the verdict the
+ * preview shows for it (assessMatchGroup) and whose solution was published. The persist
+ * path and the preview (performMergeWithGroups) resolve groups with the same function, so
+ * the preview, the saved rows and the merge's QC summary all describe the same merge.
+ */
+interface ResolvedMatchGroup {
+  group: MatchGroup;
+  /** The published row; under onConflict 'hold' a flagged group's row is pending review. */
+  merged: MergedEventData;
+  isSuspicious: boolean;
+  separated: boolean;
+  validationWarnings: string[];
+  heldForReview: boolean;
+  /** The report whose solution was published (`selected` in the provenance); -1 when averaged. */
+  selectedEventIndex: number;
+  /** Superseded same-agency vintages (M5), by position in the group. */
+  supersededEventIndexes: number[];
+  /** The epicentre and origin time the merge computes when no single report is selected. */
+  computedEpicentre: { latitude: number; longitude: number; time: string } | null;
+}
+
+/**
  * Core merge algorithm - matches events across catalogues and merges each group.
- * Delegates grouping to groupMatchingEvents (shared with the preview path).
+ * Delegates grouping to groupMatchingEvents (shared with the preview path). Returns each
+ * group with the row it publishes (`merged`), in output order.
  */
 function performMerge(
   events: EventData[],
   config: MergeConfig
-): MergedEventData[] {
-  const mergedEvents = groupMatchingEvents(events, config).map(g => mergeMatchGroup(g, config));
-  console.log(`[Merge] Processed ${events.length} events into ${mergedEvents.length} merged events`);
-  return mergedEvents;
+): ResolvedMatchGroup[] {
+  const resolved = groupMatchingEvents(events, config).map(g => resolveMatchGroup(g, config));
+  console.log(`[Merge] Processed ${events.length} events into ${resolved.length} merged events`);
+  return resolved;
 }
 
 /**
@@ -1816,20 +1923,42 @@ function performMerge(
  * the strategy - the row needs coordinates - but is marked pending review with the
  * preview's warnings, so what the reviewer sees is exactly what the preview counted.
  */
-function mergeMatchGroup(group: MatchGroup, config: MergeConfig): MergedEventData {
+function resolveMatchGroup(group: MatchGroup, config: MergeConfig): ResolvedMatchGroup {
   const merged = mergeEventGroup(group.events, config);
-  if (config.onConflict === 'hold') {
-    const assessment = assessMatchGroup(group, config);
-    if (assessment.suspicious || assessment.separated) {
-      merged.review_status = 'pending';
-      // Within the stored column's bounds (at most 50 reasons of 500 characters, lib/db.ts):
-      // one over-long gate message must not make the insert refuse the whole merge.
-      merged.review_reasons = assessment.warnings
-        .slice(0, 50)
-        .map(reason => (reason.length > 500 ? `${reason.slice(0, 499)}…` : reason));
-    }
+  // The assessment does not log (the association already logged its verdict) and does not
+  // change the row unless the group is held.
+  const assessment = assessMatchGroup(group, config);
+  const heldForReview = config.onConflict === 'hold' && (assessment.suspicious || assessment.separated);
+  if (heldForReview) {
+    merged.review_status = 'pending';
+    // Within the stored column's bounds (at most 50 reasons of 500 characters, lib/db.ts):
+    // one over-long gate message must not make the insert refuse the whole merge.
+    merged.review_reasons = assessment.warnings
+      .slice(0, 50)
+      .map(reason => (reason.length > 500 ? `${reason.slice(0, 499)}…` : reason));
   }
-  return merged;
+
+  // The report whose solution the merge publishes is the one it marks `selected` in the
+  // provenance (C2); source events are in group order. An averaged epicentre publishes
+  // no single report's solution, so no member is selected (-1).
+  const selectedEventIndex = merged.sourceEvents.findIndex(entry => entry.selected === true);
+  const supersededEventIndexes = merged.sourceEvents
+    .map((entry, index) => (entry.superseded ? index : -1))
+    .filter(index => index >= 0);
+
+  return {
+    group,
+    merged,
+    isSuspicious: assessment.suspicious,
+    separated: assessment.separated,
+    validationWarnings: assessment.warnings,
+    heldForReview,
+    selectedEventIndex,
+    supersededEventIndexes,
+    computedEpicentre: selectedEventIndex < 0 && group.events.length > 1
+      ? { latitude: merged.latitude, longitude: merged.longitude, time: String(merged.time) }
+      : null,
+  };
 }
 
 /**
@@ -1842,10 +1971,175 @@ function magnitudeRangeThreshold(avgMag: number): number {
   return 1.5;
 }
 
+// ----------------------------------------------------------------------------
+// Uncertainty-aware tolerances of the consistency gate
+// ----------------------------------------------------------------------------
+
+/**
+ * Coverage factor k of the gate's uncertainty-aware tolerances: two solutions of one
+ * earthquake are consistent when they differ by at most k combined standard deviations
+ * (k = 3 leaves about 0.3% of genuine pairs outside, for Gaussian errors).
+ */
+const GATE_COVERAGE_FACTOR = 3;
+
+/**
+ * Scatter (1 sigma, magnitude units) of the difference between two agencies' magnitudes of
+ * one earthquake that their reported uncertainties do not describe: different station sets,
+ * attenuation corrections and magnitude definitions. Inter-agency ML differences scatter by
+ * 0.2-0.3 (1 sigma) all told; the low end is taken, so the term never credits more scatter
+ * than is observed.
+ */
+const INTER_AGENCY_MAGNITUDE_SIGMA = 0.2;
+
+/**
+ * The uncertainty-aware magnitude tolerance never exceeds this multiple of the tier (1.0
+ * unit below M4), however large the reported uncertainties: many bulletins report the
+ * scatter of the station magnitudes rather than the error of their mean.
+ */
+const MAGNITUDE_TOLERANCE_CAP = 2;
+
+/**
+ * Two solutions agree closely in origin time and epicentre when their normalised
+ * separation |Δt|/τ + Δ/δ (pairSeparation) is at most a tenth of the matching window - the
+ * margin the ambiguity test also treats as indistinguishable - and, wherever both state
+ * them, within GATE_COVERAGE_FACTOR combined standard errors of origin time and epicentre.
+ */
+const CLOSE_AGREEMENT_SEPARATION = 0.1;
+
+/**
+ * How the association paired an entry, recorded for the consistency gate: the baseline
+ * matching windows, and whether the entry's pairing was contested (a refused alternative
+ * nearly as close as the one kept; AMBIGUITY_FACTOR). The gate widens its magnitude
+ * tolerance only on this evidence, and the preview (assessMatchGroup) reads the same record,
+ * so both judge a group alike. Keyed by the association's own copies of the entries, so a
+ * record never outlives the merge that made it.
+ */
+interface AssociationEvidence {
+  timeThreshold: number;
+  distanceThreshold: number;
+  contested: boolean;
+}
+
+const associationRecords = new WeakMap<EventData, AssociationEvidence>();
+
+function recordAssociation(entry: EventData, config: MergeConfig, contested: boolean): void {
+  associationRecords.set(entry, {
+    timeThreshold: config.timeThreshold,
+    distanceThreshold: config.distanceThreshold,
+    contested,
+  });
+}
+
+/**
+ * The association evidence for a group: contested when any member's pairing was. Null when
+ * a member has no record (a group assembled outside the association) or the records were
+ * made under different windows; the gate then applies its fixed tiers alone.
+ */
+function associationEvidenceOf(events: EventData[]): AssociationEvidence | null {
+  let evidence: AssociationEvidence | null = null;
+  for (const e of events) {
+    const record = associationRecords.get(e);
+    if (!record) return null;
+    if (!evidence) {
+      evidence = { ...record };
+    } else if (
+      record.timeThreshold !== evidence.timeThreshold ||
+      record.distanceThreshold !== evidence.distanceThreshold
+    ) {
+      return null;
+    } else if (record.contested) {
+      evidence.contested = true;
+    }
+  }
+  return evidence;
+}
+
+/** A positive, finite number, else null: a zero or negative uncertainty is no measurement. */
+function positiveOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/** An entry's reported magnitude uncertainty (1 sigma), or null when it states none. */
+function magnitudeUncertaintyOf(e: EventData): number | null {
+  return positiveOrNull(reportMagnitude(e, 0).uncertainty);
+}
+
+/** An entry's reported origin-time uncertainty in seconds, or null when it states none. */
+function originTimeUncertaintyOf(e: EventData): number | null {
+  return positiveOrNull(preferredQuakemlOrigin(e)?.time?.uncertainty) ?? positiveOrNull(e.time_uncertainty);
+}
+
+/** Root-sum-square of two standard errors, or null unless both are stated. */
+function combinedSigma(a: number | null, b: number | null): number | null {
+  return a != null && b != null ? Math.sqrt(a * a + b * b) : null;
+}
+
+/**
+ * Whether every pair of solutions in a group agrees closely in origin time and epicentre
+ * (CLOSE_AGREEMENT_SEPARATION): inside a tenth of the pair's matching window, and within
+ * GATE_COVERAGE_FACTOR combined standard errors of origin time and of epicentre wherever
+ * both solutions state them.
+ */
+function agreesClosely(events: EventData[], evidence: AssociationEvidence): boolean {
+  for (let i = 0; i < events.length; i++) {
+    for (let j = i + 1; j < events.length; j++) {
+      const a = events[i];
+      const b = events[j];
+      const pair = pairSeparation(a, b, evidence.timeThreshold, evidence.distanceThreshold);
+      if (!(pair.cost <= CLOSE_AGREEMENT_SEPARATION)) return false;
+      const sigmaT = combinedSigma(originTimeUncertaintyOf(a), originTimeUncertaintyOf(b));
+      if (sigmaT != null && pair.timeDiff > GATE_COVERAGE_FACTOR * sigmaT) return false;
+      const sigmaH = combinedSigma(locationUncertaintyKm(a), locationUncertaintyKm(b));
+      if (sigmaH != null && pair.distance > GATE_COVERAGE_FACTOR * sigmaH) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Magnitude tolerance for two solutions with reported uncertainties sigma1 and sigma2
+ * (0 when not stated). Without widening it is the tier. Widened, it is k standard deviations
+ * of the difference of the two magnitudes, k * sqrt(sigma1^2 + sigma2^2 + sigma_ag^2), never
+ * below the tier and never above MAGNITUDE_TOLERANCE_CAP times it.
+ */
+function magnitudeTolerance(tier: number, sigma1: number, sigma2: number, widen: boolean): number {
+  if (!widen) return tier;
+  const scatter =
+    GATE_COVERAGE_FACTOR *
+    Math.sqrt(sigma1 * sigma1 + sigma2 * sigma2 + INTER_AGENCY_MAGNITUDE_SIGMA * INTER_AGENCY_MAGNITUDE_SIGMA);
+  return Math.min(MAGNITUDE_TOLERANCE_CAP * tier, Math.max(tier, scatter));
+}
+
+/** One magnitude in the gate: its value, its reported uncertainty and its conversion uncertainty. */
+interface GateMagnitude {
+  value: number;
+  /** Reported measurement uncertainty (1 sigma), 0 when the entry states none. */
+  sigma: number;
+  /** Uncertainty of the conversion to the common scale (0 on the entry's own scale). */
+  conversion: number;
+}
+
+/**
+ * The lowest and highest of a set of magnitudes. Ties go to the member with the larger
+ * conversion uncertainty, then the larger reported uncertainty, so the extremes - and the
+ * thresholds they set - never depend on the order members arrive in.
+ */
+function magnitudeExtremes(points: GateMagnitude[]): { lo: GateMagnitude; hi: GateMagnitude } {
+  const wider = (p: GateMagnitude, q: GateMagnitude) =>
+    p.conversion > q.conversion || (p.conversion === q.conversion && p.sigma > q.sigma);
+  let lo = points[0];
+  let hi = points[0];
+  for (const point of points) {
+    if (point.value < lo.value || (point.value === lo.value && wider(point, lo))) lo = point;
+    if (point.value > hi.value || (point.value === hi.value && wider(point, hi))) hi = point;
+  }
+  return { lo, hi };
+}
+
 /**
  * Verdict of the magnitude-consistency gate, plus every statistic the QC preview needs to
- * explain it. Shared by validateEventGroup (which enforces it) and performMergeWithGroups
- * (which reports it), so the panel can never describe a group differently from the gate.
+ * explain it. Shared by validateEventGroup (which enforces it) and assessMatchGroup (which
+ * reports it), so the panel can never describe a group differently from the gate.
  */
 type MagnitudeGateFailure = 'raw-range' | 'within-scale-range' | 'mw-range';
 
@@ -1856,14 +2150,25 @@ interface MagnitudeConsistency {
   rawMean: number;
   /** Max - min of the usable RAW magnitudes; NaN when there are none. */
   rawRange: number;
-  /** Tier threshold selected by the RAW mean (never by a converted mean). */
+  /** Tier selected by the RAW mean (never by a converted mean). */
+  tier: number;
+  /**
+   * True when the tolerances were widened by the reported magnitude uncertainties: the
+   * association recorded the group, no member's pairing was contested, and every pair of
+   * solutions agrees closely in origin time and epicentre (agreesClosely).
+   */
+  widened: boolean;
+  /** Threshold of the raw-range check: the tier, or the tolerance of the extreme members. */
   threshold: number;
-  /** Widest raw spread inside a single magnitude-type category, if any category has 2+. */
-  worstScale: { category: MagnitudeType; range: number } | null;
+  /**
+   * The single scale whose raw spread exceeds its threshold by the most (or comes closest
+   * to it), if any scale has 2+ members, with that threshold.
+   */
+  worstScale: { category: MagnitudeType; range: number; threshold: number } | null;
   /**
    * Spread of the CONVERTIBLE members on the common (Mw) scale; null unless 2+ scales.
-   * `threshold` is the tier widened in quadrature by the conversion uncertainty of the two
-   * extreme members, and is the value the Mw comparison is actually judged against.
+   * `threshold` is the tolerance of the two extreme members widened in quadrature by their
+   * conversion uncertainties, and is the value the Mw comparison is actually judged against.
    */
   mw: { range: number; mean: number; count: number; threshold: number } | null;
   /** True when every usable magnitude carries a type convertToMw understands. */
@@ -1872,8 +2177,13 @@ interface MagnitudeConsistency {
   ok: boolean;
   /** Accepted, but only because the members agree once put on the common scale. */
   rescuedByMw: boolean;
+  /** Accepted, but only because the tolerance was widened: the tier alone rejects the group. */
+  rescuedByUncertainty: boolean;
   /** Which check rejected the group, or null when it passed. */
   failure: MagnitudeGateFailure | null;
+  /** The quantity the failed check measured and the threshold it exceeded (null when it passed). */
+  failedValue: number | null;
+  failedThreshold: number | null;
   /** Human-readable statement of the failure (or of the rescue), for the QC log/panel. */
   reason: string | null;
 }
@@ -1881,22 +2191,37 @@ interface MagnitudeConsistency {
 /**
  * Decide whether a candidate group's magnitudes can describe ONE earthquake.
  *
- * Three checks, all against the tier the RAW mean selects, so converting cannot buy a looser
- * tier: (1) raw spread within each scale, since same-scale values are already like-for-like;
- * (2) raw spread overall, waived only when the group mixes scales and all convert;
- * (3) spread on the common scale, widened in quadrature by the conversion uncertainties
- * convertToMw reports (Scordilis 2006: Mw = 0.67*Ms + 2.07, Mw = 0.85*mb + 1.03).
+ * Three checks, all against tolerances built on the tier the RAW mean selects, so converting
+ * cannot buy a looser tier: (1) raw spread within each scale, since same-scale values are
+ * already like-for-like; (2) raw spread overall, waived only when the group mixes scales and
+ * all convert; (3) spread on the common scale, widened in quadrature by the conversion
+ * uncertainties convertToMw reports (Scordilis 2006: Mw = 0.67*Ms + 2.07, Mw = 0.85*mb + 1.03).
+ *
+ * Each tolerance is the tier unless the association's evidence shows the solutions agree
+ * closely in origin time and epicentre and the pairing was not contested; then it is
+ * magnitudeTolerance: k standard deviations of the magnitude difference implied by the two
+ * extreme members' reported uncertainties and the inter-agency scatter, between the tier and
+ * twice the tier. In a contested (dense-sequence) pairing magnitude is the main thing that
+ * tells neighbouring events apart, so there the tier stands. The widening applies only to
+ * comparisons on one scale (within a scale, or on the common Mw scale): a raw comparison
+ * across scales that cannot be homogenised hides an unknown scale offset and keeps the tier.
  */
-function assessMagnitudeConsistency(events: EventData[]): MagnitudeConsistency {
-  const raw: number[] = [];
-  const byCategory = new Map<MagnitudeType, number[]>();
-  const mwPoints: { value: number; sigma: number }[] = [];
+function assessMagnitudeConsistency(
+  events: EventData[],
+  association: AssociationEvidence | null = null
+): MagnitudeConsistency {
+  const raw: GateMagnitude[] = [];
+  const measured: EventData[] = [];
+  const byCategory = new Map<MagnitudeType, GateMagnitude[]>();
+  const mwPoints: GateMagnitude[] = [];
   let unconvertible = 0;
 
   for (const e of events) {
     const value = e.magnitude;
     if (value == null || !Number.isFinite(value)) continue; // absent or NaN/Inf: no information
-    raw.push(value);
+    const sigma = magnitudeUncertaintyOf(e) ?? 0;
+    raw.push({ value, sigma, conversion: 0 });
+    measured.push(e);
 
     const category = getMagnitudeTypeCategory(e.magnitude_type);
     const converted = category ? convertToMw(value, e.magnitude_type) : null;
@@ -1905,94 +2230,257 @@ function assessMagnitudeConsistency(events: EventData[]): MagnitudeConsistency {
       continue;
     }
     const bucket = byCategory.get(category);
-    if (bucket) bucket.push(value);
-    else byCategory.set(category, [value]);
-    mwPoints.push({ value: converted.value, sigma: converted.uncertainty ?? 0 });
+    const point = { value, sigma, conversion: 0 };
+    if (bucket) bucket.push(point);
+    else byCategory.set(category, [point]);
+    mwPoints.push({ value: converted.value, sigma, conversion: converted.uncertainty ?? 0 });
   }
 
   if (raw.length === 0) {
     return {
-      count: 0, rawMean: NaN, rawRange: NaN, threshold: NaN, worstScale: null, mw: null,
-      fullyConvertible: false, ok: true, rescuedByMw: false, failure: null, reason: null,
+      count: 0, rawMean: NaN, rawRange: NaN, tier: NaN, widened: false, threshold: NaN, worstScale: null,
+      mw: null, fullyConvertible: false, ok: true, rescuedByMw: false, rescuedByUncertainty: false,
+      failure: null, failedValue: null, failedThreshold: null, reason: null,
     };
   }
 
-  const rawMean = raw.reduce((a, b) => a + b, 0) / raw.length;
-  const rawRange = Math.max(...raw) - Math.min(...raw);
-  const threshold = magnitudeRangeThreshold(rawMean);
-
-  let worstScale: { category: MagnitudeType; range: number } | null = null;
-  for (const [category, values] of Array.from(byCategory.entries())) {
-    if (values.length < 2) continue;
-    const range = Math.max(...values) - Math.min(...values);
-    if (!worstScale || range > worstScale.range) worstScale = { category, range };
-  }
-
+  const rawMean = raw.reduce((sum, p) => sum + p.value, 0) / raw.length;
+  const tier = magnitudeRangeThreshold(rawMean);
+  const rawExtremes = magnitudeExtremes(raw);
+  const rawRange = rawExtremes.hi.value - rawExtremes.lo.value;
+  const fullyConvertible = unconvertible === 0;
+  // Scales in a fixed order, so the scale a message names never depends on input order.
+  const categories = Array.from(byCategory.keys()).sort();
   // At least two DISTINCT scales are needed before a common-scale comparison says anything
   // a single-scale raw comparison did not already say.
-  let mw: { range: number; mean: number; count: number; threshold: number } | null = null;
-  if (byCategory.size >= 2 && mwPoints.length >= 2) {
-    let lo = mwPoints[0];
-    let hi = mwPoints[0];
-    let sum = 0;
-    for (const point of mwPoints) {
-      // Ties are broken toward the LARGER conversion uncertainty so the chosen extremes -
-      // and therefore the widened threshold - do not depend on the order members arrive in.
-      if (point.value < lo.value || (point.value === lo.value && point.sigma > lo.sigma)) lo = point;
-      if (point.value > hi.value || (point.value === hi.value && point.sigma > hi.sigma)) hi = point;
-      sum += point.value;
+  const mixed = byCategory.size >= 2 && mwPoints.length >= 2;
+  const mwExtremes = mixed ? magnitudeExtremes(mwPoints) : null;
+  // The raw comparison is waived for a mixed group whose every scale converts (the common
+  // scale decides instead).
+  const rawWaived = mixed && fullyConvertible;
+  // The uncertainty model describes two measurements of the SAME quantity, so it widens only
+  // comparisons on one scale (within a scale, or on the common Mw scale). Raw values on
+  // scales that cannot be homogenised differ by an unknown scale offset: the tier stands.
+  const rawOnOneScale = fullyConvertible && byCategory.size === 1;
+
+  // The three checks at the tier (widen = false) or at the uncertainty-aware tolerance.
+  const judge = (widen: boolean) => {
+    const threshold = magnitudeTolerance(tier, rawExtremes.lo.sigma, rawExtremes.hi.sigma, widen && rawOnOneScale);
+    const scales: Array<{ category: MagnitudeType; range: number; threshold: number }> = [];
+    let worstScale: (typeof scales)[number] | null = null;
+    for (const category of categories) {
+      const values = byCategory.get(category)!;
+      if (values.length < 2) continue;
+      const { lo, hi } = magnitudeExtremes(values);
+      const scale = { category, range: hi.value - lo.value, threshold: magnitudeTolerance(tier, lo.sigma, hi.sigma, widen) };
+      scales.push(scale);
+      if (!worstScale || scale.range - scale.threshold > worstScale.range - worstScale.threshold) worstScale = scale;
     }
-    const conversionSigma = Math.sqrt(lo.sigma * lo.sigma + hi.sigma * hi.sigma);
-    mw = {
-      range: hi.value - lo.value,
-      mean: sum / mwPoints.length,
-      count: mwPoints.length,
-      threshold: Math.sqrt(threshold * threshold + conversionSigma * conversionSigma),
-    };
-  }
+    let mw: { range: number; mean: number; count: number; threshold: number } | null = null;
+    if (mwExtremes) {
+      const { lo, hi } = mwExtremes;
+      const tolerance = magnitudeTolerance(tier, lo.sigma, hi.sigma, widen);
+      const conversionVariance = lo.conversion * lo.conversion + hi.conversion * hi.conversion;
+      mw = {
+        range: hi.value - lo.value,
+        mean: mwPoints.reduce((sum, p) => sum + p.value, 0) / mwPoints.length,
+        count: mwPoints.length,
+        threshold: Math.sqrt(tolerance * tolerance + conversionVariance),
+      };
+    }
+    const rawOk = rawRange <= threshold;
+    let failure: MagnitudeGateFailure | null = null;
+    if (!rawWaived && !rawOk) failure = 'raw-range';
+    else if (worstScale && worstScale.range > worstScale.threshold) failure = 'within-scale-range';
+    else if (mw && mw.range > mw.threshold) failure = 'mw-range';
+    return { threshold, scales, worstScale, mw, rawOk, failure };
+  };
 
-  const fullyConvertible = unconvertible === 0;
-  const rawOk = rawRange <= threshold;
-  const withinScaleOk = worstScale == null || worstScale.range <= threshold;
-  const mwOk = mw == null || mw.range <= mw.threshold;
-  const rawWaived = mw != null && fullyConvertible;
+  const atTier = judge(false);
+  const widened =
+    association != null && !association.contested && raw.length >= 2 && agreesClosely(measured, association);
+  const verdict = widened ? judge(true) : atTier;
+  const { threshold, worstScale, mw, failure } = verdict;
 
-  let failure: MagnitudeGateFailure | null = null;
+  // A threshold as the messages state it: the tier, or the tolerance it was widened to.
+  const limit = (value: number) =>
+    value > tier ? `${value.toFixed(2)}, tier ${tier} widened by the reported magnitude uncertainties` : `${tier}`;
+
   let reason: string | null = null;
-  if (!rawWaived && !rawOk) {
-    failure = 'raw-range';
-    reason = `Large magnitude range: ${rawRange.toFixed(2)} units (threshold: ${threshold})`;
-  } else if (!withinScaleOk) {
-    failure = 'within-scale-range';
+  let failedValue: number | null = null;
+  let failedThreshold: number | null = null;
+  if (failure === 'raw-range') {
+    failedValue = rawRange;
+    failedThreshold = threshold;
+    reason = `Large magnitude range: ${rawRange.toFixed(2)} units (threshold: ${limit(threshold)})`;
+  } else if (failure === 'within-scale-range') {
+    failedValue = worstScale!.range;
+    failedThreshold = worstScale!.threshold;
     reason =
       `Large magnitude range within a single scale (${worstScale!.category}): ` +
-      `${worstScale!.range.toFixed(2)} units (threshold: ${threshold})`;
-  } else if (!mwOk) {
-    failure = 'mw-range';
+      `${worstScale!.range.toFixed(2)} units (threshold: ${limit(worstScale!.threshold)})`;
+  } else if (failure === 'mw-range') {
+    failedValue = mw!.range;
+    failedThreshold = mw!.threshold;
     reason =
-      `Magnitude reports disagree once converted to a common scale: ` +
+      `Magnitudes disagree once converted to a common scale: ` +
       `${mw!.range.toFixed(2)} units of Mw (threshold: ${mw!.threshold.toFixed(2)}, ` +
-      `tier ${threshold} widened by conversion uncertainty)`;
+      `tier ${tier} widened by ${widened ? 'the magnitude and ' : ''}conversion uncertainty)`;
   }
 
   const ok = failure == null;
-  const rescuedByMw = ok && !rawOk;
-  if (rescuedByMw) {
+  // Accepted although the raw values span more than the tier, because the scales convert
+  // and agree on the common one: explained against the tier, the threshold the raw values
+  // appear to break (the raw check being waived, its widened value is never applied).
+  const rescuedByMw = ok && rawWaived && !atTier.rawOk;
+  // Accepted only because the solutions agree closely and their magnitudes are uncertain
+  // enough: at the tier alone the same group fails.
+  const rescuedByUncertainty = ok && atTier.failure != null;
+  if (rescuedByUncertainty) {
+    // The check the tier failed: its quantity, its threshold at the tier, its tolerance.
+    const [value, atTierLimit, tolerance] =
+      atTier.failure === 'raw-range'
+        ? [rawRange, atTier.threshold, threshold]
+        : atTier.failure === 'within-scale-range'
+          ? [
+              atTier.worstScale!.range,
+              atTier.worstScale!.threshold,
+              verdict.scales.find(s => s.category === atTier.worstScale!.category)!.threshold,
+            ]
+          : [atTier.mw!.range, atTier.mw!.threshold, mw!.threshold];
+    const atTierText = atTierLimit === tier ? `${tier}` : atTierLimit.toFixed(2);
     reason =
-      `Large raw magnitude range: ${rawRange.toFixed(2)} units (threshold: ${threshold}); ` +
+      `Magnitude range of ${value.toFixed(2)} units exceeds the tier threshold (${atTierText}); accepted — ` +
+      `within ${tolerance.toFixed(2)}, the tolerance the entries' reported magnitude uncertainties allow ` +
+      `for solutions this close in origin time and epicentre`;
+  } else if (rescuedByMw) {
+    reason =
+      `Large raw magnitude range: ${rawRange.toFixed(2)} units (threshold: ${tier}); ` +
       `accepted — Mw-equivalent range is ${mw!.range.toFixed(2)} units across mixed magnitude scales`;
   }
 
   return {
-    count: raw.length, rawMean, rawRange, threshold, worstScale, mw,
-    fullyConvertible, ok, rescuedByMw, failure, reason,
+    count: raw.length, rawMean, rawRange, tier, widened, threshold, worstScale, mw,
+    fullyConvertible, ok, rescuedByMw, rescuedByUncertainty, failure, failedValue, failedThreshold, reason,
   };
+}
+
+/**
+ * Maximum depth range of a group, in km, by the mean depth of its compared solutions and its
+ * mean magnitude: shallow (< 70 km) depths are the best constrained, intermediate (70-300 km)
+ * and deep ones less so, and larger events are allowed more. A NaN mean magnitude (no usable
+ * magnitude) takes the wider branch.
+ */
+function depthRangeTier(avgDepth: number, avgMag: number): number {
+  if (avgDepth < 70) return avgMag < 5 ? 30 : 50;
+  if (avgDepth < 300) return avgMag < 5 ? 50 : 100;
+  return avgMag < 5 ? 100 : 150;
+}
+
+/** Verdict of the depth-consistency gate, shared by the gate and the preview like the magnitude one. */
+interface DepthConsistency {
+  /** The depths compared: solved-for depths only. */
+  depths: number[];
+  /** Entries whose depth was fixed (operator assigned), and so not compared. */
+  fixed: number;
+  /** Mean and range of the compared depths; NaN with fewer than two. */
+  avgDepth: number;
+  range: number;
+  /** Tier of the compared depths, and the threshold after widening by their uncertainties. */
+  tier: number;
+  threshold: number;
+  ok: boolean;
+  /** The rejection, or a note on why a range past the tier was accepted; null otherwise. */
+  reason: string | null;
+}
+
+/**
+ * Decide whether a group's depths can describe ONE earthquake.
+ *
+ * A fixed (operator-assigned) depth carries no depth information (isFixedDepth), so it is not
+ * compared: an agency that fixes an unresolved depth at 10 km does not contradict another's
+ * solved 35 km. The solved-for depths must then agree within
+ *   max(tier, k * sqrt(sigma1^2 + sigma2^2)),
+ * sigma the reported depth uncertainties of the shallowest and deepest solution (0 when not
+ * stated), k = GATE_COVERAGE_FACTOR: two poorly constrained depths are allowed to differ by
+ * what their own errors allow, and the tier remains the floor.
+ */
+function assessDepthConsistency(events: EventData[], avgMag: number): DepthConsistency {
+  const points: Array<{ depth: number; sigma: number }> = [];
+  let fixed = 0;
+  let allLo = Infinity;
+  let allHi = -Infinity;
+  let allSum = 0;
+  let allCount = 0;
+  for (const e of events) {
+    const depth = e.depth;
+    if (depth == null || !Number.isFinite(depth)) continue;
+    allLo = Math.min(allLo, depth);
+    allHi = Math.max(allHi, depth);
+    allSum += depth;
+    allCount++;
+    if (isFixedDepth(e, preferredQuakemlOrigin(e))) {
+      fixed++;
+      continue;
+    }
+    points.push({ depth, sigma: depthMetadataOf(e).depth_uncertainty ?? 0 });
+  }
+
+  // Would the tier alone, over every depth, have rejected the group? Then leaving the fixed
+  // depths out is what accepted it, and the reviewer is told so.
+  const fixedNote = (): string | null =>
+    fixed > 0 && allCount >= 2 && allHi - allLo > depthRangeTier(allSum / allCount, avgMag)
+      ? `Depth range of ${(allHi - allLo).toFixed(1)} km includes ${fixed === 1 ? 'a fixed depth' : `${fixed} fixed depths`} ` +
+        `(operator assigned), which carry no depth information and are not compared`
+      : null;
+
+  if (points.length < 2) {
+    return {
+      depths: points.map(p => p.depth), fixed, avgDepth: NaN, range: NaN, tier: NaN, threshold: NaN,
+      ok: true, reason: fixedNote(),
+    };
+  }
+
+  // Ties go to the larger uncertainty, so the threshold never depends on input order.
+  let lo = points[0];
+  let hi = points[0];
+  for (const point of points) {
+    if (point.depth < lo.depth || (point.depth === lo.depth && point.sigma > lo.sigma)) lo = point;
+    if (point.depth > hi.depth || (point.depth === hi.depth && point.sigma > hi.sigma)) hi = point;
+  }
+  const range = hi.depth - lo.depth;
+  const avgDepth = points.reduce((sum, p) => sum + p.depth, 0) / points.length;
+  const tier = depthRangeTier(avgDepth, avgMag);
+  const threshold = Math.max(tier, GATE_COVERAGE_FACTOR * Math.sqrt(lo.sigma * lo.sigma + hi.sigma * hi.sigma));
+  const ok = range <= threshold;
+
+  let reason: string | null;
+  if (!ok) {
+    reason = threshold > tier
+      ? `Large depth range: ${range.toFixed(1)} km (threshold: ${threshold.toFixed(1)} km, tier ${tier} km widened by the reported depth uncertainties)`
+      : `Large depth range: ${range.toFixed(1)} km (threshold: ${tier} km)`;
+  } else if (range > tier) {
+    reason =
+      `Depth range of ${range.toFixed(1)} km exceeds the tier (${tier} km); accepted — within ` +
+      `${threshold.toFixed(1)} km, the tolerance the entries' reported depth uncertainties allow`;
+  } else {
+    reason = fixedNote();
+  }
+
+  return { depths: points.map(p => p.depth), fixed, avgDepth, range, tier, threshold, ok, reason };
 }
 
 /**
  * Validate that a group of events makes physical sense to merge
  */
-function validateEventGroup(events: EventData[], logConflicts: boolean = true, reasons?: string[]): boolean {
+function validateEventGroup(
+  events: EventData[],
+  logConflicts: boolean = true,
+  reasons?: string[],
+  // How the association paired these entries (associationEvidenceOf): what lets the
+  // magnitude tolerance widen. A group assembled outside the association has none.
+  association: AssociationEvidence | null = associationEvidenceOf(events)
+): boolean {
   if (events.length < 2) return true;
 
   // Trial validations (the greedy split in splitInconsistentGroup) pass logConflicts=false:
@@ -2037,7 +2525,7 @@ function validateEventGroup(events: EventData[], logConflicts: boolean = true, r
   // event twice.
   const { active } = supersedeSameAgency(events);
   if (active.length < 2) return true;
-  return validateGroupConsistency(active, logConflict);
+  return validateGroupConsistency(active, logConflict, association);
 }
 
 /** The group summary every conflict record carries. */
@@ -2056,13 +2544,17 @@ function conflictContext(events: EventData[]) {
  * spatial spread, a repeated source, time spread), over the reports that take part in the
  * merge.
  */
-function validateGroupConsistency(events: EventData[], logConflict: MergeConflictLog['log']): boolean {
+function validateGroupConsistency(
+  events: EventData[],
+  logConflict: MergeConflictLog['log'],
+  association: AssociationEvidence | null
+): boolean {
   const { eventIds, sources, avgLat, avgLon, avgTime } = conflictContext(events);
 
   // Magnitude consistency. assessMagnitudeConsistency drops absent AND non-finite
   // magnitudes, so a stray NaN can no longer make every comparison false and silently
   // disable the whole magnitude gate for the group.
-  const magnitude = assessMagnitudeConsistency(events);
+  const magnitude = assessMagnitudeConsistency(events, association);
 
   // NaN when the group carries no usable magnitude at all. Every threshold comparison below
   // then takes its wider branch — the same thing that happened before when a NaN magnitude
@@ -2079,7 +2571,7 @@ function validateGroupConsistency(events: EventData[], logConflict: MergeConflic
     logConflict(
       'magnitude_range',
       'warning',
-      `${magnitude.reason} - possible mismatch`,
+      magnitude.reason!,
       {
         eventIds,
         sources,
@@ -2094,15 +2586,10 @@ function validateGroupConsistency(events: EventData[], logConflict: MergeConflic
             : {}),
           ...(magnitude.mw ? { mwRange: magnitude.mw.range, avgMw: magnitude.mw.mean } : {}),
         },
-        threshold: magnitude.threshold,
-        // Report the quantity that actually failed, so the QC panel is not left comparing a
-        // passing raw range against the threshold that a different check rejected.
-        actualValue:
-          magnitude.failure === 'within-scale-range'
-            ? magnitude.worstScale!.range
-            : magnitude.failure === 'mw-range'
-              ? magnitude.mw!.range
-              : magnitude.rawRange,
+        // Report the quantity that actually failed and the threshold it exceeded, so the QC
+        // panel is not left comparing a passing raw range against a different check's limit.
+        threshold: magnitude.failedThreshold!,
+        actualValue: magnitude.failedValue!,
         location: { lat: avgLat, lon: avgLon },
         time: avgTime,
       }
@@ -2110,43 +2597,25 @@ function validateGroupConsistency(events: EventData[], logConflict: MergeConflic
     return false;
   }
 
-  // Check depth consistency
-  const depths = events.filter(e => e.depth != null).map(e => e.depth!);
-  if (depths.length >= 2) {
-    const depthRange = Math.max(...depths) - Math.min(...depths);
-    const avgDepth = depths.reduce((a, b) => a + b, 0) / depths.length;
-
-    // Depth threshold varies by depth level and magnitude
-    // Shallow (< 70 km): stricter threshold (better constrained)
-    // Intermediate (70-300 km): moderate threshold
-    // Deep (> 300 km): looser threshold (harder to constrain)
-    // Large events also get more tolerance
-    let maxDepthRange: number;
-    if (avgDepth < 70) {
-      maxDepthRange = avgMag < 5 ? 30 : 50;
-    } else if (avgDepth < 300) {
-      maxDepthRange = avgMag < 5 ? 50 : 100;
-    } else {
-      maxDepthRange = avgMag < 5 ? 100 : 150;
-    }
-
-    if (depthRange > maxDepthRange) {
-      logConflict(
-        'depth_range',
-        'warning',
-        `Large depth range: ${depthRange.toFixed(1)}km (threshold: ${maxDepthRange}km) - possible mismatch`,
-        {
-          eventIds,
-          sources,
-          values: { depths, avgDepth },
-          threshold: maxDepthRange,
-          actualValue: depthRange,
-          location: { lat: avgLat, lon: avgLon },
-          time: avgTime,
-        }
-      );
-      return false;
-    }
+  // Depth consistency (assessDepthConsistency): fixed depths are not compared, and two
+  // solved-for depths may differ by what their reported uncertainties allow.
+  const depth = assessDepthConsistency(events, avgMag);
+  if (!depth.ok) {
+    logConflict(
+      'depth_range',
+      'warning',
+      depth.reason!,
+      {
+        eventIds,
+        sources,
+        values: { depths: depth.depths, avgDepth: depth.avgDepth, ...(depth.fixed > 0 ? { fixedDepths: depth.fixed } : {}) },
+        threshold: depth.threshold,
+        actualValue: depth.range,
+        location: { lat: avgLat, lon: avgLon },
+        time: avgTime,
+      }
+    );
+    return false;
   }
 
   // Check for suspiciously large groups (likely matching error)
@@ -2155,7 +2624,7 @@ function validateGroupConsistency(events: EventData[], logConflict: MergeConflic
     logConflict(
       'group_size',
       'error',
-      `Suspiciously large event group: ${events.length} events - possible over-matching`,
+      `Group of ${events.length} entries exceeds the limit of 15: the matching windows probably joined several events`,
       {
         eventIds,
         sources,
@@ -2193,7 +2662,7 @@ function validateGroupConsistency(events: EventData[], logConflict: MergeConflic
       logConflict(
         'spatial_spread',
         'warning',
-        `Large spatial spread: ${spreadKm.toFixed(1)}km (threshold: ${maxSpread}km) - possible mismatch`,
+        `Large spatial spread: ${spreadKm.toFixed(1)} km (threshold: ${maxSpread} km)`,
         {
           eventIds,
           sources,
@@ -2806,7 +3275,7 @@ function withMergeProvenance(merged: MergedEventData, config: MergeConfig): Merg
  * A merged row starts unreviewed. The strategies spread a base report, and a report from a
  * merged source catalogue carries that catalogue's review columns, which would otherwise
  * publish a stale 'pending' (or a reviewer's name) on the new row. The persist path marks
- * the held rows AFTER this (mergeMatchGroup).
+ * the held rows AFTER this (resolveMatchGroup).
  */
 function clearReviewColumns(merged: MergedEventData): void {
   merged.review_status = null;
@@ -4902,7 +5371,7 @@ function mergeByPriority(events: EventData[], priority: string, priorityOrder?: 
 
 /**
  * Preview merge operation without saving to database
- * Returns duplicate groups for QC visualization
+ * Returns the QC preview payload (MergePreviewPayload, see buildMergePreview)
  */
 export async function previewMerge(
   sourceCatalogues: SourceCatalogue[],
@@ -4953,63 +5422,7 @@ async function previewMergeWithAuthority(sourceCatalogues: SourceCatalogue[], co
 
   console.log(`[Preview] Loaded ${allEvents.length} events from ${sourceCatalogues.length} catalogues`);
 
-  // Perform merge to get duplicate groups
-  const duplicateGroups = performMergeWithGroups(allEvents, config);
-
-  // Calculate statistics
-  const totalEventsBefore = allEvents.length;
-  const duplicateGroupsCount = duplicateGroups.filter(g => g.events.length > 1).length;
-  const totalEventsAfter = duplicateGroups.length;
-  const duplicatesRemoved = totalEventsBefore - totalEventsAfter;
-
-  // Identify suspicious matches — use the flag already set by performMergeWithGroups
-  // to avoid calling validateEventGroup a second time (which would double-log conflicts).
-  const suspiciousGroups = duplicateGroups.filter(group => group.isSuspicious);
-  const heldForReviewCount = duplicateGroups.filter(group => group.heldForReview).length;
-  const separatedReportsCount = duplicateGroups.filter(group => group.separated).length;
-  const supersededReportsCount = duplicateGroups.reduce((sum, group) => sum + group.supersededEventIndexes.length, 0);
-
-  return {
-    duplicateGroups: duplicateGroups.map(group => ({
-      id: group.id,
-      events: group.events.map(e => ({
-        id: e.id,
-        time: e.time,
-        latitude: e.latitude,
-        longitude: e.longitude,
-        depth: e.depth,
-        magnitude: e.magnitude,
-        source: e.source,
-        catalogueId: e.catalogueId,
-        catalogueName: (e as any).catalogueName,
-        // Quality metrics
-        magnitude_type: e.magnitude_type,
-        magnitude_uncertainty: e.magnitude_uncertainty,
-        used_station_count: e.used_station_count,
-        azimuthal_gap: e.azimuthal_gap,
-        standard_error: e.standard_error,
-        depth_uncertainty: e.depth_uncertainty,
-      })),
-      selectedEventIndex: group.selectedEventIndex,
-      isSuspicious: group.isSuspicious,
-      separated: group.separated,
-      validationWarnings: group.validationWarnings,
-      heldForReview: group.heldForReview,
-      supersededEventIndexes: group.supersededEventIndexes,
-      computedEpicentre: group.computedEpicentre,
-    })),
-    statistics: {
-      totalEventsBefore,
-      totalEventsAfter,
-      duplicateGroupsCount,
-      duplicatesRemoved,
-      suspiciousGroupsCount: suspiciousGroups.length,
-      heldForReviewCount,
-      supersededReportsCount,
-      separatedReportsCount,
-    },
-    catalogueColors,
-  };
+  return buildMergePreview(allEvents, sourceCatalogues, config, catalogueColors);
 }
 
 /**
@@ -5017,9 +5430,9 @@ async function previewMergeWithAuthority(sourceCatalogues: SourceCatalogue[], co
  * shows. ONE predicate for the preview and the persist path (M4), so the groups the
  * preview counts as flagged are exactly the rows a 'hold' merge marks pending: salvaged
  * from a split cluster, a contested association, a failed consistency gate, a magnitude
- * statement from the gate (a rejection, or an acceptance only on the common scale), or a
- * depth range past the gate's tier. The gate re-run here does not log: the association
- * already logged its verdict once.
+ * statement from the gate (a rejection, or an acceptance only on the common scale or within
+ * the uncertainty-aware tolerance), or a depth range the gate rejects. The gate re-run here
+ * does not log: the association already logged its verdict once.
  */
 function assessMatchGroup(
   group: MatchGroup,
@@ -5035,7 +5448,7 @@ function assessMatchGroup(
     warnings.push(
       matchingEvents.length > 1
         ? `Salvaged from a larger matched cluster that failed consistency validation and was split.${why}`
-        : `Matched with another report but separated because the group failed consistency validation.${why}`
+        : `Matched with another entry but kept apart because the group failed consistency validation.${why}`
     );
   }
 
@@ -5043,8 +5456,8 @@ function assessMatchGroup(
   // reviewer should confirm it — dense sequences are where fixed windows mislead.
   if (group.ambiguous) {
     warnings.push(
-      'Ambiguous association: a report in this group was nearly as close, in time and distance, to ' +
-      'another event that could not join it (a second report from a catalogue already in the group, ' +
+      'Ambiguous association: an entry in this group was nearly as close, in time and distance, to ' +
+      'another event that could not join it (a second entry from a catalogue already in the group, ' +
       'or one too far from the rest); the closest match was kept.'
     );
   }
@@ -5053,7 +5466,9 @@ function assessMatchGroup(
   // published alone, and "suspicious matches" keeps meaning merged groups a reviewer should
   // check. Both are flagged, and both are held under onConflict 'hold'.
   const separated = group.regrouped && matchingEvents.length === 1;
-  const gateFailed = matchingEvents.length > 1 && !validateEventGroup(matchingEvents, false);
+  // The association's own record of this group, read by the same helper the gate reads it with.
+  const association = associationEvidenceOf(matchingEvents);
+  const gateFailed = matchingEvents.length > 1 && !validateEventGroup(matchingEvents, false, undefined, association);
   let suspicious = (group.regrouped && !separated) || group.ambiguous || gateFailed;
 
   // The gate judges the reports that take part in the merge (superseded same-agency
@@ -5065,91 +5480,315 @@ function assessMatchGroup(
     // magnitude list, so a single null member coerced to 0 through Math.min/reduce and the
     // panel quoted a fabricated range (and a threshold from a fabricated mean) for a group
     // the merge had accepted without complaint.
-    const magnitude = assessMagnitudeConsistency(judged);
+    const magnitude = assessMagnitudeConsistency(judged, association);
     if (magnitude.reason) {
       // reason is set both when the gate rejected the group and when it accepted only
-      // because the members agree on the common (Mw) scale — say which. Only a rejection
-      // flags the group: the rescue explains why the merge went ahead.
+      // because the members agree on the common (Mw) scale or within the tolerance their
+      // reported uncertainties allow — say which. Only a rejection flags the group: a
+      // rescue explains why the merge went ahead.
       warnings.push(magnitude.reason);
       if (magnitude.failure) suspicious = true;
     }
 
-    const depths = judged.filter(e => e.depth != null).map(e => e.depth!);
-    if (depths.length > 1) {
-      const depthRange = Math.max(...depths) - Math.min(...depths);
-      const avgDepth = depths.reduce((a, b) => a + b, 0) / depths.length;
-      // Same filtered mean the gate uses; a group with no usable magnitude keeps the
-      // strictest tier rather than inventing a mean from nulls.
-      const avgMagPreview = magnitude.count > 0 ? magnitude.rawMean : 0;
-      const maxDepthRange = avgDepth < 70
-        ? (avgMagPreview < 5 ? 30 : 50)
-        : avgDepth < 300
-          ? (avgMagPreview < 5 ? 50 : 100)
-          : (avgMagPreview < 5 ? 100 : 150);
-      if (depthRange > maxDepthRange) {
-        warnings.push(`Large depth range: ${depthRange.toFixed(1)} km (threshold: ${maxDepthRange} km)`);
-        suspicious = true;
-      }
+    // The gate's own depth verdict, with the gate's mean magnitude (NaN when none is usable,
+    // which takes the wider tier there as here; the preview used to take the strictest).
+    const depth = assessDepthConsistency(judged, magnitude.rawMean);
+    if (depth.reason) {
+      // A rejection flags the group; a note explains why a wide range was accepted.
+      warnings.push(depth.reason);
+      if (!depth.ok) suspicious = true;
     }
   }
 
   return { suspicious, separated, warnings };
 }
 
-/**
- * Perform merge and return duplicate groups with metadata
- */
-function performMergeWithGroups(
-  events: EventData[],
-  config: MergeConfig
-): Array<{
+/** One group of a merge as the preview and the QC summary describe it. */
+interface MergeGroupDetail {
+  /** `group-<n>` in the preview; the merged event's id for a merge that writes rows. */
   id: string;
   events: EventData[];
   selectedEventIndex: number;
   isSuspicious: boolean;
   separated: boolean;
   validationWarnings: string[];
+  /** What a 'hold' merge marks pending: the same predicate, the same reasons. */
   heldForReview: boolean;
+  /** Superseded same-agency vintages (M5), so the panel can grey them out. */
   supersededEventIndexes: number[];
   /** The epicentre and origin time the merge computes and publishes when no single report
    *  is selected (average / median strategies); null when a report's solution is published. */
   computedEpicentre: { latitude: number; longitude: number; time: string } | null;
-}> {
-  // Use the SAME grouping the persist path uses so the preview stats, groups, and
-  // selected representative match exactly what mergeCatalogues will write. Each match
-  // group corresponds 1:1 to a merged output event.
-  const matchGroups = groupMatchingEvents(events, config);
+  splitKey: string | null;
+  discrepancy: number;
+  spread: QcPreviewGroup['spread'];
+}
 
-  return matchGroups.map((matchGroup, i) => {
-    const matchingEvents = matchGroup.events;
-    const { suspicious: isSuspicious, separated, warnings: validationWarnings } = assessMatchGroup(matchGroup, config);
+/**
+ * Perform merge and return every group (single entries included) with its metadata.
+ */
+function performMergeWithGroups(
+  events: EventData[],
+  config: MergeConfig
+): MergeGroupDetail[] {
+  // Use the SAME grouping and resolution the persist path uses so the preview stats,
+  // groups, and selected representative match exactly what mergeCatalogues will write.
+  // Each match group corresponds 1:1 to a merged output event.
+  return groupMatchingEvents(events, config).map((matchGroup, i) =>
+    describeResolvedGroup(resolveMatchGroup(matchGroup, config), `group-${i}`, config)
+  );
+}
 
-    // The report whose solution the merge publishes is the one it marks `selected` in the
-    // provenance (C2); source events are in group order. An averaged epicentre publishes
-    // no single report's solution, so no member is selected (-1). Superseded same-agency
-    // vintages (M5) are listed so the panel can grey them out.
-    const mergedEvent = mergeEventGroup(matchingEvents, config);
-    const selectedEventIndex = mergedEvent.sourceEvents.findIndex(entry => entry.selected === true);
-    const supersededEventIndexes = mergedEvent.sourceEvents
-      .map((entry, index) => (entry.superseded ? index : -1))
-      .filter(index => index >= 0);
+// ============================================================================
+// MERGE QUALITY CONTROL (lib/merge-qc.ts): the preview payload and the QC summary
+// ============================================================================
 
-    return {
-      id: `group-${i}`,
-      events: matchingEvents,
-      selectedEventIndex,
-      isSuspicious,
-      separated,
-      validationWarnings,
-      // What a 'hold' merge would mark pending: the same predicate, the same reasons.
-      heldForReview: config.onConflict === 'hold' && (isSuspicious || separated),
-      supersededEventIndexes,
-      // Where the QC map draws the published solution of an averaged / median group.
-      computedEpicentre: selectedEventIndex < 0 && matchingEvents.length > 1
-        ? { latitude: mergedEvent.latitude, longitude: mergedEvent.longitude, time: String(mergedEvent.time) }
-        : null,
-    };
+/** Above this many windows a disagreement is off the scale; keeps the value finite for JSON. */
+const MAX_DISCREPANCY = 1000;
+
+const finiteNumberOrNull = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+const roundTo = (value: number, step: number): number => {
+  const rounded = Math.round(value / step) * step;
+  return Number(rounded.toFixed(6)) || 0;
+};
+
+function describeResolvedGroup(resolved: ResolvedMatchGroup, id: string, config: MergeConfig): MergeGroupDetail {
+  const { discrepancy, spread } = groupDisagreement(resolved, config);
+  return {
+    id,
+    events: resolved.group.events,
+    selectedEventIndex: resolved.selectedEventIndex,
+    isSuspicious: resolved.isSuspicious,
+    separated: resolved.separated,
+    validationWarnings: resolved.validationWarnings,
+    heldForReview: resolved.heldForReview,
+    supersededEventIndexes: resolved.supersededEventIndexes,
+    computedEpicentre: resolved.computedEpicentre,
+    splitKey: resolved.group.splitKey,
+    discrepancy,
+    spread,
+  };
+}
+
+/**
+ * How far a group's entries are from what the merge publishes (QcPreviewGroup.discrepancy
+ * and .spread): each entry against the published solution, or against the computed
+ * epicentre (with the published depth and magnitude) when the solution was averaged. The
+ * discrepancy is in units of the pair's own adaptive windows (pairSeparation), the same
+ * windows the matcher used. Superseded vintages take no part in the merge and are skipped.
+ */
+function groupDisagreement(
+  resolved: ResolvedMatchGroup,
+  config: MergeConfig
+): { discrepancy: number; spread: QcPreviewGroup['spread'] } {
+  const events = resolved.group.events;
+  const spread: QcPreviewGroup['spread'] = { timeS: 0, distanceKm: 0, depthKm: null, magnitude: null };
+  if (events.length < 2) return { discrepancy: 0, spread };
+
+  const published = resolved.selectedEventIndex >= 0 ? events[resolved.selectedEventIndex] : null;
+  const reference: EventData = published ?? {
+    time: String(resolved.merged.time),
+    latitude: resolved.merged.latitude,
+    longitude: resolved.merged.longitude,
+    depth: resolved.merged.depth,
+    magnitude: resolved.merged.magnitude,
+    source: resolved.merged.source,
+  };
+  const referenceDepth = finiteNumberOrNull(reference.depth);
+  const referenceMagnitude = finiteNumberOrNull(reference.magnitude);
+  const superseded = new Set(resolved.supersededEventIndexes);
+  const share = (value: number, window: number): number =>
+    !Number.isFinite(value) ? 0 : window > 0 ? value / window : value > 0 ? MAX_DISCREPANCY : 0;
+
+  let discrepancy = 0;
+  events.forEach((event, index) => {
+    if (event === published || superseded.has(index)) return;
+    const pair = pairSeparation(event, reference, config.timeThreshold, config.distanceThreshold);
+    discrepancy = Math.max(discrepancy, share(pair.timeDiff, pair.timeWindow), share(pair.distance, pair.distanceWindow));
+    if (Number.isFinite(pair.timeDiff)) spread.timeS = Math.max(spread.timeS, pair.timeDiff);
+    if (Number.isFinite(pair.distance)) spread.distanceKm = Math.max(spread.distanceKm, pair.distance);
+    const depth = finiteNumberOrNull(event.depth);
+    if (depth !== null && referenceDepth !== null) {
+      spread.depthKm = Math.max(spread.depthKm ?? 0, Math.abs(depth - referenceDepth));
+    }
+    const magnitude = finiteNumberOrNull(event.magnitude);
+    if (magnitude !== null && referenceMagnitude !== null) {
+      spread.magnitude = Math.max(spread.magnitude ?? 0, Math.abs(magnitude - referenceMagnitude));
+    }
   });
+
+  return {
+    discrepancy: roundTo(Math.min(discrepancy, MAX_DISCREPANCY), 1e-4),
+    spread: {
+      timeS: roundTo(spread.timeS, 1e-3),
+      distanceKm: roundTo(spread.distanceKm, 1e-3),
+      depthKm: spread.depthKm === null ? null : roundTo(spread.depthKm, 1e-3),
+      magnitude: spread.magnitude === null ? null : roundTo(spread.magnitude, 1e-3),
+    },
+  };
+}
+
+/** One entry of a group as buildMergeQcSummary reads it. */
+function qcEntryInput(event: EventData, superseded: boolean, catalogueNames: Map<string, string>): QcEntryInput {
+  const catalogueId = String(event.catalogueId ?? '');
+  const sourceId = typeof event.source_id === 'string' && event.source_id !== '' ? event.source_id : null;
+  const magnitudeType =
+    typeof event.magnitude_type === 'string' && event.magnitude_type.trim() !== '' ? event.magnitude_type.trim() : null;
+  return {
+    catalogueId,
+    catalogueName:
+      catalogueNames.get(catalogueId) ??
+      (typeof event.catalogueName === 'string' ? event.catalogueName : String(event.source ?? catalogueId)),
+    sourceId,
+    time: String(event.time),
+    latitude: event.latitude,
+    longitude: event.longitude,
+    depth: finiteNumberOrNull(event.depth),
+    magnitude: finiteNumberOrNull(event.magnitude),
+    magnitudeType,
+    qualityScore: finiteNumberOrNull(event.quality_score),
+    // The rule the depth selection uses (QuakeML depthType, else the stored depth_type).
+    depthFixed: isFixedDepth(event, preferredQuakemlOrigin(event)),
+    superseded,
+  };
+}
+
+function qcGroupInput(detail: MergeGroupDetail, catalogueNames: Map<string, string>): QcGroupInput {
+  const superseded = new Set(detail.supersededEventIndexes);
+  return {
+    id: detail.id,
+    entries: detail.events.map((event, index) => qcEntryInput(event, superseded.has(index), catalogueNames)),
+    publishedIndex: detail.selectedEventIndex,
+    flagged: detail.isSuspicious,
+    keptApart: detail.separated,
+    held: detail.heldForReview,
+    reasons: detail.validationWarnings,
+    splitKey: detail.splitKey,
+    discrepancy: detail.discrepancy,
+  };
+}
+
+/** The QC summary of a merge from its groups (every group, single entries included). */
+function buildMergeQc(
+  details: MergeGroupDetail[],
+  sourceCatalogues: SourceCatalogue[],
+  config: MergeConfig
+): MergeQcSummary {
+  const refs = sourceCatalogues.map(c => ({ id: String(c.id), name: c.name ?? String(c.id) }));
+  const catalogueNames = new Map<string, string>();
+  refs.forEach(ref => { if (!catalogueNames.has(ref.id)) catalogueNames.set(ref.id, ref.name); });
+  return buildMergeQcSummary({
+    // As stored in the catalogue's merge_config (JSON, so absent options are absent).
+    config: JSON.parse(JSON.stringify(config)) as Record<string, unknown>,
+    sourceCatalogues: refs,
+    groups: details.map(detail => qcGroupInput(detail, catalogueNames)),
+    pairWindows: (a, b) => pairMatchingWindows(a, b, config.timeThreshold, config.distanceThreshold),
+    generatedBy: QC_GENERATED_BY,
+  });
+}
+
+/** One entry as the preview lists it. */
+function previewEntry(e: EventData): QcPreviewEntry {
+  return {
+    id: e.id,
+    source_id: e.source_id,
+    time: e.time,
+    latitude: e.latitude,
+    longitude: e.longitude,
+    depth: e.depth,
+    depth_type: e.depth_type,
+    magnitude: e.magnitude,
+    source: e.source,
+    catalogueId: e.catalogueId,
+    catalogueName: e.catalogueName,
+    // Quality metrics
+    magnitude_type: e.magnitude_type,
+    magnitude_uncertainty: e.magnitude_uncertainty,
+    used_station_count: e.used_station_count,
+    azimuthal_gap: e.azimuthal_gap,
+    standard_error: e.standard_error,
+    depth_uncertainty: e.depth_uncertainty,
+    quality_score: e.quality_score,
+  };
+}
+
+function previewGroup(detail: MergeGroupDetail): QcPreviewGroup {
+  return {
+    id: detail.id,
+    events: detail.events.map(previewEntry),
+    selectedEventIndex: detail.selectedEventIndex,
+    isSuspicious: detail.isSuspicious,
+    separated: detail.separated,
+    validationWarnings: detail.validationWarnings,
+    heldForReview: detail.heldForReview,
+    supersededEventIndexes: detail.supersededEventIndexes,
+    computedEpicentre: detail.computedEpicentre,
+    splitKey: detail.splitKey,
+    discrepancy: detail.discrepancy,
+    spread: detail.spread,
+  };
+}
+
+/**
+ * The merge preview (POST /api/merge/preview, MergePreviewPayload): every flagged,
+ * kept-apart and held group, the QC_PREVIEW_MAX_MATCHED other matched groups with the
+ * largest discrepancy, in output order, and the QC summary of the whole merge. Single
+ * entries that were never matched are counted (statistics, qc) but not listed: listing
+ * all of them made the payload grow with the catalogues rather than with what needs review.
+ */
+function buildMergePreview(
+  events: EventData[],
+  sourceCatalogues: SourceCatalogue[],
+  config: MergeConfig,
+  catalogueColors: Record<string, string>
+): MergePreviewPayload {
+  const groups = performMergeWithGroups(events, config);
+
+  // Calculate statistics (over every group, listed or not)
+  const totalEventsBefore = events.length;
+  const duplicateGroupsCount = groups.filter(g => g.events.length > 1).length;
+  const totalEventsAfter = groups.length;
+  const duplicatesRemoved = totalEventsBefore - totalEventsAfter;
+
+  // Identify suspicious matches — use the flag already set by performMergeWithGroups
+  // to avoid calling validateEventGroup a second time (which would double-log conflicts).
+  const suspiciousGroups = groups.filter(group => group.isSuspicious);
+  const heldForReviewCount = groups.filter(group => group.heldForReview).length;
+  const separatedReportsCount = groups.filter(group => group.separated).length;
+  const supersededReportsCount = groups.reduce((sum, group) => sum + group.supersededEventIndexes.length, 0);
+
+  const needsReview = (g: MergeGroupDetail) => g.isSuspicious || g.separated || g.heldForReview;
+  // Matched groups that need no review, largest discrepancy first (ties in output order).
+  const matched = groups
+    .map((group, order) => ({ group, order }))
+    .filter(({ group }) => group.events.length > 1 && !needsReview(group));
+  const listedMatched = new Set(
+    matched
+      .slice()
+      .sort((a, b) => b.group.discrepancy - a.group.discrepancy || a.order - b.order)
+      .slice(0, QC_PREVIEW_MAX_MATCHED)
+      .map(({ group }) => group)
+  );
+
+  return {
+    duplicateGroups: groups.filter(g => needsReview(g) || listedMatched.has(g)).map(previewGroup),
+    matchedListed: listedMatched.size,
+    matchedTotal: matched.length,
+    statistics: {
+      totalEventsBefore,
+      totalEventsAfter,
+      duplicateGroupsCount,
+      duplicatesRemoved,
+      suspiciousGroupsCount: suspiciousGroups.length,
+      heldForReviewCount,
+      supersededReportsCount,
+      separatedReportsCount,
+    },
+    catalogueColors,
+    qc: buildMergeQc(groups, sourceCatalogues, config),
+  };
 }
 
 // ============================================================================
@@ -5269,6 +5908,11 @@ export {
   buildMergedEventFields,
   groupMatchingEvents,
   performMergeWithGroups,
+  // Merge quality control
+  pairMatchingWindows,
+  buildMergePreview,
+  buildMergeQc,
+  isFixedDepth,
   assessMatchGroup,
   mergeEventGroup,
   supersedeSameAgency,

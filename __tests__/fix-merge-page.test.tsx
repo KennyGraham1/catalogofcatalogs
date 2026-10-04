@@ -50,6 +50,13 @@ async function fakeServer(input: any, init?: any) {
       ? { success: true, catalogueId: null, eventCount: 0, originalEventCount: 0, events: [] }
       : { success: true, catalogueId: 'merged-1', eventCount: 0, originalEventCount: 0 });
   }
+  if (url.pathname === '/api/merge/preview' && init?.method === 'POST') {
+    return jsonResponse({
+      duplicateGroups: [],
+      statistics: { totalEventsBefore: 5, totalEventsAfter: 5, duplicateGroupsCount: 0, duplicatesRemoved: 0, suspiciousGroupsCount: 0 },
+      catalogueColors: {},
+    });
+  }
   if (url.pathname === '/api/catalogues/merged-1/events') {
     return jsonResponse({ data: [], pagination: { nextCursor: null, prevCursor: null, hasMore: false, limit: 1000 } });
   }
@@ -115,6 +122,9 @@ describe('"newest" is described as the most recently determined solution', () =>
 describe('C5: a saved merge invalidates the client catalogue caches', () => {
   async function merge(confirmLabel: string) {
     fireEvent.click(screen.getByRole('button', { name: /Preview Merge/ }));
+    // A merge always follows a QC preview of the current settings.
+    fireEvent.click(screen.getByRole('button', { name: 'Generate QC Preview' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Start Merge/ })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /Start Merge/ }));
     fireEvent.click(await screen.findByRole('button', { name: confirmLabel }));
     await waitFor(() => expect(calls.some(c => c.url === '/api/merge')).toBe(true));

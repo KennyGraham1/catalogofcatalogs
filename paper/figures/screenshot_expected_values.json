@@ -168,12 +168,79 @@
    "mergeStrategy": "quality",
    "priority": "newest"
   },
+  "tiles": {
+   "Entries before": 9333,
+   "Events after": 7329,
+   "Matched groups": 2004,
+   "Entries combined": 2004,
+   "Flagged groups": 4
+  },
+  "tabs": {
+   "Flagged": 4,
+   "Kept apart": 26,
+   "Matched": 2000
+  },
+  "keptApartEntries": 50,
+  "splits": 26,
+  "supersededEntries": 0,
+  "perCatalogue": [
+   {
+    "id": "synthetic-geonet-like",
+    "entries": 4922,
+    "matched": 2004,
+    "matchedPercent": "40.7 %",
+    "onlyInThisCatalogue": 2918,
+    "publishedFromIt": 625
+   },
+   {
+    "id": "synthetic-agency-b",
+    "entries": 4411,
+    "matched": 2004,
+    "matchedPercent": "45.4 %",
+    "onlyInThisCatalogue": 2407,
+    "publishedFromIt": 1379
+   }
+  ],
+  "differences": {
+   "pairs": 2004,
+   "originTimeS": {
+    "n": 2004,
+    "median": -0.01,
+    "robustSigma": 0.38,
+    "p05": -1.23,
+    "p95": 1.11
+   },
+   "epicentreKm": {
+    "n": 2004,
+    "median": 1.6,
+    "p95": 12
+   },
+   "depthKm": {
+    "n": 1589,
+    "median": -0.2,
+    "robustSigma": 4.9,
+    "p05": -12.5,
+    "p95": 9.4
+   },
+   "magnitude": {
+    "n": 2004,
+    "median": -0.01,
+    "robustSigma": 0.23,
+    "p05": -0.41,
+    "p95": 0.4
+   }
+  },
+  "windowUse": {
+   "nearTimeLimit": 2,
+   "nearDistanceLimit": 8,
+   "matchedPairs": 2004
+  },
   "eventsBefore": 9333,
-  "eventsAfter": 7443,
-  "duplicateGroups": 1890,
-  "duplicatesRemoved": 1890,
+  "eventsAfter": 7329,
+  "duplicateGroups": 2004,
+  "duplicatesRemoved": 2004,
   "suspiciousMatches": 4,
-  "resolvedToGeoNetLike": 577,
-  "resolvedToAgencyB": 1313
+  "resolvedToGeoNetLike": 625,
+  "resolvedToAgencyB": 1379
  }
 }

@@ -111,9 +111,10 @@ describe('listing', () => {
 
     const card = screen.getByTestId('review-event-evt-1');
     expect(within(card).getByText('M7.8 Mw')).toBeInTheDocument();
-    // Origin times in UTC with the zone, never the host zone's calendar day.
-    expect(within(card).getAllByText('13/11/2016, 11:02:56 UTC').length).toBeGreaterThan(0);
-    expect(within(card).queryByText(/14\/11\/2016/)).toBeNull();
+    // Origin times as ISO 8601 UTC with the zone (no day/month ambiguity), never the host
+    // zone's calendar day.
+    expect(within(card).getAllByText('2016-11-13 11:02:56 UTC').length).toBeGreaterThan(0);
+    expect(within(card).queryByText(/2016-11-14|14\/11\/2016|13\/11\/2016/)).toBeNull();
 
     // Reports are labelled by source catalogue name; stations and gap are shown.
     const first = within(card).getByTestId('review-report-evt-1-0');

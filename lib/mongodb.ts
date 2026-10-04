@@ -292,6 +292,9 @@ export const COLLECTIONS = {
   // catalogue mutation so API caches in every server instance stop serving data
   // read before it (see lib/cache.ts getCacheGeneration).
   CACHE_GENERATIONS: 'cache_generations',
+  // One merge QC summary per merged catalogue ({ catalogue_id, created_at, summary },
+  // lib/merge-qc.ts), written in the merge's transaction and deleted with the catalogue.
+  MERGE_QC_SUMMARIES: 'merge_qc_summaries',
 } as const;
 
 /**

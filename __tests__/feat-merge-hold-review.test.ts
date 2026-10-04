@@ -77,7 +77,7 @@ describe("onConflict 'hold'", () => {
     expect(members(pair)).toEqual(['a', 'b']);
     expect(pair.review_reasons).toEqual([expect.stringMatching(/^Salvaged from a larger matched cluster.*Reason: Large magnitude range: 0\.70 units/)]);
     expect(members(lone)).toEqual(['c']);
-    expect(lone.review_reasons).toEqual([expect.stringMatching(/^Matched with another report but separated.*Reason: Large magnitude range/)]);
+    expect(lone.review_reasons).toEqual([expect.stringMatching(/^Matched with another entry but kept apart.*Reason: Large magnitude range/)]);
     // A provisional solution: the strategy still published coordinates.
     expect([pair.latitude, pair.longitude, pair.magnitude]).toEqual([-41.3, 174.8, 3.5]);
     const d = saved.find(r => members(r)[0] === 'd')!;
@@ -152,7 +152,7 @@ describe('assessMatchGroup and the review columns', () => {
     expect(assessMatchGroup(lone, base as any)).toEqual({
       suspicious: false,
       separated: true,
-      warnings: [expect.stringMatching(/^Matched with another report but separated.*Large magnitude range/)],
+      warnings: [expect.stringMatching(/^Matched with another entry but kept apart.*Large magnitude range/)],
     });
 
     const clean = groupMatchingEvents([ev('a', 3.5, 0), ev('b', 3.8, 2)], base as any);

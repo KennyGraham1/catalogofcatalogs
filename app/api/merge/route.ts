@@ -13,7 +13,13 @@ export async function POST(request: NextRequest) {
       return authResult;
     }
 
-    const body = await request.json();
+    // A missing or malformed body is the client's error (400), not a failed merge (500).
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body', code: 'INVALID_JSON' }, { status: 400 });
+    }
 
     // Validate request body using Zod schema
     const validation = validateMergeRequest(body);

@@ -101,13 +101,13 @@ or Maximum Curvature (MAXC),
 Gardner-Knopoff declustering, and cumulative seismic moment and energy.  A fully
 synthetic two-catalogue New Zealand example (no real event data), processed end to
 end by the platform's own engine, illustrates the workflow and quantifies the
-biases an analyst must control: the matcher pairs 93\% of the earthquakes both
-agencies report, with 98\% of its pairs correct; a quality threshold removes 95\%
+biases an analyst must control: the matcher pairs 98\% of the earthquakes both
+agencies report, with 98\% of its pairs correct; a quality threshold removes 94\%
 of the events with azimuthal gap above $180^{\circ}$ but also favours larger
 events, lowering $b$ by 0.06; the MAXC and goodness-of-fit estimates of $M_c$
 fall well below the completeness of the merged catalogue, which the more
 conservative $b$-value-stability estimate reaches; and window declustering lowers
-$b$ by a further 0.12.
+$b$ by a further 0.11.
 Above a stable cut-off, the estimator recovers the planted $b = 1.00$ of the
 independent events ($1.01 \pm 0.01$).  These values characterise the controlled
 synthetic inputs, not real New Zealand seismicity.
@@ -651,8 +651,9 @@ was published marked), the merge strategy and threshold parameters applied,
 the quality score of the published solution and, for a group held back for
 review, its review status.  This per-event provenance is
 carried in the CSV, JSON, GeoJSON and KML exports and as a per-event QuakeML
-\texttt{comment} \citep{schorlemmer2011}, and merge-level metadata is recorded
-at the catalogue level, supporting the reproducibility goals of CSEP-based
+\texttt{comment} \citep{schorlemmer2011}, and merge-level metadata, among it
+the merge's quality-control summary (Section~\ref{sec:merge}), is recorded at the
+catalogue level, supporting the reproducibility goals of CSEP-based
 forecast evaluations \citep{schorlemmer2007}.
 
 \subsection{Visualisation}
@@ -931,16 +932,46 @@ when a report's best refused alternative was nearly as close as the pairing kept
 alone then barely separate the two choices.
 
 Candidate groups that violate magnitude-scaled physical-validity gates are
-flagged as merge conflicts and are not merged.  A group is rejected if its
-magnitude range exceeds $0.5$ ($M<4$), $0.8$ ($M\,4$--$5.5$), $1.2$
-($M\,5.5$--$7$), or $1.5$ ($M\geq7$) within any one magnitude scale, or, for a
-group mixing scales, on the common $M_w$ scale with the threshold widened by the
-conversion uncertainties (on the raw values when a type cannot be converted); if
-its depth range exceeds $30$\,km for shallow events
-($50$\,km from $M5$), with wider limits at intermediate and great depth; if a
-group of more than three spreads over more than $100$\,km ($M<5$), $150$\,km
-($M\,5$--$6$), or $200$\,km ($M\geq6$); or if more than $15$ events fall in a
-single group.
+flagged as merge conflicts and are not merged.  The magnitude gate compares the
+spread of a group's magnitudes with a tolerance $T$ of $0.5$ ($\bar{M}<4$),
+$0.8$ ($\bar{M}\,4$--$5.5$), $1.2$ ($\bar{M}\,5.5$--$7$), or $1.5$
+($\bar{M}\geq7$), $\bar{M}$ being the mean of the magnitudes as reported.
+Magnitudes are compared within each scale and, for a group mixing scales, on the
+common $M_w$ scale against $\sqrt{T^{*2} + \sigma_{c,1}^{2} + \sigma_{c,2}^{2}}$,
+$\sigma_{c,1}$ and $\sigma_{c,2}$ being the conversion uncertainties of the two
+extreme members; raw values on scales that cannot be converted are compared
+against $T$.  The tolerance $T^{*}$ of these single-scale comparisons allows for
+the reported magnitude uncertainties $\sigma_1$ and $\sigma_2$ of the two
+extreme solutions ($0$ when not reported):
+\begin{equation}
+  T^{*} = \min\Bigl\{2T,\ \max\Bigl[T,\ k\sqrt{\sigma_1^{2} + \sigma_2^{2} + \sigma_{\mathrm{ag}}^{2}}\,\Bigr]\Bigr\},
+  \label{eq:magtol}
+\end{equation}
+with $k = 3$ (three-standard-deviation coverage) and $\sigma_{\mathrm{ag}} = 0.2$,
+the scatter between two agencies' magnitudes of one earthquake that no reported
+uncertainty describes (the low end of the $0.2$--$0.3$ typical of inter-agency
+$M_L$ differences, so that no more scatter is credited than is observed).  The
+cap of $2T$ (1.0 unit below $M4$) guards against bulletins that report the
+scatter of the station magnitudes rather than the error of their mean.  The
+widening applies only when the association is uncontested (no refused
+alternative within the ambiguity margin above) and every pair of solutions in
+the group agrees closely in origin time and epicentre: within a tenth of its
+widened windows, $|\Delta t|/\tau + d/\delta \leq 0.1$ (the margin the
+ambiguity test uses) and, where both solutions state them, within three
+combined standard errors of origin time and of epicentre.  Otherwise
+$T^{*} = T$: where pairings are contested, as in a dense sequence, magnitude is
+the main evidence that tells neighbouring events apart.  A depth fixed by the
+operator carries no depth information and is not compared; solved-for depths
+must agree within the larger of $T_z$ and
+$3\sqrt{\sigma_{z,1}^{2} + \sigma_{z,2}^{2}}$, $\sigma_{z,1}$ and $\sigma_{z,2}$
+being the reported depth uncertainties of the shallowest and deepest solution
+and $T_z$ being $30$\,km for shallow events ($50$\,km from $M5$), with wider
+limits at intermediate and great depth.  A group is also rejected if it has more
+than three members and spreads over more than $100$\,km ($M<5$), $150$\,km
+($M\,5$--$6$), or $200$\,km ($M\geq6$), or if more than $15$ events fall in a
+single group.  A group accepted only because of the reported uncertainties, or
+only because a fixed depth was left out, is not flagged, but the preview states
+why it was accepted.
 
 \subsection{Merge strategies}
 \label{sec:strategies}
@@ -1064,10 +1095,26 @@ tensors, then first-motion solutions from at least 20 polarities, then automatic
 ones) and within a source by the quality of the solution.
 
 Figure~\ref{fig:app_merge} shows the configuration and preview steps as the user
-encounters them: the matching windows and merge strategy are set explicitly, and
-the duplicate groups, their time/distance/magnitude separations, and any groups
-failing the validity gates are reported for inspection before the merge is
-committed.
+encounters them.  The matching windows and merge strategy are set explicitly,
+and the preview is a dry run of the merge they define, with a quality-control
+(QC) summary of it: the totals; for each source catalogue, how many of its
+entries were matched, how many appear only in it, and how often its solution was
+published; for each catalogue pair, the differences between matched solutions in
+origin time, epicentre, depth and magnitude (overall and by magnitude-type pair),
+as the median with a robust standard deviation ($1.4826$ times the median
+absolute deviation) and the 5--95\% range, so that a systematic magnitude offset
+between two agencies shows directly; how many matched pairs lie near the edge of
+their windows, a measure of the merge's sensitivity to the thresholds; and the
+flagged, kept-apart and held groups with their reasons.  The groups to review are
+listed under \emph{Flagged}, \emph{Kept apart} (the entries of a group that
+failed the gates, published as separate events and shown together) and
+\emph{Matched}, the largest disagreement first (the greatest offset of an entry
+from the published solution, in units of its matching window); each group lists
+its entries with their $Q$ and states which solution is published and why.  The
+wizard's one merge action, \emph{Start Merge}, is enabled only once a preview
+exists for the current settings, and the merge stores the same summary with the
+merged catalogue, in the transaction that writes the catalogue; the summary is shown after the merge and on the merged
+catalogue's page, and can be downloaded as JSON, its list of groups as CSV.
 
 \begin{figure}[p]
   \centering
@@ -1080,11 +1127,16 @@ committed.
     conflict-resolution strategy (Table~\ref{tab:strategies}; here
     Quality-based), and an in-app statement of how the adaptive multipliers widen
     those baselines with magnitude and depth.
-    \textit{Bottom:} the \emph{Preview} step, a dry run reporting each duplicate
-    group's time, distance, and magnitude separation and flagging groups that
-    fail the physical-validity gates or are ambiguous, before any merge is
-    committed: the 9\,333 records form 1\,890 duplicate groups and merge into
-    7\,443 events.  Data are a reduced-scale version of the synthetic pair of the
+    \textit{Bottom:} the \emph{Preview} step, a dry run of the merge with its QC
+    summary, before anything is written.  The totals read \emph{Entries before}
+    9\,333, \emph{Events after} 7\,329, \emph{Matched groups} 2\,004,
+    \emph{Entries combined} 2\,004 and \emph{Flagged groups} 4, and 50 entries
+    of 26 groups that failed the gates are kept apart, published as separate
+    events.  The summary goes on to each catalogue's matched entries (40.7\% of
+    the GeoNet-like and 45.4\% of the Agency~B entries) and the differences
+    between matched solutions, and the groups to review follow under
+    \emph{Flagged} (4), \emph{Kept apart} (26) and \emph{Matched} (2\,000),
+    largest disagreement first.  Data are a reduced-scale version of the synthetic pair of the
     worked example (Section~\ref{sec:example}), 4\,922 GeoNet-like and 4\,411
     Agency~B events built by the same generator with each true earthquake kept
     with probability $1/23$.
@@ -1245,7 +1297,8 @@ events; a Gutenberg-Richter fit requires at least 10 events at or above its
 cut-off, spread over at least three populated magnitude bins (and, when the fit
 estimates its own $M_c$, the 50 events above); and the $b$-value of an individual
 aftershock sequence is reported only for sequences of at least 50 events, above
-the sequence's own $M_c$ (by $b$-value stability, with its fallbacks), since
+the sequence's own $M_c$ (always by $b$-value stability, with its fallbacks,
+whatever method the $M_c$ settings select), since
 short-term incompleteness early in a sequence
 raises its $M_c$ above the background network's.  The $N \approx 200$ figure is a
 guideline the analyst should apply when interpreting results.
@@ -1437,28 +1490,37 @@ reports carry, a correlation built into the synthetic uncertainty model and one
 that real network locations also show \citep{bondar2004}.  The platform's MAXC
 estimates of completeness are $M_c = 1.8$ for the GeoNet-like catalogue and 1.4
 for Agency~B, whose denser network detects smaller events in its region (the
-goodness-of-fit test gives 1.9 for both).
+goodness-of-fit test gives 1.9 for both).  Its default, $b$-value-stability
+estimates are $M_c = 2.7$ and 2.6: with $10^5$ events, $\delta b$ at the lower
+cut-offs is a few thousandths, so the test rejects every cut-off at which
+$\hat{b}$ still differs by more than that from its mean over the next half unit
+(Section~\ref{sec:mc}; Step~4).
 
 \subsection{Step 2: Merge}
 
 Merging with the Quality-based strategy and baseline windows of 60~s and 50~km
-(equations~\eqref{eq:dt} and~\eqref{eq:dd}), the matcher forms 44\,856 duplicate
-groups, and the $113\,427 + 101\,806 = 215\,233$ records merge into 170\,377
-events (Figure~\ref{fig:map}b): 68\,571 reported by the GeoNet-like agency only,
-56\,950 by Agency~B only (mostly small events inside its denser network), and
-44\,856 by both.  Because the generator knows which reports describe the same
+(equations~\eqref{eq:dt} and~\eqref{eq:dd}), the matcher forms 47\,109 duplicate
+groups, and the $113\,427 + 101\,806 = 215\,233$ records merge into 168\,124
+events (Figure~\ref{fig:map}b): 66\,318 reported by the GeoNet-like agency only,
+54\,697 by Agency~B only (mostly small events inside its denser network), and
+47\,109 by both.  Because the generator knows which reports describe the same
 earthquake, the association can be scored exactly.  Of the 47\,109 earthquakes
-both agencies report, 43\,936 (93\%) are paired correctly, and 97.9\% of the
-groups join two reports of one earthquake; 915 of the 920 wrong pairings lie
-within aftershock sequences, where several events fall inside one window.  Of the
-3\,173 pairs left apart, the validity gates reject 2\,315 whose two magnitudes
-differ by more than the gate allows (0.5 units below $M4$) and 691 whose depths
-differ by more than it allows (30~km for shallow events), most of them because one
-agency fixed the depth; 141 lie outside the matching window (distant events
-Agency~B locates poorly), and in 26 each report has a closer counterpart.  These earthquakes stay in the merged catalogue twice.
-The Quality-based strategy keeps Agency~B's solution for 30\,467 of the duplicate
+both agencies report, 46\,353 (98\%) are paired correctly, and 98.4\% of the
+groups join two entries of one earthquake; that there are as many groups as
+shared earthquakes is a coincidence, the 756 wrong pairings matching in number
+the 756 pairs left apart.  Of the wrong pairings, 753 lie within aftershock
+sequences, where several events fall inside one window, and none is among the
+1\,742 groups that pass the magnitude gate only within the tolerance widened by
+the reported uncertainties (equation~\eqref{eq:magtol}).  Of the 756 pairs left
+apart, the validity gates reject 572 whose two magnitudes differ by more than the
+gate allows (0.5 units below $M4$, at most 1.0 where the tolerance widens) and 16
+whose solved-for depths differ by more than it allows (30~km for shallow events,
+or three combined standard errors); 141 lie outside the matching window (distant
+events Agency~B locates poorly), and in 27 each entry has a closer counterpart.
+These earthquakes stay in the merged catalogue twice.
+The Quality-based strategy keeps Agency~B's solution for 31\,870 of the duplicate
 groups (68\%), those inside its denser network, and the GeoNet-like solution for
-the other 14\,389; every contributing report is kept in the merged event's
+the other 15\,239; every contributing report is kept in the merged event's
 lineage, and each exported event carries its source catalogue IDs, the merge
 strategy, the selected report and its quality score.  These recall and precision
 figures reflect the synthetic location, timing and magnitude scatter; they are a
@@ -1468,39 +1530,41 @@ errors are non-Gaussian and whose clocks and magnitude scales differ
 
 \subsection{Step 3: Quality filtering}
 
-A quality threshold of $Q \geq 70$ (upper grade~B and above) retains 86\,468 of
-the 170\,377 merged events (50.8\%).  It removes 94.5\% of the 39\,160 merged
+A quality threshold of $Q \geq 70$ (upper grade~B and above) retains 86\,028 of
+the 168\,124 merged events (51.2\%).  It removes 94.3\% of the 37\,951 merged
 events with gap $> 180^{\circ}$, which make up 44\% of the removed set, so the
 filter does remove most of the poorly constrained offshore population.  It is not
 neutral in magnitude, however.  Because $Q$ rises with the number of recording
 stations and falls with the location and magnitude uncertainties, all of which
-depend on magnitude, the filter keeps 58\% of the events of $M$1.5--2.0 but 83\%
+depend on magnitude, the filter keeps 58\% of the events of $M$1.5--2.0 but 86\%
 of those of $M$3.5--4.0, and so changes the shape of the frequency-magnitude
 distribution (Figure~\ref{fig:fmd}a).
 
 \subsection{Step 4: Completeness and $b$-value}
 
-On the quality-filtered catalogue the platform's default estimate is
-$M_c = 1.7$ (MAXC with the $+0.2$ correction), above which the maximum-likelihood
-fit gives $\hat{b} = 0.811 \pm 0.004$ ($N = 43\,329$); the goodness-of-fit test
-gives $M_c = 1.9$ at the 95\% level and $\hat{b} = 0.865 \pm 0.005$.  Both lie
+On the quality-filtered catalogue the platform's MAXC estimate is
+$M_c = 1.8$ (MAXC with the $+0.2$ correction), above which the maximum-likelihood
+fit gives $\hat{b} = 0.837 \pm 0.004$ ($N = 36\,824$); the goodness-of-fit test
+gives $M_c = 1.9$ at the 95\% level and $\hat{b} = 0.863 \pm 0.005$.  Both lie
 far below the planted values, because completeness varies across the merged
 catalogue: Agency~B's network detects small events in the central North Island
 that the GeoNet-like network misses, and both networks miss small offshore and
-deep events.  A single global $M_c$ is set by the best-covered part of the
-catalogue, and the catalogue above it is incomplete elsewhere.  Stepping the
-magnitude cut-off shows $\hat{b}$ rising until $M$2.7 and stable above it
-(Figure~\ref{fig:fmd}c); $M$2.7 is the lowest cut-off meeting the
-$b$-value-stability criterion of \citet{caogao2002}, in the form of
-\citet{woessner2005}, applied to the platform's estimates.  Above $M$2.7 the
-merged catalogue gives $\hat{b} = 1.061 \pm 0.011$ ($N = 8\,556$), a mixture of
+deep events.  A single global $M_c$ from either method is set by the
+best-covered part of the catalogue, and the catalogue above it is incomplete
+elsewhere.  Stepping the magnitude cut-off shows $\hat{b}$ rising until $M$2.7
+and stable above it (Figure~\ref{fig:fmd}c), and the platform's default
+estimate finds this: $b$-value stability (Section~\ref{sec:mc}) gives
+$M_c = 2.7$ for the merged catalogue, which we adopt as the cut-off for the
+comparisons below, and 2.8 for the quality-filtered catalogue, whose $\hat{b}$
+still rises by about 0.01 per 0.1 unit up to $M$3.0.  Above $M$2.7 the
+merged catalogue gives $\hat{b} = 1.062 \pm 0.012$ ($N = 8\,313$), a mixture of
 the independent background and the injected aftershocks.  Applied to the
-background events alone, the same routine returns $\hat{b} = 1.011 \pm 0.012$
+background events alone, the same routine returns $\hat{b} = 1.012 \pm 0.012$
 against the planted $1.00$, and to the injected aftershocks alone
 $1.35 \pm 0.04$ against the planted $1.30$: the estimator is sound once the
 sample is complete.  The quality-filtered catalogue above $M$2.7, in which 15\%
 of the events are injected aftershocks, gives $\hat{b} = 0.998 \pm 0.012$
-($N = 6\,465$; Figure~\ref{fig:fmd}b), 0.06 below the unfiltered value at the
+($N = 6\,446$; Figure~\ref{fig:fmd}b), 0.06 below the unfiltered value at the
 same cut-off, and its background events alone give $0.955 \pm 0.013$: the
 magnitude selectivity of the filter persists above the completeness magnitude.
 These are checks of the platform's behaviour on a controlled input, not
@@ -1508,19 +1572,19 @@ measurements of New Zealand seismicity.
 
 \subsection{Step 5: Declustering}
 
-Gardner-Knopoff declustering (Section~\ref{sec:decluster}) of the 6\,465
-quality-filtered events above $M$2.7 removes 2\,538 of them (39\%, against the
+Gardner-Knopoff declustering (Section~\ref{sec:decluster}) of the 6\,446
+quality-filtered events above $M$2.7 removes 2\,525 of them (39\%, against the
 15\% injected as aftershocks).  The windows recover 96.5\% of the injected
-aftershocks but also sweep up 1\,617 independent events that fall inside the
+aftershocks but also sweep up 1\,606 independent events that fall inside the
 space-time window of a larger event, and these are preferentially small (their
 own $\hat{b}$ is 1.19), because every cluster head survives while small events
 are the ones absorbed.  The declustered estimate, $\hat{b} = 0.883 \pm 0.014$,
-therefore lies 0.12 below both the undeclustered value and the planted background
-$b = 1.00$: window declustering shifts $b$ downwards, as \citet{mizrahi2021}
+therefore lies 0.11 below the undeclustered value and 0.12 below the planted
+background $b = 1.00$: window declustering shifts $b$ downwards, as \citet{mizrahi2021}
 found for real catalogues, and the shift here is not the removal of an
 aftershock excess alone.  Because the synthetic aftershocks follow their
 mainshocks, the forward window matches this construction; the symmetric window
-convention removes a further 970 events and gives $\hat{b} = 0.823 \pm 0.015$,
+convention removes a further 968 events and gives $\hat{b} = 0.824 \pm 0.015$,
 0.06 (about four formal standard errors) lower still.  Figure~\ref{fig:funnel}
 summarises the event-count flow through these steps.
 
@@ -1543,21 +1607,26 @@ offshore or at depth.
 
 \textbf{Guidance.}
 \begin{enumerate}[leftmargin=*]
-  \item Always estimate $M_c$ before fitting~$b$.  Use the CofC MAXC or
-    goodness-of-fit estimate as a starting point but verify it by eye on the FMD
-    plot, and check that $\hat{b}$ is stable as the cut-off is raised (the
-    magnitude filter sets an explicit cut-off).  In the synthetic example
-    (Section~\ref{sec:example}) both automatic estimates ($M$1.7 and $M$1.9)
-    lie well below the $M$2.7 from which $\hat{b}$ is stable.
+  \item Always estimate $M_c$ before fitting~$b$, and verify the estimate by eye
+    on the FMD and $b$-value stability plots rather than adopting it
+    unexamined.  In the synthetic example (Section~\ref{sec:example}) the MAXC
+    and goodness-of-fit estimates ($M$1.8 and $M$1.9) lie well below the
+    $M$2.7 from which $\hat{b}$ is stable, which the default
+    $b$-value-stability estimate finds.  That estimate errs the other way: on a
+    large catalogue, or one with an excess of large events over the GR law, it
+    can rise above a cut-off the analyst would accept (Section~\ref{sec:mc}).
+    Where the stability plot shows only a drift the analyst judges immaterial,
+    set an explicit cut-off (the magnitude filter's lower bound) and report it.
   \item Set the lower magnitude cut-off slightly above $M_c$ (e.g.\ $M_c + 0.1$)
     as a practical conservatism against partial completeness in the transition
     zone.
   \item After merging catalogues with different $M_c$ values, use at least the
     \emph{higher} of the two as the common cut-off.  This is necessary but not
-    sufficient: in the synthetic example the higher of the two catalogue
+    sufficient: in the synthetic example the higher of the two catalogues' MAXC
     estimates ($M$1.8, or $M$1.9 by the goodness-of-fit test) is still below the
     merged catalogue's completeness, because completeness also varies within each
-    network.
+    network; the higher of their $b$-value-stability estimates ($M$2.7) reaches
+    it.
 \end{enumerate}
 
 \subsection{Magnitude heterogeneity bias}
@@ -1598,7 +1667,7 @@ preferentially.
   \item Before fitting $b$ to a quality-filtered catalogue, compare the
     frequency-magnitude distributions or $b$-values with and without the filter
     at the same cut-off: in the synthetic example a $Q \geq 70$ filter keeps 58\%
-    of the events of $M$1.5--2.0 but 83\% of those of $M$3.5--4.0, and lowers
+    of the events of $M$1.5--2.0 but 86\% of those of $M$3.5--4.0, and lowers
     $\hat{b}$ by 0.06 even above the completeness magnitude.
   \item Check the spatial distribution of excluded events; geographic
     concentration may indicate a bias rather than a data problem.
@@ -1616,7 +1685,7 @@ methods remove small independent events more readily than large ones
 the clustered population was assigned a higher $b$ by construction, the
 quality-filtered catalogue gives $\hat{b} = 1.00$ above $M$2.7 before
 declustering and $0.88$ after, below the planted background value of $1.00$,
-because the windows also remove 1\,617 small independent events.  The
+because the windows also remove 1\,606 small independent events.  The
 declustered value also depends on the window convention: a symmetric window
 gives $0.82$ on the same catalogue (Section~\ref{sec:decluster}), a difference of
 about four formal $\sigma_b$, so the convention must be reported alongside any
@@ -1642,8 +1711,8 @@ declustered $b$.
 earthquake once per report, inflating $N(M)$ wherever the catalogues overlap,
 raising the estimated $a$-value, and distorting rate estimates.  In the
 synthetic example, concatenating the two catalogues instead of merging them
-would raise the number of events above $M$2.7 from 8\,556 to 13\,312 (56\%
-more) and the $a$-value from 6.80 to 6.87; because the shared events are the
+would raise the number of events above $M$2.7 from 8\,313 to 13\,312 (60\%
+more) and the $a$-value from 6.79 to 6.87; because the shared events are the
 larger ones that both networks record, it would also lower $\hat{b}$, from 1.06 to
 1.02.  The Analysis page therefore withholds the $b$-value, $M_c$, rates and
 moment totals for a set pooled from several catalogues.
@@ -1652,10 +1721,11 @@ moment totals for a set pooled from several catalogues.
 \begin{enumerate}[leftmargin=*]
   \item Always merge catalogues before statistical analysis; never concatenate
     raw files.
-  \item Inspect the merge preview and summary (duplicate count, groups flagged
-    as failing a validity gate or ambiguous, strategy applied) and satisfy
-    yourself that the matching thresholds are physically appropriate for your
-    region and magnitude range.
+  \item Inspect the merge's QC summary (matched, flagged and kept-apart groups,
+    the differences between matched solutions, the pairs near the edge of their
+    windows, strategy applied), which is kept with the merged catalogue, and
+    satisfy yourself that the matching thresholds are physically appropriate for
+    your region and magnitude range.
   \item For teleseismic analysis, increase the distance threshold (e.g., to
     100~km) to account for larger location scatter at global distances.
 \end{enumerate}
@@ -1789,16 +1859,21 @@ but are captured as persistent, shareable catalogue objects.
 \textbf{$M_c$ estimation.}  The MAXC method \citep{wiemer2000} implemented in
 CofC is fast and requires no assumptions about the GR model, but
 \citet{woessner2005} showed that it systematically underestimates $M_c$ by
-$\sim 0.1$--$0.2$ magnitude units in typical network conditions.  The $+0.2$
-correction applied by default mitigates this but does not eliminate it, and the
-goodness-of-fit test offered as an alternative shares a deeper limitation: both
-estimate one $M_c$ for the events under analysis.  On a merged catalogue whose
-completeness varies in space, the worked example shows both falling well below
-the magnitude from which $b$ is stable (Section~\ref{sec:example}).  The
-Entire-Magnitude-Range method \citep{woessner2005}, a $b$-value-stability
-estimate \citep{caogao2002}, spatially varying $M_c$ \citep{schorlemmer2008},
-and, for time-varying $M_c$, the bootstrap approach described by
-\citet{mignan2012} are planned.
+$\sim 0.1$--$0.2$ magnitude units in typical network conditions; the $+0.2$
+correction mitigates this but does not eliminate it.  On a merged catalogue whose
+completeness varies in space, the worked example shows MAXC and the
+goodness-of-fit test both falling well below the magnitude from which $b$ is
+stable (Section~\ref{sec:example}).  The default $b$-value-stability estimate
+\citep{caogao2002,woessner2005} reaches that magnitude, but it errs in the
+other direction: its tolerance $\delta b$ shrinks as $1/\sqrt{N}$, so on large
+catalogues it rejects cut-offs at which $\hat{b}$ still drifts by only a few
+hundredths, and an excess of large events over the GR law raises it further.
+Its $M_c$ is therefore conservative and should be checked against the
+stability plot.  All three methods estimate one $M_c$ for
+the events under analysis.  The Entire-Magnitude-Range method
+\citep{woessner2005}, spatially varying $M_c$ \citep{schorlemmer2008}, and, for
+time-varying $M_c$, the bootstrap approach described by \citet{mignan2012} are
+planned.
 
 \textbf{Spatial analysis.}  CofC currently provides only global (single
 value) $b$-value estimates.  Spatial mapping of $b$ \citep{wiemer2000,
@@ -1835,14 +1910,16 @@ provenance-preserving export, the steps that are individually inconvenient
 yet collectively determine the validity of downstream statistical analysis.
 Using a fully synthetic two-catalogue New Zealand example processed end to end
 by the platform's own engine, we illustrated the workflow and quantified what it
-exposes: the matcher pairs 93\% of the earthquakes both agencies report, with
+exposes: the matcher pairs 98\% of the earthquakes both agencies report, with
 98\% of its pairs correct; the quality index ranks the offshore, high-gap
-population lowest, and a quality threshold removes 95\% of it; and three
+population lowest, and a quality threshold removes 94\% of it; and three
 preprocessing choices move the $b$-value by more than its formal error, namely a
-single global $M_c$ on a catalogue whose completeness varies in space, a
-magnitude-selective quality filter ($-0.06$), and window declustering ($-0.12$).
-Once the cut-off lies above the merged catalogue's completeness, the estimator
-recovers the planted $b = 1.00$ of the independent events ($1.01 \pm 0.01$).
+single global $M_c$ from maximum curvature or the goodness-of-fit test on a
+catalogue whose completeness varies in space, a magnitude-selective quality
+filter ($-0.06$), and window declustering ($-0.11$).  Above the more
+conservative $b$-value-stability estimate of $M_c$, which reaches the merged
+catalogue's completeness, the estimator recovers the planted $b = 1.00$ of the
+independent events ($1.01 \pm 0.01$).
 These figures characterise the controlled synthetic inputs and the software's
 behaviour on them, not real New Zealand seismicity.
 The priority next steps are validation on heterogeneous real catalogues,
@@ -1877,13 +1954,13 @@ coastline.  Everything the example reports is then computed by the platform's
 own TypeScript modules, called as the platform calls them, through
 \path{paper/figures/worked_example_engine.ts}: the quality index on import
 (\path{lib/quality-scoring.ts}), duplicate association and the Quality-based
-merge (\path{lib/merge.ts}), and the $M_c$ estimates, maximum-likelihood
+merge (\path{lib/merge.ts}), and the $M_c$ estimates (among them the
+$b$-value-stability estimate that sets the analysis cut-off), maximum-likelihood
 $b$-values and Gardner-Knopoff declustering
 (\path{lib/seismological-analysis.ts}).  The only computations outside the
-platform are the symmetric-window variant of Gardner-Knopoff declustering and the
-$b$-value-stability criterion used to choose the cut-off, both implemented in
-that file and labelled as such, and the scoring of the results against the
-generator's ground truth.  \path{paper/figures/generate_figures.py} runs the
+platform are the symmetric-window variant of Gardner-Knopoff declustering,
+implemented in that file and labelled as such, and the scoring of the results
+against the generator's ground truth.  \path{paper/figures/generate_figures.py} runs the
 whole chain, draws Figures~\ref{fig:map}, \ref{fig:gap} and~\ref{fig:fmd}, prints
 the summary and writes every quoted number to
 \path{paper/figures/worked_example_summary.json}; its Python dependencies are
@@ -2019,20 +2096,23 @@ conservatively.}
     all computed by the platform (Section~\ref{sec:example}).
     \textit{(a)}~Non-cumulative frequency-magnitude distribution (FMD) of the
     merged catalogue (aqua outline) and of its quality-filtered subset
-    ($Q \geq 70$, blue bars), with the platform's MAXC and goodness-of-fit
-    estimates of $M_c$ for the filtered catalogue (dotted) and the cut-off from
-    which $\hat{b}$ is stable (dashed); the filter removes a larger share of the
-    small events.  \textit{(b)}~Cumulative FMD of the 6\,465 filtered events at
-    or above $M$2.7 before (open circles) and after (filled squares)
-    Gardner-Knopoff declustering, with the platform's maximum-likelihood fits;
+    ($Q \geq 70$, blue bars), in 0.1-wide bins centred on multiples of 0.1, with
+    the platform's MAXC and goodness-of-fit estimates of $M_c$ for the filtered
+    catalogue (dotted) and its $b$-value-stability (MBS) estimate for the merged
+    catalogue, the cut-off from which $\hat{b}$ is stable (dashed); the filter
+    removes a larger share of the small events.  \textit{(b)}~Cumulative FMD of
+    the 6\,446 filtered events at or above $M$2.7 before (open circles) and after
+    (filled squares) Gardner-Knopoff declustering, with the platform's
+    maximum-likelihood fits;
     the partition is the one the windows of
     equations~\eqref{eq:gk_L}--\eqref{eq:gk_T} produce on the events' origin
     times and epicentres.  \textit{(c)}~$\hat{b} \pm \sigma_b$ against the
     magnitude cut-off for the merged catalogue, the quality-filtered catalogue,
-    and the quality-filtered catalogue declustered at each cut-off.  $\hat{b}$
-    rises with the cut-off until the whole merged catalogue is complete, near
-    $M$2.7; the quality filter lowers it by about 0.06 and declustering by a
-    further 0.12, below the planted background value (dotted).  Data are
+    and the quality-filtered catalogue declustered at each cut-off, with the
+    $M_c$ estimates of (a).  $\hat{b}$ rises with the cut-off until the whole
+    merged catalogue is complete, near $M$2.7; the quality filter lowers it by
+    about 0.06 and declustering by a
+    further 0.11, below the planted background value (dotted).  Data are
     synthetic and for illustration only.
   }
   \label{fig:fmd}
@@ -2050,12 +2130,12 @@ conservatively.}
   % bars centred at x=0; width (cm) proportional to event count (9\,cm = 215\,233).
   % The two narrowest bars carry their counts to their left.
   \node[bar=10, minimum width=9.00cm] (b1) at (0,0)     {215\,233};
-  \node[bar=16, minimum width=7.12cm] (b2) at (0,-1.25) {170\,377};
-  \node[bar=24, minimum width=3.62cm] (b3) at (0,-2.50) {86\,468};
+  \node[bar=16, minimum width=7.03cm] (b2) at (0,-1.25) {168\,124};
+  \node[bar=24, minimum width=3.60cm] (b3) at (0,-2.50) {86\,028};
   \node[bar=34, minimum width=0.27cm] (b4) at (0,-3.75) {};
-  \node[anchor=east] at (b4.west) {6\,465\,};
+  \node[anchor=east] at (b4.west) {6\,446\,};
   \node[bar=44, minimum width=0.16cm] (b5) at (0,-5.00) {};
-  \node[anchor=east] at (b5.west) {3\,927\,};
+  \node[anchor=east] at (b5.west) {3\,921\,};
   \node[stage] at (-5.1,0)     {Ingested records};
   \node[stage] at (-5.1,-1.25) {Merged (unique)};
   \node[stage] at (-5.1,-2.50) {Quality $\geq 70$};
@@ -2065,10 +2145,10 @@ conservatively.}
     \draw[blue!25] (\a.south west)--(\b.north west);
     \draw[blue!25] (\a.south east)--(\b.north east);
   }
-  \node[cut] (c1) at (5.3,-0.625) {$-44\,856$ duplicate reports merged};
-  \node[cut] (c2) at (5.3,-1.875) {$-83\,909$ low quality ($Q<70$)};
-  \node[cut] (c3) at (5.3,-3.125) {$-80\,003$ below $M$2.7};
-  \node[cut] (c4) at (5.3,-4.375) {$-2\,538$ Gardner-Knopoff dependents};
+  \node[cut] (c1) at (5.3,-0.625) {$-47\,109$ duplicate entries merged};
+  \node[cut] (c2) at (5.3,-1.875) {$-82\,096$ low quality ($Q<70$)};
+  \node[cut] (c3) at (5.3,-3.125) {$-79\,582$ below $M$2.7};
+  \node[cut] (c4) at (5.3,-4.375) {$-2\,525$ Gardner-Knopoff dependents};
   \draw[->,red!50!black] (c1.west) -- (4.1,-0.625);
   \draw[->,red!50!black] (c2.west) -- (2.6,-1.875);
   \draw[->,red!50!black] (c3.west) -- (1.0,-3.125);
@@ -2076,16 +2156,18 @@ conservatively.}
   \node[anchor=north, font=\footnotesize, align=center] (res) at (0,-5.75)
     {Gutenberg--Richter fit at or above $M$2.7: $\hat{b}=1.00\pm0.01$ before declustering,
      $0.88\pm0.01$ after\\[1pt]
-     (platform's own $M_c$ estimates for the filtered catalogue: $M$1.7 by MAXC, $M$1.9 by goodness of fit)};
+     ($M$2.7 is the merged catalogue's $M_c$ by $b$-value stability;\\[1pt]
+     the filtered catalogue's MAXC and goodness-of-fit estimates are $M$1.8 and $M$1.9)};
   \draw[->,blue!55!black] (b5.south) -- (res.north);
 \end{tikzpicture}%
 }
 \caption{Event-count flow through the CofC pipeline for the synthetic worked
 example (Section~\ref{sec:example}), every count computed by the platform.  Bar
 widths are proportional to the number of events; each stage removes the subset
-shown in red.  The cut-off $M$2.7 is the magnitude from which the merged
-catalogue's $b$-value is stable (Figure~\ref{fig:fmd}c), above the platform's
-automatic $M_c$ estimates.  All counts are properties of the controlled synthetic
+shown in red.  The cut-off $M$2.7 is the platform's $b$-value-stability
+estimate of $M_c$ for the merged catalogue, the magnitude from which its
+$b$-value is stable (Figure~\ref{fig:fmd}c), well above the MAXC and
+goodness-of-fit estimates.  All counts are properties of the controlled synthetic
 inputs, not real New Zealand seismicity.}
 \label{fig:funnel}
 \end{figure}

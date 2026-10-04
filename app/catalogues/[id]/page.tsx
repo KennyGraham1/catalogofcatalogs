@@ -38,6 +38,7 @@ import { useCachedFetch } from '@/hooks/use-cached-fetch';
 import { useAuth, usePermission } from '@/lib/auth/hooks';
 import { Permission, UserRole } from '@/lib/auth/types';
 import { ReviewQueue } from '@/components/merge/ReviewQueue';
+import { MergeQcCard } from '@/components/merge/MergeQcCard';
 
 interface Event {
   id: string | number;
@@ -428,6 +429,9 @@ export default function CatalogueDetailPage() {
       {mergedSourceNames && (
         <ReviewQueue catalogueId={catalogueId} canReview={canReview} catalogueNames={mergedSourceNames} />
       )}
+
+      {/* The QC summary kept with the merge; the card hides itself when there is none (404). */}
+      {mergedSourceNames && <MergeQcCard catalogueId={catalogueId} catalogueName={catalogue.name} />}
 
       {/* Event filters: client-side over the already-loaded events (C4 shape), with saved
           filters and a filtered export (C12) alongside. */}

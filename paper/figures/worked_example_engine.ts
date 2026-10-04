@@ -347,6 +347,10 @@ export interface WorkedExampleResult {
     true_pairs_found: number;
     false_associations: number;
     false_associations_with_aftershock: number;
+    /** Duplicate groups the magnitude gate accepted only within its uncertainty-aware tolerance. */
+    magnitude_widened_groups: number;
+    /** Of those, the groups that join entries of different true earthquakes. */
+    magnitude_widened_false: number;
     missed_pairs: number;
     missed_by_reason: Record<string, number>;
   };
@@ -487,17 +491,21 @@ export function runWorkedExample(
   // ---- merge: what mergeCatalogues runs (performMerge), with the Quality-based strategy ----
   type Report = Record<string, unknown> & { time: string; latitude: number; longitude: number; magnitude: number; source: string };
   const allEvents: Report[] = [];
-  const byKey = new Map<string, Report>();
   input.catalogues.forEach((c, k) => {
     const source: SourceCatalogue = { id: c.id, name: c.name, events: rowsByCatalogue[k].length, source: c.name };
     const agency = catalogueAgencyOf(source, { name: c.name } as never);
     rowsByCatalogue[k].forEach(row => {
-      const report: Report = { ...row, source: c.name, catalogueId: c.id, _catalogueAgency: agency };
-      allEvents.push(report);
-      byKey.set(`${c.id}/${row.id}`, report);
+      allEvents.push({ ...row, source: c.name, catalogueId: c.id, _catalogueAgency: agency });
     });
   });
   const groups = groupMatchingEvents(allEvents, config);
+  // The association's own copies of the entries (MatchGroup.events). The association keeps
+  // its record of how each entry was paired (contested or not) on these objects, and the
+  // consistency gate reads that record to decide whether its magnitude tolerance may widen,
+  // so the miss diagnostic below judges these objects, not the inputs, which carry none.
+  type Associated = (typeof groups)[number]['events'][number];
+  const associated = new Map<string, Associated>();
+  groups.forEach(g => g.events.forEach(e => associated.set(`${e.catalogueId}/${e.id}`, e)));
   const mergedRows = groups.map((g, index) => {
     const merged = mergeEventGroup(g.events, config);
     const members = merged.sourceEvents;
@@ -515,6 +523,8 @@ export function runWorkedExample(
   let truePairs = 0;
   let falseAssociations = 0;
   let falseWithAftershock = 0;
+  let widenedGroups = 0;
+  let widenedFalse = 0;
   const resolvedTo: Record<string, number> = { [first.id]: 0, [second.id]: 0 };
   let firstOnly = 0;
   let secondOnly = 0;
@@ -530,10 +540,18 @@ export function runWorkedExample(
     }
     duplicateGroups++;
     const truths = m.members.map(e => truthOf.get(`${e.catalogueId}/${e.originalData.id}`)!);
-    if (truths.every(t => t.trueIndex === truths[0].trueIndex)) truePairs++;
+    const correct = truths.every(t => t.trueIndex === truths[0].trueIndex);
+    if (correct) truePairs++;
     else {
       falseAssociations++;
       if (truths.some(t => t.aftershock)) falseWithAftershock++;
+    }
+    // A group the gate accepted only because its magnitude tolerance was widened by the
+    // reported uncertainties: judged without the association's record (null), the gate
+    // applies the fixed tiers, and only the magnitude check reads that record.
+    if (!validateEventGroup(groups[gi].events, false, undefined, null)) {
+      widenedGroups++;
+      if (!correct) widenedFalse++;
     }
     const to = m.selectedCatalogue ?? 'none';
     resolvedTo[to] = (resolvedTo[to] ?? 0) + 1;
@@ -545,7 +563,9 @@ export function runWorkedExample(
 
   // Earthquakes both agencies report (the duplicates to be found), and why the platform
   // left any of them apart: outside the adaptive windows, rejected by a validity gate (the
-  // conflict type the gate logs), or each report claimed by a closer counterpart.
+  // conflict type the gate logs), or each entry claimed by a closer counterpart. The gate is
+  // re-run on the association's copies of the two entries, so it judges them with the
+  // association's record, exactly as it did during the merge.
   const firstByTrue = new Map<number, string>();
   input.truth[first.id].true_index.forEach((t, i) => firstByTrue.set(t, `${first.id}/${String(first.columns.id[i])}`));
   const missedByReason: Record<string, number> = {};
@@ -557,8 +577,8 @@ export function runWorkedExample(
     injectedPairs++;
     const keyB = `${second.id}/${String(second.columns.id[i])}`;
     if (groupOf.get(keyA) === groupOf.get(keyB)) return;
-    const a = byKey.get(keyA)!;
-    const b = byKey.get(keyB)!;
+    const a = associated.get(keyA)!;
+    const b = associated.get(keyB)!;
     let reason: string;
     if (!eventsMatchAdaptive(a, b, config.timeThreshold, config.distanceThreshold)) {
       reason = 'outside matching window';
@@ -568,7 +588,7 @@ export function runWorkedExample(
         const logged = conflictLog.getConflicts();
         reason = logged.length > 0 ? `gate:${logged[0].type}` : 'gate:other';
       } else {
-        reason = 'paired with a closer report';
+        reason = 'paired with a closer entry';
       }
     }
     missedByReason[reason] = (missedByReason[reason] ?? 0) + 1;
@@ -709,6 +729,8 @@ export function runWorkedExample(
       true_pairs_found: truePairs,
       false_associations: falseAssociations,
       false_associations_with_aftershock: falseWithAftershock,
+      magnitude_widened_groups: widenedGroups,
+      magnitude_widened_false: widenedFalse,
       missed_pairs: injectedPairs - truePairs,
       missed_by_reason: missedByReason,
     },

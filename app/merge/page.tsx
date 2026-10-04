@@ -16,6 +16,10 @@ import Link from 'next/link';
 import { MergeActions } from '@/components/merge/MergeActions';
 import { MergeMetadataForm, MergeMetadata } from '@/components/merge/MergeMetadataForm';
 import { MergeProgressIndicator, MergeStep } from '@/components/merge/MergeProgressIndicator';
+import { MergeQcSummaryView } from '@/components/merge/MergeQcSummaryView';
+import { isMergeQcSummary } from '@/components/merge/qc-format';
+import type { MergeQcSummary } from '@/lib/merge-qc';
+import { formatCount } from '@/lib/map-format';
 import { useCatalogues } from '@/contexts/CatalogueContext';
 import { invalidateCatalogueData } from '@/lib/client-cache';
 import { InfoTooltip, LabelWithTooltip } from '@/components/ui/info-tooltip';
@@ -215,11 +219,11 @@ const FIELD_RULE_OPTIONS: Array<{
 // accessible description.
 const STRATEGY_TEXT: Record<string, { summary: string; details: string }> = {
   quality: {
-    summary: 'Uses the catalogue entry with the best-constrained solution (station count, azimuthal gap, RMS residual, uncertainties). The other entries are kept as its sources.',
+    summary: 'Uses the catalogue entry with the best-constrained solution (station count, azimuthal gap, RMS residual, uncertainties). The other entries are stored with the merged event as provenance.',
     details: 'Keeps the best-constrained solution, comparing only the quality metrics every catalogue in the group reports (station count, azimuthal gap, RMS residual, magnitude uncertainty and type, evaluation status). If a catalogue reports none of them, network authority decides.',
   },
   priority: {
-    summary: 'Uses the catalogue entry from the agency or catalogue you rank highest (set under Source Priority). The other entries are kept as its sources.',
+    summary: 'Uses the catalogue entry from the agency or catalogue you rank highest (set under Source Priority). The other entries are stored with the merged event as provenance.',
     details: 'Keeps the record from the source you rank highest when the same event appears in more than one catalogue.',
   },
   average: {
@@ -231,11 +235,11 @@ const STRATEGY_TEXT: Record<string, { summary: string; details: string }> = {
     details: 'Takes the median of the reported epicentres, latitude and longitude separately (longitudes unwrapped across the date line), and the median origin time; with two entries the median is their mean. Magnitude and depth are selected, not averaged: magnitude by type (Mw first; below M6.2 local ML ahead of mb, from M6.2 Ms ahead), depth from the best-constrained solution that solved for depth, falling back to a fixed depth only when none did. No single entry\'s origin details (time uncertainty, station counts, agency) are carried onto the median epicentre.',
   },
   newest: {
-    summary: 'Uses the latest reported solution creation time, falling back to review status and quality when times are missing. The other entries are kept as its sources.',
+    summary: 'Uses the latest reported solution creation time, falling back to review status and quality when times are missing. The other entries are stored with the merged event as provenance.',
     details: 'Keeps the most recently determined solution: the one whose origin the agency computed last (QuakeML creation time). When times are missing or tied and every entry states its review status, reviewed or final solutions win over preliminary ones; remaining ties use quality score. A rejected solution is used only if every entry is rejected.',
   },
   complete: {
-    summary: 'Uses the catalogue entry with the most populated fields (uncertainties, quality metrics, focal mechanisms). The other entries are kept as its sources.',
+    summary: 'Uses the catalogue entry with the most populated fields (uncertainties, quality metrics, focal mechanisms). The other entries are stored with the merged event as provenance.',
     details: 'Keeps the record with the most complete information (the most populated fields).',
   },
 };
@@ -376,13 +380,19 @@ export default function MergePage() {
     { id: 'save', label: 'Saving merged catalogue', status: 'pending' }
   ]);
   const [previewData, setPreviewData] = useState<any>(null);
+  // The selection and config the shown preview was generated for. Start Merge is enabled
+  // only while they equal the current ones, so a merge always follows a preview of exactly
+  // what it will do (the effects below also clear the preview when the settings change).
+  const [previewConfigKey, setPreviewConfigKey] = useState<string | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  // The QC summary the merge route returned for the merge just run (null for an older server).
+  const [completedQc, setCompletedQc] = useState<MergeQcSummary | null>(null);
   const [confirmMergeOpen, setConfirmMergeOpen] = useState(false);
 
   // Ref to track progress interval for cleanup
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  // Guards against re-entrant / concurrent merge submissions (double-click, or the QC
-  // panel's Proceed button firing again during/after a merge).
+  // Guards against re-entrant / concurrent merge submissions (a double-click on Start Merge
+  // or on the confirmation).
   const mergeInFlightRef = useRef(false);
   // Monotonic request id so a slow in-flight preview response can't overwrite state that
   // belongs to a newer request (config/selection changed while a preview was loading).
@@ -402,12 +412,14 @@ export default function MergePage() {
   useEffect(() => {
     previewRequestIdRef.current++;
     setPreviewData(null);
+    setPreviewConfigKey(null);
   }, [timeThreshold, distanceThreshold, mergeStrategy, priority, priorityOrder, fieldRuleChoices, onConflict]);
 
   // Clear preview data when selected catalogues change (same in-flight invalidation).
   useEffect(() => {
     previewRequestIdRef.current++;
     setPreviewData(null);
+    setPreviewConfigKey(null);
   }, [selectedCatalogues]);
 
   // Cleanup progress interval and any in-flight merged-event load on unmount
@@ -447,6 +459,10 @@ export default function MergePage() {
     });
     return Object.keys(rules).length > 0 ? rules : null;
   };
+
+  // What a preview was generated for: the selected catalogues (in order) and the config.
+  const previewKeyOf = (catalogues: ReadonlyArray<{ id: number | string }>, config: Record<string, unknown>): string =>
+    JSON.stringify({ sources: catalogues.map(catalogue => String(catalogue.id)), config });
 
   // One config builder for the preview and merge requests so the two cannot drift apart.
   const buildMergeConfig = (): Record<string, unknown> => {
@@ -556,11 +572,13 @@ export default function MergePage() {
         source: (cat as any).source || cat.name || 'unknown',
       }));
 
+      const config = buildMergeConfig();
+      const requestKey = previewKeyOf(selectedCatalogueData, config);
       const requestBody = {
         // Validation schema requires a "name" field, even for preview
         name: mergedName || 'Preview Only',
         sourceCatalogues,
-        config: buildMergeConfig(),
+        config,
       };
 
       if (process.env.NODE_ENV !== 'production') {
@@ -590,10 +608,13 @@ export default function MergePage() {
         return;
       }
       setPreviewData(result);
+      setPreviewConfigKey(requestKey);
 
+      const matched = Number(result?.statistics?.duplicateGroupsCount) || 0;
+      const flagged = Number(result?.statistics?.suspiciousGroupsCount) || 0;
       toast({
-        title: "Preview Generated",
-        description: `Found ${result.statistics.duplicateGroupsCount} duplicate groups`,
+        title: 'QC preview ready',
+        description: `${formatCount(matched)} matched ${matched === 1 ? 'group' : 'groups'}, ${formatCount(flagged)} flagged.`,
       });
     } catch (error) {
       if (requestId !== previewRequestIdRef.current) {
@@ -623,9 +644,19 @@ export default function MergePage() {
       });
       return;
     }
-    // Block re-entry while a merge is running or already finished (the QC panel's Proceed
-    // button and the footer button both route here). Prevents duplicate/concurrent writes.
+    // Block re-entry while a merge is running or already finished. Prevents
+    // duplicate/concurrent writes.
     if (mergeStatus === 'merging' || mergeStatus === 'complete' || mergeInFlightRef.current) {
+      return;
+    }
+    // A merge only follows a QC preview of exactly these settings (the button is disabled
+    // otherwise; this also covers a call that bypasses it).
+    if (!previewIsCurrent) {
+      toast({
+        title: 'Generate the QC preview first',
+        description: 'The merge starts from a QC preview of the current selection and settings.',
+        variant: 'destructive'
+      });
       return;
     }
     // Guard against selection drifting out of sync with the catalogues actually available.
@@ -663,11 +694,11 @@ export default function MergePage() {
     setMergeProgress(0);
     setMergedCatalogueId(null);
     setCompletedMerge(null);
+    setCompletedQc(null);
     setHeldForReviewCount(0);
-    // Clear the QC preview so its "Proceed with Merge" button cannot re-trigger a merge
-    // while this one runs or after it completes.
+    // Discard any preview still loading. The shown preview is kept (hidden while the merge
+    // runs), so after a failed merge it can be retried without generating it again.
     previewRequestIdRef.current++;
-    setPreviewData(null);
 
     // Reset all steps to pending
     setMergeSteps(steps => steps.map(s => ({ ...s, status: 'pending' as const })));
@@ -736,6 +767,8 @@ export default function MergePage() {
       // A server without the field reports nothing held.
       const held = Number(result.heldForReviewCount);
       setHeldForReviewCount(!exportOnly && Number.isFinite(held) && held > 0 ? held : 0);
+      // The QC summary of the merge as run; an older server sends none.
+      setCompletedQc(isMergeQcSummary(result.qc) ? result.qc : null);
 
       // Server accepted and returned the merge result — only now mark the
       // fetch/match/merge/bounds steps complete (they previously flipped green
@@ -1472,6 +1505,13 @@ export default function MergePage() {
     return sortDirection === 'asc' ? ' ↑' : ' ↓';
   };
 
+  // Start Merge is enabled only while a QC preview of exactly the current selection and
+  // settings is shown.
+  const currentPreviewKey = previewKeyOf(getSelectedCatalogues, buildMergeConfig());
+  const previewIsCurrent = previewData != null && previewConfigKey === currentPreviewKey;
+  const mergeNeedsPreview = !isReadOnly && (mergeStatus === 'idle' || mergeStatus === 'error') && !previewIsCurrent;
+  const previewStatistics = previewIsCurrent ? previewData?.statistics : null;
+
   const renderMergeButton = () => {
     if (mergeStatus === 'merging') {
       return (
@@ -1491,9 +1531,12 @@ export default function MergePage() {
           // Reset the rest of the merge state so no stale preview/results/progress carry over.
           previewRequestIdRef.current++;
           setPreviewData(null);
+          setPreviewConfigKey(null);
           setMergedEvents([]);
           setMergedCatalogueId(null);
           setCompletedMerge(null);
+          setCompletedQc(null);
+          setHeldForReviewCount(0);
           setMergeProgress(0);
           setMergeSteps(steps => steps.map(s => ({ ...s, status: 'pending' as const })));
         }}>
@@ -1503,7 +1546,11 @@ export default function MergePage() {
     }
 
     return (
-      <Button onClick={handleStartMerge} disabled={isReadOnly}>
+      <Button
+        onClick={handleStartMerge}
+        disabled={isReadOnly || !previewIsCurrent}
+        aria-describedby={mergeNeedsPreview ? 'start-merge-hint' : undefined}
+      >
         <Save className="mr-2 h-4 w-4" />
         {isReadOnly ? 'Login to Merge' : 'Start Merge'}
       </Button>
@@ -2065,7 +2112,7 @@ export default function MergePage() {
                         <div>
                           <div className="flex items-center gap-1.5">
                             <h4 id="on-conflict-label" className="text-sm font-medium">Flagged groups</h4>
-                            <InfoTooltip content="The preview flags groups that were regrouped, are ambiguous, fail validation, or disagree on magnitude or depth, and entries that were matched but split off because their group failed validation (Separated). Holding never drops an entry: the row is written with the strategy's provisional solution and a reviewer keeps it or publishes one entry's solution instead." />
+                            <InfoTooltip content="The preview flags groups that were regrouped, are ambiguous, fail validation, or disagree on magnitude or depth, and entries that were matched but kept apart because their group failed the consistency checks (Kept apart). Holding never drops an entry: the row is written with the strategy's provisional solution and a reviewer keeps it or publishes one entry's solution instead." />
                           </div>
                         </div>
                         <RadioGroup
@@ -2215,10 +2262,11 @@ export default function MergePage() {
                     </div>
 
                     {/* Generate Preview Button */}
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center">
-                      <h3 className="font-medium text-blue-900 mb-2">Quality Control Preview</h3>
-                      <p className="text-sm text-blue-700 mb-4">
-                        Generate a preview to review duplicate groups and validate the merge before committing to the database.
+                    <div className="rounded-lg border bg-muted/30 p-6 text-center">
+                      <h3 className="mb-2 font-medium">Quality-control preview</h3>
+                      <p className="mb-4 text-sm text-muted-foreground">
+                        Generate the QC preview to check the matched, flagged and kept-apart groups before merging.
+                        The merge can be started once the preview is shown.
                       </p>
                       <Button
                         onClick={handleGeneratePreview}
@@ -2233,8 +2281,8 @@ export default function MergePage() {
                   <MergePreviewQC
                     previewData={previewData}
                     holdForReview={onConflict === 'hold'}
-                    onProceedWithMerge={handleStartMerge}
-                    onCancel={() => setPreviewData(null)}
+                    strategy={mergeStrategy}
+                    priority={priority}
                   />
                 ))}
 
@@ -2264,6 +2312,27 @@ export default function MergePage() {
                   </Alert>
                 )}
 
+                {/* The QC summary of the merge as run (the stored one, for a saved catalogue). */}
+                {mergeStatus === 'complete' && completedQc && (
+                  <Card className="mb-4" data-testid="completed-merge-qc">
+                    <CardHeader>
+                      <CardTitle>Merge QC summary</CardTitle>
+                      <CardDescription>
+                        {mergedCatalogueId
+                          ? 'Kept with the merged catalogue and shown on its page.'
+                          : 'Export-only merge: download the summary now, it is not stored.'}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <MergeQcSummaryView
+                        summary={completedQc}
+                        catalogueId={mergedCatalogueId}
+                        fileBaseName={mergedName.trim() || 'merged_catalogue'}
+                      />
+                    </CardContent>
+                  </Card>
+                )}
+
                 {mergeStatus === 'complete' && (
                   <MergeActions
                     events={mergedEvents}
@@ -2278,7 +2347,7 @@ export default function MergePage() {
                   />
                 )}
 
-                {mergeStatus !== 'complete' && !previewData && (
+                {(mergeStatus === 'merging' || (mergeStatus !== 'complete' && !previewData)) && (
                   <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 p-3 rounded-md">
                     <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0" />
                     <p className="text-sm text-amber-800 dark:text-amber-300">
@@ -2316,7 +2385,16 @@ export default function MergePage() {
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               )}
-              {activeTab === 'preview' && renderMergeButton()}
+              {activeTab === 'preview' && (
+                <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
+                  {mergeNeedsPreview && (
+                    <p id="start-merge-hint" className="text-sm text-muted-foreground">
+                      {isLoadingPreview ? 'Generating the QC preview…' : 'Generate the QC preview first'}
+                    </p>
+                  )}
+                  {renderMergeButton()}
+                </div>
+              )}
             </div>
           </CardFooter>
         </Card>
@@ -2327,7 +2405,16 @@ export default function MergePage() {
               <AlertDialogTitle>Merge {getSelectedCatalogues.length} catalogues?</AlertDialogTitle>
               <AlertDialogDescription>
                 This creates a new catalogue{mergedName.trim() ? <> named <strong>{mergedName.trim()}</strong></> : ''} from{' '}
-                {getSelectedCatalogues.length} sources (~{estimatedMergedEvents.toLocaleString()} events after de-duplication).
+                {getSelectedCatalogues.length} sources
+                {previewStatistics
+                  ? ` (${formatCount(previewStatistics.totalEventsAfter)} events, as in the QC preview).`
+                  : ` (~${estimatedMergedEvents.toLocaleString()} events after combining matched entries).`}
+                {previewStatistics && previewStatistics.suspiciousGroupsCount > 0 && (
+                  // Held rows exist only in a saved catalogue; an export-only merge holds nothing.
+                  onConflict === 'hold' && !exportOnly
+                    ? ` ${formatCount(previewStatistics.suspiciousGroupsCount)} flagged ${previewStatistics.suspiciousGroupsCount === 1 ? 'group is' : 'groups are'} held for review.`
+                    : ` ${formatCount(previewStatistics.suspiciousGroupsCount)} flagged ${previewStatistics.suspiciousGroupsCount === 1 ? 'group is' : 'groups are'} published with the strategy's solution.`
+                )}
                 {exportOnly
                   ? ' Export-only mode: nothing is written to the database.'
                   : ' The merged catalogue is written to the database and cannot be undone from here.'}

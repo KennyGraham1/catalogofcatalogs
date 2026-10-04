@@ -174,6 +174,10 @@ function goToPreview() {
 }
 
 async function startAndConfirmMerge(confirmLabel = 'Merge catalogues') {
+  // A merge always follows a QC preview of the current settings: generate one if none is shown.
+  const generate = screen.queryByRole('button', { name: 'Generate QC Preview' });
+  if (generate) fireEvent.click(generate);
+  await waitFor(() => expect(screen.getByRole('button', { name: /Start Merge/ })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: /Start Merge/ }));
   fireEvent.click(await screen.findByRole('button', { name: confirmLabel }));
 }

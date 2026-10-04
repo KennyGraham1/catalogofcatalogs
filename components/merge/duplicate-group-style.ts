@@ -60,6 +60,11 @@ export interface GroupShape {
   selectedEventIndex: number;
   supersededEventIndexes?: number[];
   computedEpicentre?: { latitude: number; longitude: number; time: string } | null;
+  /**
+   * Entries published as events of their own, beside selectedEventIndex: a kept-apart
+   * cluster shown as one map, where each split-off event has its own published solution.
+   */
+  publishedEventIndexes?: number[];
 }
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
@@ -71,6 +76,7 @@ function foreground(isDark: boolean): string {
 /** Role of the entry at `index` in `group`. */
 export function entryRole(group: GroupShape, index: number): GroupEntryRole {
   if ((group.supersededEventIndexes ?? []).includes(index)) return 'superseded';
+  if ((group.publishedEventIndexes ?? []).includes(index)) return 'published';
   return index === group.selectedEventIndex ? 'published' : 'duplicate';
 }
 

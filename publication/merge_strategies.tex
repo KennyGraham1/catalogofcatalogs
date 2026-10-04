@@ -502,6 +502,7 @@ event group (\cref{sec:selection}), not merely to flag events after the
 fact.
 
 \subsubsection{Depth fixing and its consequences}
+\label{sec:depthfix}
 
 A significant fraction of agencies fix the focal depth at a standard value when
 insufficient depth-sensitive phases are available.  \citet{Engdahl2020} estimate
@@ -1332,7 +1333,41 @@ names one \catalog\ twice is refused), and a group of three or more must have a
 member within the matching window of every other, so reports
 linked only through a chain of intermediate reports are not fused.  Groups that
 fail the consistency checks are split into their largest self-consistent
-sub-groups, as recommended in the failed-group recovery above.
+sub-groups, as recommended in the failed-group recovery above.  The entries a
+split leaves on their own are published as separate events and flagged, and the
+merge's quality-control summary, kept with the merged \catalog, lists each
+failed group as one unit with the reasons it failed.
+
+The consistency checks allow for the uncertainties the solutions report.  The
+magnitude check compares the spread of a group's magnitudes, within each scale
+and, for a group mixing scales, on the common $M_\mathrm{w}$ scale, with a
+tolerance $T$ of 0.5, 0.8, 1.2 or 1.5 units for a mean reported magnitude below
+4, from 4 to 5.5, from 5.5 to 7, and from 7.  Where the pairing is uncontested
+(the association refused no alternative nearly as close as the pairing kept)
+and every pair of solutions agrees closely in origin time and epicentre (within
+a tenth of the matching window and, where both solutions state them, within
+three combined standard errors of each), the tolerance becomes
+\begin{equation*}
+  T^{*} = \min\bigl\{2T,\ \max\bigl[T,\ 3\sqrt{\sigma_1^{2} + \sigma_2^{2} + \sigma_\mathrm{ag}^{2}}\,\bigr]\bigr\},
+\end{equation*}
+where $\sigma_1$ and $\sigma_2$ are the reported uncertainties of the two
+extreme magnitudes (0 when not reported) and $\sigma_\mathrm{ag} = 0.2$ is the
+inter-agency scatter that no reported uncertainty describes, the low end of the
+0.2--0.3 typical of $M_\mathrm{L}$ differences between agencies.  The factor 3
+gives three-standard-deviation coverage.  On the common scale the conversion
+uncertainties are added in quadrature, $\sqrt{T^{*2} + \sigma_{c,1}^{2} +
+\sigma_{c,2}^{2}}$, while raw values on scales that cannot be converted are held
+to $T$, since they differ by an unknown scale offset.  The cap at $2T$ guards
+against bulletins that report the scatter of the station magnitudes rather than
+the error of their mean; below $M4$ it equals the 1.0-unit magnitude-range flag
+of \cref{tab:qcflags} \citep{Tanaka2022}.  A contested pairing keeps $T$,
+because in a dense sequence magnitude is the main evidence that separates
+neighbouring events.  For depth, a fixed (operator-assigned) depth carries no
+depth information (\cref{sec:depthfix}) and is not compared, so an agency that
+fixes an unresolved depth at 10\,km does not contradict another's solved 35\,km;
+solved-for depths must agree within the larger of the depth threshold (30\,km
+for shallow events below $M5$, 50\,km from it, wider at intermediate and great
+depth) and three combined standard errors of the two extreme depths.
 
 \bibliographystyle{apalike}
 \bibliography{catalogBib}

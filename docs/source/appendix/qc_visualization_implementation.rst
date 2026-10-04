@@ -1,6 +1,19 @@
 QC Visualization Implementation for Merge Operations
 ====================================================
 
+.. note::
+
+   **Superseded (October 2026).** This page records the original
+   implementation of the merge QC preview. The panel has since been
+   redesigned, and the current behaviour is documented in the user guide
+   (:doc:`/user-guide/merging-catalogues`): the QC preview with its
+   **Flagged**, **Kept apart** and **Matched** tabs (largest disagreement
+   first, 50 per page), the single **Start Merge** action that requires a
+   current preview, the merge QC summary that is stored with every saved
+   merge and downloadable as JSON and CSV, and the uncertainty-aware
+   magnitude and depth consistency checks that replace the fixed thresholds
+   described under *Validation Warnings* below.
+
 
 Summary
 -------
@@ -11,7 +24,7 @@ Implemented a comprehensive Quality Control (QC) visualization feature for earth
 
 
 ✅ **What Was Implemented**
---------------------------
+----------------------------
 
 
 **1. Backend: Preview API Endpoint**
@@ -31,10 +44,12 @@ Implemented a comprehensive Quality Control (QC) visualization feature for earth
 **File:** ``lib/merge.ts`` (added ~220 lines)
 
 **New Functions:**
+
 - ``previewMerge()`` - Main preview function that returns duplicate groups
 - ``performMergeWithGroups()`` - Modified merge algorithm that tracks duplicate groups
 
 **Returns:**
+
 .. code-block:: typescript
 
    {
@@ -63,6 +78,7 @@ Implemented a comprehensive Quality Control (QC) visualization feature for earth
 **File:** ``components/merge/DuplicateGroupCard.tsx``
 
 **Features:**
+
 - Displays each duplicate group (duplicate/triplicate/quadruplicate)
 - Shows max time difference, distance, and magnitude range
 - Expandable table with side-by-side comparison of all events
@@ -71,6 +87,7 @@ Implemented a comprehensive Quality Control (QC) visualization feature for earth
 - "View on Map" button to visualize geographic locations
 
 **Data Shown:**
+
 - Source catalogue (with color coding)
 - Time (with time difference from reference event)
 - Latitude/Longitude
@@ -87,6 +104,7 @@ Implemented a comprehensive Quality Control (QC) visualization feature for earth
 **File:** ``components/merge/DuplicateGroupMap.tsx``
 
 **Features:**
+
 - Interactive Leaflet map showing all events in a duplicate group
 - Color-coded markers matching source catalogues
 - Numbered markers (1, 2, 3...) for each event
@@ -104,6 +122,7 @@ Implemented a comprehensive Quality Control (QC) visualization feature for earth
 **Features:**
 
 **Statistics Summary:**
+
 - Events Before/After merge
 - Duplicate groups found
 - Duplicates removed
@@ -111,20 +130,24 @@ Implemented a comprehensive Quality Control (QC) visualization feature for earth
 - Color-coded cards (blue, green, purple, orange, red)
 
 **Alerts:**
+
 - ⚠️ Warning alert if suspicious matches detected
 - ✓ Success alert if all matches look good
 
 **Filter Tabs:**
+
 - **Duplicates** - Show only groups with 2+ events
 - **Suspicious** - Show only groups with validation warnings
 - **All** - Show all groups (including singletons)
 
 **Duplicate Groups List:**
+
 - Scrollable list of all duplicate groups
 - Each group shows as a DuplicateGroupCard
 - Click "View on Map" to see geographic visualization
 
 **Action Buttons:**
+
 - "Back to Configuration" - Return to merge config
 - "Proceed with Merge" - Continue with actual merge operation
 
@@ -135,6 +158,7 @@ Implemented a comprehensive Quality Control (QC) visualization feature for earth
 **File:** ``app/merge/page.tsx`` (modified)
 
 **Changes:**
+
 - Added ``previewData`` state to store preview results
 - Added ``isLoadingPreview`` state for loading indicator
 - Added ``handleGeneratePreview()`` function to call preview API
@@ -146,7 +170,7 @@ Implemented a comprehensive Quality Control (QC) visualization feature for earth
 
 
 🎯 **User Workflow**
--------------------
+---------------------
 
 .. mermaid::
    :align: center
@@ -234,7 +258,7 @@ Implemented a comprehensive Quality Control (QC) visualization feature for earth
 
 
 📊 **Validation Warnings**
--------------------------
+---------------------------
 
 
 The system automatically detects suspicious matches:
@@ -256,7 +280,7 @@ The system automatically detects suspicious matches:
 
 
 🎨 **Visual Features**
----------------------
+-----------------------
 
 
 **Color Coding**
@@ -286,7 +310,7 @@ The system automatically detects suspicious matches:
 
 
 🔍 **Example Use Cases**
------------------------
+-------------------------
 
 
 **Use Case 1: Verify Adaptive Thresholds**
@@ -322,7 +346,7 @@ The system automatically detects suspicious matches:
 
 
 📁 **Files Created/Modified**
-----------------------------
+------------------------------
 
 
 **Created:**
@@ -343,7 +367,7 @@ The system automatically detects suspicious matches:
 
 
 🚀 **How to Test**
------------------
+-------------------
 
 
 1. **Start the app:** http://localhost:3002/merge
@@ -361,7 +385,7 @@ The system automatically detects suspicious matches:
 
 
 ✅ **Benefits**
---------------
+----------------
 
 
 - ✅ **Confidence:** See exactly what will be merged before committing
@@ -374,7 +398,7 @@ The system automatically detects suspicious matches:
 
 
 🎉 **Result**
-------------
+--------------
 
 
 Users can now perform comprehensive QC on merge operations before committing to the database, ensuring high-quality merged catalogues!
@@ -382,7 +406,7 @@ Users can now perform comprehensive QC on merge operations before committing to 
 
 
 📸 **Visual Workflow**
----------------------
+-----------------------
 
 
 **Before Preview:**
@@ -519,7 +543,7 @@ Users can now perform comprehensive QC on merge operations before committing to 
 
 
 🔧 **Technical Details**
------------------------
+-------------------------
 
 
 **API Request:**
@@ -603,7 +627,7 @@ Users can now perform comprehensive QC on merge operations before committing to 
 
 
 🎓 **Best Practices**
---------------------
+----------------------
 
 
 1. **Always generate preview** before merging large catalogues
@@ -618,7 +642,7 @@ Users can now perform comprehensive QC on merge operations before committing to 
 
 
 🎉 **Final Result**
-------------------
+--------------------
 
 
 The QC visualization feature provides complete transparency into the merge operation, allowing users to:

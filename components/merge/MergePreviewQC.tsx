@@ -1,57 +1,42 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import type { MergeQcSummary } from '@/lib/merge-qc';
+import { formatCount } from '@/lib/map-format';
 import { DuplicateGroupCard } from './DuplicateGroupCard';
-import { AlertTriangle, CheckCircle2, Info, TrendingDown, Users, X } from 'lucide-react';
+import { KeptApartCard } from './KeptApartCard';
+import { MergeQcSummaryView, QcTotalsTiles } from './MergeQcSummaryView';
+import {
+  countOf, groupCatalogueIds, groupDiscrepancy, groupOriginEpoch, isFlagged, isKeptApart, plural, splitUnits,
+  unitDiscrepancy, unitEntryCount, unitOriginEpoch,
+  type PreviewEntry, type PreviewGroup, type SplitUnit,
+} from './qc-format';
 
-// Dynamically import map component to avoid SSR issues with Leaflet
+// Dynamically import the map to avoid SSR issues with Leaflet.
 const DuplicateGroupMap = dynamic(
   () => import('./DuplicateGroupMap').then(mod => mod.DuplicateGroupMap),
   { ssr: false }
 );
 
-interface EventData {
-  id?: string;
-  time: string;
-  latitude: number;
-  longitude: number;
-  depth?: number | null;
-  magnitude: number;
-  source: string;
-  catalogueId: string;
-  catalogueName: string;
-  magnitude_type?: string | null;
-  magnitude_uncertainty?: number | null;
-  used_station_count?: number | null;
-  azimuthal_gap?: number | null;
-  standard_error?: number | null;
-  depth_uncertainty?: number | null;
-}
+/** Groups per page of the list: rendering thousands of cards at once froze the page. */
+export const QC_PAGE_SIZE = 50;
 
-// heldForReview / supersededEventIndexes and the two counts are optional so a preview from
-// a server that predates them (contract M4) still renders.
-interface DuplicateGroup {
-  id: string;
-  events: EventData[];
-  selectedEventIndex: number;
-  isSuspicious: boolean;
-  validationWarnings: string[];
-  heldForReview?: boolean;
-  supersededEventIndexes?: number[];
-  /** A report the association matched but the validity gate split off: published alone. */
-  separated?: boolean;
-  /** The averaged / median epicentre the merge publishes when no report is selected. */
-  computedEpicentre?: { latitude: number; longitude: number; time: string } | null;
-}
-
-interface PreviewData {
-  duplicateGroups: DuplicateGroup[];
+/**
+ * The preview as the panel reads it (POST /api/merge/preview, MergePreviewPayload). The QC
+ * fields are optional so a response from a server that predates them still renders.
+ */
+export interface PreviewData {
+  duplicateGroups: PreviewGroup[];
+  matchedListed?: number;
+  matchedTotal?: number;
   statistics: {
     totalEventsBefore: number;
     totalEventsAfter: number;
@@ -63,220 +48,371 @@ interface PreviewData {
     separatedReportsCount?: number;
   };
   catalogueColors: Record<string, string>;
+  qc?: MergeQcSummary | null;
 }
 
-interface MergePreviewQCProps {
+export interface MergePreviewQCProps {
   previewData: PreviewData;
   /** True when the merge will hold flagged groups for review (config.onConflict 'hold'). */
   holdForReview?: boolean;
-  onProceedWithMerge: () => void;
-  onCancel: () => void;
+  /** The merge strategy and source priority, to say why each published solution won. */
+  strategy?: string;
+  priority?: string;
 }
 
-export function MergePreviewQC({ previewData, holdForReview = false, onProceedWithMerge, onCancel }: MergePreviewQCProps) {
-  const [selectedGroup, setSelectedGroup] = useState<DuplicateGroup | null>(null);
-  const [filterView, setFilterView] = useState<'all' | 'duplicates' | 'suspicious' | 'separated'>('duplicates');
+type QcView = 'flagged' | 'kept-apart' | 'matched';
+type SortOrder = 'discrepancy' | 'time-asc' | 'time-desc';
+const ALL_CATALOGUES = '__all__';
+
+type ListItem =
+  | { kind: 'group'; key: string; group: PreviewGroup; index: number; discrepancy: number; epoch: number; catalogues: string[] }
+  | { kind: 'unit'; key: string; unit: SplitUnit; discrepancy: number; epoch: number; catalogues: string[] };
+
+const VIEW_LABELS: Record<QcView, string> = { flagged: 'Flagged', 'kept-apart': 'Kept apart', matched: 'Matched' };
+
+const EMPTY_TEXT: Record<QcView, string> = {
+  flagged: 'No matched group was flagged.',
+  'kept-apart': 'No matched group failed the consistency checks, so no entries were kept apart.',
+  matched: 'No entries were matched across catalogues.',
+};
+
+/** What the map shows: a group, or a kept-apart cluster drawn as one group. */
+interface MapTarget {
+  title: string;
+  description: string;
+  group: PreviewGroup & { publishedEventIndexes?: number[] };
+}
+
+/** A kept-apart cluster as one map group: every split-off event's solution is ringed. */
+function unitMapGroup(unit: SplitUnit): MapTarget['group'] {
+  const events: PreviewEntry[] = [];
+  const published: number[] = [];
+  const superseded: number[] = [];
+  for (const { group } of unit.groups) {
+    const offset = events.length;
+    group.events.forEach(entry => events.push(entry));
+    if (group.selectedEventIndex >= 0) published.push(offset + group.selectedEventIndex);
+    (group.supersededEventIndexes ?? []).forEach(index => superseded.push(offset + index));
+  }
+  return {
+    id: unit.key, events, selectedEventIndex: -1, isSuspicious: false, validationWarnings: [],
+    supersededEventIndexes: superseded, publishedEventIndexes: published, computedEpicentre: null,
+  };
+}
+
+function compareItems(order: SortOrder) {
+  const byTime = (a: ListItem, b: ListItem) => (order === 'time-desc' ? b.epoch - a.epoch : a.epoch - b.epoch);
+  if (order !== 'discrepancy') return (a: ListItem, b: ListItem) => byTime(a, b) || a.key.localeCompare(b.key);
+  return (a: ListItem, b: ListItem) => b.discrepancy - a.discrepancy || a.epoch - b.epoch || a.key.localeCompare(b.key);
+}
+
+/**
+ * The merge QC preview: the QC summary of the merge the current settings would produce, and
+ * the groups to check, in three lists (Flagged, Kept apart, Matched), ranked by the largest
+ * disagreement with the published solution, filterable by catalogue and paged. The merge
+ * itself is started from the wizard footer; this panel has no actions of its own.
+ */
+export function MergePreviewQC({ previewData, holdForReview = false, strategy, priority }: MergePreviewQCProps) {
+  const { duplicateGroups, statistics, catalogueColors, qc } = previewData;
+  const [mapTarget, setMapTarget] = useState<MapTarget | null>(null);
   const mapCardRef = useRef<HTMLDivElement>(null);
+  const listTopRef = useRef<HTMLDivElement>(null);
+  const sortId = useId();
+  const catalogueId = useId();
 
-  // The map card opens below the (scrolling) group list: bring it into view.
+  // The map card opens below the list: bring it into view.
   useEffect(() => {
-    if (selectedGroup) mapCardRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
-  }, [selectedGroup]);
+    if (mapTarget) mapCardRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+  }, [mapTarget]);
 
-  const { duplicateGroups, statistics, catalogueColors } = previewData;
-
-  // Precompute id -> original index once so per-row lookups are O(1) instead of
-  // duplicateGroups.indexOf(group) (O(n)) inside the render map, which was O(n²) overall.
-  const groupIndexById = useMemo(() => {
-    const map = new Map<string, number>();
-    duplicateGroups.forEach((g, i) => map.set(g.id, i));
-    return map;
+  // Classify once per preview: O(n), then each view sorts and pages its own list.
+  const lists = useMemo(() => {
+    const flagged: ListItem[] = [];
+    const matched: ListItem[] = [];
+    const apart: Array<{ group: PreviewGroup; index: number }> = [];
+    duplicateGroups.forEach((group, index) => {
+      if (isKeptApart(group)) {
+        apart.push({ group, index });
+        return;
+      }
+      if (!isFlagged(group) && group.events.length < 2) return;
+      const item: ListItem = {
+        kind: 'group', key: group.id, group, index,
+        discrepancy: groupDiscrepancy(group), epoch: groupOriginEpoch(group), catalogues: groupCatalogueIds(group),
+      };
+      (isFlagged(group) ? flagged : matched).push(item);
+    });
+    const keptApart: ListItem[] = splitUnits(apart).map(unit => ({
+      kind: 'unit', key: unit.key, unit,
+      discrepancy: unitDiscrepancy(unit), epoch: unitOriginEpoch(unit),
+      catalogues: unit.groups.reduce<string[]>((ids, { group }) => {
+        groupCatalogueIds(group).forEach(id => { if (!ids.includes(id)) ids.push(id); });
+        return ids;
+      }, []),
+    }));
+    return { flagged, 'kept-apart': keptApart, matched } as Record<QcView, ListItem[]>;
   }, [duplicateGroups]);
 
-  // Filter groups based on view
-  const filteredGroups = duplicateGroups.filter(group => {
-    if (filterView === 'all') return true;
-    if (filterView === 'duplicates') return group.events.length > 1;
-    if (filterView === 'suspicious') return group.isSuspicious;
-    if (filterView === 'separated') return group.separated === true;
-    return true;
-  });
+  const catalogueOptions = useMemo(() => {
+    const names = new Map<string, string>();
+    (qc?.sourceCatalogues ?? []).forEach(catalogue => names.set(catalogue.id, catalogue.name));
+    duplicateGroups.forEach(group => group.events.forEach(entry => {
+      if (!names.has(entry.catalogueId)) names.set(entry.catalogueId, entry.catalogueName || entry.catalogueId);
+    }));
+    return Array.from(names.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [duplicateGroups, qc]);
 
-  const duplicateGroupsOnly = duplicateGroups.filter(g => g.events.length > 1);
-  const selectedCatalogueCount = selectedGroup ? new Set(selectedGroup.events.map(event => event.catalogueId)).size : 0;
+  const defaultView: QcView = lists.flagged.length > 0 ? 'flagged' : lists['kept-apart'].length > 0 ? 'kept-apart' : 'matched';
+  const [view, setView] = useState<QcView>(defaultView);
+  const [sortOrder, setSortOrder] = useState<SortOrder>('discrepancy');
+  const [catalogue, setCatalogue] = useState<string>(ALL_CATALOGUES);
+  const [page, setPage] = useState(1);
+
+  const visible = useMemo(() => {
+    const items = catalogue === ALL_CATALOGUES ? lists[view] : lists[view].filter(item => item.catalogues.includes(catalogue));
+    return items.slice().sort(compareItems(sortOrder));
+  }, [lists, view, sortOrder, catalogue]);
+
+  const pageCount = Math.max(1, Math.ceil(visible.length / QC_PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const first = (currentPage - 1) * QC_PAGE_SIZE;
+  const pageItems = visible.slice(first, first + QC_PAGE_SIZE);
+
+  const goToPage = (next: number) => {
+    setPage(Math.min(Math.max(1, next), pageCount));
+    listTopRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  };
+
+  // The tiles and alerts: the QC summary when the server sent one, else the statistics.
+  const flaggedCount = qc?.totals.flaggedGroups ?? statistics.suspiciousGroupsCount;
+  const keptApartEntries = qc?.totals.keptApartEntries ?? statistics.separatedReportsCount ?? 0;
+  const matchedGroups = qc?.totals.matchedGroups ?? statistics.duplicateGroupsCount;
+  const matchedTotal = previewData.matchedTotal ?? lists.matched.length;
+  const matchedListed = previewData.matchedListed ?? lists.matched.length;
+  const truncated = matchedTotal > matchedListed;
+  const tabCounts: Record<QcView, number> = {
+    flagged: lists.flagged.length,
+    'kept-apart': lists['kept-apart'].length,
+    matched: matchedTotal,
+  };
+
+  const alerts = (
+    <>
+      {flaggedCount > 0 && (
+        <Alert className="border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40">
+          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+          <AlertTitle className="text-amber-900 dark:text-amber-100">
+            {countOf(flaggedCount, 'flagged group', 'flagged groups')} {plural(flaggedCount, 'needs', 'need')} review
+          </AlertTitle>
+          <AlertDescription className="text-amber-900 dark:text-amber-100">
+            {flaggedCount === 1 ? 'It' : 'Each'} failed at least one consistency check (magnitude, depth, epicentre or
+            origin-time agreement, or an ambiguous match); the reasons are listed on {flaggedCount === 1 ? 'the group' : 'each group'} under Flagged.
+            {holdForReview
+              ? ` The merge will write ${flaggedCount === 1 ? 'it' : 'them'} with a provisional solution and list ${flaggedCount === 1 ? 'it' : 'them'} for review on the catalogue page.`
+              : ` The merge will publish the strategy's solution for ${flaggedCount === 1 ? 'it' : 'each'}; choose Hold for review in the configuration to have a reviewer decide instead.`}
+          </AlertDescription>
+        </Alert>
+      )}
+      {flaggedCount === 0 && keptApartEntries === 0 && matchedGroups > 0 && (
+        <Alert className="border-green-300 bg-green-50 dark:border-green-800 dark:bg-green-950/40">
+          <CheckCircle2 className="h-4 w-4 text-green-700 dark:text-green-400" />
+          <AlertTitle className="text-green-900 dark:text-green-100">All matched groups passed the consistency checks.</AlertTitle>
+        </Alert>
+      )}
+    </>
+  );
+
+  const supersededCount = statistics.supersededReportsCount ?? 0;
+
+  const listBody = (
+    <div className="space-y-3">
+      {view === 'matched' && truncated && (
+        <p className="text-sm text-muted-foreground" data-testid="matched-truncation">
+          Showing the {formatCount(matchedListed)} largest disagreements of {countOf(matchedTotal, 'matched group', 'matched groups')}.
+        </p>
+      )}
+      {visible.length === 0 ? (
+        <p className="py-8 text-center text-sm text-muted-foreground">
+          {catalogue !== ALL_CATALOGUES && lists[view].length > 0 ? 'No group in this list has an entry from the selected catalogue.' : EMPTY_TEXT[view]}
+        </p>
+      ) : (
+        <>
+          <p className="text-sm text-muted-foreground" aria-live="polite" data-testid="qc-page-range">
+            {view === 'kept-apart' ? 'Clusters' : 'Groups'} {formatCount(first + 1)}–{formatCount(first + pageItems.length)} of {formatCount(visible.length)}
+          </p>
+          <ol className="space-y-3" aria-label={`${VIEW_LABELS[view]} groups`}>
+            {pageItems.map(item => (
+              <li key={item.key}>
+                {item.kind === 'group' ? (
+                  <DuplicateGroupCard
+                    group={item.group}
+                    groupIndex={item.index}
+                    catalogueColors={catalogueColors}
+                    strategy={strategy}
+                    priority={priority}
+                    onViewOnMap={group => setMapTarget({
+                      title: `Group #${item.index + 1} on the map`,
+                      description: `${countOf(group.events.length, 'entry', 'entries')} from ${countOf(groupCatalogueIds(group).length, 'catalogue', 'catalogues')}. Click an entry for its offset from the published solution.`,
+                      group,
+                    })}
+                  />
+                ) : (
+                  <KeptApartCard
+                    unit={item.unit}
+                    catalogueColors={catalogueColors}
+                    strategy={strategy}
+                    priority={priority}
+                    onViewOnMap={unit => setMapTarget({
+                      title: 'Kept-apart cluster on the map',
+                      description: `${countOf(unitEntryCount(unit), 'entry', 'entries')} published as ${countOf(unit.groups.length, 'separate event', 'separate events')}; each ringed entry is a published solution.`,
+                      group: unitMapGroup(unit),
+                    })}
+                  />
+                )}
+              </li>
+            ))}
+          </ol>
+          {pageCount > 1 && (
+            <nav aria-label="Group list pages" className="flex flex-wrap items-center justify-between gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1}>
+                <ChevronLeft className="mr-1 h-4 w-4" aria-hidden="true" />
+                Previous
+              </Button>
+              <span className="text-sm tabular-nums text-muted-foreground">Page {currentPage} of {pageCount}</span>
+              <Button variant="outline" size="sm" onClick={() => goToPage(currentPage + 1)} disabled={currentPage === pageCount}>
+                Next
+                <ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />
+              </Button>
+            </nav>
+          )}
+        </>
+      )}
+    </div>
+  );
 
   return (
     <div className="space-y-6">
-      {/* Statistics Summary */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Info className="h-5 w-5" />
-            Merge Preview Statistics
-          </CardTitle>
+          <CardTitle>Merge QC preview</CardTitle>
           <CardDescription>
-            Review the duplicate detection results before committing the merge
+            What the merge would produce with the current settings. Review the flagged and kept-apart groups, then start the merge below.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className={`grid grid-cols-2 gap-4 ${holdForReview ? 'md:grid-cols-6' : 'md:grid-cols-5'}`}>
-            <div className="text-center p-4 bg-blue-50 dark:bg-blue-950/50 rounded-lg border border-blue-200 dark:border-blue-800">
-              <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">{statistics.totalEventsBefore.toLocaleString()}</div>
-              <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">Events Before</div>
+          {qc ? (
+            <MergeQcSummaryView summary={qc} showHeldTile={holdForReview} fileBaseName="merge_preview" afterTotals={alerts} />
+          ) : (
+            <div className="space-y-3">
+              <QcTotalsTiles
+                showHeld={holdForReview}
+                totals={{
+                  entriesBefore: statistics.totalEventsBefore,
+                  eventsAfter: statistics.totalEventsAfter,
+                  matchedGroups: statistics.duplicateGroupsCount,
+                  entriesCombined: statistics.duplicatesRemoved,
+                  flaggedGroups: statistics.suspiciousGroupsCount,
+                  heldForReview: statistics.heldForReviewCount ?? 0,
+                }}
+              />
+              {(keptApartEntries > 0 || supersededCount > 0) && (
+                <ul className="space-y-1 text-sm text-muted-foreground">
+                  {keptApartEntries > 0 && (
+                    <li>
+                      {countOf(keptApartEntries, 'entry was', 'entries were')} matched but kept apart because{' '}
+                      {keptApartEntries === 1 ? 'its group' : 'their groups'} failed the consistency checks; each is published on its own (see Kept apart).
+                    </li>
+                  )}
+                  {supersededCount > 0 && (
+                    <li>
+                      {countOf(supersededCount, 'superseded entry', 'superseded entries')} (older vintages of one agency&apos;s solution, kept as provenance).
+                    </li>
+                  )}
+                </ul>
+              )}
+              {alerts}
             </div>
-            <div className="text-center p-4 bg-green-50 dark:bg-green-950/50 rounded-lg border border-green-200 dark:border-green-800">
-              <div className="text-2xl font-bold text-green-700 dark:text-green-300">{statistics.totalEventsAfter.toLocaleString()}</div>
-              <div className="text-xs text-green-600 dark:text-green-400 mt-1">Events After</div>
-            </div>
-            <div className="text-center p-4 bg-purple-50 dark:bg-purple-950/50 rounded-lg border border-purple-200 dark:border-purple-800">
-              <div className="text-2xl font-bold text-purple-700 dark:text-purple-300">{statistics.duplicateGroupsCount.toLocaleString()}</div>
-              <div className="text-xs text-purple-600 dark:text-purple-400 mt-1">Duplicate Groups</div>
-            </div>
-            <div className="text-center p-4 bg-orange-50 dark:bg-orange-950/50 rounded-lg border border-orange-200 dark:border-orange-800">
-              <div className="text-2xl font-bold text-orange-700 dark:text-orange-300">{statistics.duplicatesRemoved.toLocaleString()}</div>
-              <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">Duplicates Removed</div>
-            </div>
-            <div className="text-center p-4 bg-red-50 dark:bg-red-950/50 rounded-lg border border-red-200 dark:border-red-800">
-              <div className="text-2xl font-bold text-red-700 dark:text-red-300">{statistics.suspiciousGroupsCount.toLocaleString()}</div>
-              <div className="text-xs text-red-600 dark:text-red-400 mt-1">Suspicious Matches</div>
-            </div>
-            {/* Only meaningful when the merge holds flagged groups: otherwise the count is 0 by
-                construction and the tile would only distract. */}
-            {holdForReview && (
-              <div className="text-center p-4 bg-amber-50 dark:bg-amber-950/50 rounded-lg border border-amber-200 dark:border-amber-800">
-                <div className="text-2xl font-bold text-amber-700 dark:text-amber-300">{(statistics.heldForReviewCount ?? 0).toLocaleString()}</div>
-                <div className="text-xs text-amber-600 dark:text-amber-400 mt-1">Held for review</div>
-              </div>
-            )}
-          </div>
-
-          {(statistics.supersededReportsCount ?? 0) > 0 && (
-            <p className="mt-3 text-sm text-muted-foreground">
-              {statistics.supersededReportsCount!.toLocaleString()} superseded {statistics.supersededReportsCount === 1 ? 'entry' : 'entries'} (older vintages of one agency&apos;s solution)
-            </p>
-          )}
-
-          {/* Reports the windows matched but the validity gate split apart are published on
-              their own; without this line the split would look like unrelated events. */}
-          {(statistics.separatedReportsCount ?? 0) > 0 && (
-            <p className="mt-3 text-sm text-muted-foreground">
-              {statistics.separatedReportsCount!.toLocaleString()} {statistics.separatedReportsCount === 1 ? 'entry was' : 'entries were'} matched
-              but kept apart because {statistics.separatedReportsCount === 1 ? 'its group' : 'their groups'} failed validation;
-              each is published on its own (see Separated).
-            </p>
-          )}
-
-          {statistics.suspiciousGroupsCount > 0 && (
-            <Alert className="mt-4 border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-950/50">
-              <AlertTriangle className="h-4 w-4 text-orange-600 dark:text-orange-400" />
-              <AlertTitle className="text-orange-900 dark:text-orange-200">Suspicious Matches Detected</AlertTitle>
-              <AlertDescription className="text-orange-800 dark:text-orange-300">
-                {statistics.suspiciousGroupsCount} duplicate group(s) have validation warnings.
-                Review these carefully before proceeding with the merge.
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {statistics.suspiciousGroupsCount === 0 && statistics.duplicateGroupsCount > 0 && (
-            <Alert className="mt-4 border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950/50">
-              <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
-              <AlertTitle className="text-green-900 dark:text-green-200">All Matches Look Good</AlertTitle>
-              <AlertDescription className="text-green-800 dark:text-green-300">
-                All duplicate groups passed validation checks. The merge appears to be working correctly.
-              </AlertDescription>
-            </Alert>
           )}
         </CardContent>
       </Card>
 
-      {/* Duplicate Groups List */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Duplicate Groups</CardTitle>
-              <CardDescription>
-                Review each group of matching events
-              </CardDescription>
-            </div>
-            <Tabs value={filterView} onValueChange={(v) => setFilterView(v as any)}>
-              <TabsList>
-                <TabsTrigger value="duplicates">
-                  Duplicates ({duplicateGroupsOnly.length})
-                </TabsTrigger>
-                <TabsTrigger value="suspicious">
-                  Suspicious ({statistics.suspiciousGroupsCount})
-                </TabsTrigger>
-                {(statistics.separatedReportsCount ?? 0) > 0 && (
-                  <TabsTrigger value="separated">
-                    Separated ({statistics.separatedReportsCount})
-                  </TabsTrigger>
-                )}
-                <TabsTrigger value="all">
-                  All ({duplicateGroups.length})
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
+          <CardTitle>Groups to review</CardTitle>
+          <CardDescription>
+            The largest disagreement is the greatest offset of an entry from the published solution, in units of its matching window.
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4 max-h-[600px] overflow-y-auto">
-            {filteredGroups.length === 0 && (
-              <div className="text-center py-8 text-muted-foreground">
-                No groups to display
+          <Tabs value={view} onValueChange={value => { setView(value as QcView); setPage(1); }}>
+            <div ref={listTopRef} className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <TabsList className="h-auto flex-wrap justify-start">
+                {(Object.keys(VIEW_LABELS) as QcView[]).map(key => (
+                  <TabsTrigger key={key} value={key}>
+                    {VIEW_LABELS[key]} ({formatCount(tabCounts[key])})
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <div className="space-y-1">
+                  <Label htmlFor={sortId} className="text-xs text-muted-foreground">Sort</Label>
+                  <Select value={sortOrder} onValueChange={value => { setSortOrder(value as SortOrder); setPage(1); }}>
+                    <SelectTrigger id={sortId} className="w-full sm:w-[220px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="discrepancy">Largest disagreement first</SelectItem>
+                      <SelectItem value="time-asc">Origin time, earliest first</SelectItem>
+                      <SelectItem value="time-desc">Origin time, latest first</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor={catalogueId} className="text-xs text-muted-foreground">Catalogue</Label>
+                  <Select value={catalogue} onValueChange={value => { setCatalogue(value); setPage(1); }}>
+                    <SelectTrigger id={catalogueId} className="w-full sm:w-[240px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL_CATALOGUES}>All catalogues</SelectItem>
+                      {catalogueOptions.map(option => (
+                        <SelectItem key={option.id} value={option.id}>{option.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-            )}
-            {filteredGroups.map((group, idx) => (
-              <DuplicateGroupCard
-                key={group.id}
-                group={group}
-                groupIndex={groupIndexById.get(group.id) ?? idx}
-                catalogueColors={catalogueColors}
-                onViewOnMap={(g) => setSelectedGroup(g)}
-              />
+            </div>
+            {(Object.keys(VIEW_LABELS) as QcView[]).map(key => (
+              <TabsContent key={key} value={key} className="mt-4">
+                {key === view ? listBody : null}
+              </TabsContent>
             ))}
-          </div>
+          </Tabs>
         </CardContent>
       </Card>
 
       {/* The selected group on the map: the map fills the card below its header. */}
-      {selectedGroup && (
-        <Card ref={mapCardRef} role="region" aria-label="Duplicate group map" className="overflow-hidden">
+      {mapTarget && (
+        <Card ref={mapCardRef} role="region" aria-label="Matched group map" className="overflow-hidden">
           <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-4">
             <div className="space-y-1">
-              <CardTitle className="text-base">
-                Group #{(groupIndexById.get(selectedGroup.id) ?? 0) + 1} on the map
-              </CardTitle>
-              <CardDescription>
-                {selectedGroup.events.length} {selectedGroup.events.length === 1 ? 'entry' : 'entries'} from{' '}
-                {selectedCatalogueCount} {selectedCatalogueCount === 1 ? 'catalogue' : 'catalogues'}.
-                Click an entry for its offset from the published solution.
-              </CardDescription>
+              <CardTitle className="text-base">{mapTarget.title}</CardTitle>
+              <CardDescription>{mapTarget.description}</CardDescription>
             </div>
-            <Button variant="outline" size="sm" onClick={() => setSelectedGroup(null)}>
-              <X className="mr-1 h-4 w-4" aria-hidden />
+            <Button variant="outline" size="sm" onClick={() => setMapTarget(null)}>
+              <X className="mr-1 h-4 w-4" aria-hidden="true" />
               Close map
             </Button>
           </CardHeader>
           <DuplicateGroupMap
-            group={selectedGroup}
+            group={mapTarget.group}
             catalogueColors={catalogueColors}
             height="500px"
             className="border-t"
           />
         </Card>
       )}
-
-      {/* Action Buttons */}
-      <div className="flex justify-between items-center pt-4 border-t">
-        <Button variant="outline" onClick={onCancel}>
-          Back to Configuration
-        </Button>
-        <Button onClick={onProceedWithMerge} size="lg">
-          Proceed with Merge
-        </Button>
-      </div>
     </div>
   );
 }
-

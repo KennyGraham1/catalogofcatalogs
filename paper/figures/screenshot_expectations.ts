@@ -16,8 +16,11 @@
  *     tab shows is read off the worker's result, whatever method produced Mc: the tallest
  *     bar of its centred FMD (the maximum-curvature peak), the stability test at Mc, and
  *     the MAXC and GFT estimates the method selector would give;
- *   - the merge preview is performMergeWithGroups, the function the preview route calls,
- *     with the settings the capture spec prescribes.
+ *   - the merge preview is buildMergePreview, the function the preview route
+ *     (previewMerge) returns, with the settings the capture spec prescribes: the totals
+ *     tiles and per-catalogue table of its merge QC summary, and the Flagged / Kept apart /
+ *     Matched tab counts, classified as the QC panel (components/merge/MergePreviewQC.tsx)
+ *     classifies them.
  * The values are written to <out.json> and printed.
  */
 import { readFileSync, writeFileSync } from 'fs';
@@ -26,7 +29,9 @@ import * as ts from 'typescript';
 import { parseQuakeML } from '@/lib/parsers';
 import { quakemlEventToDbFields } from '@/lib/quakeml-to-db';
 import { eventQualityFields } from '@/lib/db';
-import { catalogueAgencyOf, performMergeWithGroups } from '@/lib/merge';
+import { buildMergePreview, catalogueAgencyOf } from '@/lib/merge';
+import { OKABE_ITO } from '@/lib/map-style';
+import { isFlagged, isKeptApart, splitUnits, type PreviewGroup } from '@/components/merge/qc-format';
 import { calculateGutenbergRichter, estimateCompletenessMagnitude, type EarthquakeEvent } from '@/lib/seismological-analysis';
 import type { MergeConfig, SourceCatalogue } from '@/lib/validation';
 
@@ -199,24 +204,75 @@ function main(): void {
       };
     });
 
-    // Merge preview, as previewMerge assembles its input (source = catalogue name for uploads).
+    // Merge preview, as previewMerge assembles its input (source = catalogue name for uploads)
+    // and returns it (buildMergePreview).
     const events: Array<Record<string, unknown> & { time: string; latitude: number; longitude: number; magnitude: number; source: string }> = [];
-    catalogues.forEach(c => {
+    const sources: SourceCatalogue[] = [];
+    const catalogueColors: Record<string, string> = {};
+    catalogues.forEach((c, i) => {
       const source: SourceCatalogue = { id: c.id, name: c.name, events: c.rows.length, source: c.name };
+      sources.push(source);
+      catalogueColors[c.id] = OKABE_ITO[i % 7];
       const agency = catalogueAgencyOf(source, { name: c.name } as never);
       c.rows.forEach(r => events.push({ ...r, source: c.name, catalogueId: c.id, catalogueName: c.name, _catalogueAgency: agency }));
     });
-    const groups = performMergeWithGroups(events, CAPTURE_MERGE_CONFIG);
-    const duplicateGroups = groups.filter(g => g.events.length > 1);
+    const payload = buildMergePreview(events, sources, CAPTURE_MERGE_CONFIG, catalogueColors);
+    const qc = payload.qc;
+    if (!qc) throw new Error('The merge preview carries no QC summary');
+    const { totals } = qc;
+    // The panel's tabs: Flagged and Kept apart list every such group (kept-apart groups
+    // gathered into one card per failed cluster); Matched counts every clean matched group.
+    const listed = payload.duplicateGroups as PreviewGroup[];
+    const apart = listed.map((group, index) => ({ group, index })).filter(({ group }) => isKeptApart(group));
+    const published = (id: string) => qc.perCatalogue.find(c => c.id === id)?.published ?? 0;
+    const pair = qc.pairwise[0];
+    const robust = (s: { n: number; median: number; robustSigma: number; p05: number; p95: number } | null, digits: number) =>
+      s && s.n
+        ? { n: s.n, median: Number(s.median.toFixed(digits)), robustSigma: Number(s.robustSigma.toFixed(digits)),
+            p05: Number(s.p05.toFixed(digits)), p95: Number(s.p95.toFixed(digits)) }
+        : null;
     const preview = {
       config: CAPTURE_MERGE_CONFIG,
-      eventsBefore: events.length,
-      eventsAfter: groups.length,
-      duplicateGroups: duplicateGroups.length,
-      duplicatesRemoved: events.length - groups.length,
-      suspiciousMatches: groups.filter(g => g.isSuspicious).length,
-      resolvedToGeoNetLike: duplicateGroups.filter(g => g.events[g.selectedEventIndex]?.catalogueId === 'synthetic-geonet-like').length,
-      resolvedToAgencyB: duplicateGroups.filter(g => g.events[g.selectedEventIndex]?.catalogueId === 'synthetic-agency-b').length,
+      // The QC summary's totals tiles, by their labels (MergeQcSummaryView QcTotalsTiles).
+      tiles: {
+        'Entries before': totals.entriesBefore,
+        'Events after': totals.eventsAfter,
+        'Matched groups': totals.matchedGroups,
+        'Entries combined': totals.entriesCombined,
+        'Flagged groups': totals.flaggedGroups,
+      },
+      tabs: {
+        Flagged: listed.filter(isFlagged).length,
+        'Kept apart': splitUnits(apart).length,
+        Matched: payload.matchedTotal,
+      },
+      keptApartEntries: totals.keptApartEntries,
+      splits: totals.splits,
+      supersededEntries: totals.supersededEntries,
+      perCatalogue: qc.perCatalogue.map(c => ({
+        id: c.id, entries: c.entries, matched: c.matched,
+        matchedPercent: `${((100 * c.matched) / c.entries).toFixed(1)} %`,
+        onlyInThisCatalogue: c.unique, publishedFromIt: c.published,
+      })),
+      // Agency B minus GeoNet-like over the matched pairs (the summary's first pair table).
+      differences: pair && {
+        pairs: pair.pairs,
+        originTimeS: robust(pair.originTime, 2),
+        epicentreKm: pair.epicentre && pair.epicentre.n
+          ? { n: pair.epicentre.n, median: Number(pair.epicentre.median.toFixed(1)), p95: Number(pair.epicentre.p95.toFixed(1)) }
+          : null,
+        depthKm: robust(pair.depth, 1),
+        magnitude: robust(pair.magnitude, 2),
+      },
+      windowUse: qc.windowUse,
+      // The same counts under the names earlier versions of this file used.
+      eventsBefore: totals.entriesBefore,
+      eventsAfter: totals.eventsAfter,
+      duplicateGroups: totals.matchedGroups,
+      duplicatesRemoved: totals.entriesCombined,
+      suspiciousMatches: totals.flaggedGroups,
+      resolvedToGeoNetLike: published('synthetic-geonet-like'),
+      resolvedToAgencyB: published('synthetic-agency-b'),
     };
     result = { catalogues: analysis, mergePreview: preview };
   } finally {

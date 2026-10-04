@@ -139,3 +139,19 @@ describe.each([['save', POST], ['preview', previewPOST]] as const)('%s source va
     expect(auditInserts).toHaveLength(0);
   });
 });
+
+describe('a missing or malformed JSON body', () => {
+  const raw = (url: string, body: string) => new NextRequest(url, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body,
+  });
+
+  it('is a 400 INVALID_JSON from the merge and the preview, not a failed merge', async () => {
+    for (const [route, url] of [[POST, 'http://localhost/api/merge'], [previewPOST, 'http://localhost/api/merge/preview']] as const) {
+      for (const body of ['', '{"name":']) {
+        const res = await route(raw(url, body));
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ error: 'Invalid JSON body', code: 'INVALID_JSON' });
+      }
+    }
+  });
+});
