@@ -79,7 +79,12 @@ export function Layout({ children, nonce }: LayoutProps) {
   });
 
   return (
-    <ThemeProvider nonce={nonce} attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+    // The nonce matters only in the server render, where it lets the CSP run next-themes'
+    // inline theme script. Browsers then blank a script's nonce attribute (so page scripts
+    // cannot read it), and hydrating with the real value made React report an attribute
+    // mismatch on every page; on the client the script never runs again, so it gets ''.
+    // (next-themes 0.4 does the same internally.)
+    <ThemeProvider nonce={typeof window === 'undefined' ? nonce : ''} attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
       <CatalogueProvider>
         <div className="min-h-screen flex flex-col">
           <Header
