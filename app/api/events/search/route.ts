@@ -3,6 +3,7 @@ import { dbQueries, MAX_SEARCH_RESULTS } from '@/lib/db';
 import { formatErrorResponse } from '@/lib/errors';
 import { applyRateLimit, apiRateLimiter } from '@/lib/rate-limiter';
 import { requireViewer } from '@/lib/auth/middleware';
+import { formatOriginDateUtc } from '@/lib/map-format';
 
 // Force dynamic rendering for this API route
 export const dynamic = 'force-dynamic';
@@ -82,11 +83,7 @@ export async function GET(request: NextRequest) {
         // M0.0 is a magnitude; only a missing one is unknown.
         const magnitudeLabel = row.magnitude != null ? `M${row.magnitude}` : 'Unknown magnitude';
         const locationLabel = row.location_name || row.region;
-        const dateLabel = new Date(row.time).toLocaleDateString('en-GB', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric',
-        });
+        const dateLabel = formatOriginDateUtc(row.time);
         if (locationLabel) {
           return `${magnitudeLabel} ${locationLabel} - ${dateLabel}`;
         }

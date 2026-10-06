@@ -39,6 +39,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { SafeUser, UserRole } from '@/lib/auth/types';
+import { formatLocalDate } from '@/lib/date-format';
 
 export default function AdminUsersPage() {
   const { user, isLoading } = useAuth();
@@ -234,11 +235,7 @@ export default function AdminUsersPage() {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    {new Date(account.created_at).toLocaleDateString('en-GB', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      year: 'numeric',
-                    })}
+                    {formatLocalDate(account.created_at)}
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-2">

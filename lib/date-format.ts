@@ -34,6 +34,12 @@ export function formatLocalDate(value: DateInput, timeZone?: string): string {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
+/** "14:05 NZDT" in the reader's zone, with the zone named. */
+export function formatLocalTime(value: DateInput, timeZone?: string): string {
+  const full = formatLocalDateTime(value, timeZone);
+  return /^\d{4}-\d{2}-\d{2} /.test(full) ? full.slice(11) : full;
+}
+
 /** "2026-10-06 14:05 NZDT" in the reader's zone, with the zone named. */
 export function formatLocalDateTime(value: DateInput, timeZone?: string): string {
   const date = toDate(value);

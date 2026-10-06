@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { getCatalogueSourceType } from '@/lib/catalogue-source-type';
 import { hasCatalogueData } from '@/contexts/catalogue-load-status';
 import { UnavailableValue } from '@/components/catalogues/CatalogueLoadNotice';
+import { formatLocalDate, formatLocalTime } from '@/lib/date-format';
 
 /** A refresh interval in the largest whole unit: 21600000 ms is "6 h". */
 function formatInterval(ms: number): string {
@@ -76,13 +77,9 @@ export function StatisticsCards() {
     },
     {
       title: 'Last Updated',
-      value: lastUpdated ? new Date(lastUpdated).toLocaleTimeString() : null,
+      value: lastUpdated ? formatLocalTime(lastUpdated) : null,
       icon: RefreshCw,
-      description: lastUpdated ? new Date(lastUpdated).toLocaleDateString('en-GB', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      }) : 'Not loaded yet',
+      description: lastUpdated ? formatLocalDate(lastUpdated) : 'Not loaded yet',
       // The provider's own interval (CatalogueProvider autoRefreshInterval, 6 h by default).
       trend: typeof autoRefreshInterval !== 'number'
         ? 'Use the refresh icon for the latest data'

@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { QualityCheckResult } from '@/lib/data-quality-checker';
 import { getQualityGrade } from '@/lib/data-quality-checker';
 import { InfoTooltip, TechnicalTermTooltip } from '@/components/ui/info-tooltip';
+import { formatOriginDateUtc } from '@/lib/map-format';
 
 interface DataQualityReportProps {
   result: QualityCheckResult;
@@ -180,15 +181,7 @@ export function DataQualityReport({ result }: DataQualityReportProps) {
           <div className="p-3 bg-muted/50 rounded-lg">
             <p className="text-xs font-medium mb-1">Time Range</p>
             <p className="text-xs text-muted-foreground">
-              {new Date(result.report.statistics.timeRange.start).toLocaleDateString('en-GB', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-              })} - {new Date(result.report.statistics.timeRange.end).toLocaleDateString('en-GB', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-              })}
+              {formatOriginDateUtc(result.report.statistics.timeRange.start)} to {formatOriginDateUtc(result.report.statistics.timeRange.end)}
             </p>
           </div>
         )}

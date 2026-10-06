@@ -170,77 +170,77 @@
   },
   "tiles": {
    "Entries before": 9333,
-   "Events after": 7329,
-   "Matched groups": 2004,
-   "Entries combined": 2004,
+   "Events after": 7315,
+   "Matched groups": 2018,
+   "Entries combined": 2018,
    "Flagged groups": 4
   },
   "tabs": {
    "Flagged": 4,
-   "Kept apart": 26,
-   "Matched": 2000
+   "Kept apart": 11,
+   "Matched": 2014
   },
-  "keptApartEntries": 50,
-  "splits": 26,
+  "keptApartEntries": 21,
+  "splits": 11,
   "supersededEntries": 0,
   "perCatalogue": [
    {
     "id": "synthetic-geonet-like",
     "entries": 4922,
-    "matched": 2004,
-    "matchedPercent": "40.7 %",
-    "onlyInThisCatalogue": 2918,
-    "publishedFromIt": 625
+    "matched": 2018,
+    "matchedPercent": "41.0 %",
+    "onlyInThisCatalogue": 2904,
+    "publishedFromIt": 635
    },
    {
     "id": "synthetic-agency-b",
     "entries": 4411,
-    "matched": 2004,
-    "matchedPercent": "45.4 %",
-    "onlyInThisCatalogue": 2407,
-    "publishedFromIt": 1379
+    "matched": 2018,
+    "matchedPercent": "45.7 %",
+    "onlyInThisCatalogue": 2393,
+    "publishedFromIt": 1383
    }
   ],
   "differences": {
-   "pairs": 2004,
+   "pairs": 2018,
    "originTimeS": {
-    "n": 2004,
+    "n": 2018,
     "median": -0.01,
     "robustSigma": 0.38,
-    "p05": -1.23,
+    "p05": -1.25,
     "p95": 1.11
    },
    "epicentreKm": {
-    "n": 2004,
+    "n": 2018,
     "median": 1.6,
-    "p95": 12
+    "p95": 11.9
    },
    "depthKm": {
-    "n": 1589,
+    "n": 1598,
     "median": -0.2,
     "robustSigma": 4.9,
     "p05": -12.5,
-    "p95": 9.4
+    "p95": 9.3
    },
    "magnitude": {
-    "n": 2004,
+    "n": 2018,
     "median": -0.01,
     "robustSigma": 0.23,
     "p05": -0.41,
-    "p95": 0.4
+    "p95": 0.41
    }
   },
   "windowUse": {
    "nearTimeLimit": 2,
    "nearDistanceLimit": 8,
-   "matchedPairs": 2004
+   "matchedPairs": 2018
   },
   "eventsBefore": 9333,
-  "eventsAfter": 7329,
-  "duplicateGroups": 2004,
-  "duplicatesRemoved": 2004,
+  "eventsAfter": 7315,
+  "duplicateGroups": 2018,
+  "duplicatesRemoved": 2018,
   "suspiciousMatches": 4,
-  "resolvedToGeoNetLike": 625,
-  "resolvedToAgencyB": 1379
+  "resolvedToGeoNetLike": 635,
+  "resolvedToAgencyB": 1383
  }
 }

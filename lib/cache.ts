@@ -312,10 +312,33 @@ export function registerCacheGenerationSource(source: SharedGenerationSource | n
  * no longer tell whether a cached entry is current.
  */
 export async function getCacheGeneration(scope: string): Promise<string | null> {
+  const parts = await getCacheGenerationParts(scope);
+  return parts ? parts.generation : null;
+}
+
+export interface CacheGenerationParts {
+  /** What getCacheGeneration resolves to: for keys of this process's caches. */
+  generation: string;
+  /**
+   * The shared (database) counter alone, or null when no shared source is registered
+   * (client code, or tests that replace the database layer). Unlike `generation` it is
+   * the same in every server instance and survives a restart, so it is the one to store
+   * beside data persisted in the database. Every committed catalogue write advances it.
+   */
+  shared: number | null;
+}
+
+/**
+ * Both generations of `scope`, from one read of the shared counter. Take it BEFORE
+ * reading the database. Resolves to null when the shared generation cannot be read,
+ * with the same meaning as for getCacheGeneration.
+ */
+export async function getCacheGenerationParts(scope: string): Promise<CacheGenerationParts | null> {
   const local = `${processEpoch}.${localGenerations.get(scope) ?? 0}`;
-  if (!sharedGenerationSource) return local;
+  if (!sharedGenerationSource) return { generation: local, shared: null };
   try {
-    return `${await sharedGenerationSource(scope)}:${local}`;
+    const shared = await sharedGenerationSource(scope);
+    return { generation: `${shared}:${local}`, shared };
   } catch (error) {
     console.warn(`[Cache] Shared cache generation for ${scope} unavailable; bypassing the cache:`,
       error instanceof Error ? error.message : error);

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAllCacheStats, clearAllCaches } from '@/lib/cache';
 import { writeAuditLog } from '@/lib/audit';
 import { requireAdmin } from '@/lib/auth/middleware';
+import { discardStoredCatalogueStatistics } from '@/lib/catalogue-statistics';
 
 /**
  * GET /api/cache/stats
@@ -30,9 +31,11 @@ export async function GET(request: NextRequest) {
 
 /**
  * DELETE /api/cache/stats
- * Clears all caches of this server instance (admin only). Other instances keep theirs;
- * catalogue writes already invalidate every instance through the shared cache
- * generation, so this is for recovery, not routine use.
+ * Clears all caches of this server instance (admin only), and the statistics stored in
+ * the database for every catalogue (lib/catalogue-statistics.ts), which are recomputed
+ * on the next open. Other instances keep their in-memory caches; catalogue writes
+ * already invalidate every instance through the shared cache generation, so this is
+ * for recovery, not routine use.
  */
 export async function DELETE(request: NextRequest) {
   try {
@@ -44,6 +47,15 @@ export async function DELETE(request: NextRequest) {
     // Clear all caches, and retire every cache generation handed out so far so a
     // request that read the database before this call cannot re-cache its result.
     clearAllCaches();
+    // The in-memory caches are clear whatever happens here, so a database failure is
+    // reported in the answer rather than failing the request.
+    let storedStatisticsCleared = true;
+    try {
+      await discardStoredCatalogueStatistics('all');
+    } catch (error) {
+      storedStatisticsCleared = false;
+      console.warn('[Cache] Stored catalogue statistics could not be cleared:', error instanceof Error ? error.message : error);
+    }
 
     console.log('[Cache] All caches cleared via API');
     await writeAuditLog({
@@ -55,7 +67,10 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: 'All caches cleared successfully',
+      message: storedStatisticsCleared
+        ? 'All caches cleared successfully'
+        : 'In-memory caches cleared; the stored catalogue statistics could not be cleared',
+      storedStatisticsCleared,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {

@@ -8,7 +8,8 @@
  * (their reported uncertainties sigma1, sigma2) plus inter-agency scatter that no uncertainty
  * reports (station sets, attenuation corrections, ML definitions; sigma_ag = 0.2). When the
  * association recorded the pair, the pairing was NOT contested, and the solutions agree
- * closely in origin time and epicentre (normalised separation |dt|/tau + d/delta <= 0.1 and,
+ * closely in origin time and epicentre (normalised separation |dt|/tau + d/delta <= 0.2, a fifth
+ * of the windows, and,
  * where both state them, within 3 combined standard errors), the tier T is widened to
  *     min(2T, max(T, 3 * sqrt(sigma1^2 + sigma2^2 + 0.2^2))).
  * Otherwise - a loose pair, a contested pairing in a dense sequence, a group assembled outside
@@ -87,7 +88,7 @@ describe('magnitude gate — a close, uncontested pair is judged by its uncertai
   // dM = 0.63 > tier 0.5 (mean 1.385 < 4). Reported sigmas 0.15 and 0.20:
   //   3 * sqrt(0.15^2 + 0.20^2 + 0.2^2) = 3 * sqrt(0.0225 + 0.04 + 0.04) = 3 * 0.3202 = 0.961,
   // capped at 2 * 0.5 = 1.0 -> tolerance 0.96 >= 0.63.
-  // Closeness: |dt|/60 + 1/50 = 0.02 <= 0.1; 1 km <= 3 * sqrt(1^2 + 1^2) = 4.24 km;
+  // Closeness: |dt|/60 + 1/50 = 0.02 <= 0.2; 1 km <= 3 * sqrt(1^2 + 1^2) = 4.24 km;
   // 0 s <= 3 * sqrt(0.2^2 + 0.2^2) s.
   const a = entry('a', 'cat-a', 1.07, { magSigma: 0.15, timeSigma: 0.2, horizontalSigma: 1 });
   const b = entry('b', 'cat-b', 1.7, { northKm: 1, magSigma: 0.2, timeSigma: 0.2, horizontalSigma: 1 });
@@ -121,13 +122,38 @@ describe('magnitude gate — a close, uncontested pair is judged by its uncertai
   });
 
   it('keeps a LOOSE pair with the same magnitudes apart', () => {
-    // 20 s and 10 km apart: 20/60 + 10/50 = 0.533 > 0.1, so the tier 0.5 stands: 0.63 > 0.5.
+    // 20 s and 10 km apart: 20/60 + 10/50 = 0.533 > 0.2, so the tier 0.5 stands: 0.63 > 0.5.
     const late = entry('late', 'cat-b', 1.7, { seconds: 20, northKm: 10, magSigma: 0.2, timeSigma: 0.2, horizontalSigma: 1 });
     expect(ids(groupMatchingEvents([a, late], config))).toEqual([['a'], ['late']]);
   });
 
+  it('merges a pair just past a tenth of the windows (the live QC case at 0.105)', () => {
+    // ML 0.88 and ML 1.40, 0.2 s and 5.1 km apart: 0.2/60 + 5.1/50 = 0.105 <= 0.2.
+    // dM 0.52 > tier 0.5; 3 * sqrt(0.15^2 + 0.20^2 + 0.2^2) = 0.96 >= 0.52.
+    // 5.1 km <= 3 * sqrt(2^2 + 2^2) = 8.49 km; 0.2 s <= 3 * sqrt(0.2^2 + 0.2^2) = 0.85 s.
+    const c = entry('c', 'cat-a', 0.88, { magSigma: 0.15, timeSigma: 0.2, horizontalSigma: 2 });
+    const d = entry('d', 'cat-b', 1.4, { seconds: 0.2, northKm: 5.1, magSigma: 0.2, timeSigma: 0.2, horizontalSigma: 2 });
+    expect(ids(groupMatchingEvents([c, d], config))).toEqual([['c', 'd']]);
+    expect(validateEventGroup([c, d], false, undefined, uncontested)).toBe(true);
+    expect(validateEventGroup([c, d], false)).toBe(false);
+  });
+
+  it('keeps apart the same magnitudes just beyond a fifth of the windows', () => {
+    // 0.7 s and 10.2 km apart: 0.7/60 + 10.2/50 = 0.216 > 0.2, although the reported errors
+    // explain the offsets (10.2 km <= 3 * sqrt(4^2 + 4^2) = 17.0 km; 0.7 s <= 2.1 s): the
+    // tier 0.5 stands and dM 0.52 exceeds it. (Two aftershocks this far apart, with these
+    // magnitudes, were the first wrong pairing a looser bound admitted on the worked example.)
+    const c = entry('c', 'cat-a', 0.88, { magSigma: 0.15, timeSigma: 0.5, horizontalSigma: 4 });
+    const far = entry('far', 'cat-b', 1.4, { seconds: 0.7, northKm: 10.2, magSigma: 0.2, timeSigma: 0.5, horizontalSigma: 4 });
+    expect(ids(groupMatchingEvents([c, far], config))).toEqual([['c'], ['far']]);
+    expect(validateEventGroup([c, far], false, undefined, uncontested)).toBe(false);
+    // Inside a fifth (0.6 s and 9.4 km: 0.01 + 0.188 = 0.198) the same pair is accepted.
+    const near = entry('near', 'cat-b', 1.4, { seconds: 0.6, northKm: 9.4, magSigma: 0.2, timeSigma: 0.5, horizontalSigma: 4 });
+    expect(ids(groupMatchingEvents([c, near], config))).toEqual([['c', 'near']]);
+  });
+
   it('keeps apart a pair whose separation the reported location errors do not explain', () => {
-    // 0 s and 4 km apart is inside a tenth of the window (4/50 = 0.08), but both solutions
+    // 0 s and 4 km apart is inside a fifth of the window (4/50 = 0.08), but both solutions
     // claim 0.3 km: 4 km > 3 * sqrt(0.3^2 + 0.3^2) = 1.27 km, so they do not agree closely.
     const p = entry('p', 'cat-a', 1.07, { magSigma: 0.15, horizontalSigma: 0.3 });
     const q = entry('q', 'cat-b', 1.7, { northKm: 4, magSigma: 0.2, horizontalSigma: 0.3 });

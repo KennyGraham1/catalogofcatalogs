@@ -93,6 +93,16 @@ export const DATABASE_INDEXES: ReadonlyArray<IndexDefinition> = [
     options: unique,
   },
 
+  // One stored statistics document per catalogue (lib/catalogue-statistics.ts), read by
+  // catalogue id. The uniqueness is what makes a store from an older generation fail
+  // instead of adding a second document beside a newer one.
+  {
+    collection: COLLECTIONS.CATALOGUE_STATISTICS,
+    name: 'catalogue_statistics_catalogue_unique_idx',
+    key: { catalogue_id: 1 },
+    options: unique,
+  },
+
   idIndex(COLLECTIONS.MAPPING_TEMPLATES),
   { collection: COLLECTIONS.MAPPING_TEMPLATES, name: 'idx_name', key: { name: 1 } },
 

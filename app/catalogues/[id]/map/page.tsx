@@ -7,8 +7,9 @@ import { Card, CardHeader } from '@/components/ui/card';
 import Link from 'next/link';
 import { Loader2, MapPin, AlertCircle, LogIn } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { useCatalogueEvents } from '@/hooks/use-catalogue-events';
+import { useCatalogueEvents, useMapEventView } from '@/hooks/use-catalogue-events';
 import { EVENTS_SIGN_IN_MESSAGE } from '@/lib/catalogue-event-loader';
+import { loginHref } from '@/lib/auth/login-href';
 import type { MapDetail } from '@/lib/map-event-selection';
 import { Button } from '@/components/ui/button';
 import { useCachedFetch } from '@/hooks/use-cached-fetch';
@@ -40,7 +41,12 @@ export default function CatalogueMapPage() {
   );
 
   const availableCatalogues = useMemo(() => Array.isArray(catalogues) ? catalogues : [], [catalogues]);
-  const { events, loading: eventsLoading, complete, loadedCount, error, retry: reload } = useCatalogueEvents(availableCatalogues, catalogueId);
+  // The map is public: a signed-out visitor loads the map view of the events, a signed-in
+  // user the summary view as before.
+  const view = useMapEventView();
+  const isGuest = view === 'map';
+  const signInHref = loginHref(`/catalogues/${catalogueId}/map`);
+  const { events, loading: eventsLoading, complete, loadedCount, error, retry: reload } = useCatalogueEvents(availableCatalogues, catalogueId, undefined, { view });
 
   const catalogue = useMemo(() => {
     if (!catalogues || !catalogueId) return null;
@@ -133,6 +139,18 @@ export default function CatalogueMapPage() {
         )}
       </div>
 
+      {isGuest && (
+        <div role="note" className="flex flex-col gap-3 rounded-lg border p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <p>
+            <span className="font-medium">You are viewing the public map.</span>{' '}
+            The event table, full event records, analytics and exports need an account.
+          </p>
+          <Button asChild size="sm" className="self-start sm:self-auto">
+            <Link href={signInHref}><LogIn className="mr-2 h-4 w-4" aria-hidden="true" />Sign in</Link>
+          </Button>
+        </div>
+      )}
+
       {!complete && events.length > 0 && <div role={error ? 'alert' : 'status'} className="rounded-lg border p-3 text-sm">
         {error || `Showing a preview. ${loadedCount.toLocaleString()} events received; loading the remaining events...`}
         {error && <Button variant="outline" onClick={reload}>Retry loading events</Button>}
@@ -152,14 +170,16 @@ export default function CatalogueMapPage() {
           </div>
         )}
 
+        {/* A signed-out visitor loads the public map view, which needs no session, so a
+            refusal for want of one means a signed-in session the server no longer honours. */}
         {error === EVENTS_SIGN_IN_MESSAGE && events.length === 0 && (
           <div className="h-[700px] flex items-center justify-center p-6">
             <Alert className="max-w-md">
               <LogIn className="h-4 w-4" />
               <AlertDescription className="space-y-3">
-                <p>{error} Your session may have expired.</p>
+                <p>Your session has ended, so this catalogue&apos;s events could not be loaded. Sign in again to continue.</p>
                 <Button asChild size="sm">
-                  <Link href={`/login?callbackUrl=${encodeURIComponent(`/catalogues/${catalogueId}/map`)}`}>Log in</Link>
+                  <Link href={signInHref}>Sign in</Link>
                 </Button>
               </AlertDescription>
             </Alert>

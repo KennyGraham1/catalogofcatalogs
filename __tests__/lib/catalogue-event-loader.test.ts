@@ -1,4 +1,4 @@
-import { CatalogueEventCache, loadCatalogueEvents, type CatalogueEvent } from '@/lib/catalogue-event-loader';
+import { CatalogueEventCache, EVENTS_RATE_LIMITED_MESSAGE, loadCatalogueEvents, type CatalogueEvent } from '@/lib/catalogue-event-loader';
 
 const catalogue = { id: 'a', name: 'A', event_count: 2 };
 const response = (data: unknown) => ({ ok: true, status: 200, json: async () => data } as Response);
@@ -87,5 +87,54 @@ describe('progressive catalogue loading', () => {
     const now = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 20);
     expect(cache.get({ ...catalogue, id: 'b' })).toBeUndefined();
     now.mockRestore();
+  });
+});
+
+describe('event views (public maps)', () => {
+  const originalFetch = global.fetch;
+  beforeEach(() => { global.fetch = jest.fn(); });
+  afterAll(() => { global.fetch = originalFetch; });
+  const requested = (call: number) => new URL(String((fetch as jest.Mock).mock.calls[call][0]), 'http://localhost').searchParams;
+
+  it('loads the summary view unless the map view is asked for', async () => {
+    (fetch as jest.Mock).mockResolvedValue(page(['one']));
+    await loadCatalogueEvents([catalogue], { signal: new AbortController().signal });
+    expect(requested(0).get('view')).toBe('summary');
+    await loadCatalogueEvents([catalogue], { signal: new AbortController().signal, view: 'map' });
+    expect(requested(1).get('view')).toBe('map');
+  });
+
+  it('follows the cursor in the map view as well', async () => {
+    (fetch as jest.Mock).mockResolvedValueOnce(page(['one'], 'next')).mockResolvedValueOnce(page(['two']));
+    const events = await loadCatalogueEvents([catalogue], { signal: new AbortController().signal, view: 'map' });
+    expect(events.map(event => event.id)).toEqual(['one', 'two']);
+    expect(requested(1).get('view')).toBe('map');
+    expect(requested(1).get('cursor')).toBe('next');
+  });
+
+  it('keys the cache by view: a map load never stands in for a summary load, nor the reverse', async () => {
+    const cache = new CatalogueEventCache();
+    (fetch as jest.Mock).mockResolvedValue(page(['one']));
+    const signal = new AbortController().signal;
+    await loadCatalogueEvents([catalogue], { signal, cache, view: 'map' });
+    expect(cache.get(catalogue)).toBeUndefined();
+    expect(cache.get(catalogue, 'map')).toHaveLength(1);
+
+    await loadCatalogueEvents([catalogue], { signal, cache });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(requested(1).get('view')).toBe('summary');
+
+    await loadCatalogueEvents([catalogue], { signal, cache, view: 'map' });
+    await loadCatalogueEvents([catalogue], { signal, cache });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports a rate-limited map request with the server\'s reason, or a plain one', async () => {
+    (fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 429, json: async () => ({ error: 'Too many map requests from your network. Wait a few minutes and try again.' }) });
+    await expect(loadCatalogueEvents([catalogue], { signal: new AbortController().signal, view: 'map' }))
+      .rejects.toThrow('Too many map requests from your network. Wait a few minutes and try again.');
+    (fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 429, json: async () => { throw new SyntaxError('no body'); } });
+    await expect(loadCatalogueEvents([catalogue], { signal: new AbortController().signal, view: 'map' }))
+      .rejects.toThrow(EVENTS_RATE_LIMITED_MESSAGE);
   });
 });

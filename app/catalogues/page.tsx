@@ -1151,6 +1151,7 @@ export default function CataloguesPage() {
                     <CatalogueStatsPopover
                       catalogueId={catalogue.id}
                       catalogueName={catalogue.name}
+                      catalogue={catalogue}
                     />
                     <Button
                       variant="ghost"

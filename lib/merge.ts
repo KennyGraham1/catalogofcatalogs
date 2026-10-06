@@ -2000,11 +2000,18 @@ const MAGNITUDE_TOLERANCE_CAP = 2;
 
 /**
  * Two solutions agree closely in origin time and epicentre when their normalised
- * separation |Δt|/τ + Δ/δ (pairSeparation) is at most a tenth of the matching window - the
- * margin the ambiguity test also treats as indistinguishable - and, wherever both state
- * them, within GATE_COVERAGE_FACTOR combined standard errors of origin time and epicentre.
+ * separation |Δt|/τ + Δ/δ (pairSeparation) is at most a fifth of the matching window (for
+ * 60 s and 50 km: 12 s at one epicentre, 10 km at one origin time, or any mix of the two)
+ * and, wherever both state them, within GATE_COVERAGE_FACTOR combined standard errors of
+ * origin time and epicentre. The bound is a fixed share of the window, not scaled by the
+ * reported errors: it limits the chance that a second earthquake lies this close, which
+ * depends on how dense the seismicity is, not on how well the two solutions are located
+ * (the standard-error checks cover that). The region it admits is 0.2^3 / 3, under 0.3%, of
+ * the matching window's space-time volume. On the synthetic worked example (known ground
+ * truth) a fifth admits no wrong pairing through the widened magnitude tolerance and keeps
+ * 287 fewer genuine pairs apart than a tenth; the first wrong pairing appears beyond it.
  */
-const CLOSE_AGREEMENT_SEPARATION = 0.1;
+const CLOSE_AGREEMENT_SEPARATION = 0.2;
 
 /**
  * How the association paired an entry, recorded for the consistency gate: the baseline
@@ -2076,7 +2083,7 @@ function combinedSigma(a: number | null, b: number | null): number | null {
 
 /**
  * Whether every pair of solutions in a group agrees closely in origin time and epicentre
- * (CLOSE_AGREEMENT_SEPARATION): inside a tenth of the pair's matching window, and within
+ * (CLOSE_AGREEMENT_SEPARATION): inside a fifth of the pair's matching window, and within
  * GATE_COVERAGE_FACTOR combined standard errors of origin time and of epicentre wherever
  * both solutions state them.
  */

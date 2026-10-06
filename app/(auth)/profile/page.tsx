@@ -26,6 +26,7 @@ import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import { toast } from '@/hooks/use-toast';
 import { RoleChangeRequest, UserRole } from '@/lib/auth/types';
 import { REQUEST_ACCESS_SECTION_ID } from '@/lib/auth/access-request';
+import { formatLocalDate } from '@/lib/date-format';
 
 export default function ProfilePage() {
   const { user, isLoading } = useAuth();
@@ -292,11 +293,7 @@ export default function ProfilePage() {
                       </Badge>
                       <span className="text-sm text-muted-foreground">
                         Requested {latestRequest.requested_role.toUpperCase()} on{' '}
-                        {new Date(latestRequest.created_at).toLocaleDateString('en-GB', {
-                          day: '2-digit',
-                          month: 'short',
-                          year: 'numeric',
-                        })}
+                        {formatLocalDate(latestRequest.created_at)}
                       </span>
                     </div>
                     <p className="text-sm text-muted-foreground">

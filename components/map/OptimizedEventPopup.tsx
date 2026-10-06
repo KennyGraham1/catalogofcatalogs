@@ -6,6 +6,7 @@ import { scoreToGrade } from '@/lib/quality-scoring';
 import {
   formatDepth, formatLatLon, formatMagnitude, formatOriginTimeUtc, formatQuality, isKnownRegion,
 } from '@/lib/map-format';
+import { useGeoNetLocality } from './use-geonet-locality';
 
 /** Event fields the popup can show; every field but position, magnitude and time is optional. */
 export interface PopupEvent {
@@ -23,6 +24,8 @@ export interface PopupEvent {
   catalogue?: string | null;
   /** The reporting agency's own event id. */
   source_id?: string | null;
+  /** QuakeML event publicID: with source_id, how a GeoNet event is recognised (lib/geonet-locality.ts). */
+  event_public_id?: string | null;
   event_type?: string | null;
   azimuthal_gap?: number | null;
   used_station_count?: number | null;
@@ -179,7 +182,9 @@ function NearbyFaultsSection({ latitude, longitude }: { latitude: number; longit
  * ("ML 2.6"), the UTC origin time, then a compact definition grid - location with
  * hemisphere letters, depth (± uncertainty or "fixed"), and region, type, quality, gap,
  * stations, catalogue and agency event id only when the event has them. No empty rows,
- * no "Unknown" placeholders, no descriptor badge.
+ * no "Unknown" placeholders, no descriptor badge. A GeoNet event also gets GeoNet's own
+ * locality, credited, when the hover card has already fetched it (the popup never asks
+ * GeoNet itself; see useGeoNetLocality).
  *
  * Render inside a react-leaflet <Popup minWidth={260} maxWidth={300}> (or pass its
  * markup to bindPopup via renderToStaticMarkup on imperative maps).
@@ -195,6 +200,7 @@ export const OptimizedEventPopup = memo(function OptimizedEventPopup({
   const depth = formatDepth(event);
   const resolvedQuality = resolvePopupQuality(event, quality, qualityScores);
   const catalogue = catalogueName ?? event.catalogue;
+  const geonetLocality = useGeoNetLocality(event);
   const eventType = typeof event.event_type === 'string' && !UNREMARKABLE_EVENT_TYPES.has(event.event_type.trim().toLowerCase())
     ? event.event_type.trim() : null;
 
@@ -214,6 +220,11 @@ export const OptimizedEventPopup = memo(function OptimizedEventPopup({
       </div>
 
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
+        {geonetLocality && (
+          <Row label="Locality" title="GeoNet's description of where the event is (GeoNet, CC BY 4.0)">
+            {geonetLocality} <span className="text-muted-foreground">(GeoNet)</span>
+          </Row>
+        )}
         <Row label="Location" title="Epicentre, decimal degrees">{formatLatLon(event.latitude, event.longitude)}</Row>
         <Row label="Depth">{depth ?? <span className="text-muted-foreground">not reported</span>}</Row>
         {isKnownRegion(event.region) && <Row label="Region">{event.region}</Row>}

@@ -242,11 +242,7 @@ export default function AdminRoleRequestsPage() {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    {new Date(requestItem.created_at).toLocaleDateString('en-GB', {
-                      day: '2-digit',
-                      month: 'short',
-                      year: 'numeric',
-                    })}
+                    {formatLocalDate(requestItem.created_at)}
                   </TableCell>
                   <TableCell className="min-w-[220px]">
                     {requestItem.status === 'pending' ? (

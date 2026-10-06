@@ -79,6 +79,7 @@ import {
   type CustomFieldMapping,
 } from '@/lib/field-definitions';
 import type { DefaultFieldMappingsConfig, FileFormat } from '@/components/settings/DefaultFieldMappings';
+import { formatLocalDate } from '@/lib/date-format';
 
 // Flat focal-mechanism columns that are auto-assembled into focal_mechanisms JSON
 // by the parser — they don't need individual schema mapping.
@@ -715,11 +716,7 @@ export function EnhancedSchemaMapper({
                             </p>
                           )}
                           <p className="text-xs text-muted-foreground mt-2">
-                            Created: {new Date(template.created_at).toLocaleDateString('en-GB', {
-                              day: '2-digit',
-                              month: '2-digit',
-                              year: 'numeric',
-                            })}
+                            Created: {formatLocalDate(template.created_at)}
                           </p>
                         </div>
                         <div className="flex gap-1">

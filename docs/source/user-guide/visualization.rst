@@ -30,6 +30,29 @@ Accessing Visualizations
 * **Catalogue View**: Click any catalogue, then "View on Map"
 * **Event Details**: Click any event marker for detailed information
 
+Who Can See What
+================
+
+The maps are public. Without an account you can browse the catalogue list and
+open the catalogue map (``/catalogues/<id>/map``) and the dashboard's **Map
+View**: markers, colour modes, the active-fault, uncertainty-ellipse and
+focal-mechanism overlays, the summary card and the event popup all work as
+they do when signed in. A note above the map says what needs an account, with
+a **Sign in** link that brings you back to the map.
+
+An account is needed for:
+
+* the **Analytics** page and its charts and analyses;
+* the catalogue **event table** and **full event records** (picks, arrivals,
+  origins, provenance of merged events);
+* **exports** (CSV, JSON, GeoJSON, KML and QuakeML).
+
+Signed out, a map loads only the event fields the map shows (the API's
+``view=map``; see the API reference). To protect the service, signed-out map
+loading is limited per network to 300 pages of events (about 1.5 million
+events) every 5 minutes; past that the map says so, and **Retry loading
+events** works once the window has passed. Signing in removes the limit.
+
 -----------------
 Interactive Maps
 -----------------
@@ -88,7 +111,8 @@ Pointing at an event shows a compact card in the form seismic observatories use:
   the nearest kilometre below 20 km and to the nearest 5 km beyond. Within
   3 km the card says "Near *place*". Beyond 300 km from every place (or before
   the place list has loaded) the title falls back to the event's stored
-  region, then to its epicentre.
+  region, then to its epicentre. For a GeoNet event the title becomes
+  GeoNet's own locality text (see below), marked "Locality: GeoNet".
 * **Magnitude** with its type (e.g. ML 3.5), **depth** (marked "fixed" when
   the depth was held fixed), and the **epicentre**.
 * **Azimuthal gap** with a judgement of how well the network surrounds the
@@ -101,6 +125,41 @@ Pointing at an event shows a compact card in the form seismic observatories use:
 
 Clicking the event opens the full record. While the place names are in use,
 the map's attribution credits them: "Place names © LINZ (CC BY 4.0)".
+
+GeoNet's locality for GeoNet events
+-----------------------------------
+
+GeoNet publishes its own locality for each event (for example "15 km
+north-east of Culverden" for the 2016 Kaikōura earthquake, ``2016p858000``).
+That text is not part of what the platform imports: GeoNet's FDSN QuakeML gives
+only a broad region ("South Island, New Zealand"), and the Quake Search CSV has
+no locality column. So the map asks GeoNet's quake API
+(``https://api.geonet.org.nz/quake/<event id>``) for the one event you point at:
+
+* The card appears at once with the platform's own title. When GeoNet answers,
+  and the card is still open, the title is replaced with GeoNet's text and a
+  muted "Locality: GeoNet" line. Pointing at the event again shows GeoNet's
+  text straight away, because the answer is kept for the rest of the page visit.
+* Nothing is requested at import time, while the map draws, or for events that
+  are not GeoNet's. Requests are made one at a time per event, at most four at
+  once, and time out after 4 seconds. Moving across many markers quickly does
+  not send a request for each one: a request still waiting when the pointer
+  leaves its marker is dropped. An event GeoNet does not know (404) is not
+  asked about again. After any other failure the card keeps the platform's
+  title and the event is not asked about again for 30 seconds.
+* An event counts as GeoNet's only when its ID is in GeoNet's form (year,
+  ``p``, six digits) **and** the record says it is GeoNet's. This means GeoNet's
+  QuakeML identifier (``smi:nz.org.geonet/2016p858000``), a merged ID qualified
+  by a GeoNet catalogue (``GeoNet:2016p858000``), a GeoNet agency code (``WEL``,
+  ``NZ``, ``GNS``), or a catalogue name that names GeoNet and no other agency. An
+  ID of the same form is not looked up when the record names another agency,
+  or when nothing in it names GeoNet (for example a campaign catalogue whose
+  software numbers events the same way).
+* The click popup also shows GeoNet's locality, labelled "(GeoNet)", once the
+  card has fetched it. The popup never asks GeoNet itself.
+
+GeoNet data is licensed CC BY 4.0. Once GeoNet's text has been shown, the map's
+attribution also credits it: "Event localities © GeoNet (CC BY 4.0)".
 
 Map Colour Modes
 =================

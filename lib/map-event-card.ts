@@ -6,6 +6,10 @@
  * time for New Zealand events) plus the agency's event id. The full record stays in the
  * click popup.
  *
+ * For a GeoNet event the title is GeoNet's own locality text when it is known (fetched on
+ * hover by the marker layer, lib/geonet-locality.ts), with a muted "Locality: GeoNet"
+ * credit; otherwise the locality derived from the LINZ Gazetteer places.
+ *
  * Built as an HTML string for a Leaflet tooltip bound to the hovered marker only, so the
  * thousands of canvas markers carry no tooltip until one is hovered. Every value is escaped.
  */
@@ -27,6 +31,16 @@ export interface EventCardFields {
   region?: string | null;
   source_id?: string | null;
   event_public_id?: string | null;
+}
+
+/** Extra card inputs. */
+export interface EventCardOptions {
+  /**
+   * GeoNet's own locality for a GeoNet event ("15 km north-east of Culverden",
+   * lib/geonet-locality.ts fetchGeoNetLocality). When given it is the title, credited to
+   * GeoNet; null, empty or omitted keeps the Gazetteer / region / epicentre title.
+   */
+  geonetLocality?: string | null;
 }
 
 const escapeHtml = (text: string) =>
@@ -69,8 +83,13 @@ export function eventCardTitle(
     ?? formatLatLon(event.latitude, event.longitude, 2);
 }
 
-/** The card's HTML (see the module comment); `places` are the Gazetteer places (loadNzLocalities). */
-export function buildEventCardHtml(event: EventCardFields, places: ReadonlyArray<Locality> = []): string {
+/**
+ * The card's HTML (see the module comment); `places` are the Gazetteer places
+ * (loadNzLocalities), `options.geonetLocality` GeoNet's locality text when known.
+ */
+export function buildEventCardHtml(
+  event: EventCardFields, places: ReadonlyArray<Locality> = [], options: EventCardOptions = {}
+): string {
   const row = (label: string, value: string, className = '') =>
     `<div class="eq-card-row"><span class="eq-card-label">${escapeHtml(label)}</span><span class="eq-card-value ${className}">${value}</span></div>`;
   const rows: string[] = [];
@@ -86,9 +105,13 @@ export function buildEventCardHtml(event: EventCardFields, places: ReadonlyArray
   const local = inNewZealand ? newZealandLocalTime(event.time) : null;
   const when = `<div>${escapeHtml(formatOriginTimeUtc(event.time))}</div>` + (local ? `<div class="eq-card-muted">${escapeHtml(local)} (local)</div>` : '');
   const id = agencyEventLabel(event);
+  const geonet = typeof options.geonetLocality === 'string' ? options.geonetLocality.replace(/\s+/g, ' ').trim() : '';
+  const title = geonet
+    ? `<div class="eq-card-title">${escapeHtml(geonet)}<span class="eq-card-credit eq-card-muted">Locality: GeoNet</span></div>`
+    : `<div class="eq-card-title">${escapeHtml(eventCardTitle(event, places))}</div>`;
   return [
     '<div class="eq-card">',
-    `<div class="eq-card-title">${escapeHtml(eventCardTitle(event, places))}</div>`,
+    title,
     `<div class="eq-card-rows">${rows.join('')}</div>`,
     `<div class="eq-card-footer">${when}${id ? `<div class="eq-card-id">ID ${escapeHtml(id)}</div>` : ''}</div>`,
     '</div>',

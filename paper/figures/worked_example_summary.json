@@ -73,78 +73,78 @@
  ],
  "merge": {
   "ingested": 215233,
-  "merged": 168124,
-  "duplicate_groups": 47109,
-  "removed": 47109,
+  "merged": 167849,
+  "duplicate_groups": 47384,
+  "removed": 47384,
   "resolved_to": {
-   "synthetic-geonet-like": 15239,
-   "synthetic-agency-b": 31870
+   "synthetic-geonet-like": 15372,
+   "synthetic-agency-b": 32012
   },
-  "first_only": 66318,
-  "second_only": 54697,
+  "first_only": 66043,
+  "second_only": 54422,
   "injected_pairs": 47109,
-  "true_pairs_found": 46353,
-  "false_associations": 756,
-  "false_associations_with_aftershock": 753,
-  "magnitude_widened_groups": 1742,
+  "true_pairs_found": 46640,
+  "false_associations": 744,
+  "false_associations_with_aftershock": 741,
+  "magnitude_widened_groups": 2029,
   "magnitude_widened_false": 0,
-  "missed_pairs": 756,
+  "missed_pairs": 469,
   "missed_by_reason": {
-   "gate:magnitude_range": 572,
+   "gate:magnitude_range": 285,
    "paired with a closer entry": 27,
    "outside matching window": 141,
    "gate:depth_range": 16
   }
  },
  "merge_pct": {
-  "recall": 98.4,
+  "recall": 99.0,
   "precision": 98.4,
-  "resolved_to_agency_b": 67.7
+  "resolved_to_agency_b": 67.6
  },
  "quality": {
   "retained": 86028,
-  "removed": 82096,
-  "retained_pct": 51.2,
+  "removed": 81821,
+  "retained_pct": 51.3,
   "merged_median_q": 70,
-  "gap_over_180_merged": 37951,
+  "gap_over_180_merged": 37678,
   "gap_over_180_removed_pct": 94.3,
-  "removed_with_gap_over_180_pct": 43.6,
+  "removed_with_gap_over_180_pct": 43.4,
   "removed_share_by_provenance_pct": {
-   "first-only": 44.3,
-   "second-only": 42.5,
-   "duplicate-second": 7.2,
-   "duplicate-first": 6.0
+   "first-only": 44.2,
+   "second-only": 42.4,
+   "duplicate-second": 7.3,
+   "duplicate-first": 6.1
   },
   "retention_by_magnitude_pct": [
    {
     "lo": 1,
     "hi": 1.5,
-    "events": 56845,
+    "events": 56775,
     "retained_pct": 42.0
    },
    {
     "lo": 1.5,
     "hi": 2,
-    "events": 51710,
-    "retained_pct": 58.4
+    "events": 51610,
+    "retained_pct": 58.5
    },
    {
     "lo": 2,
     "hi": 2.5,
-    "events": 25463,
-    "retained_pct": 63.7
+    "events": 25395,
+    "retained_pct": 63.9
    },
    {
     "lo": 2.5,
     "hi": 3,
-    "events": 9262,
-    "retained_pct": 70.5
+    "events": 9243,
+    "retained_pct": 70.7
    },
    {
     "lo": 3,
     "hi": 3.5,
-    "events": 2844,
-    "retained_pct": 80.9
+    "events": 2842,
+    "retained_pct": 81.0
    },
    {
     "lo": 3.5,
@@ -187,25 +187,25 @@
   },
   "merged_maxc": {
    "mc": 1.6,
-   "b": 0.8403129411280904,
-   "sigma_b": 0.0030053757233665323,
-   "n": 78178,
+   "b": 0.8401730187459379,
+   "sigma_b": 0.003008128436587387,
+   "n": 78009,
    "mc_source": "MAXC",
    "gft_level": null
   },
   "merged_gft": {
    "mc": 1.9,
-   "b": 0.9296579815308587,
-   "sigma_b": 0.004293677297112729,
-   "n": 46880,
+   "b": 0.9292870903374729,
+   "sigma_b": 0.004296778891904905,
+   "n": 46775,
    "mc_source": "GFT",
    "gft_level": 95
   },
   "merged_mbs": {
    "mc": 2.7,
-   "b": 1.0617275873153236,
-   "sigma_b": 0.011644858393895738,
-   "n": 8313,
+   "b": 1.0612261600621782,
+   "sigma_b": 0.011645664567872386,
+   "n": 8304,
    "mc_source": "MBS",
    "gft_level": null
   },
@@ -241,10 +241,10 @@
    "n": 6446
   },
   "gr_merged": {
-   "b": 1.0617275873153236,
-   "sigma_b": 0.011644858393895738,
-   "a": 6.786422266253268,
-   "n": 8313
+   "b": 1.0612261600621782,
+   "sigma_b": 0.011645664567872386,
+   "a": 6.784597972672264,
+   "n": 8304
   },
   "gr_concatenated": {
    "b": 1.0156463277030352,
@@ -259,10 +259,10 @@
    "n": 5494
   },
   "gr_merged_background": {
-   "b": 1.0116316113580461,
-   "sigma_b": 0.01209303814031506,
-   "a": 6.576379288813612,
-   "n": 6998
+   "b": 1.0111687849113713,
+   "sigma_b": 0.012093555535009097,
+   "a": 6.574695021389711,
+   "n": 6991
   },
   "gr_retained_aftershocks": {
    "b": 1.3499388615873757,
@@ -289,7 +289,7 @@
    "merged": [
     0.804,
     0.003,
-    90423
+    90234
    ],
    "retained": [
     0.74,
@@ -304,7 +304,7 @@
    "merged_background": [
     0.749,
     0.003,
-    64386
+    64255
    ],
    "retained_background": [
     0.681,
@@ -317,7 +317,7 @@
    "merged": [
     0.84,
     0.003,
-    78178
+    78009
    ],
    "retained": [
     0.778,
@@ -332,7 +332,7 @@
    "merged_background": [
     0.786,
     0.003,
-    56576
+    56458
    ],
    "retained_background": [
     0.718,
@@ -345,7 +345,7 @@
    "merged": [
     0.871,
     0.003,
-    66546
+    66402
    ],
    "retained": [
     0.81,
@@ -360,7 +360,7 @@
    "merged_background": [
     0.817,
     0.004,
-    48896
+    48795
    ],
    "retained_background": [
     0.751,
@@ -373,7 +373,7 @@
    "merged": [
     0.901,
     0.004,
-    56088
+    55968
    ],
    "retained": [
     0.837,
@@ -388,7 +388,7 @@
    "merged_background": [
     0.848,
     0.004,
-    41878
+    41796
    ],
    "retained_background": [
     0.781,
@@ -399,9 +399,9 @@
   {
    "cutoff": 1.9,
    "merged": [
-    0.93,
+    0.929,
     0.004,
-    46880
+    46775
    ],
    "retained": [
     0.863,
@@ -416,7 +416,7 @@
    "merged_background": [
     0.876,
     0.005,
-    35484
+    35415
    ],
    "retained_background": [
     0.808,
@@ -427,9 +427,9 @@
   {
    "cutoff": 2,
    "merged": [
-    0.954,
+    0.953,
     0.005,
-    38713
+    38624
    ],
    "retained": [
     0.881,
@@ -444,7 +444,7 @@
    "merged_background": [
     0.901,
     0.005,
-    29741
+    29678
    ],
    "retained_background": [
     0.83,
@@ -455,9 +455,9 @@
   {
    "cutoff": 2.1,
    "merged": [
-    0.979,
+    0.978,
     0.005,
-    31786
+    31715
    ],
    "retained": [
     0.901,
@@ -472,7 +472,7 @@
    "merged_background": [
     0.929,
     0.006,
-    24831
+    24780
    ],
    "retained_background": [
     0.853,
@@ -483,9 +483,9 @@
   {
    "cutoff": 2.2,
    "merged": [
-    1.001,
+    1.0,
     0.006,
-    25873
+    25814
    ],
    "retained": [
     0.918,
@@ -498,9 +498,9 @@
     9178
    ],
    "merged_background": [
-    0.952,
+    0.951,
     0.007,
-    20481
+    20438
    ],
    "retained_background": [
     0.872,
@@ -511,9 +511,9 @@
   {
    "cutoff": 2.3,
    "merged": [
-    1.021,
+    1.02,
     0.007,
-    20915
+    20870
    ],
    "retained": [
     0.938,
@@ -526,9 +526,9 @@
     7824
    ],
    "merged_background": [
-    0.97,
+    0.969,
     0.008,
-    16724
+    16692
    ],
    "retained_background": [
     0.892,
@@ -539,9 +539,9 @@
   {
    "cutoff": 2.4,
    "merged": [
-    1.033,
+    1.032,
     0.008,
-    16689
+    16656
    ],
    "retained": [
     0.952,
@@ -554,9 +554,9 @@
     6607
    ],
    "merged_background": [
-    0.982,
+    0.981,
     0.008,
-    13514
+    13491
    ],
    "retained_background": [
     0.905,
@@ -567,9 +567,9 @@
   {
    "cutoff": 2.5,
    "merged": [
-    1.042,
+    1.041,
     0.009,
-    13250
+    13229
    ],
    "retained": [
     0.967,
@@ -584,7 +584,7 @@
    "merged_background": [
     0.988,
     0.009,
-    10838
+    10823
    ],
    "retained_background": [
     0.92,
@@ -595,9 +595,9 @@
   {
    "cutoff": 2.6,
    "merged": [
-    1.05,
+    1.049,
     0.01,
-    10489
+    10477
    ],
    "retained": [
     0.983,
@@ -612,7 +612,7 @@
    "merged_background": [
     0.997,
     0.011,
-    8697
+    8689
    ],
    "retained_background": [
     0.936,
@@ -623,9 +623,9 @@
   {
    "cutoff": 2.7,
    "merged": [
-    1.062,
+    1.061,
     0.012,
-    8313
+    8304
    ],
    "retained": [
     0.998,
@@ -638,9 +638,9 @@
     3921
    ],
    "merged_background": [
-    1.012,
+    1.011,
     0.012,
-    6998
+    6991
    ],
    "retained_background": [
     0.955,
@@ -653,7 +653,7 @@
    "merged": [
     1.068,
     0.013,
-    6543
+    6536
    ],
    "retained": [
     1.008,
@@ -666,9 +666,9 @@
     3233
    ],
    "merged_background": [
-    1.024,
+    1.023,
     0.014,
-    5601
+    5596
    ],
    "retained_background": [
     0.967,
@@ -679,9 +679,9 @@
   {
    "cutoff": 2.9,
    "merged": [
-    1.065,
+    1.064,
     0.015,
-    5099
+    5094
    ],
    "retained": [
     1.015,
@@ -696,7 +696,7 @@
    "merged_background": [
     1.02,
     0.015,
-    4411
+    4407
    ],
    "retained_background": [
     0.975,
@@ -709,7 +709,7 @@
    "merged": [
     1.065,
     0.017,
-    3988
+    3986
    ],
    "retained": [
     1.029,
@@ -724,7 +724,7 @@
    "merged_background": [
     1.02,
     0.017,
-    3483
+    3481
    ],
    "retained_background": [
     0.987,
@@ -735,9 +735,9 @@
   {
    "cutoff": 3.1,
    "merged": [
-    1.068,
+    1.067,
     0.019,
-    3126
+    3124
    ],
    "retained": [
     1.027,
@@ -752,7 +752,7 @@
    "merged_background": [
     1.024,
     0.019,
-    2763
+    2761
    ],
    "retained_background": [
     0.987,

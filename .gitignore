@@ -88,5 +88,5 @@ __pycache__/
 *.pdfsync
 
 # Local UI audit reports and browser evidence
-# /UI_AUDIT_*.md
+/UI_AUDIT_*.md
 /docs/audits/ui-*/

@@ -248,6 +248,8 @@ div.leaflet-container {
 .leaflet-container .leaflet-tooltip.eq-hover-card::before { display: none; }
 .eq-card { width: 268px; padding: 10px 12px 9px; font-size: 12px; line-height: 1.35; }
 .eq-card-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+/* "Locality: GeoNet" under a title that is GeoNet's own locality text (CC BY 4.0 credit). */
+.eq-card-credit { display: block; margin-top: 1px; font-size: 10.5px; font-weight: 400; }
 .eq-card-rows { display: grid; gap: 2px; }
 .eq-card-row { display: flex; justify-content: space-between; gap: 12px; }
 .eq-card-label { color: hsl(var(--muted-foreground)); white-space: nowrap; }

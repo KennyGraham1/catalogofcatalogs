@@ -27,6 +27,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Save, Trash2, Download, Plus, Filter } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { formatLocalDate } from '@/lib/date-format';
 
 interface SavedFilter {
   id: string;
@@ -221,13 +222,7 @@ export function SavedFiltersDialog({ currentFilters, onLoadFilter, readOnly = fa
     });
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-GB', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
-  };
+  const formatDate = (dateString: string) => formatLocalDate(dateString);
 
   const getFilterSummary = (filterConfig: any) => {
     const parts: string[] = [];

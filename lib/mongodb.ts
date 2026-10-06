@@ -295,6 +295,11 @@ export const COLLECTIONS = {
   // One merge QC summary per merged catalogue ({ catalogue_id, created_at, summary },
   // lib/merge-qc.ts), written in the merge's transaction and deleted with the catalogue.
   MERGE_QC_SUMMARIES: 'merge_qc_summaries',
+  // One stored statistics document per catalogue ({ catalogue_id, generation, version,
+  // format, computed_at, statistics }, lib/catalogue-statistics.ts): the answer of
+  // GET /api/catalogues/[id]/statistics, valid while the catalogue's shared cache
+  // generation is unchanged. Deleted with the catalogue.
+  CATALOGUE_STATISTICS: 'catalogue_statistics',
 } as const;
 
 /**

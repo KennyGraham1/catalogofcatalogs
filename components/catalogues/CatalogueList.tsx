@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { AlertCircle } from 'lucide-react';
 import type { MergedCatalogue } from '@/lib/db';
+import { formatLocalDate } from '@/lib/date-format';
 
 export function CatalogueList() {
   const { data: catalogues, loading, error } = useFetch<MergedCatalogue[]>('/api/catalogues');
@@ -57,11 +58,7 @@ export function CatalogueList() {
               </Badge>
             </div>
             <CardDescription>
-              {new Date(catalogue.created_at).toLocaleDateString('en-GB', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-              })}
+              {formatLocalDate(catalogue.created_at)}
             </CardDescription>
           </CardHeader>
           <CardContent>

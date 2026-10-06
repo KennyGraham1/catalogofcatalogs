@@ -1,6 +1,6 @@
 'use client';
 
-import { buildEventCardHtml } from '@/lib/map-event-card';
+import { buildEventCardHtml, type EventCardOptions } from '@/lib/map-event-card';
 import { LocalitiesAttribution, useNzLocalities } from '@/components/map/use-nz-localities';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { MapContainer, Popup } from 'react-leaflet';
@@ -190,9 +190,10 @@ export default function UnifiedEarthquakeMap({
   // Viewport-sampled events (culling + detail budget) and the single lazy popup.
   const { sampled: sampledEarthquakes, displayCount, visibleCount, onViewportChange, getPosition } = useMapEventSelection(earthquakes, sampleSize);
   const { activePopup, onEventClick, closePopup } = useEventMapPopup(earthquakes, mapKey);
-  // Hover card (lib/map-event-card.ts): localities from the LINZ Gazetteer once loaded.
+  // Hover card (lib/map-event-card.ts): localities from the LINZ Gazetteer once loaded, and
+  // GeoNet's own locality for GeoNet events (requested on hover by EarthquakeMarkerLayer).
   const places = useNzLocalities();
-  const hoverCard = useCallback((event: Earthquake) => buildEventCardHtml(event, places), [places]);
+  const hoverCard = useCallback((event: Earthquake, options: EventCardOptions) => buildEventCardHtml(event, places, options), [places]);
 
   // Frame the events (antimeridian aware; NZ when empty). MapContainer reads the bounds once;
   // FitMapToEvents keeps framing them while events stream in, until the user takes over.

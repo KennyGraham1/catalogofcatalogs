@@ -6,6 +6,7 @@ import { Search, Loader2, MapPin, Calendar, Activity } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useDebounce } from '@/hooks/use-debounce';
+import { formatOriginDateUtc } from '@/lib/map-format';
 
 interface SearchResult {
   id: string;
@@ -140,14 +141,8 @@ export function GlobalSearch({
     }
   }, [handleResultClick, showResults, results, selectedIndex]);
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-GB', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
-  };
+  // Event origin times: the UTC calendar day, like every event time on the platform.
+  const formatDate = (dateString: string) => formatOriginDateUtc(dateString);
 
   return (
     <div ref={searchRef} className={cn('relative', className)}>

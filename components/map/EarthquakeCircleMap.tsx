@@ -1,6 +1,6 @@
 'use client';
 
-import { buildEventCardHtml } from '@/lib/map-event-card';
+import { buildEventCardHtml, type EventCardOptions } from '@/lib/map-event-card';
 import { LocalitiesAttribution, useNzLocalities } from './use-nz-localities';
 import { useCallback, useMemo, useState, memo } from 'react';
 import { MapContainer, Popup } from 'react-leaflet';
@@ -51,6 +51,11 @@ export interface CircleMapEvent {
   depth_type?: string | null;
   source_id?: string | null;
   used_station_count?: number | null;
+
+  // How the hover card and popup recognise a GeoNet event for its GeoNet locality
+  // (lib/geonet-locality.ts geonetPublicIdOf): the QuakeML publicID and the agency code.
+  event_public_id?: string | null;
+  agency_id?: string | null;
 
   // C1: stored quality score/grade (resolveEventQuality prefers these; see event-quality.ts).
   quality_score?: number | null;
@@ -140,9 +145,10 @@ export const EarthquakeCircleMap = memo(function EarthquakeCircleMap({
 
   const { sampled: sampledEvents, displayCount, visibleCount, onViewportChange, getPosition } = useMapEventSelection(events, sampleSize);
   const { activePopup, onEventClick, closePopup } = useEventMapPopup(events, mapKey);
-  // Hover card (lib/map-event-card.ts): localities from the LINZ Gazetteer once loaded.
+  // Hover card (lib/map-event-card.ts): localities from the LINZ Gazetteer once loaded, and
+  // GeoNet's own locality for GeoNet events (requested on hover by EarthquakeMarkerLayer).
   const places = useNzLocalities();
-  const hoverCard = useCallback((event: CircleMapEvent) => buildEventCardHtml(event, places), [places]);
+  const hoverCard = useCallback((event: CircleMapEvent, options: EventCardOptions) => buildEventCardHtml(event, places, options), [places]);
 
   // The fault traces: fetched once per page load and shared with every other map.
   const faultData = useFaultData(showFaults);

@@ -137,10 +137,13 @@ therefore widened, by the uncertainties, to
 where σ₁ and σ₂ are the entries' reported magnitude uncertainties (0 when
 not reported) and 0.2 is the scatter between agencies that no reported
 uncertainty describes. The widening applies only when the two solutions agree
-closely in time and place — together within a tenth of their matching windows
-(for 60 s and 50 km: 6 s at the same epicentre, or 5 km at the same time), and
+closely in time and place — together within a fifth of their matching windows
+(for 60 s and 50 km: 12 s at the same epicentre, or 10 km at the same time), and
 within three combined standard deviations where both report time and location
-uncertainties — and only when the pairing was uncontested. In a dense
+uncertainties — and only when the pairing was uncontested. The fifth is a fixed
+share of the windows, not a multiple of the reported errors: it limits the
+chance that a second earthquake lies as close, which depends on how dense the
+seismicity is rather than on how well the solutions are located. In a dense
 aftershock sequence, where a refused alternative was nearly as close,
 magnitude is the main way to tell neighbours apart and the base tolerance T
 applies. The cap of 2T guards against bulletins that report the scatter of
@@ -156,7 +159,7 @@ to 300 km depth; 100/150 km deeper) and three times the combined reported
 depth uncertainty.
 
 On the platform's synthetic worked example, with known ground truth, these
-checks raised the share of true duplicate pairs merged from 93.3 % to 98.4 %
+checks raised the share of true duplicate pairs merged from 93.3 % to 99.0 %
 while the share of merged pairs that were truly one earthquake rose from
 97.9 % to 98.4 %. The widened magnitude tolerance admitted no false pairings.
 When a group is accepted only because of the widening, or because a fixed

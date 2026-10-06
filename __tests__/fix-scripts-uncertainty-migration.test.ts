@@ -257,6 +257,28 @@ describe('gs#0 migrate-uncertainty-units.ts end-to-end (fake driver, no real DB)
     expect(bulkWriteSpy).not.toHaveBeenCalled();
   });
 
+  it('marks the rewritten rows\' catalogues changed after a --write run, and nothing on a dry run', async () => {
+    // The script writes past lib/db.ts, so without this the stored statistics and the
+    // other instances' caches would keep serving the unconverted values.
+    for (const doc of docs) (doc as FakeDoc & { catalogue_id?: string }).catalogue_id = doc.id === 'C1' ? 'cat-csv' : 'cat-quakeml';
+    const markCatalogueDataChanged = jest.fn(async () => {});
+    jest.doMock('@/lib/db', () => ({ ...jest.requireActual('@/lib/db'), markCatalogueDataChanged }));
+    try {
+      process.argv = ['node', 'migrate-uncertainty-units.ts'];
+      await (await import('@/scripts/migrate-uncertainty-units')).run();
+      expect(markCatalogueDataChanged).not.toHaveBeenCalled();
+
+      jest.resetModules(); // WRITE is read when the script loads
+      process.argv = ['node', 'migrate-uncertainty-units.ts', '--write', '--yes'];
+      await (await import('@/scripts/migrate-uncertainty-units')).run();
+      // C1 (no provenance) is not rewritten, so only the QuakeML catalogue changed.
+      expect(markCatalogueDataChanged).toHaveBeenCalledTimes(1);
+      expect(markCatalogueDataChanged).toHaveBeenCalledWith(['cat-quakeml']);
+    } finally {
+      jest.dontMock('@/lib/db');
+    }
+  });
+
   it('refuses to write without confirmation in a non-interactive shell, even with --write', async () => {
     process.argv = ['node', 'migrate-uncertainty-units.ts', '--write']; // no --yes
     const originalIsTTY = process.stdin.isTTY;

@@ -38,6 +38,8 @@ import {
 } from './event-filter-params';
 import { AppError, ValidationError } from './errors';
 import type { MergeQcSummary } from './merge-qc';
+import type { CatalogueStatistics } from './catalogue-statistics';
+import { catalogueStatisticsChanged } from './catalogue-statistics-refresh';
 
 export interface MergedCatalogue {
   id: string;
@@ -267,6 +269,79 @@ export const EVENT_SUMMARY_PROJECTION = {
   merge_parameters: 0,
 };
 
+/**
+ * The map view (GET /api/catalogues/[id]/events?view=map), the only event data served
+ * without a session: just what the event maps read (EarthquakeCircleMap and its marker
+ * layer, overlays, hover card, popup and colour modes, on the catalogue map page and the
+ * dashboard map). Everything else needs a session: provenance (source_events,
+ * merge_strategy, merge_parameters), picks, arrivals and the other nested QuakeML
+ * collections, the review fields, catalogue_id, created_at, and every scalar no map shows.
+ *
+ * Map rows are cut from summary rows (toEventMapRow), so a field here must also be one
+ * EVENT_SUMMARY_PROJECTION keeps: EventMapRow is picked from EventSummary to enforce it.
+ */
+export const EVENT_MAP_PROJECTION = {
+  _id: 0,
+  // Marker key, position and size; time and id are also the page cursor.
+  id: 1, time: 1, latitude: 1, longitude: 1, magnitude: 1,
+  // Depth colour mode; depth, magnitude and the agency's event id in the hover card and popup.
+  depth: 1, depth_uncertainty: 1, depth_type: 1, magnitude_type: 1, source_id: 1, event_public_id: 1,
+  // Popup rows (region, type, stations); region is also the hover card's fallback title.
+  region: 1, event_type: 1, used_station_count: 1,
+  // The reporting agency's code (e.g. WEL): with the ids above, how the hover card and popup
+  // recognise a GeoNet event for GeoNet's own locality (lib/geonet-locality.ts).
+  agency_id: 1,
+  // Azimuthal-gap colour mode, hover card and popup; it also weights the ellipse display.
+  azimuthal_gap: 1,
+  // Quality colour mode and popup: the stored Q and grade, and for rows stored before Q
+  // was kept, the inputs resolveEventQuality computes it from (quality-scoring metricsFromEvent).
+  quality_score: 1, quality_grade: 1, time_uncertainty: 1, used_phase_count: 1, standard_error: 1,
+  magnitude_uncertainty: 1, magnitude_station_count: 1, evaluation_mode: 1, evaluation_status: 1,
+  // Source-catalogue colour mode: a merged row's contributing catalogues.
+  source_catalogue_ids: 1,
+  // Uncertainty-ellipse overlay and the map page's "With Uncertainty" count.
+  horizontal_uncertainty: 1, min_horizontal_uncertainty: 1, max_horizontal_uncertainty: 1,
+  azimuth_max_horizontal_uncertainty: 1, confidence_level: 1, latitude_uncertainty: 1, longitude_uncertainty: 1,
+  // Focal-mechanism overlay (beach balls) and the map page's count; cut to the nodal
+  // planes by toEventMapRow.
+  focal_mechanisms: 1, preferred_focal_mechanism_id: 1,
+} as const;
+
+/** Derived from EVENT_MAP_PROJECTION, within EventSummary, so the type cannot drift from it. */
+export type EventMapRow = Pick<EventSummary, Exclude<keyof typeof EVENT_MAP_PROJECTION, '_id'>>;
+
+const EVENT_MAP_FIELDS = Object.keys(EVENT_MAP_PROJECTION).filter((field) => field !== '_id') as Array<keyof EventMapRow>;
+
+/** What parseFocalMechanism reads of a stored mechanism; moment tensors, axes and creation info are left out. */
+const FOCAL_MECHANISM_MAP_KEYS = ['publicID', 'nodalPlanes', 'nodalPlane1', 'nodalPlane2', 'preferredPlane'];
+
+function focalMechanismsForMap(json: string | null | undefined): string | null | undefined {
+  if (typeof json !== 'string') return json;
+  try {
+    const mechanisms: unknown = JSON.parse(json);
+    if (!Array.isArray(mechanisms)) return null;
+    return JSON.stringify(mechanisms.map((mechanism) => (
+      mechanism && typeof mechanism === 'object'
+        ? Object.fromEntries(FOCAL_MECHANISM_MAP_KEYS
+          .filter((key) => key in mechanism)
+          .map((key) => [key, (mechanism as Record<string, unknown>)[key]]))
+        : null
+    )));
+  } catch {
+    return null; // Unreadable: no map could draw it either.
+  }
+}
+
+/** A summary (or full) event row cut to the map view: EVENT_MAP_PROJECTION's fields only. */
+export function toEventMapRow(row: Partial<EventSummary>): EventMapRow {
+  const mapRow: Record<string, unknown> = {};
+  for (const field of EVENT_MAP_FIELDS) {
+    if (row[field] !== undefined) mapRow[field] = row[field];
+  }
+  if ('focal_mechanisms' in mapRow) mapRow.focal_mechanisms = focalMechanismsForMap(row.focal_mechanisms);
+  return mapRow as EventMapRow;
+}
+
 export interface PaginatedResult<T> {
   data: T[];
   pagination: {
@@ -404,6 +479,16 @@ export interface DbQueries {
   // Aggregated in MongoDB: a 218k-event catalogue must not be materialised in Node
   // just to take a min/max/mean.
   getCatalogueEventStatistics: (catalogueId: string) => Promise<CatalogueEventStatistics>;
+
+  // The stored answer of the statistics endpoint (lib/catalogue-statistics.ts), one per
+  // catalogue, deleted with the catalogue. getStoredCatalogueStatistics resolves to null
+  // when none is stored. storeCatalogueStatistics never replaces a document of a newer
+  // generation and stores nothing for a catalogue that is not live; it resolves to
+  // whether it stored the document. deleteStoredCatalogueStatistics('all') empties the
+  // collection (the admin cache clear).
+  getStoredCatalogueStatistics: (catalogueId: string) => Promise<StoredCatalogueStatistics | null>;
+  storeCatalogueStatistics: (doc: StoredCatalogueStatistics) => Promise<boolean>;
+  deleteStoredCatalogueStatistics: (catalogueIds: string[] | 'all') => Promise<void>;
 
   // Transaction support
   transaction: <T>(callback: TransactionCallback<T>) => Promise<T>;
@@ -1066,6 +1151,20 @@ export interface CatalogueEventStatistics {
   qualityGrades: Array<{ grade: QualityGrade; count: number }>;
 }
 
+/** A document of the catalogue_statistics collection (lib/catalogue-statistics.ts). */
+export interface StoredCatalogueStatistics {
+  catalogue_id: string;
+  /** The catalogue's shared cache generation the statistics were computed under. */
+  generation: number;
+  /** The catalogue version they were computed for. */
+  version: string;
+  /** CATALOGUE_STATISTICS_FORMAT of `statistics`. */
+  format: number;
+  /** ISO 8601 UTC. */
+  computed_at: string;
+  statistics: CatalogueStatistics;
+}
+
 function parseOptionalPositiveInt(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const parsed = Number.parseInt(value, 10);
@@ -1197,15 +1296,20 @@ async function publishCatalogueWrites(writes: Map<string, boolean>): Promise<voi
   } catch (error) {
     console.warn('[Database] Cache invalidation failed:', error instanceof Error ? error.message : error);
   }
+  let generationAdvanced = true;
   try {
     await bumpSharedCacheGenerations(scopes);
   } catch (error) {
+    generationAdvanced = false;
     if (!sharedGenerationWarningLogged) {
       sharedGenerationWarningLogged = true;
       console.warn('[Database] Could not advance the shared cache generation; other server instances may serve cached data until it expires:',
         error instanceof Error ? error.message : error);
     }
   }
+  // The stored catalogue statistics are keyed by the shared generation: recompute them
+  // in the background (debounced; it returns at once and never throws).
+  catalogueStatisticsChanged(Array.from(writes.keys()), { generationAdvanced });
 }
 
 /**
@@ -2406,6 +2510,58 @@ if (typeof window === 'undefined') {
       };
     },
 
+    getStoredCatalogueStatistics: async (catalogueId: string): Promise<StoredCatalogueStatistics | null> => {
+      const collection = await getCollection(COLLECTIONS.CATALOGUE_STATISTICS);
+      // Newest generation first, should a database without the unique index (setup not
+      // run) ever hold two.
+      const doc = await collection.findOne(
+        { catalogue_id: catalogueId },
+        { projection: { _id: 0 }, sort: { generation: -1 } }
+      );
+      if (!doc || typeof doc.generation !== 'number' || typeof doc.statistics !== 'object' || doc.statistics === null) {
+        return null;
+      }
+      return {
+        catalogue_id: String(doc.catalogue_id),
+        generation: doc.generation,
+        version: String(doc.version ?? ''),
+        format: typeof doc.format === 'number' ? doc.format : 0,
+        computed_at: String(doc.computed_at ?? ''),
+        statistics: doc.statistics as CatalogueStatistics,
+      };
+    },
+
+    storeCatalogueStatistics: async (doc: StoredCatalogueStatistics): Promise<boolean> => {
+      if (!doc.catalogue_id) throw new Error('Stored statistics need their catalogue id');
+      const catalogues = await getCollection(COLLECTIONS.CATALOGUES);
+      const collection = await getCollection(COLLECTIONS.CATALOGUE_STATISTICS);
+      // Nothing is stored for a catalogue that is gone or being deleted: its deletion
+      // may already have removed the stored statistics (see deleteCatalogue).
+      const live = await catalogues.findOne({ id: doc.catalogue_id, ...LIVE_CATALOGUE }, { projection: { _id: 0, id: 1 } });
+      if (!live) return false;
+      try {
+        // Replaces a document of the same or an older generation (or one without any).
+        // A document of a NEWER generation does not match, so the upsert tries to insert
+        // a second document for the catalogue, which the unique index on catalogue_id
+        // refuses: a computation that fell behind a write never overwrites its successor.
+        await collection.updateOne(
+          { catalogue_id: doc.catalogue_id, generation: { $not: { $gt: doc.generation } } },
+          { $set: { ...doc } },
+          { upsert: true }
+        );
+        return true;
+      } catch (error) {
+        if ((error as { code?: unknown })?.code === 11000) return false;
+        throw error;
+      }
+    },
+
+    deleteStoredCatalogueStatistics: async (catalogueIds: string[] | 'all'): Promise<void> => {
+      if (catalogueIds !== 'all' && catalogueIds.length === 0) return;
+      const collection = await getCollection(COLLECTIONS.CATALOGUE_STATISTICS);
+      await collection.deleteMany(catalogueIds === 'all' ? {} : { catalogue_id: { $in: catalogueIds } });
+    },
+
     updateCatalogueGeoBounds: async (
       id: string, minLat: number, maxLat: number, minLon: number, maxLon: number,
       session?: ClientSession, boundsOptions?: GeoBoundsUpdateOptions
@@ -2572,7 +2728,8 @@ if (typeof window === 'undefined') {
     //  1. mark the catalogue 'deleting': it vanishes from every read at once, and event
     //     writes refuse it (a batch already in flight removes its own rows again, see
     //     insertEventRows);
-    //  2. delete its events, then its import history and merge QC summary;
+    //  2. delete its events, then its import history, merge QC summary and stored
+    //     statistics;
     //  3. delete the catalogue row last.
     // A failure part-way leaves a hidden 'deleting' catalogue, not a visible empty one;
     // repeating the DELETE, or the integrity sweep, finishes the job. Resolves to
@@ -2582,6 +2739,7 @@ if (typeof window === 'undefined') {
       const eventsCollection = await getCollection(COLLECTIONS.EVENTS);
       const historyCollection = await getCollection(COLLECTIONS.IMPORT_HISTORY);
       const qcCollection = await getCollection(COLLECTIONS.MERGE_QC_SUMMARIES);
+      const statisticsCollection = await getCollection(COLLECTIONS.CATALOGUE_STATISTICS);
 
       const marked = await collection.updateOne(
         { id },
@@ -2593,6 +2751,10 @@ if (typeof window === 'undefined') {
       await eventsCollection.deleteMany({ catalogue_id: id });
       await historyCollection.deleteMany({ catalogue_id: id });
       await qcCollection.deleteMany({ catalogue_id: id });
+      // storeCatalogueStatistics checks that the catalogue is live just before it writes,
+      // so a computation that read the catalogue before the mark does not store its
+      // answer after this (bar a window of milliseconds, which the integrity sweep covers).
+      await statisticsCollection.deleteMany({ catalogue_id: id });
       await collection.deleteOne({ id, status: 'deleting' });
 
       // Readers between the mark and the event deletion may have cached a partial view.
@@ -2605,16 +2767,19 @@ if (typeof window === 'undefined') {
       const events = await getCollection(COLLECTIONS.EVENTS);
       const history = await getCollection(COLLECTIONS.IMPORT_HISTORY);
       const qcSummaries = await getCollection(COLLECTIONS.MERGE_QC_SUMMARIES);
+      const storedStatistics = await getCollection(COLLECTIONS.CATALOGUE_STATISTICS);
       const cutoff = new Date(Date.now() - (options.staleDeletionMs ?? 15 * 60 * 1000)).toISOString();
 
       // Referencing IDs first, catalogue rows second: a catalogue row is always written
       // before its events, so an ID seen in the events has its row visible by the time
       // the rows are read, and a catalogue being created right now is never mistaken
-      // for an orphan. A merge QC summary is written in its catalogue's transaction.
+      // for an orphan. A merge QC summary is written in its catalogue's transaction, and
+      // statistics are stored only for a catalogue that has been read.
       const referenced = Array.from(new Set([
         ...(await events.distinct('catalogue_id')),
         ...(await history.distinct('catalogue_id')),
         ...(await qcSummaries.distinct('catalogue_id')),
+        ...(await storedStatistics.distinct('catalogue_id')),
       ].map(String)));
       const rows = await catalogues
         .find({}, { projection: { _id: 0, id: 1, status: 1, deleting_at: 1 } })
@@ -2641,6 +2806,7 @@ if (typeof window === 'undefined') {
         await events.deleteMany(filter);
         await history.deleteMany(filter);
         await qcSummaries.deleteMany(filter);
+        await storedStatistics.deleteMany(filter);
       }
       if (options.apply && staleDeletions.length > 0) {
         await catalogues.deleteMany({ id: { $in: staleDeletions }, status: 'deleting' });

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useMap } from 'react-leaflet';
 import { LOCALITIES_ATTRIBUTION, loadNzLocalities, type Locality } from '@/lib/nz-localities';
+import { GEONET_LOCALITY_ATTRIBUTION } from '@/lib/geonet-locality';
 
 /**
  * The LINZ Gazetteer places the hover card describes events against, loaded once per page
@@ -27,6 +28,21 @@ export function LocalitiesAttribution({ active }: { active: boolean }) {
     if (!active || !control) return;
     control.addAttribution(LOCALITIES_ATTRIBUTION);
     return () => { control.removeAttribution(LOCALITIES_ATTRIBUTION); };
+  }, [map, active]);
+  return null;
+}
+
+/**
+ * Credits GeoNet in the map's attribution while GeoNet's own locality text is in use on the
+ * map (EarthquakeMarkerLayer turns it on once a hover card has shown it).
+ */
+export function GeoNetLocalityAttribution({ active }: { active: boolean }) {
+  const map = useMap();
+  useEffect(() => {
+    const control = map?.attributionControl;
+    if (!active || !control) return;
+    control.addAttribution(GEONET_LOCALITY_ATTRIBUTION);
+    return () => { control.removeAttribution(GEONET_LOCALITY_ATTRIBUTION); };
   }, [map, active]);
   return null;
 }

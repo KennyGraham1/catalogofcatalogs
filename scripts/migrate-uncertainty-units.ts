@@ -38,7 +38,7 @@
  */
 
 import { COLLECTIONS } from '../lib/mongodb';
-import { optionalFieldInRange } from '../lib/db';
+import { markCatalogueDataChanged, optionalFieldInRange } from '../lib/db';
 import { resolveDbTarget } from './lib/db-target';
 import { confirmWrite } from './lib/confirm';
 import {
@@ -53,6 +53,7 @@ const BATCH_SIZE = 500;
 
 interface LegacyEventDoc {
   id: string;
+  catalogue_id?: string | null;
   preferred_origin_id?: string | null;
   origins?: string | null;
   depth_uncertainty?: number | null;
@@ -110,6 +111,9 @@ export async function run(): Promise<void> {
   let nulledOutOfRange = 0;
   const outOfRangeReport: string[] = [];
   const pending: PendingUpdate[] = [];
+  // Catalogues with a rewritten row: their cached and stored data (event lists, the
+  // statistics popover) must stop being served once the migration has written.
+  const changedCatalogues = new Set<string>();
 
   const flush = async (): Promise<void> => {
     if (!WRITE || pending.length === 0) {
@@ -168,10 +172,12 @@ export async function run(): Promise<void> {
 
     if (Object.keys(set).length > 0) {
       pending.push({ id: doc.id, set });
+      if (doc.catalogue_id) changedCatalogues.add(String(doc.catalogue_id));
       if (pending.length >= BATCH_SIZE) await flush();
     }
   }
   await flush();
+  if (WRITE && changedCatalogues.size > 0) await markCatalogueDataChanged(Array.from(changedCatalogues));
 
   console.log(`Scanned: ${scanned}`);
   console.log(`  Converted (metres -> km): ${convertedDocs}`);

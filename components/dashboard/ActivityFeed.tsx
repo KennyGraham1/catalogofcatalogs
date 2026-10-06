@@ -15,6 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useRouter } from 'next/navigation';
 import { getCatalogueSourceType } from '@/lib/catalogue-source-type';
+import { formatLocalDate } from '@/lib/date-format';
 
 /** Entries in a catalogue's source list; 0 when it is missing or unreadable. */
 function countSourceCatalogues(raw: string | null | undefined): number {
@@ -82,11 +83,7 @@ export function ActivityFeed() {
       } else if (diffDays < 30) {
         timeAgo = `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
       } else {
-        timeAgo = createdDate.toLocaleDateString('en-GB', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric',
-        });
+        timeAgo = formatLocalDate(createdDate);
       }
 
       // Determine activity type and description

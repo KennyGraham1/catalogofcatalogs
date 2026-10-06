@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { dbQueries } from '@/lib/db';
-import { Logger, formatErrorResponse } from '@/lib/errors';
+import { dbQueries, toEventMapRow, type CursorPaginatedResult, type EventSummary } from '@/lib/db';
+import { Logger, NotFoundError, formatErrorResponse } from '@/lib/errors';
 import { catalogueScope, eventCache, generateCacheKey, getCacheGeneration } from '@/lib/cache';
 import { requireViewer } from '@/lib/auth/middleware';
 import { decodeEventCursor } from '@/lib/event-cursor';
+import { GUEST_MAP_RATE_LIMIT, applyRateLimit, guestMapRateLimiter } from '@/lib/rate-limiter';
 
 // Force dynamic rendering for this API route
 export const dynamic = 'force-dynamic';
@@ -16,14 +17,39 @@ function exceedsConfiguredLimit(value: number): boolean {
   return Number.isFinite(MAX_EVENTS_REQUEST_LIMIT) && MAX_EVENTS_REQUEST_LIMIT > 0 && value > MAX_EVENTS_REQUEST_LIMIT;
 }
 
+/**
+ * Events of one catalogue, in three views:
+ * - full records (no `view`) and `view=summary` need a viewer session;
+ * - `view=map` (EVENT_MAP_PROJECTION's fields only) is public, like the catalogue list,
+ *   for a catalogue the list shows. Signed-out clients are rate-limited per address
+ *   (GUEST_MAP_RATE_LIMIT); signed-in viewers are not.
+ * Summary and map pages use the same cursor pagination and caps.
+ */
 export async function GET(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   const { id } = await context.params;
+  const { searchParams } = new URL(request.url);
+  const view = searchParams.get('view');
+  const mapView = view === 'map';
 
   const authResult = await requireViewer(request);
-  if (authResult instanceof NextResponse) return authResult;
+  const signedIn = !(authResult instanceof NextResponse);
+  if (!signedIn && !mapView) return authResult;
+
+  if (!signedIn) {
+    const rateLimit = applyRateLimit(request, guestMapRateLimiter, GUEST_MAP_RATE_LIMIT.requests);
+    if (!rateLimit.success) {
+      return NextResponse.json(
+        {
+          error: 'Too many map requests from your network. Wait a few minutes and try again, or sign in to load maps without this limit.',
+          retryAfter: rateLimit.headers['Retry-After'],
+        },
+        { status: 429, headers: rateLimit.headers }
+      );
+    }
+  }
 
   try {
     if (!dbQueries) {
@@ -34,12 +60,17 @@ export async function GET(
     }
 
     const catalogueId = id;
-    const { searchParams } = new URL(request.url);
-    const view = searchParams.get('view');
-    if (view && view !== 'summary') {
+    if (view && view !== 'summary' && view !== 'map') {
       return NextResponse.json({ error: 'Invalid event view' }, { status: 400 });
     }
-    const summary = view === 'summary';
+    // The public view only covers catalogues the public list shows (getCatalogueById
+    // applies the list's filter): a catalogue being deleted is not mapped.
+    if (mapView && !(await dbQueries.getCatalogueById(catalogueId))) {
+      throw new NotFoundError('Catalogue');
+    }
+    // Map pages are summary pages (same query, caps and cache entries) cut to the map's
+    // fields just before they are sent.
+    const summary = view === 'summary' || mapView;
 
     // Parse pagination parameters
     const page = searchParams.get('page');
@@ -220,6 +251,10 @@ export async function GET(
       count: Array.isArray(events) ? events.length : (events && typeof events === 'object' && 'data' in events ? (events as { data?: unknown[] }).data?.length : 0) || 0
     });
 
+    if (mapView) {
+      const summaryPage = events as CursorPaginatedResult<EventSummary>;
+      return NextResponse.json({ ...summaryPage, data: summaryPage.data.map(toEventMapRow) });
+    }
     return NextResponse.json(events);
   } catch (error) {
     logger.error('Failed to fetch catalogue events', error);

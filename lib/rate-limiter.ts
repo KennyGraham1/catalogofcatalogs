@@ -173,6 +173,22 @@ export const authRateLimiter = rateLimit({
   uniqueTokenPerInterval: 500,
 });
 
+/**
+ * Signed-out reads of the public event map (GET /api/catalogues/[id]/events?view=map), per
+ * client address (an IPv6 /64 counting as one). The map loads a catalogue page by page
+ * (500 events, then 5,000 a page), so the budget is in pages and must cover a whole large
+ * catalogue inside one window: a failed load is retried from the first page. 300 pages per
+ * 5 minutes loads about 1.5 million events, several of the largest catalogues (~220,000
+ * events, 45 pages), and holds a scraper to one page a second on average. Signed-in
+ * viewers are not limited.
+ */
+export const GUEST_MAP_RATE_LIMIT = Object.freeze({ requests: 300, intervalMs: 5 * 60 * 1000 });
+
+export const guestMapRateLimiter = rateLimit({
+  interval: GUEST_MAP_RATE_LIMIT.intervalMs,
+  uniqueTokenPerInterval: 5000,
+});
+
 const DEFAULT_TRUSTED_PROXY_HOPS = 1;
 
 /**

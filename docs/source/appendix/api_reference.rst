@@ -547,6 +547,14 @@ Aggregated statistics for one catalogue's events (date range, magnitude/depth
 distributions, quality metrics), computed in MongoDB rather than by loading every
 event into the application.
 
+The answer is stored in the ``catalogue_statistics`` collection, one document per
+catalogue, and served from there while the catalogue is unchanged, including after a
+restart and on other server instances. Every write to the catalogue (upload, import,
+merge, event edit, review, metadata edit) retires the stored copy and recomputes it
+in the background about two seconds later, so the next request is usually answered
+without reading the events. Clearing the caches (``DELETE /api/cache/stats``) also
+empties the collection.
+
 **Endpoint**: ``GET /api/catalogues/{id}/statistics``
 
 **Path Parameters**:
@@ -767,6 +775,41 @@ and ``creation_info``. Omitted fields can still exist in the full event record.
 Continue until ``pagination.hasMore`` is false. Summary page sizes are capped
 by both 10,000 and any positive ``MAX_EVENTS_REQUEST_LIMIT`` configuration.
 Without ``view=summary``, the full-record response remains available.
+
+The full-record and summary views need a signed-in viewer (``401`` when signed out).
+
+Public Map Pages
+~~~~~~~~~~~~~~~~
+
+``view=map`` is the one event view readable without signing in: the maps use it
+for signed-out visitors. It is paged, capped and cursor-driven exactly like
+``view=summary``, but each row carries only the fields the maps show
+(``EVENT_MAP_PROJECTION`` in ``lib/db.ts``): ``id``, ``time``, ``latitude``,
+``longitude``, ``magnitude``, ``magnitude_type``, ``depth``,
+``depth_uncertainty``, ``depth_type``, ``source_id``, ``event_public_id``,
+``region``, ``event_type``, ``used_station_count``, ``agency_id``, ``azimuthal_gap``,
+``quality_score``, ``quality_grade`` and the quality-score inputs
+(``time_uncertainty``, ``used_phase_count``, ``standard_error``,
+``magnitude_uncertainty``, ``magnitude_station_count``, ``evaluation_mode``,
+``evaluation_status``), ``source_catalogue_ids``, the location uncertainties
+(``horizontal_uncertainty``, ``min_horizontal_uncertainty``,
+``max_horizontal_uncertainty``, ``azimuth_max_horizontal_uncertainty``,
+``confidence_level``, ``latitude_uncertainty``, ``longitude_uncertainty``),
+``focal_mechanisms`` (each mechanism cut to its ``publicID`` and nodal planes)
+and ``preferred_focal_mechanism_id``. Provenance (``source_events``), picks,
+arrivals, the other nested QuakeML collections, review fields, ``catalogue_id``
+and ``created_at`` are never included.
+
+.. code-block:: text
+
+   GET /api/catalogues/{id}/events?view=map&limit=500
+   GET /api/catalogues/{id}/events?view=map&limit=5000&cursor={nextCursor}
+
+A catalogue the catalogue list does not show (one being deleted, or an unknown
+ID) answers ``404``. Signed-out requests are limited to 300 per 5 minutes per
+client address (an IPv6 /64 counts as one address); past that the response is
+``429 Too Many Requests`` with ``Retry-After`` and ``X-RateLimit-*`` headers.
+Signed-in viewers are not limited.
 
 The UI shows a preview of up to 500 events, loads the remaining pages with at
 most three requests in flight, and enables catalogue analyses only after all

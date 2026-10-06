@@ -44,6 +44,14 @@ User Roles
 - Limited read-only access to public/demo catalogues only
 - **Cannot** export or modify data
 
+Signed-Out Visitors
+^^^^^^^^^^^^^^^^^^^
+
+Without signing in, anyone can browse the catalogue list and catalogue details and
+view the maps (the catalogue map page and the dashboard map), which load the public
+``view=map`` event pages. Analytics, the event table, full event records and exports
+need a signed-in account with the Viewer role or higher.
+
 Setup and Installation
 ----------------------
 
@@ -134,6 +142,10 @@ Viewer+ Required (Viewer, Editor, or Admin)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - ``GET /api/catalogues/[id]/export`` - Export catalogue
+- ``GET /api/catalogues/[id]/events`` - Event pages: full records, or ``view=summary``
+  (the event table, analytics and signed-in maps)
+- ``GET /api/catalogues/[id]/events/[eventId]`` - One full event record
+- ``GET /api/catalogues/[id]/events/filtered`` - Filtered events
 
 Admin Only
 ~~~~~~~~~~
@@ -150,6 +162,10 @@ Public Endpoints
 
 - ``GET /api/catalogues`` - List catalogues
 - ``GET /api/catalogues/[id]`` - Get catalogue details
+- ``GET /api/catalogues/[id]/events?view=map`` - Event pages for the maps: only the
+  fields the maps show, for catalogues the list shows. Signed-out requests are limited
+  to 300 per 5 minutes per client address (an IPv6 /64 counts as one), answered with
+  ``429 Too Many Requests`` and ``Retry-After`` past that; signed-in viewers are not limited.
 - ``POST /api/auth/register`` - User registration
 - ``POST /api/auth/forgot-password`` - Request password reset
 - ``POST /api/auth/reset-password`` - Complete password reset

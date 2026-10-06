@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getCatalogueSourceType } from '@/lib/catalogue-source-type';
+import { formatLocalDate } from '@/lib/date-format';
 
 export function RecentCatalogues() {
   const { catalogues, status } = useCatalogues();
@@ -24,11 +25,7 @@ export function RecentCatalogues() {
       return {
         id: cat.id,
         name: cat.name,
-        date: new Date(cat.created_at).toLocaleDateString('en-GB', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric',
-        }),
+        date: formatLocalDate(cat.created_at),
         events: cat.event_count,
         status: cat.status,
         isMerged

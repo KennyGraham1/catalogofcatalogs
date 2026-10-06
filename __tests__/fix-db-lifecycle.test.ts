@@ -728,6 +728,17 @@ describe('#62 / #122 / C13 :: PATCH /api/catalogues/[id]', () => {
     expect(catalogueCache.get('catalogues:all=true')).toBeNull();
     expect(audit()).toEqual([expect.objectContaining({ action: 'cache.clear', actor_id: 'admin-1' })]);
   });
+
+  it('clearing the caches also drops the statistics stored for every catalogue', async () => {
+    (requireAdmin as jest.Mock).mockResolvedValue({ user: { id: 'admin-1', email: 'a@example.test', role: 'admin' } });
+    const stored = collection('catalogue_statistics');
+    await stored.insertOne({ catalogue_id: 'cat-s1', generation: 3, version: '1.0.0', format: 1, statistics: {} });
+    await stored.insertOne({ catalogue_id: 'cat-s2', generation: 5, version: '1.0.0', format: 1, statistics: {} });
+    const response = await clearCaches(new NextRequest('http://localhost/api/cache/stats', { method: 'DELETE' }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(expect.objectContaining({ success: true, storedStatisticsCleared: true }));
+    expect(await stored.countDocuments()).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

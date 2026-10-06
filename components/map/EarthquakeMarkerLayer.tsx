@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useMemo, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import { CircleMarker } from 'react-leaflet';
 import { useMapViewport } from '@/hooks/use-map-viewport';
@@ -8,6 +8,9 @@ import { useMapColors } from '@/hooks/use-map-theme';
 import { getMagnitudePixelRadius, isEventInBounds } from '@/lib/earthquake-utils';
 import { positionInMapWorld } from '@/lib/map-event-selection';
 import { MARKER_STYLE, markerPathOptions, markerStrokeStyle } from '@/lib/map-style';
+import type { EventCardOptions } from '@/lib/map-event-card';
+import { fetchGeoNetLocality, geonetPublicIdOf, peekGeoNetLocality } from '@/lib/geonet-locality';
+import { GeoNetLocalityAttribution } from './use-nz-localities';
 
 interface MarkerEvent {
   id?: string | number | null;
@@ -34,10 +37,13 @@ export interface EarthquakeMarkerLayerProps<T extends MarkerEvent> {
   /** @deprecated Fill opacity comes from MARKER_STYLE; an explicit value still overrides it. */
   opacity?: number;
   /**
-   * HTML for the hover card of an event (lib/map-event-card.ts buildEventCardHtml), or
-   * null for none. Bound to the hovered marker only and removed on mouse-out or click.
+   * HTML for the hover card of an event (lib/map-event-card.ts buildEventCardHtml - pass
+   * `options` through), or null for none. Bound to the hovered marker only and removed on
+   * mouse-out or click. For a GeoNet event (lib/geonet-locality.ts) the card is shown at
+   * once with `geonetLocality` null (or GeoNet's cached text), and rebuilt with GeoNet's
+   * locality when the lazy request for it answers while the card is still open.
    */
-  hoverCard?: (event: T) => string | null;
+  hoverCard?: (event: T, options: EventCardOptions) => string | null;
 }
 
 /** Leaflet tooltip options for the event hover card. */
@@ -54,6 +60,12 @@ function asPath(target: unknown): L.Path | null {
  * markerPathOptions. Offscreen events are culled; marker reconciliation is kept out of
  * popup/control updates. Hover and selection restyle the Leaflet layer directly, so they
  * never re-render the marker list.
+ *
+ * GeoNet localities: hovering a GeoNet event asks GeoNet's quake API for its locality
+ * (fetchGeoNetLocality: cached, deduplicated, rate-limited; nothing is requested for other
+ * events, and nothing but on hover). The answer replaces the card's title if that marker's
+ * card is still open; later hovers read the cache synchronously. Once GeoNet text has been
+ * shown, the map's attribution credits GeoNet.
  */
 export const EarthquakeMarkerLayer = memo(function EarthquakeMarkerLayer<T extends MarkerEvent>({
   events, getColor, onEventClick, isDark: isDarkProp, selectedId, opacity, hoverCard,
@@ -74,6 +86,17 @@ export const EarthquakeMarkerLayer = memo(function EarthquakeMarkerLayer<T exten
   const selected = useRef<{ id: string | number | null | undefined; layer: L.Path } | null>(null);
 
   const ordered = useMemo(() => [...events].sort((a, b) => a.magnitude - b.magnitude), [events]);
+
+  // GeoNet locality requests: one AbortController per hovered marker (aborted on mouse-out,
+  // so a request still queued for a marker the pointer has left is never sent).
+  const hoverRequests = useRef(new WeakMap<object, AbortController>());
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const [creditGeoNet, setCreditGeoNet] = useState(false);
+  const geonetShown = useCallback(() => setCreditGeoNet(true), []);
 
   const markers = useMemo(() => {
     if (!bounds) return null;
@@ -101,15 +124,41 @@ export const EarthquakeMarkerLayer = memo(function EarthquakeMarkerLayer<T exten
           mouseover: (e) => {
             const layer = asPath(e.target);
             if (layer && selected.current?.layer !== layer) layer.setStyle(hoverStroke);
-            const html = hoverCard?.(event);
             const target = e.target as L.Layer | undefined;
-            if (html && target && typeof target.bindTooltip === 'function') target.bindTooltip(html, HOVER_CARD_OPTIONS).openTooltip();
+            if (!hoverCard || !target || typeof target.bindTooltip !== 'function') return;
+            const publicId = geonetPublicIdOf(event);
+            const known = publicId ? peekGeoNetLocality(publicId) : undefined;
+            const html = hoverCard(event, { geonetLocality: known ?? null });
+            if (!html) return;
+            target.bindTooltip(html, HOVER_CARD_OPTIONS).openTooltip();
+            if (known) geonetShown();
+            if (!publicId || known !== undefined) return;
+            // Not asked yet: ask GeoNet, and retitle this card if it is still open then.
+            const tooltip = typeof target.getTooltip === 'function' ? target.getTooltip() : undefined;
+            hoverRequests.current.get(target)?.abort();
+            const interest = new AbortController();
+            hoverRequests.current.set(target, interest);
+            void fetchGeoNetLocality(publicId, { signal: interest.signal }).then((locality) => {
+              if (!locality || !mounted.current || !tooltip) return;
+              try {
+                if (target.getTooltip() !== tooltip || !target.isTooltipOpen()) return;
+                const updated = hoverCard(event, { geonetLocality: locality });
+                if (!updated) return;
+                target.setTooltipContent(updated);
+                geonetShown();
+              } catch {
+                // The marker left the map meanwhile: nothing to update.
+              }
+            });
           },
           mouseout: (e) => {
             const layer = asPath(e.target);
             if (layer && selected.current?.layer !== layer) layer.setStyle(baseStroke);
             const target = e.target as L.Layer | undefined;
-            if (target && typeof target.unbindTooltip === 'function') target.unbindTooltip();
+            if (!target) return;
+            hoverRequests.current.get(target)?.abort();
+            hoverRequests.current.delete(target);
+            if (typeof target.unbindTooltip === 'function') target.unbindTooltip();
           },
           click: (e) => {
             // The popup replaces the hover card.
@@ -127,7 +176,7 @@ export const EarthquakeMarkerLayer = memo(function EarthquakeMarkerLayer<T exten
         }}
       />;
     });
-  }, [ordered, bounds, getColor, isDark, fillOpacity, renderer, trackSelection, onEventClick, hoverCard]);
+  }, [ordered, bounds, getColor, isDark, fillOpacity, renderer, trackSelection, onEventClick, hoverCard, geonetShown]);
 
   // Drop the highlight when the selection moves on (popup closed, another event chosen),
   // and re-apply it after a rebuild restyled the selected marker.
@@ -142,5 +191,10 @@ export const EarthquakeMarkerLayer = memo(function EarthquakeMarkerLayer<T exten
     }
   }, [selectedId, trackSelection, isDark, fillOpacity, markers]);
 
-  return markers;
+  return (
+    <>
+      {markers}
+      <GeoNetLocalityAttribution active={creditGeoNet} />
+    </>
+  );
 }) as <T extends MarkerEvent>(props: EarthquakeMarkerLayerProps<T>) => React.ReactNode;

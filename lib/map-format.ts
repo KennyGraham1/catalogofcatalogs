@@ -119,6 +119,13 @@ export function formatOriginTimeUtc(time: string | number | Date): string {
   return `${date.toISOString().slice(0, 19).replace('T', ' ')} UTC`;
 }
 
+/** "2020-08-13 UTC", the UTC calendar day of an event time; an unparseable value is returned verbatim. */
+export function formatOriginDateUtc(time: string | number | Date): string {
+  const date = time instanceof Date ? time : new Date(time);
+  if (Number.isNaN(date.getTime())) return String(time);
+  return `${date.toISOString().slice(0, 10)} UTC`;
+}
+
 const PLACEHOLDER_REGIONS = new Set(['', 'unknown', 'unknown region', 'n/a', 'na', 'none', 'null', '-', '?']);
 
 /** A region name worth printing (not empty, not an 'Unknown' placeholder). */

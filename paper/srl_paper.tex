@@ -84,14 +84,14 @@ platform for ingesting, quality-scoring, merging, and statistically
 analysing earthquake catalogues from multiple agencies and formats, following
 the FAIR data principles (Findable, Accessible, Interoperable, Reusable).  CofC accepts data as CSV/TXT, GeoJSON,
 QuakeML~1.2 Basic Event Description (BED), and the FDSN Event Web Service.
-A six-strategy merging engine associates duplicate reports one to one (each
-report with its closest counterpart in every other catalogue) within configurable,
+A six-strategy merging engine associates duplicate entries one to one (each
+entry with its closest counterpart in every other catalogue) within configurable,
 adaptive time and distance windows (widened for larger and deeper events), with
 magnitude and depth consistency enforced as separate per-group gates, and
 resolves conflicts by solution quality, source priority, most recent solution,
 record completeness, or an averaged or median epicentre, with optional per-field
 rules for depth, magnitude and focal mechanism and the option to hold flagged
-groups for review, keeping every contributing report as per-event lineage.  A transparent quality-scoring system (a 0--100 index with
+groups for review, keeping every contributing entry as per-event lineage.  A transparent quality-scoring system (a 0--100 index with
 letter grades) evaluates each event across five dimensions: location precision,
 network geometry, solution fit, magnitude quality, and analyst-evaluation status.
 Standard seismological analyses run client-side in the browser:
@@ -101,7 +101,7 @@ or Maximum Curvature (MAXC),
 Gardner-Knopoff declustering, and cumulative seismic moment and energy.  A fully
 synthetic two-catalogue New Zealand example (no real event data), processed end to
 end by the platform's own engine, illustrates the workflow and quantifies the
-biases an analyst must control: the matcher pairs 98\% of the earthquakes both
+biases an analyst must control: the matcher pairs 99\% of the earthquakes both
 agencies report, with 98\% of its pairs correct; a quality threshold removes 94\%
 of the events with azimuthal gap above $180^{\circ}$ but also favours larger
 events, lowering $b$ by 0.06; the MAXC and goodness-of-fit estimates of $M_c$
@@ -179,7 +179,7 @@ documents that, even for well-recorded teleseismic events, agency-to-agency
 hypocentre differences commonly reach 10--20~km in epicentre and tens of
 kilometres in depth, which is far less well constrained \citep{engdahl1998}.
 Na{\"i}vely concatenating catalogues without duplicate removal counts every
-earthquake that more than one agency reports once per report: it inflates $N(M)$
+earthquake that more than one agency reports once per entry: it inflates $N(M)$
 wherever the catalogues overlap, raises the apparent $a$-value, and distorts rate
 estimates.  \citet{storchak2013} describe the
 duplicate-association procedure developed for the ISC-GEM global
@@ -427,7 +427,7 @@ catalogue data:
     controlled vocabulary, are kept as reported, since their case is meaningful
     ($m_B$ is not $m_b$).
   \item \textbf{Reusable.}  Every merged event keeps its lineage (the source
-    catalogues and every contributing report, the merge strategy and parameters,
+    catalogues and every contributing entry, the merge strategy and parameters,
     and the quality score of the published solution), and every export carries
     it together with the catalogue's version and a SHA-256 checksum of the
     exported rows, so that a study can state, and a reader can verify, the data
@@ -503,7 +503,7 @@ contributions are:
     \citep{storchak2013,engdahl1998,yeck2019} into a tool regional researchers
     can apply themselves.
   \item \textbf{FAIR-by-design provenance}: every merged catalogue records its
-    full per-event lineage (source-catalogue IDs, every contributing report and
+    full per-event lineage (source-catalogue IDs, every contributing entry and
     the one whose solution was published, merge strategy and thresholds, quality
     score, review status), re-exported as columns or properties in the CSV, JSON, GeoJSON and
     KML outputs and as a per-event QuakeML \texttt{comment}
@@ -646,7 +646,7 @@ past versions, so a superseded version cannot be retrieved from it: each major
 and minor release is intended to be deposited with an external archive (e.g.\
 Zenodo) to obtain a persistent DOI, and DOI minting is not performed by the
 platform itself.  Every merged catalogue carries event-level provenance: the
-source catalogue IDs, every contributing report (with the one whose solution
+source catalogue IDs, every contributing entry (with the one whose solution
 was published marked), the merge strategy and threshold parameters applied,
 the quality score of the published solution and, for a group held back for
 review, its review status.  This per-event provenance is
@@ -912,22 +912,22 @@ The baseline windows are user-configurable in the merge UI and are consistent in
 scale with the $10$--$20$\,km epicentral scatter documented for multi-network
 locations \citep{engdahl1998}; configurable space--time association windows of
 this kind are also provided by catalogue-building toolkits \citep{oqmbtk}.
-Association is one to one and best match first.  Every pair of reports from
+Association is one to one and best match first.  Every pair of entries from
 \emph{different} catalogues that fall inside each other's widened windows is a
 candidate, ranked by its normalised separation $|\Delta t|/\tau + d/\delta$ (so
 time and distance count equally whatever the window sizes; magnitude agreement
-only breaks ties).  Candidates are joined in increasing separation, so each report
+only breaks ties).  Candidates are joined in increasing separation, so each entry
 is claimed by its closest counterpart in each other catalogue rather than by
-whichever earlier report reached it first; a group never holds two reports from
+whichever earlier entry reached it first; a group never holds two entries from
 one catalogue (each catalogue is taken to be free of internal duplicates, and a
 merge request that lists the same catalogue twice is refused), and a group of
 three or more must have a member inside the window of every other
-member, so reports linked only through a chain are not fused.  A group that fails
+member, so entries linked only through a chain are not fused.  A group that fails
 the validity gates below is split into its largest self-consistent sub-groups
-(seeded from its earliest report, candidates tried nearest first), and reports left
+(seeded from its earliest entry, candidates tried nearest first), and entries left
 unpaired may pair again in a further round.  The result does not depend on the
 order of the input.  The merge preview flags an \emph{ambiguous association}
-when a report's best refused alternative was nearly as close as the pairing kept
+when an entry's best refused alternative was nearly as close as the pairing kept
 (within twice its separation plus a tenth of a window), since time and distance
 alone then barely separate the two choices.
 
@@ -955,10 +955,15 @@ cap of $2T$ (1.0 unit below $M4$) guards against bulletins that report the
 scatter of the station magnitudes rather than the error of their mean.  The
 widening applies only when the association is uncontested (no refused
 alternative within the ambiguity margin above) and every pair of solutions in
-the group agrees closely in origin time and epicentre: within a tenth of its
-widened windows, $|\Delta t|/\tau + d/\delta \leq 0.1$ (the margin the
-ambiguity test uses) and, where both solutions state them, within three
-combined standard errors of origin time and of epicentre.  Otherwise
+the group agrees closely in origin time and epicentre: within a fifth of its
+widened windows, $|\Delta t|/\tau + d/\delta \leq 0.2$ (for the 60~s and 50~km
+baseline, 12~s at one epicentre or 10~km at one origin time), and, where both
+solutions state them, within three combined standard errors of origin time and
+of epicentre.  The bound is a fixed share of the windows, not a multiple of the
+reported errors, because it limits the chance that a second earthquake lies as
+close, which depends on the density of seismicity rather than on the location
+errors; it admits $0.2^{3}/3$, under 0.3\%, of the space-time volume of the
+matching window.  Otherwise
 $T^{*} = T$: where pairings are contested, as in a dense sequence, magnitude is
 the main evidence that tells neighbouring events apart.  A depth fixed by the
 operator carries no depth information and is not compared; solved-for depths
@@ -982,9 +987,9 @@ applied.  CofC offers six strategies (Table~\ref{tab:strategies}).
 \begin{table}[htbp]
 \centering
 \caption{Merge strategies available in CofC.  Whatever the strategy, every
-report in a duplicate group is kept in the merged event's lineage, with the
-report whose solution was published marked (none, for an averaged or median event); no
-other report's origin or depth metadata is attached to the published solution
+entry in a duplicate group is kept in the merged event's lineage, with the
+entry whose solution was published marked (none, for an averaged or median event); no
+other entry's origin or depth metadata is attached to the published solution
 (see text).}
 \label{tab:strategies}
 \small
@@ -993,36 +998,36 @@ other report's origin or depth metadata is attached to the published solution
 \textbf{Strategy} & \textbf{Description} \\
 \midrule
 Quality-based (recommended)
-  & Keeps the best-constrained report under a merge-time solution score (station
+  & Keeps the best-constrained entry under a merge-time solution score (station
     count, azimuthal gap, RMS residual, magnitude uncertainty and type, and
     evaluation status, on a fixed 100-point scale), comparing only the metrics
-    \emph{every} report in the group states.  If a report states none of them, a
+    \emph{every} entry in the group states.  If an entry states none of them, a
     network-authority ranking (a default table the administrator can edit) decides; remaining ties go to authority,
     then to the more complete core record.  This merge-time score is distinct from
     the index $Q$ (equation~\eqref{eq:quality}); consolidating the two is planned. \\
 Source priority
-  & Keeps the report of a chosen source.  \emph{Custom Order}: the user's
+  & Keeps the entry of a chosen source.  \emph{Custom Order}: the user's
     ranking of the selected catalogues decides, quality breaks ties, and
     unranked catalogues come last.  \emph{GeoNet (or GNS) $>$ Others}: the
-    GeoNet report, recognised by its agency code or by the catalogue's metadata
+    GeoNet entry, recognised by its agency code or by the catalogue's metadata
     or name, is kept; a group without one falls back to the network-authority
-    ranking, with equally authoritative reports compared on the metrics they all
+    ranking, with equally authoritative entries compared on the metrics they all
     state, as in the Quality-based strategy.  The Quality-Based and Most Recent
     Solution options apply those rules. \\
 Most recent solution
   & Keeps the solution the agency computed last (the origin's QuakeML creation
     time, else the record's creation or modification time).  When not every
-    report states one, reviewed or final solutions win over preliminary ones,
+    entry states one, reviewed or final solutions win over preliminary ones,
     then quality; a rejected solution never wins.  Upload time is not used. \\
 Most complete
-  & The report with the greatest number of populated fields is kept,
+  & The entry with the greatest number of populated fields is kept,
     maximising metadata density in the merged product. \\
 Average values
-  & Only the epicentre is averaged: weighted by $1/\sigma^{2}$ when every report
+  & Only the epicentre is averaged: weighted by $1/\sigma^{2}$ when every entry
     states a horizontal uncertainty, with equal weights otherwise (no
-    uncertainty is assumed for a report that states none).  Magnitude is selected
+    uncertainty is assumed for an entry that states none).  Magnitude is selected
     by type, not averaged, and published as reported (see text).  Depth, with its
-    type and uncertainty, is taken from the best-constrained report that solved
+    type and uncertainty, is taken from the best-constrained entry that solved
     for depth (a fixed depth
     only when none did); origin time is the earliest in the group; no single
     agency's origin details (gap, counts, RMS) are carried onto the averaged
@@ -1031,9 +1036,9 @@ Average values
 Median values
   & As Average values, but the epicentre is the component-wise median of the
     reported latitudes and longitudes (longitudes unwrapped across the date
-    line), every report counting equally, and the origin time is the median of
-    those reported (the mean, for two reports).  Magnitude, depth and origin
-    metadata are handled exactly as for Average values.  One outlying report
+    line), every entry counting equally, and the origin time is the median of
+    those reported (the mean, for two entries).  Magnitude, depth and origin
+    metadata are handled exactly as for Average values.  One outlying entry
     moves neither coordinate; stated uncertainties are not used. \\
 \bottomrule
 \end{tabular}
@@ -1041,8 +1046,8 @@ Median values
 
 Whatever the strategy, the published origin keeps its own metadata (agency,
 method, gap, counts, residual, evaluation status) and the published depth its own
-type and uncertainty: none of these is filled in from another report, and a
-location or magnitude uncertainty is filled in only from a report stating the
+type and uncertainty: none of these is filled in from another entry, and a
+location or magnitude uncertainty is filled in only from an entry stating the
 same location, or the same magnitude value and type.  The Average values strategy
 selects the magnitude rather than averaging it, and publishes it as reported, not
 converted.  The preference depends on the event's size, taken as the median of the
@@ -1058,25 +1063,25 @@ to the smaller uncertainty, then to the agency's preferred magnitude.
 
 Three refinements apply on top of any strategy.  First, the depth, magnitude
 and focal mechanism of the merged event may each be resolved by a rule of their
-own rather than by the strategy: the depth from the best-constrained report, or
-from the report ranked first by quality, network authority or determination
+own rather than by the strategy: the depth from the best-constrained entry, or
+from the entry ranked first by quality, network authority or determination
 time, or from a named catalogue; the magnitude by the type preference above or
-from a report chosen in the same ways; the focal mechanism from the united set
-(the default), from the published report only, or from a named catalogue.  The
-published depth and magnitude always carry their own metadata, and the report
+from an entry chosen in the same ways; the focal mechanism from the united set
+(the default), from the published entry only, or from a named catalogue.  The
+published depth and magnitude always carry their own metadata, and the entry
 that supplied each is marked in the lineage.  Second, a group the preview flags
 (a failed validity gate, a split group, an ambiguous pairing, or an inconsistent
 magnitude or depth range) may be held for review instead of resolved: the
 strategy's solution is written as provisional, the event is listed on the
 catalogue page with the reasons, and an editor either keeps that solution or
-publishes one contributing report wholesale, which bumps the catalogue version.
-Third, two reports of one agency in a group (the agency of their catalogue, not
+publishes one contributing entry wholesale, which bumps the catalogue version.
+Third, two entries of one agency in a group (the agency of their catalogue, not
 merely the author of a copied origin) are compared on their agency event
 identifiers, reduced to a bare form: equal identifiers are vintages of one
 solution, of which only the most recently computed takes part, the older being
 kept in the lineage as superseded; differing identifiers are two earthquakes,
-and the group is split, each report left alone being flagged with the reason;
-without comparable identifiers both reports take part as usual.  The network-authority table that the Source priority fallback,
+and the group is split, each entry left alone being flagged with the reason;
+without comparable identifiers both entries take part as usual.  The network-authority table that the Source priority fallback,
 the Quality-based tie-break and the authority rule consult (a global ranking
 with regional overrides for New Zealand and Japan by default) is editable by an
 administrator, and each merged event records which table was used.
@@ -1089,7 +1094,7 @@ Because several quality sub-scores increase with network density
 denser networks; it is a reproducible, explicit preference, not a network-neutral
 one, and we recommend inspecting the per-strategy provenance split
 (Section~\ref{sec:example}) as a bias diagnostic.  Focal mechanisms from all
-reports in a group are united, and the preferred one is chosen by source (Global
+entries in a group are united, and the preferred one is chosen by source (Global
 CMT, then USGS/NEIC, GEOFON, GeoNet and INGV moment tensors, then other moment
 tensors, then first-motion solutions from at least 20 polarities, then automatic
 ones) and within a source by the quality of the solution.
@@ -1129,13 +1134,13 @@ catalogue's page, and can be downloaded as JSON, its list of groups as CSV.
     those baselines with magnitude and depth.
     \textit{Bottom:} the \emph{Preview} step, a dry run of the merge with its QC
     summary, before anything is written.  The totals read \emph{Entries before}
-    9\,333, \emph{Events after} 7\,329, \emph{Matched groups} 2\,004,
-    \emph{Entries combined} 2\,004 and \emph{Flagged groups} 4, and 50 entries
-    of 26 groups that failed the gates are kept apart, published as separate
-    events.  The summary goes on to each catalogue's matched entries (40.7\% of
-    the GeoNet-like and 45.4\% of the Agency~B entries) and the differences
+    9\,333, \emph{Events after} 7\,315, \emph{Matched groups} 2\,018,
+    \emph{Entries combined} 2\,018 and \emph{Flagged groups} 4, and 21 entries
+    of 11 groups that failed the gates are kept apart, published as separate
+    events.  The summary goes on to each catalogue's matched entries (41.0\% of
+    the GeoNet-like and 45.7\% of the Agency~B entries) and the differences
     between matched solutions, and the groups to review follow under
-    \emph{Flagged} (4), \emph{Kept apart} (26) and \emph{Matched} (2\,000),
+    \emph{Flagged} (4), \emph{Kept apart} (11) and \emph{Matched} (2\,014),
     largest disagreement first.  Data are a reduced-scale version of the synthetic pair of the
     worked example (Section~\ref{sec:example}), 4\,922 GeoNet-like and 4\,411
     Agency~B events built by the same generator with each true earthquake kept
@@ -1410,7 +1415,7 @@ Processed or merged catalogues can be exported in:
 \begin{itemize}[leftmargin=*]
   \item \textbf{CSV}: a flat table, one row per event, with the stored fields
     and per-event lineage columns (source-catalogue IDs, merge strategy and
-    parameters, the selected source report and its catalogue, quality score and
+    parameters, the selected source entry and its catalogue, quality score and
     grade, review status, the agency's own event type, and the catalogue
     version), suitable for
     ZMAP \citep{wiemer2001}, ObsPy \citep{obspy2010}, and R/Python workflows;
@@ -1461,7 +1466,7 @@ networks record them: a GeoNet-like national network of 166 stations at
 $\sim$40~km spacing on land, and an Agency~B regional network of 67 stations at
 $\sim$30~km spacing in the central and eastern North Island
 (Figure~\ref{fig:map}a).  An agency catalogues every earthquake that four or more
-of its stations record within a magnitude-dependent distance.  Each report's
+of its stations record within a magnitude-dependent distance.  Each entry's
 azimuthal gap, station count and nearest-station distance follow from its
 network's geometry; its location, depth, origin-time and magnitude uncertainties
 follow stated scalings with those quantities (growing with the gap and with the
@@ -1486,7 +1491,7 @@ regional network.  Equation~\eqref{eq:quality} ranks these events lowest
 to 53--55 between $180^{\circ}$ and $270^{\circ}$ and 35--36 above.  At most 12.5
 of those points come from the gap term itself; the rest come from the larger
 location uncertainties and smaller station and phase counts that the high-gap
-reports carry, a correlation built into the synthetic uncertainty model and one
+entries carry, a correlation built into the synthetic uncertainty model and one
 that real network locations also show \citep{bondar2004}.  The platform's MAXC
 estimates of completeness are $M_c = 1.8$ for the GeoNet-like catalogue and 1.4
 for Agency~B, whose denser network detects smaller events in its region (the
@@ -1499,30 +1504,29 @@ $\hat{b}$ still differs by more than that from its mean over the next half unit
 \subsection{Step 2: Merge}
 
 Merging with the Quality-based strategy and baseline windows of 60~s and 50~km
-(equations~\eqref{eq:dt} and~\eqref{eq:dd}), the matcher forms 47\,109 duplicate
-groups, and the $113\,427 + 101\,806 = 215\,233$ records merge into 168\,124
-events (Figure~\ref{fig:map}b): 66\,318 reported by the GeoNet-like agency only,
-54\,697 by Agency~B only (mostly small events inside its denser network), and
-47\,109 by both.  Because the generator knows which reports describe the same
+(equations~\eqref{eq:dt} and~\eqref{eq:dd}), the matcher forms 47\,384 duplicate
+groups, and the $113\,427 + 101\,806 = 215\,233$ records merge into 167\,849
+events (Figure~\ref{fig:map}b): 66\,043 reported by the GeoNet-like agency only,
+54\,422 by Agency~B only (mostly small events inside its denser network), and
+47\,384 by both.  Because the generator knows which entries describe the same
 earthquake, the association can be scored exactly.  Of the 47\,109 earthquakes
-both agencies report, 46\,353 (98\%) are paired correctly, and 98.4\% of the
-groups join two entries of one earthquake; that there are as many groups as
-shared earthquakes is a coincidence, the 756 wrong pairings matching in number
-the 756 pairs left apart.  Of the wrong pairings, 753 lie within aftershock
-sequences, where several events fall inside one window, and none is among the
-1\,742 groups that pass the magnitude gate only within the tolerance widened by
-the reported uncertainties (equation~\eqref{eq:magtol}).  Of the 756 pairs left
-apart, the validity gates reject 572 whose two magnitudes differ by more than the
+both agencies report, 46\,640 (99\%) are paired correctly, and 98.4\% of the
+groups join two entries of one earthquake.  Of the 744 wrong pairings, 741 lie
+within aftershock sequences, where several events fall inside one window, and
+none is among the 2\,029 groups that pass the magnitude gate only within the
+tolerance widened by the reported uncertainties (equation~\eqref{eq:magtol}).
+Of the 469 pairs left
+apart, the validity gates reject 285 whose two magnitudes differ by more than the
 gate allows (0.5 units below $M4$, at most 1.0 where the tolerance widens) and 16
 whose solved-for depths differ by more than it allows (30~km for shallow events,
 or three combined standard errors); 141 lie outside the matching window (distant
 events Agency~B locates poorly), and in 27 each entry has a closer counterpart.
 These earthquakes stay in the merged catalogue twice.
-The Quality-based strategy keeps Agency~B's solution for 31\,870 of the duplicate
+The Quality-based strategy keeps Agency~B's solution for 32\,012 of the duplicate
 groups (68\%), those inside its denser network, and the GeoNet-like solution for
-the other 15\,239; every contributing report is kept in the merged event's
+the other 15\,372; every contributing entry is kept in the merged event's
 lineage, and each exported event carries its source catalogue IDs, the merge
-strategy, the selected report and its quality score.  These recall and precision
+strategy, the selected entry and its quality score.  These recall and precision
 figures reflect the synthetic location, timing and magnitude scatter; they are a
 check of the association logic, not a benchmark for real catalogue pairs, whose
 errors are non-Gaussian and whose clocks and magnitude scales differ
@@ -1531,12 +1535,12 @@ errors are non-Gaussian and whose clocks and magnitude scales differ
 \subsection{Step 3: Quality filtering}
 
 A quality threshold of $Q \geq 70$ (upper grade~B and above) retains 86\,028 of
-the 168\,124 merged events (51.2\%).  It removes 94.3\% of the 37\,951 merged
-events with gap $> 180^{\circ}$, which make up 44\% of the removed set, so the
+the 167\,849 merged events (51.3\%).  It removes 94.3\% of the 37\,678 merged
+events with gap $> 180^{\circ}$, which make up 43\% of the removed set, so the
 filter does remove most of the poorly constrained offshore population.  It is not
 neutral in magnitude, however.  Because $Q$ rises with the number of recording
 stations and falls with the location and magnitude uncertainties, all of which
-depend on magnitude, the filter keeps 58\% of the events of $M$1.5--2.0 but 86\%
+depend on magnitude, the filter keeps 59\% of the events of $M$1.5--2.0 but 86\%
 of those of $M$3.5--4.0, and so changes the shape of the frequency-magnitude
 distribution (Figure~\ref{fig:fmd}a).
 
@@ -1557,9 +1561,9 @@ estimate finds this: $b$-value stability (Section~\ref{sec:mc}) gives
 $M_c = 2.7$ for the merged catalogue, which we adopt as the cut-off for the
 comparisons below, and 2.8 for the quality-filtered catalogue, whose $\hat{b}$
 still rises by about 0.01 per 0.1 unit up to $M$3.0.  Above $M$2.7 the
-merged catalogue gives $\hat{b} = 1.062 \pm 0.012$ ($N = 8\,313$), a mixture of
+merged catalogue gives $\hat{b} = 1.061 \pm 0.012$ ($N = 8\,304$), a mixture of
 the independent background and the injected aftershocks.  Applied to the
-background events alone, the same routine returns $\hat{b} = 1.012 \pm 0.012$
+background events alone, the same routine returns $\hat{b} = 1.011 \pm 0.012$
 against the planted $1.00$, and to the injected aftershocks alone
 $1.35 \pm 0.04$ against the planted $1.30$: the estimator is sound once the
 sample is complete.  The quality-filtered catalogue above $M$2.7, in which 15\%
@@ -1666,7 +1670,7 @@ preferentially.
     excluded from the Analysis page by default.
   \item Before fitting $b$ to a quality-filtered catalogue, compare the
     frequency-magnitude distributions or $b$-values with and without the filter
-    at the same cut-off: in the synthetic example a $Q \geq 70$ filter keeps 58\%
+    at the same cut-off: in the synthetic example a $Q \geq 70$ filter keeps 59\%
     of the events of $M$1.5--2.0 but 86\% of those of $M$3.5--4.0, and lowers
     $\hat{b}$ by 0.06 even above the completeness magnitude.
   \item Check the spatial distribution of excluded events; geographic
@@ -1708,11 +1712,11 @@ declustered $b$.
 \subsection{Duplicate double-counting}
 
 \textbf{Problem.}  Merging without duplicate removal counts each shared
-earthquake once per report, inflating $N(M)$ wherever the catalogues overlap,
+earthquake once per entry, inflating $N(M)$ wherever the catalogues overlap,
 raising the estimated $a$-value, and distorting rate estimates.  In the
 synthetic example, concatenating the two catalogues instead of merging them
-would raise the number of events above $M$2.7 from 8\,313 to 13\,312 (60\%
-more) and the $a$-value from 6.79 to 6.87; because the shared events are the
+would raise the number of events above $M$2.7 from 8\,304 to 13\,312 (60\%
+more) and the $a$-value from 6.78 to 6.87; because the shared events are the
 larger ones that both networks record, it would also lower $\hat{b}$, from 1.06 to
 1.02.  The Analysis page therefore withholds the $b$-value, $M_c$, rates and
 moment totals for a set pooled from several catalogues.
@@ -1845,7 +1849,7 @@ duplicate removal, $M_c$ cut-off, declustering algorithm and parameters,
 quality filters) differ in ways that are rarely fully reported
 \citep{schorlemmer2007}.  CofC addresses this at the infrastructure
 level: every catalogue stored in the platform carries a provenance record
-(source catalogue IDs and contributing reports per event, merge strategy and
+(source catalogue IDs and contributing entries per event, merge strategy and
 parameters, quality score) and a version.  Every export includes this record
 together with the catalogue version, a checksum of the exported rows, the filter
 applied and, when requested, the declustering algorithm, its parameters and
@@ -1910,7 +1914,7 @@ provenance-preserving export, the steps that are individually inconvenient
 yet collectively determine the validity of downstream statistical analysis.
 Using a fully synthetic two-catalogue New Zealand example processed end to end
 by the platform's own engine, we illustrated the workflow and quantified what it
-exposes: the matcher pairs 98\% of the earthquakes both agencies report, with
+exposes: the matcher pairs 99\% of the earthquakes both agencies report, with
 98\% of its pairs correct; the quality index ranks the offshore, high-gap
 population lowest, and a quality threshold removes 94\% of it; and three
 preprocessing choices move the $b$-value by more than its formal error, namely a
@@ -2001,9 +2005,9 @@ same synthetic catalogues, are provided in the electronic supplement.
     How the merge works, on the synthetic New Zealand example
     (Section~\ref{sec:example}).  \textit{(a)}~The two synthetic station
     networks (GeoNet-like: open triangles; Agency~B: filled squares) and a random
-    sample of each agency's reports (GeoNet-like: blue circles; Agency~B: orange
+    sample of each agency's entries (GeoNet-like: blue circles; Agency~B: orange
     triangles).  The inset zooms on the boxed region off the Hawke's Bay coast and
-    joins pairs of reports that the platform's matcher associated as one
+    joins pairs of entries that the platform's matcher associated as one
     earthquake (a random sample of 30 pairs), with a 20~km scale bar for
     comparison against the 50~km baseline distance window
     (equations~\eqref{eq:dt}--\eqref{eq:dd}); magnitude and depth consistency are
@@ -2024,16 +2028,16 @@ same synthetic catalogues, are provided in the electronic supplement.
   \caption{%
     Azimuthal gap and the quality index on the synthetic example
     (Section~\ref{sec:example}).  \textit{(a)}~Distribution of azimuthal gap
-    for the GeoNet-like (blue) and Agency~B (orange) reports before merging;
+    for the GeoNet-like (blue) and Agency~B (orange) entries before merging;
     the gaps are computed from each synthetic network's geometry, so events
     offshore or outside a network have large gaps, and the shaded region marks
     gaps above $180^{\circ}$.  \textit{(b)}~The quality index $Q$
-    (equation~\eqref{eq:quality}) that the platform assigns the same reports on
+    (equation~\eqref{eq:quality}) that the platform assigns the same entries on
     import, against their gap: median and 10--90\% range in $15^{\circ}$ bins.
     The dotted line is the $Q$ of an event that is ideal in every other respect:
     the gap term alone can lower $Q$ by at most 12.5 points (to 88), so most of
     the fall comes from the larger location uncertainties and smaller station
-    counts that the high-gap reports carry.  The dashed line is the $Q \geq 70$
+    counts that the high-gap entries carry.  The dashed line is the $Q \geq 70$
     threshold applied in the example.
   }
   \label{fig:gap}
@@ -2130,7 +2134,7 @@ conservatively.}
   % bars centred at x=0; width (cm) proportional to event count (9\,cm = 215\,233).
   % The two narrowest bars carry their counts to their left.
   \node[bar=10, minimum width=9.00cm] (b1) at (0,0)     {215\,233};
-  \node[bar=16, minimum width=7.03cm] (b2) at (0,-1.25) {168\,124};
+  \node[bar=16, minimum width=7.02cm] (b2) at (0,-1.25) {167\,849};
   \node[bar=24, minimum width=3.60cm] (b3) at (0,-2.50) {86\,028};
   \node[bar=34, minimum width=0.27cm] (b4) at (0,-3.75) {};
   \node[anchor=east] at (b4.west) {6\,446\,};
@@ -2145,8 +2149,8 @@ conservatively.}
     \draw[blue!25] (\a.south west)--(\b.north west);
     \draw[blue!25] (\a.south east)--(\b.north east);
   }
-  \node[cut] (c1) at (5.3,-0.625) {$-47\,109$ duplicate entries merged};
-  \node[cut] (c2) at (5.3,-1.875) {$-82\,096$ low quality ($Q<70$)};
+  \node[cut] (c1) at (5.3,-0.625) {$-47\,384$ duplicate entries merged};
+  \node[cut] (c2) at (5.3,-1.875) {$-81\,821$ low quality ($Q<70$)};
   \node[cut] (c3) at (5.3,-3.125) {$-79\,582$ below $M$2.7};
   \node[cut] (c4) at (5.3,-4.375) {$-2\,525$ Gardner-Knopoff dependents};
   \draw[->,red!50!black] (c1.west) -- (4.1,-0.625);

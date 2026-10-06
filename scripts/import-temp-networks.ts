@@ -444,6 +444,12 @@ async function importTemporaryNetworks() {
       console.log(`   📥 Inserted events ${i + 1}-${Math.min(i + batchSize, eventDocs.length)} of ${eventDocs.length}`);
     }
 
+    // Written past lib/db.ts, so tell every server instance's caches about the new
+    // catalogue (the catalogue list, and statistics a popover opened mid-import stored).
+    // Imported here, not at the top, so the builders above load without the database layer.
+    const { markCatalogueDataChanged } = await import('../lib/db');
+    await markCatalogueDataChanged([catalogueId], true);
+
     totalEvents += events.length;
     console.log(`   ✅ Imported ${events.length} events for ${networkCode}`);
   }

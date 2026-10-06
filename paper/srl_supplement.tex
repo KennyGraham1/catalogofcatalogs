@@ -149,7 +149,9 @@ Reported values & True epicentre, depth, origin time and magnitude plus errors o
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\linewidth]{figures/app_analytics_mc.png}
+  % The panel, from the analysis tabs to the b-value stability chart: height-limited so the
+  % figure and its caption share one page.
+  \includegraphics[width=\linewidth,height=0.68\textheight,keepaspectratio]{figures/app_analytics_mc.png}
   \caption{Magnitude-of-completeness panel for the same catalogue, with the
   default method, $b$-value stability (the main paper's $M_c$ section; Woessner
   and Wiemer, 2005); the goodness-of-fit test and maximum curvature, with a
@@ -163,9 +165,10 @@ Reported values & True epicentre, depth, origin time and magnitude plus errors o
   multiples of 0.1, and the fullest bin of the non-cumulative distribution is
   $M1.7$, so maximum curvature with its default $+0.2$ correction would give
   $M1.9$, and the goodness-of-fit test gives $M2.2$ at the 95\,\% level.  Below
-  the distribution the tab plots the stability test itself, $\hat{b} \pm \delta b$
-  and the mean over the next 0.5 units at every cut-off with at least 50 events
-  above it, whichever method set $M_c$.  $b$-value stability is conservative on
+  the distribution (bottom of the figure) the tab plots the stability test itself,
+  $\hat{b} \pm \delta b$ and the mean over the next 0.5 units at every cut-off with
+  at least 50 events above it, whichever method set $M_c$; $M_c$ is the first
+  cut-off whose error bar reaches the mean.  $b$-value stability is conservative on
   large samples, because $\delta b$ falls as $1/\sqrt{N}$: on the full-scale
   GeoNet-like catalogue of the main paper, 23 times larger, it gives $M2.7$.
   The estimate is shown with its method and the values behind it, so that the
@@ -183,7 +186,7 @@ Reported values & True epicentre, depth, origin time and magnitude plus errors o
   distribution and the mean score ($67.9$) are the five-dimension per-event index
   of equation~1 of the main paper, which scores location, network geometry,
   solution, magnitude, and evaluation status; every event is scored when it is
-  stored and mapped to an A\textsuperscript{+}--F grade.  The synthetic reports
+  stored and mapped to an A\textsuperscript{+}--F grade.  The synthetic entries
   carry the fields equation~1 reads (horizontal, depth and origin-time
   uncertainties, azimuthal gap, station and phase counts, RMS residual,
   magnitude uncertainty and station count, and an analyst-reviewed evaluation
