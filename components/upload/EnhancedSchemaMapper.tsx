@@ -861,11 +861,12 @@ export function EnhancedSchemaMapper({
             <div className="flex items-center space-x-2">
               <Switch
                 id="auto-mapping"
+                aria-labelledby="auto-mapping-label"
                 checked={autoMapping}
                 onCheckedChange={setAutoMapping}
               />
               <div className="flex items-center gap-1.5">
-                <Label htmlFor="auto-mapping">Apply saved mappings and suggestions</Label>
+                <Label id="auto-mapping-label" htmlFor="auto-mapping">Apply saved mappings and suggestions</Label>
                 <InfoTooltip content="Applies explicit Settings mappings and exact alias matches to columns the parser did not map, and suggests likely targets for the rest. The parser's own mappings always apply." />
               </div>
             </div>

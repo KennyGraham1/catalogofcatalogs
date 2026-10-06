@@ -80,8 +80,8 @@ describe('CatalogueProvider.invalidateCache (gc#0)', () => {
     );
     await waitFor(() => expect(latest!.loading).toBe(false));
 
-    // Analytics reads the same list through useCachedFetch (app/analytics/page.tsx),
-    // independent of the context, and caches it for 10 minutes.
+    // A page-level useCachedFetch of the same list (the pattern analytics used before it
+    // read the shared list from CatalogueContext) must also see the change.
     const analytics = renderHook(() => useCachedFetch<Row[]>('/api/catalogues', { cacheTime: 10 * 60 * 1000 }));
     await waitFor(() => expect(analytics.result.current.data).not.toBeNull());
     expect(analytics.result.current.data!.map((c) => c.name)).toEqual(['GeoNet 2024']);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useId, memo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -45,6 +45,7 @@ export const GeographicSearchPanel = memo(function GeographicSearchPanel({
   const [activeTab, setActiveTab] = useState<'map' | 'manual'>('map');
   const [mapBounds, setMapBounds] = useState<GeographicBounds | null>(null);
   const [isOpen, setIsOpen] = useState(false);
+  const descriptionId = useId();
 
   // Sync map bounds to manual inputs when switching tabs
   useEffect(() => {
@@ -163,34 +164,45 @@ export const GeographicSearchPanel = memo(function GeographicSearchPanel({
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <Card>
-        <CollapsibleTrigger asChild>
-          <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <MapPin className="h-5 w-5" />
-                <CardTitle>Geographic Region Search</CardTitle>
-              </div>
-              {isOpen ? (
-                <ChevronUp className="h-5 w-5 text-muted-foreground" />
-              ) : (
-                <ChevronDown className="h-5 w-5 text-muted-foreground" />
-              )}
-            </div>
-            <CardDescription>
-              Filter catalogues by geographic bounding box - use the map or enter coordinates manually
-            </CardDescription>
-          </CardHeader>
-        </CollapsibleTrigger>
+        <CardHeader>
+          {/* Disclosure pattern: the heading holds one native button (the only interactive
+              element), which Radix gives aria-expanded and aria-controls. */}
+          <CardTitle className="text-lg leading-tight sm:text-2xl sm:leading-none">
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                aria-describedby={descriptionId}
+                className="-mx-2 -my-1 flex w-[calc(100%+1rem)] items-center justify-between gap-3 rounded-md px-2 py-1 text-left ring-offset-background transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <MapPin className="h-5 w-5 shrink-0" aria-hidden="true" />
+                  <span className="min-w-0 break-words">Geographic Region Search</span>
+                </span>
+                {isOpen ? (
+                  <ChevronUp className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                ) : (
+                  <ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                )}
+              </button>
+            </CollapsibleTrigger>
+          </CardTitle>
+          <CardDescription id={descriptionId}>
+            Filter catalogues by geographic bounding box - use the map or enter coordinates manually
+          </CardDescription>
+        </CardHeader>
         <CollapsibleContent>
           <CardContent className="space-y-4">
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'map' | 'manual')}>
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="map" className="flex items-center gap-2">
-                  <MapIcon className="h-4 w-4" />
+              {/* At 320 px each tab is about 115 px wide: the icons drop out below the sm
+                  breakpoint so the labels fit, and the list grows rather than clips if a
+                  label still wraps. */}
+              <TabsList className="grid h-auto w-full grid-cols-2">
+                <TabsTrigger value="map" className="flex min-w-0 items-center gap-2 whitespace-normal px-1 text-center text-xs sm:px-3 sm:text-sm">
+                  <MapIcon className="hidden h-4 w-4 shrink-0 sm:block" aria-hidden="true" />
                   Interactive Map
                 </TabsTrigger>
-                <TabsTrigger value="manual" className="flex items-center gap-2">
-                  <Edit3 className="h-4 w-4" />
+                <TabsTrigger value="manual" className="flex min-w-0 items-center gap-2 whitespace-normal px-1 text-center text-xs sm:px-3 sm:text-sm">
+                  <Edit3 className="hidden h-4 w-4 shrink-0 sm:block" aria-hidden="true" />
                   Manual Entry
                 </TabsTrigger>
               </TabsList>
@@ -292,15 +304,17 @@ export const GeographicSearchPanel = memo(function GeographicSearchPanel({
                 onClick={handleSearch}
                 disabled={isSearching}
               >
-                <Search className="mr-2 h-4 w-4" />
+                <Search className="mr-2 h-4 w-4" aria-hidden="true" />
                 {isSearching ? 'Searching...' : 'Search Region'}
               </Button>
               <Button
                 variant="outline"
                 onClick={handleClear}
                 disabled={isSearching}
+                aria-label="Clear region"
+                title="Clear region"
               >
-                <X className="h-4 w-4" />
+                <X className="h-4 w-4" aria-hidden="true" />
               </Button>
             </div>
           </CardContent>

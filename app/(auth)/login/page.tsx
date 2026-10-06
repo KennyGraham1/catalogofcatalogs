@@ -17,6 +17,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { LoadingCard } from '@/components/ui/loading-spinner';
 import { describeAuthError, safeCallbackPath } from '@/lib/auth/errors';
+import { forgotPasswordHref, registerHref } from '@/lib/auth/access-request';
 
 function LoginForm() {
   const router = useRouter();
@@ -25,6 +26,8 @@ function LoginForm() {
   const passwordChanged = searchParams.get('passwordChanged') === '1';
   // Where the middleware (or a page) sent the user from; same-origin paths only.
   const callbackUrl = safeCallbackPath(searchParams.get('callbackUrl'));
+  // Registering or recovering a password on the way keeps the same destination.
+  const rawCallback = searchParams.get('callbackUrl');
   // NextAuth redirects here with ?error=<code> when it handles a sign-in itself.
   const redirectError = searchParams.get('error');
 
@@ -62,7 +65,7 @@ function LoginForm() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12 sm:px-6 lg:px-8">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold">Sign in</CardTitle>
+          <CardTitle as="h1" className="text-2xl font-bold">Sign in</CardTitle>
           <CardDescription>
             Enter your email and password to access your account
           </CardDescription>
@@ -113,7 +116,7 @@ function LoginForm() {
                 autoComplete="current-password"
               />
               <div className="text-right">
-                <Link href="/forgot-password" className="text-sm text-primary hover:text-primary/80">
+                <Link href={forgotPasswordHref(rawCallback)} className="text-sm text-primary hover:text-primary/80">
                   Forgot Password?
                 </Link>
               </div>
@@ -132,7 +135,7 @@ function LoginForm() {
 
             <p className="text-center text-sm text-muted-foreground">
               Don&apos;t have an account?{' '}
-              <Link href="/register" className="font-medium text-primary hover:text-primary/80">
+              <Link href={registerHref(rawCallback)} className="font-medium text-primary hover:text-primary/80">
                 Register
               </Link>
             </p>

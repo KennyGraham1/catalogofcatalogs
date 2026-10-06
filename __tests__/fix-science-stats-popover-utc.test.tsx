@@ -34,9 +34,9 @@ it('shows the UTC calendar day of the earliest and latest origin times, labelled
   render(<CatalogueStatsPopover catalogueId="kaikoura" catalogueName="Kaikoura sequence" />);
   fireEvent.click(screen.getByRole('button', { name: /View statistics for Kaikoura sequence/ }));
 
-  const earliest = await screen.findByText(/13\/11\/2016/);
+  const earliest = await screen.findByText(/2016-11-13/);
   expect(earliest).toHaveTextContent('UTC');
-  expect(screen.getByText(/31\/12\/2024/)).toHaveTextContent('UTC');
-  expect(screen.queryByText(/14\/11\/2016/)).not.toBeInTheDocument();
-  expect(screen.queryByText(/01\/01\/2025/)).not.toBeInTheDocument();
+  expect(screen.getByText(/2024-12-31/)).toHaveTextContent('UTC');
+  expect(screen.queryByText(/2016-11-14/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/2025-01-01/)).not.toBeInTheDocument();
 });

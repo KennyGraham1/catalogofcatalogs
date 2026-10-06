@@ -62,6 +62,7 @@ beforeEach(() => {
         pagination: { hasMore: false, nextCursor: null, prevCursor: null, limit: 500 },
       }));
     }
+    if (url.pathname === '/api/faults/nearby') return Promise.resolve(jsonResponse({ faults: [] }));
     if (url.pathname === '/api/catalogues/cat-1/export') {
       exportRequests.push(url.search);
       return Promise.resolve({
@@ -144,5 +145,23 @@ describe('FEATURE (C12): Export filtered events', () => {
     const params = new URLSearchParams(exportRequests[0]);
     expect(params.get('minQuality')).toBe('60');
     expect(params.get('format')).toBe('csv');
+  });
+});
+
+describe('UI audit 2026-10-05 (finding 5): opening an event', () => {
+  it('the row\'s open button shows the event in a dialog with a link to the catalogue map', async () => {
+    render(<CatalogueDetailPage />);
+    const open = await screen.findByRole('button', { name: /^Open event .*M4\.2/ });
+    open.focus();
+    fireEvent.click(open);
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Event 2024-01-03 00:00:00 UTC');
+    expect(dialog).toHaveTextContent('Test catalogue');
+    expect(dialog).toHaveTextContent('M 4.2');
+    expect(screen.getByRole('link', { name: 'View catalogue map' })).toHaveAttribute('href', '/catalogues/cat-1/map');
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    // Focus goes back to the event that was opened, not to the top of the page.
+    await waitFor(() => expect(document.activeElement).toHaveAccessibleName(open.getAttribute('aria-label')!));
   });
 });

@@ -23,7 +23,13 @@ let mockMc: any = null;
 let mockMoment: any = null;
 const mockChartProps: Record<string, any> = {};
 
-jest.mock('@/hooks/use-cached-fetch', () => ({ useCachedFetch: () => ({ data: mockCatalogues, loading: false }) }));
+// The page reads the shared catalogue list (CatalogueProvider), here loaded.
+jest.mock('@/contexts/CatalogueContext', () => ({
+  useCatalogues: () => ({
+    catalogues: mockCatalogues, status: 'loaded', loading: false, error: null, refreshing: false,
+    lastSuccessAt: null, retry: async () => {}, refreshCatalogues: async () => {},
+  }),
+}));
 jest.mock('next/dynamic', () => () => function MockMap({ earthquakes }: any) {
   return <div data-testid="map">{earthquakes.length} events on map</div>;
 });

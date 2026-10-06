@@ -413,7 +413,8 @@ export function MapLegend({ children, className, defaultOpen = true, label = 'Ma
 export function LegendSection({ title, children, className }: { title: string; children: ReactNode; className?: string }) {
   return (
     <div className={className}>
-      <h4 className="mb-1.5 pr-5 text-[11px] font-semibold leading-4">{title}</h4>
+      {/* h3: maps sit in a page's h2-level card or section; h4 skipped a level (UI audit 2026-10-05). */}
+      <h3 className="mb-1.5 pr-5 text-[11px] font-semibold leading-4">{title}</h3>
       {children}
     </div>
   );

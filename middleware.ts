@@ -7,6 +7,7 @@ import { getToken, type JWT } from 'next-auth/jwt';
 import { NextResponse } from 'next/server';
 import type { NextRequest, NextFetchEvent } from 'next/server';
 import { UserRole } from './lib/auth/types';
+import { safeCallbackPath } from './lib/auth/errors';
 
 // All other security headers remain in next.config.js.
 // Only CSP is generated here because it embeds the per-request nonce.
@@ -108,6 +109,34 @@ function isCrossOriginApiWrite(req: NextRequest): boolean {
 }
 
 /**
+ * The public origin, for redirects: NEXTAUTH_URL's (the public URL, which NextAuth already
+ * requires to be right), else the one a proxy forwards or the Host header, else the request
+ * URL's. Not the request URL first: `next start` gives middleware a URL built from its own
+ * bind address (http://localhost:3110 while the browser was on 127.0.0.1:3110), and behind
+ * a proxy the Host can be the internal upstream.
+ *
+ * One case no middleware can fix: Next.js itself rewrites a loopback host (127.x.x.x,
+ * [::1]) in a redirect to "localhost" (next/dist/server/web/next-url.js,
+ * REGEX_LOCALHOST_HOSTNAME), so a browser on http://127.0.0.1 is sent to http://localhost.
+ * Real host names, and browsing on http://localhost itself, are unaffected.
+ */
+function publicOrigin(req: NextRequest): string {
+  try {
+    if (process.env.NEXTAUTH_URL) return new URL(process.env.NEXTAUTH_URL).origin;
+  } catch {
+    // Malformed NEXTAUTH_URL: NextAuth reports it; fall back to the request's headers.
+  }
+  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host');
+  const scheme = req.headers.get('x-forwarded-proto') ?? req.nextUrl.protocol;
+  return hostOrigin(scheme, host, req.headers.get('x-forwarded-port')) ?? req.nextUrl.origin;
+}
+
+/** A redirect to a same-origin path on the public origin. */
+function redirectTo(req: NextRequest, path: string): NextResponse {
+  return NextResponse.redirect(new URL(path, publicOrigin(req)));
+}
+
+/**
  * Ask the server for the session as it stands NOW.
  */
 async function liveSessionUser(req: NextRequest): Promise<{ role?: UserRole } | null> {
@@ -137,22 +166,24 @@ async function handleRequest(req: NextRequest, token: JWT | null) {
 
     if (!user) {
       // Account deactivated or deleted, or the token revoked by a password change.
-      const signIn = new URL('/login', req.url);
+      const signIn = new URL('/login', publicOrigin(req));
       signIn.searchParams.set('callbackUrl', `${req.nextUrl.pathname}${req.nextUrl.search}`);
       return NextResponse.redirect(signIn);
     }
 
     if (isAdminPath && user.role !== UserRole.ADMIN) {
-      return NextResponse.redirect(new URL('/', req.url));
+      return redirectTo(req, '/');
     }
   }
 
-  // Login/Register routes — redirect to home if already authenticated. The live check
-  // matters here too: a cookie the server no longer honours must not bounce its owner
-  // away from the only page that can give them a valid session again.
+  // Login/Register routes — an already signed-in user goes where the link meant to take
+  // them (a safe same-origin callbackUrl, as the login page itself would), else home. The
+  // live check matters here too: a cookie the server no longer honours must not bounce its
+  // owner away from the only page that can give them a valid session again.
   if ((path === '/login' || path === '/register') && token) {
     if (await liveSessionUser(req)) {
-      return NextResponse.redirect(new URL('/', req.url));
+      const target = safeCallbackPath(req.nextUrl.searchParams.get('callbackUrl'), '/');
+      return redirectTo(req, /^\/(login|register)(\/|\?|#|$)/.test(target) ? '/' : target);
     }
   }
 

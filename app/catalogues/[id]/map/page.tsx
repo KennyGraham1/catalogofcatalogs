@@ -3,7 +3,7 @@
 import { useParams } from 'next/navigation';
 import { useState, useMemo } from 'react';
 import dynamic from 'next/dynamic';
-import { Card, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardHeader } from '@/components/ui/card';
 import Link from 'next/link';
 import { Loader2, MapPin, AlertCircle, LogIn } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -99,7 +99,7 @@ export default function CatalogueMapPage() {
                   <span>Total Events</span>
                   <InfoTooltip content="Number of events with coordinates loaded for this catalogue." />
                 </div>
-                <CardTitle className="text-2xl">{stats.total.toLocaleString()}</CardTitle>
+                <p className="text-2xl font-semibold leading-none tracking-tight tabular-nums">{stats.total.toLocaleString()}</p>
               </CardHeader>
             </Card>
             <Card>
@@ -108,7 +108,7 @@ export default function CatalogueMapPage() {
                   <span>With Uncertainty</span>
                   <TechnicalTermTooltip term="uncertainty" />
                 </div>
-                <CardTitle className="text-2xl">{stats.withUncertainty.toLocaleString()}</CardTitle>
+                <p className="text-2xl font-semibold leading-none tracking-tight tabular-nums">{stats.withUncertainty.toLocaleString()}</p>
               </CardHeader>
             </Card>
             <Card>
@@ -117,7 +117,7 @@ export default function CatalogueMapPage() {
                   <span>Focal Mechanisms</span>
                   <TechnicalTermTooltip term="focalMechanism" />
                 </div>
-                <CardTitle className="text-2xl">{stats.withFocalMechanisms.toLocaleString()}</CardTitle>
+                <p className="text-2xl font-semibold leading-none tracking-tight tabular-nums">{stats.withFocalMechanisms.toLocaleString()}</p>
               </CardHeader>
             </Card>
             <Card>
@@ -126,7 +126,7 @@ export default function CatalogueMapPage() {
                   <span>Station Data</span>
                   <InfoTooltip content="Events with a reported count of stations used in the solution." />
                 </div>
-                <CardTitle className="text-2xl">{stats.withStationData.toLocaleString()}</CardTitle>
+                <p className="text-2xl font-semibold leading-none tracking-tight tabular-nums">{stats.withStationData.toLocaleString()}</p>
               </CardHeader>
             </Card>
           </div>
@@ -141,6 +141,8 @@ export default function CatalogueMapPage() {
       {/* Map card: the page header above already names the map, so the card is the map
           alone - no second title, no status badge - filling the card to its rounded edge. */}
       <Card className="overflow-hidden">
+        {/* For the heading outline only (the legend's sections are h3): no visible title. */}
+        <h2 className="sr-only">Event map</h2>
         {loading && (
           <div className="h-[700px] flex items-center justify-center">
             <div className="text-center space-y-4">

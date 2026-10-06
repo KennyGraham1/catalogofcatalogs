@@ -86,3 +86,7 @@ __pycache__/
 *.synctex.gz
 *.synctex(busy)
 *.pdfsync
+
+# Local UI audit reports and browser evidence
+# /UI_AUDIT_*.md
+/docs/audits/ui-*/

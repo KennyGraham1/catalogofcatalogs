@@ -8,6 +8,8 @@ import { RecentCatalogues } from '@/components/dashboard/RecentCatalogues';
 import { StatisticsCards } from '@/components/dashboard/StatisticsCards';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { ProcessingStatus } from '@/components/dashboard/ProcessingStatus';
+import { CatalogueLoadNotice } from '@/components/catalogues/CatalogueLoadNotice';
+import { useCatalogues } from '@/contexts/CatalogueContext';
 
 // Dynamically import CatalogueMap to avoid SSR issues with Leaflet
 const CatalogueMap = dynamic(
@@ -24,6 +26,7 @@ const CatalogueMap = dynamic(
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState('overview');
+  const { status, error, lastSuccessAt, retry, loading } = useCatalogues();
 
   return (
     <div className="container py-6 max-w-7xl mx-auto">
@@ -35,6 +38,16 @@ export default function DashboardPage() {
           </p>
         </div>
 
+        {/* One notice for every tab: the widgets below share the same catalogue list. */}
+        <CatalogueLoadNotice
+          status={status}
+          error={error}
+          lastSuccessAt={lastSuccessAt}
+          onRetry={retry}
+          retrying={loading}
+          unavailable="Catalogue totals, recent catalogues and activity"
+        />
+
         <Tabs defaultValue="overview" value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList className="grid w-full max-w-md grid-cols-3">
             <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -43,7 +56,10 @@ export default function DashboardPage() {
           </TabsList>
 
           <TabsContent value="overview" className="space-y-4">
-            <StatisticsCards />
+            <section aria-labelledby="dashboard-summary-heading">
+              <h2 id="dashboard-summary-heading" className="sr-only">Summary</h2>
+              <StatisticsCards />
+            </section>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <Card className="shadow-sm">

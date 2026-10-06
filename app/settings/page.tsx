@@ -1,14 +1,16 @@
 'use client';
 
+import Link from 'next/link';
 import { useTheme } from 'next-themes';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DefaultFieldMappings } from '@/components/settings/DefaultFieldMappings';
 import { MergeAuthoritySettings } from '@/components/settings/MergeAuthoritySettings';
 import { useAuth } from '@/lib/auth/hooks';
+import { loginHref } from '@/lib/auth/login-href';
 import { UserRole } from '@/lib/auth/types';
 import { AzimuthalGapColorBar, DepthColorBar, MagnitudeSizeKey, QualityColorKey } from '@/components/map/MapLegend';
 import { Settings, Database, Map, Lock, GitMerge } from 'lucide-react';
@@ -37,7 +39,10 @@ import { Settings, Database, Map, Lock, GitMerge } from 'lucide-react';
  * what a map actually shows the way the old hard-coded swatches had.
  */
 export default function SettingsPage() {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
+  // Admin-only: the schema mappings and the merge authority table, which apply to
+  // everyone. The theme is a per-browser preference (the header's toggle sets the same
+  // one), so every visitor can change it here as well.
   const canManageSettings = user?.role === UserRole.ADMIN;
   const isReadOnly = !canManageSettings;
   const { resolvedTheme } = useTheme();
@@ -53,22 +58,48 @@ export default function SettingsPage() {
           </p>
         </div>
 
-        {isReadOnly && (
+        {/* Not while the session loads: signed-in users (administrators included) saw the
+            guest notice and its Sign in link flash first, and the link was prefetched. */}
+        {isReadOnly && !isLoading && (
           <Alert className="border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
-            <Lock className="h-4 w-4" />
-            <AlertTitle>View-only settings</AlertTitle>
+            <Lock className="h-4 w-4" aria-hidden="true" />
+            {/* A paragraph, not AlertTitle: its h5 would skip heading levels after the h1. */}
+            <p className="mb-1 font-medium leading-none tracking-tight">View-only settings</p>
             <AlertDescription>
-              Only administrators can change schema mapping and merge authority settings. Log in with an Admin account to make updates.
+              Only administrators can change the schema mapping and merge authority settings.{' '}
+              {user ? (
+                'You can still change the theme, which is stored in this browser.'
+              ) : (
+                <>
+                  <Link href={loginHref('/settings')} className="font-medium underline underline-offset-4 hover:no-underline">
+                    Sign in
+                  </Link>{' '}
+                  with an Admin account to make updates. You can still change the theme, which is
+                  stored in this browser.
+                </>
+              )}
             </AlertDescription>
           </Alert>
         )}
 
         <Tabs defaultValue="general" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="general">General</TabsTrigger>
-            <TabsTrigger value="schema">Schema Mapping</TabsTrigger>
-            <TabsTrigger value="merge">Merge Authority</TabsTrigger>
-            <TabsTrigger value="visualization">Visualization Reference</TabsTrigger>
+          {/* Below sm the four tabs share a two-column grid and long names wrap, so the
+              list stays within the screen (one row of tabs made a 555 px page at 390 px). */}
+          <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:inline-flex sm:h-10 sm:w-auto sm:gap-0">
+            {[
+              ['general', 'General'],
+              ['schema', 'Schema Mapping'],
+              ['merge', 'Merge Authority'],
+              ['visualization', 'Visualization Reference'],
+            ].map(([value, label]) => (
+              <TabsTrigger
+                key={value}
+                value={value}
+                className="h-full whitespace-normal text-center sm:h-auto sm:whitespace-nowrap"
+              >
+                {label}
+              </TabsTrigger>
+            ))}
           </TabsList>
 
           <TabsContent value="general" className="space-y-4">
@@ -86,7 +117,7 @@ export default function SettingsPage() {
                 <div className="space-y-2">
                   <Label>Theme</Label>
                   <div className="flex items-center gap-2">
-                    <ThemeToggle disabled={isReadOnly} />
+                    <ThemeToggle />
                     <span className="text-sm text-muted-foreground">
                       Select your preferred theme
                     </span>
@@ -122,7 +153,7 @@ export default function SettingsPage() {
                 </CardTitle>
                 <CardDescription className="text-xs">
                   The network hierarchy and regional overrides catalogue merging uses to rank
-                  reports of one earthquake (applied to new merges and previews)
+                  the catalogues&apos; records of one earthquake (applied to new merges and previews)
                 </CardDescription>
               </CardHeader>
               <CardContent>

@@ -46,6 +46,11 @@ const NEXTAUTH = {
 const clientLogger = { error: jest.fn(), warn: jest.fn(), debug: jest.fn() };
 
 const originalFetch = globalThis.fetch;
+// Middleware redirects are built on NEXTAUTH_URL (the public URL); pin it so the expected
+// locations do not depend on the developer's local environment file.
+const originalNextAuthUrl = process.env.NEXTAUTH_URL;
+beforeAll(() => { process.env.NEXTAUTH_URL = 'http://localhost'; });
+afterAll(() => { process.env.NEXTAUTH_URL = originalNextAuthUrl; });
 
 /** Route every fetch (the browser client's and the middleware's) to the real handler. */
 function serveSessionRoute() {

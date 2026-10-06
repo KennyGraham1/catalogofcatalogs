@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   Activity,
@@ -26,6 +26,8 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '../theme/ThemeToggle';
 import { useAuth } from '@/lib/auth/hooks';
+import { loginHref } from '@/lib/auth/login-href';
+import { registerHref } from '@/lib/auth/access-request';
 import { signOut } from 'next-auth/react';
 import { useRouter, usePathname } from 'next/navigation';
 import {
@@ -47,9 +49,13 @@ interface HeaderProps {
 export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const { user, isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  // Sign-in and registration return the user to the page they were on.
+  const signInHref = loginHref(pathname);
+  const signUpHref = registerHref(pathname);
   const isActive = (href: string) =>
     href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(`${href}/`);
 
@@ -57,6 +63,20 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [pathname]);
+
+  // Escape closes the open mobile menu and returns focus to its button. An Escape that
+  // an open dropdown (theme or account menu) has already handled is left alone: Radix
+  // marks it with preventDefault in its capture-phase listener.
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      setMobileMenuOpen(false);
+      menuButtonRef.current?.focus();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [mobileMenuOpen]);
 
   const handleSignOut = async () => {
     await signOut({ redirect: false });
@@ -84,10 +104,10 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
 
   const navItems: Array<{
     href: string;
-    label?: string;
+    label: string;
     icon: typeof Activity;
-    ariaLabel?: string;
-    showLabel?: boolean;
+    /** Desktop row only: show the icon alone (named by aria-label and a tooltip). */
+    desktopIconOnly?: boolean;
   }> = [
     { href: '/dashboard', label: 'Dashboard', icon: Activity },
     { href: '/upload', label: 'Upload', icon: Upload },
@@ -95,7 +115,7 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
     { href: '/import', label: 'Import', icon: Download },
     { href: '/merge', label: 'Merge', icon: Layers },
     { href: '/analytics', label: 'Analytics', icon: TrendingUp },
-    { href: '/settings', icon: Settings, ariaLabel: 'Settings', showLabel: false },
+    { href: '/settings', label: 'Settings', icon: Settings, desktopIconOnly: true },
   ];
 
   return (
@@ -103,17 +123,25 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
       'fixed top-0 left-0 right-0 z-50 transition-all duration-300',
       isScrolled ? 'bg-background/95 backdrop-blur-md border-b py-3' : 'bg-transparent py-4'
     )}>
-      <div className="container flex items-center justify-between">
-        <Link href="/" className="flex shrink-0 items-center gap-2 whitespace-nowrap">
-          <Activity className="h-6 w-6 text-primary" />
-          <span className="font-bold text-lg">EarthQuake Catalogue</span>
+      <div className="container flex items-center justify-between gap-3">
+        {/* Below sm the full name does not fit beside the theme, account and menu buttons
+            (at 320 px it pushed them about 50 px past the screen), so a short wordmark is
+            shown there; the full name stays the link's accessible name at every width. */}
+        <Link href="/" className="flex min-w-0 items-center gap-2 whitespace-nowrap sm:shrink-0">
+          <Activity className="h-6 w-6 shrink-0 text-primary" aria-hidden="true" />
+          <span aria-hidden="true" data-brand="short" className="truncate text-base font-bold sm:hidden">
+            EQ Catalogue
+          </span>
+          <span data-brand="full" className="sr-only text-lg font-bold sm:not-sr-only sm:whitespace-nowrap">
+            EarthQuake Catalogue
+          </span>
         </Link>
 
         {/* Desktop Navigation. Signed out, the full row (logo, seven links with labels, three
             icon buttons, Login and Sign Up) is about 1,340 px wide, so: below lg the menu
             button; from lg icons with tooltips; from xl labels at a tighter spacing; from
             2xl the roomy spacing. Each step fits its narrowest viewport with a scrollbar. */}
-        <nav className="hidden lg:flex items-center gap-4 2xl:gap-6 text-sm 2xl:text-base">
+        <nav className="hidden lg:flex items-center gap-4 2xl:gap-6 text-sm 2xl:text-base" aria-label="Main">
           {navItems.map((item) => (
             <Link
               key={item.href}
@@ -124,12 +152,12 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
                   ? 'text-foreground font-medium'
                   : 'text-muted-foreground hover:text-foreground'
               )}
-              aria-label={item.ariaLabel || item.label}
+              aria-label={item.label}
               aria-current={isActive(item.href) ? 'page' : undefined}
-              title={item.ariaLabel || item.label}
+              title={item.label}
             >
               <item.icon className="h-4 w-4" aria-hidden="true" />
-              {item.label && item.showLabel !== false && <span className="hidden xl:inline">{item.label}</span>}
+              {!item.desktopIconOnly && <span className="hidden xl:inline">{item.label}</span>}
             </Link>
           ))}
           {onShowSearch && (
@@ -137,9 +165,10 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
               variant="ghost"
               size="icon"
               onClick={onShowSearch}
+              aria-label="Search events"
               title="Search events (/)"
             >
-              <Search className="h-4 w-4" />
+              <Search className="h-4 w-4" aria-hidden="true" />
             </Button>
           )}
           {onShowShortcuts && (
@@ -147,9 +176,10 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
               variant="ghost"
               size="icon"
               onClick={onShowShortcuts}
+              aria-label="Keyboard shortcuts"
               title="Keyboard shortcuts (Ctrl+/)"
             >
-              <Keyboard className="h-4 w-4" />
+              <Keyboard className="h-4 w-4" aria-hidden="true" />
             </Button>
           )}
           <ThemeToggle />
@@ -160,7 +190,11 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
               {isAuthenticated && user ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="relative h-9 w-9 rounded-full">
+                    <Button
+                      variant="ghost"
+                      className="relative h-9 w-9 rounded-full"
+                      aria-label={`Account menu for ${user.name || user.email || 'your account'}`}
+                    >
                       <Avatar className="h-9 w-9">
                         <AvatarFallback className="bg-primary text-primary-foreground">
                           {getUserInitials(user.name)}
@@ -210,19 +244,11 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
                 </DropdownMenu>
               ) : (
                 <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => router.push('/login')}
-                  >
-                    Login
+                  <Button asChild variant="ghost" size="sm">
+                    <Link href={signInHref}>Login</Link>
                   </Button>
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={() => router.push('/register')}
-                  >
-                    Sign Up
+                  <Button asChild variant="default" size="sm">
+                    <Link href={signUpHref}>Sign Up</Link>
                   </Button>
                 </div>
               )}
@@ -231,14 +257,18 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
         </nav>
 
         {/* Mobile Menu Button */}
-        <div className="flex lg:hidden items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2 lg:hidden">
           <ThemeToggle />
 
           {/* Mobile User Menu */}
           {!isLoading && isAuthenticated && user && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                <Button
+                  variant="ghost"
+                  className="relative h-8 w-8 rounded-full"
+                  aria-label={`Account menu for ${user.name || user.email || 'your account'}`}
+                >
                   <Avatar className="h-8 w-8">
                     <AvatarFallback className="bg-primary text-primary-foreground text-xs">
                       {getUserInitials(user.name)}
@@ -289,6 +319,7 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
           )}
 
           <Button
+            ref={menuButtonRef}
             variant="ghost"
             size="icon"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -297,19 +328,25 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
             aria-controls="mobile-nav"
           >
             {mobileMenuOpen ? (
-              <X className="h-5 w-5" />
+              <X className="h-5 w-5" aria-hidden="true" />
             ) : (
-              <Menu className="h-5 w-5" />
+              <Menu className="h-5 w-5" aria-hidden="true" />
             )}
           </Button>
         </div>
       </div>
 
-      {/* Mobile Menu */}
+      {/* Mobile Menu. Capped at the viewport height below the header bar (72 px, 4.5rem)
+          and scrolled internally, so on a short screen (390 x 500) Login and Sign Up stay
+          reachable instead of falling below the screen with the page behind them. */}
       {mobileMenuOpen && (
-        <div id="mobile-nav" className="lg:hidden bg-background border-b">
-          <div className="container py-4">
-            <nav className="flex flex-col gap-4">
+        <div
+          id="mobile-nav"
+          data-mobile-menu
+          className="max-h-[calc(100vh-4.5rem)] overflow-y-auto overscroll-contain border-b bg-background supports-[height:100dvh]:max-h-[calc(100dvh-4.5rem)] lg:hidden"
+        >
+          <div className="container py-3">
+            <nav className="flex flex-col gap-1" aria-label="Main">
               {navItems.map((item) => (
                 <Link
                   key={item.href}
@@ -321,40 +358,28 @@ export function Header({ onShowShortcuts, onShowSearch }: HeaderProps = {}) {
                       : 'hover:bg-muted'
                   )}
                   onClick={() => setMobileMenuOpen(false)}
-                  aria-label={item.ariaLabel || item.label}
                   aria-current={isActive(item.href) ? 'page' : undefined}
-                  title={item.ariaLabel || item.label}
                 >
                   <item.icon className="h-5 w-5 text-primary" aria-hidden="true" />
-                  {item.label && item.showLabel !== false && <span>{item.label}</span>}
+                  <span>{item.label}</span>
                 </Link>
               ))}
 
               {/* Mobile Auth Buttons */}
               {!isLoading && !isAuthenticated && (
                 <>
-                  <div className="border-t pt-4 mt-2" />
-                  <Button
-                    variant="ghost"
-                    className="justify-start"
-                    onClick={() => {
-                      setMobileMenuOpen(false);
-                      router.push('/login');
-                    }}
-                  >
-                    <LogIn className="mr-2 h-5 w-5" />
-                    Login
+                  <div className="my-2 border-t" />
+                  <Button asChild variant="ghost" className="justify-start">
+                    <Link href={signInHref} onClick={() => setMobileMenuOpen(false)}>
+                      <LogIn className="mr-2 h-5 w-5" aria-hidden="true" />
+                      Login
+                    </Link>
                   </Button>
-                  <Button
-                    variant="default"
-                    className="justify-start"
-                    onClick={() => {
-                      setMobileMenuOpen(false);
-                      router.push('/register');
-                    }}
-                  >
-                    <UserPlus className="mr-2 h-5 w-5" />
-                    Sign Up
+                  <Button asChild variant="default" className="justify-start">
+                    <Link href={signUpHref} onClick={() => setMobileMenuOpen(false)}>
+                      <UserPlus className="mr-2 h-5 w-5" aria-hidden="true" />
+                      Sign Up
+                    </Link>
                   </Button>
                 </>
               )}

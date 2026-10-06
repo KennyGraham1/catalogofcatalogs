@@ -50,6 +50,8 @@ jest.mock('@/contexts/CatalogueContext', () => ({
     catalogues: mockCatalogues, stats: mockStats, loading: false, error: null,
     refreshCatalogues: jest.fn(), invalidateCache: jest.fn(), lastUpdated: new Date(now),
     autoRefreshInterval: 21600000,
+    // The load-state fields of the provider (a successful load).
+    status: 'loaded', refreshing: false, retry: jest.fn(), lastSuccessAt: new Date(now),
   }),
 }));
 jest.mock('next/navigation', () => ({ useRouter: () => ({ push: jest.fn() }) }));

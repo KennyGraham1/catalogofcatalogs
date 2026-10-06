@@ -5,7 +5,7 @@
  * Display and manage user profile information
  */
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth/hooks';
@@ -25,6 +25,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import { toast } from '@/hooks/use-toast';
 import { RoleChangeRequest, UserRole } from '@/lib/auth/types';
+import { REQUEST_ACCESS_SECTION_ID } from '@/lib/auth/access-request';
 
 export default function ProfilePage() {
   const { user, isLoading } = useAuth();
@@ -36,6 +37,7 @@ export default function ProfilePage() {
   const [requestedRole, setRequestedRole] = useState<UserRole>(UserRole.EDITOR);
   const [justification, setJustification] = useState('');
   const [submittingRequest, setSubmittingRequest] = useState(false);
+  const requestSectionRef = useRef<HTMLDivElement>(null);
 
   const handleSignOut = async () => {
     setLoading(true);
@@ -66,6 +68,18 @@ export default function ProfilePage() {
     };
 
     fetchRoleRequests();
+  }, [user]);
+
+  // "Request Editor access" links elsewhere point at /profile#request-access. The section
+  // only exists once the session has loaded, after the browser's own jump to the
+  // fragment, so bring it into view (and its heading into focus) here.
+  useEffect(() => {
+    if (!user || typeof window === 'undefined') return;
+    if (window.location.hash !== `#${REQUEST_ACCESS_SECTION_ID}`) return;
+    const section = requestSectionRef.current;
+    if (!section) return;
+    section.scrollIntoView?.({ block: 'start' });
+    section.querySelector<HTMLElement>('h2')?.focus();
   }, [user]);
 
   useEffect(() => {
@@ -180,40 +194,40 @@ export default function ProfilePage() {
     <div className="container mx-auto max-w-4xl px-4 py-12">
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl font-bold">Profile</CardTitle>
+          <CardTitle as="h1" className="text-2xl font-bold">Profile</CardTitle>
           <CardDescription>
             View and manage your account information
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="space-y-4">
+          <dl className="space-y-4">
             <div>
-              <h3 className="text-sm font-medium text-muted-foreground">Name</h3>
-              <p className="mt-1 text-lg">{user.name}</p>
+              <dt className="text-sm font-medium text-muted-foreground">Name</dt>
+              <dd className="mt-1 text-lg">{user.name}</dd>
             </div>
             
             <div>
-              <h3 className="text-sm font-medium text-muted-foreground">Email</h3>
-              <p className="mt-1 text-lg">{user.email}</p>
+              <dt className="text-sm font-medium text-muted-foreground">Email</dt>
+              <dd className="mt-1 text-lg">{user.email}</dd>
             </div>
             
             <div>
-              <h3 className="text-sm font-medium text-muted-foreground">Role</h3>
-              <div className="mt-1">
+              <dt className="text-sm font-medium text-muted-foreground">Role</dt>
+              <dd className="mt-1">
                 <Badge variant={getRoleBadgeVariant(user.role)}>
                   {user.role.toUpperCase()}
                 </Badge>
-              </div>
+              </dd>
             </div>
             
             <div>
-              <h3 className="text-sm font-medium text-muted-foreground">User ID</h3>
-              <p className="mt-1 font-mono text-sm text-muted-foreground">{user.id}</p>
+              <dt className="text-sm font-medium text-muted-foreground">User ID</dt>
+              <dd className="mt-1 font-mono text-sm text-muted-foreground">{user.id}</dd>
             </div>
-          </div>
+          </dl>
           
           <div className="border-t pt-6">
-            <h3 className="mb-4 text-lg font-medium">Permissions</h3>
+            <h2 className="mb-4 text-lg font-medium">Permissions</h2>
             <div className="space-y-2 text-sm">
               {user.role === UserRole.ADMIN && (
                 <>
@@ -234,6 +248,10 @@ export default function ProfilePage() {
                 <>
                   <p>✓ View all catalogues</p>
                   <p>✓ Export catalogues</p>
+                  <p className="pt-2 text-muted-foreground">
+                    Uploading, importing and merging catalogues need Editor access, which an
+                    administrator grants. Request it below.
+                  </p>
                 </>
               )}
               {user.role === UserRole.GUEST && (
@@ -244,9 +262,13 @@ export default function ProfilePage() {
             </div>
           </div>
           
-          <div className="border-t pt-6 space-y-4">
+          <div
+            ref={requestSectionRef}
+            id={REQUEST_ACCESS_SECTION_ID}
+            className="border-t pt-6 space-y-4 scroll-mt-24"
+          >
             <div className="space-y-1">
-              <h3 className="text-lg font-medium">Role Upgrade Request</h3>
+              <h2 tabIndex={-1} className="text-lg font-medium focus:outline-none">Role Upgrade Request</h2>
               <p className="text-sm text-muted-foreground">
                 Request elevated access by submitting a role upgrade request.
               </p>
@@ -307,13 +329,13 @@ export default function ProfilePage() {
               <form onSubmit={handleRoleRequestSubmit} className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="requested-role">Desired Role</Label>
+                    <Label id="requested-role-label" htmlFor="requested-role">Desired Role</Label>
                     <Select
                       value={requestedRole}
                       onValueChange={(value) => setRequestedRole(value as UserRole)}
                       disabled={hasPendingRequest || submittingRequest}
                     >
-                      <SelectTrigger id="requested-role">
+                      <SelectTrigger id="requested-role" aria-labelledby="requested-role-label">
                         <SelectValue placeholder="Select role" />
                       </SelectTrigger>
                       <SelectContent>

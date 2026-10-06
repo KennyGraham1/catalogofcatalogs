@@ -87,11 +87,19 @@ export function Layout({ children, nonce }: LayoutProps) {
     <ThemeProvider nonce={typeof window === 'undefined' ? nonce : ''} attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
       <CatalogueProvider>
         <div className="min-h-screen flex flex-col">
+          {/* First stop for keyboard users: skips the header's navigation. Hidden until
+              focused; <main> takes focus (tabIndex -1) so the next Tab continues there. */}
+          <a
+            href="#main-content"
+            className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-md focus:border focus:bg-background focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-foreground focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          >
+            Skip to main content
+          </a>
           <Header
             onShowShortcuts={() => setShortcutsHelpOpen(true)}
             onShowSearch={() => setGlobalSearchOpen(true)}
           />
-          <main className="flex-1 pt-20">
+          <main id="main-content" tabIndex={-1} className="flex-1 pt-20 focus:outline-none">
             {/* Inside <main> so it starts below the fixed header, not underneath it. */}
             <ReadOnlyBanner />
             {children}

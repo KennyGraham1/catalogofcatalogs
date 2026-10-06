@@ -10,6 +10,12 @@ import Home from '@/app/page';
 import { CatalogueProvider } from '@/contexts/CatalogueContext';
 import { clearAllCache } from '@/hooks/use-cached-fetch';
 
+// The landing page reads the session to decide which upload entry to show; a signed-out
+// visitor is enough here.
+jest.mock('@/lib/auth/hooks', () => ({
+  useAuth: () => ({ user: null, isAuthenticated: false, isLoading: false, session: null }),
+}));
+
 type Row = { id: string; name: string; event_count: number; source_catalogues: string; created_at: string };
 
 let serverList: Row[] = [];

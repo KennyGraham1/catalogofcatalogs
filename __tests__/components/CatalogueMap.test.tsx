@@ -30,14 +30,22 @@ describe('CatalogueMap', () => {
   it('finishes loading when no catalogues exist', async () => {
     (fetch as jest.Mock).mockResolvedValue(response([]));
     render(<CatalogueMap />);
-    expect(await screen.findByText('No catalogues found')).toBeInTheDocument();
+    expect(await screen.findByText('No catalogues yet')).toBeInTheDocument();
     expect(screen.queryByText('Loading earthquake data...')).not.toBeInTheDocument();
   });
 
-  it('reports catalogue loading errors', async () => {
+  it('reports catalogue loading errors and retries them', async () => {
     (fetch as jest.Mock).mockResolvedValue(response(null, false));
     render(<CatalogueMap />);
-    expect(await screen.findByText('Failed to fetch catalogues')).toBeInTheDocument();
+    expect(await screen.findByText('The catalogue list could not be loaded (HTTP 500).')).toBeInTheDocument();
+    expect(screen.queryByText('No catalogues yet')).not.toBeInTheDocument();
+
+    (fetch as jest.Mock).mockReset();
+    (fetch as jest.Mock)
+      .mockResolvedValueOnce(response(catalogues))
+      .mockResolvedValueOnce(response([{ id: 'a-event' }]));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByTestId('event-map')).toHaveTextContent('a-event');
   });
 
   it.each([[], null])('keeps catalogue selection available after an empty/error response (%s)', async data => {

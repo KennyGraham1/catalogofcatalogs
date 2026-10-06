@@ -284,7 +284,7 @@ export function MergeAuthoritySettings({ readOnly = false }: MergeAuthoritySetti
         <div>
           <h3 className="text-lg font-medium">Network authority</h3>
           <p className="text-sm text-muted-foreground">
-            Which network&apos;s solution the merge prefers when reports of one earthquake tie on
+            Which network&apos;s solution the merge prefers when the catalogues&apos; records of one earthquake tie on
             quality. Lower priority numbers rank higher; patterns are whole words matched against a
             source name (for example <code>geonet</code>, <code>gns</code>) or an agency code.
           </p>

@@ -21,9 +21,12 @@ import { OptimizedEventPopup } from '@/components/map/OptimizedEventPopup';
 
 const KAIKOURA_UTC = '2016-11-13T11:02:56.000Z';
 
-/** en-GB, day/month/year with a zone label: derived by hand from the instant above. */
-const EXPECTED_TO_THE_MINUTE = '13/11/2016, 11:02 UTC';
-/** The map popup writes the instant ISO-style (MAP_DESIGN_SPEC S5), still in UTC. */
+/**
+ * Every event time is written ISO 8601 in UTC, to the second (derived by hand from the
+ * instant above). The tables used "13/11/2016, 11:02 UTC" until 2026-10-06; day-first
+ * dates are ambiguous to month-first readers, so the platform has one format.
+ */
+const EXPECTED_TABLE = '2016-11-13 11:02:56 UTC';
 const EXPECTED_POPUP = '2016-11-13 11:02:56 UTC';
 
 const event = {
@@ -41,13 +44,16 @@ const event = {
 const OWNED_UI_FILES = [
   'app/analytics/page.tsx',
   'components/catalogues/CatalogueStatsPopover.tsx',
-  'components/events/EventTable.tsx',
-  'components/events/VirtualizedEventTable.tsx',
+  // Both event tables format through this one shared module.
+  'components/events/event-table-model.ts',
   'components/map/OptimizedEventPopup.tsx',
 ];
 
 /** Files that show origin times through a shared formatter rather than their own. */
 const DELEGATING_UI_FILES = [
+  'components/events/EventTable.tsx',
+  'components/events/EventTableParts.tsx',
+  'components/events/VirtualizedEventTable.tsx',
   'components/map/EarthquakeCircleMap.tsx',
   'lib/map-format.ts',
 ];
@@ -57,17 +63,17 @@ const readOwned = (file: string) => readFileSync(path.join(process.cwd(), file),
 describe('origin times render in UTC', () => {
   it('EventTable shows the UTC calendar day, not the host zone day', () => {
     render(createElement(EventTable, { events: [event] }));
-    expect(screen.getByText(EXPECTED_TO_THE_MINUTE)).toBeTruthy();
-    // 14/11 is what Pacific/Auckland (UTC+13) would show for this instant.
-    expect(screen.queryByText(/14\/11\/2016/)).toBeNull();
+    expect(screen.getByText(EXPECTED_TABLE)).toBeTruthy();
+    // 2016-11-14 is what Pacific/Auckland (UTC+13) would show for this instant.
+    expect(screen.queryByText(/2016-11-14/)).toBeNull();
   });
 
   it('VirtualizedEventTable shows the same UTC string as EventTable', () => {
     render(
       createElement(VirtualizedEventTable, { events: [event], height: 400, rowHeight: 48 })
     );
-    expect(screen.getByText(EXPECTED_TO_THE_MINUTE)).toBeTruthy();
-    expect(screen.queryByText(/14\/11\/2016/)).toBeNull();
+    expect(screen.getByText(EXPECTED_TABLE)).toBeTruthy();
+    expect(screen.queryByText(/2016-11-14/)).toBeNull();
   });
 
   it('OptimizedEventPopup shows the UTC origin time to the second', () => {
@@ -93,13 +99,14 @@ describe('no origin-time renderer is left on the host timezone', () => {
     expect(zoneless).toBeNull();
   });
 
-  it.each(OWNED_UI_FILES)('%s formats through a hoisted UTC formatter', (file) => {
+  it.each(OWNED_UI_FILES)('%s formats from the UTC instant (ISO 8601) with the zone named', (file) => {
     const source = readOwned(file);
-    // Module scope, i.e. column 0 - one formatter per module, not one per row.
-    expect(source).toMatch(/^const UTC_[A-Z_]+FORMAT = new Intl\.DateTimeFormat\('en-GB', \{$/m);
-    expect(source).toContain("timeZone: 'UTC'");
-    // The zone is shown to the reader so the value cannot be read as local time.
-    expect(source).toContain("timeZoneName: 'short'");
+    // Through the shared formatter (lib/map-format.ts formatOriginTimeUtc) or the UTC
+    // instant's own ISO string - never a locale formatter on the host's zone - and the
+    // zone is written out so the value cannot be read as local time.
+    expect(source).toMatch(/formatOriginTimeUtc\(|toISOString\(\)/);
+    expect(source).not.toMatch(/new Intl\.DateTimeFormat\('en-GB'/);
+    expect(source).toMatch(/UTC/);
   });
 
   it('the popup formats the origin time from the UTC instant (toISOString), never the host zone', () => {

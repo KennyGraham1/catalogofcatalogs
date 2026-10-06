@@ -99,7 +99,7 @@ export function UncertaintyVisualization({ data }: UncertaintyVisualizationProps
               {quality.score === null ? 'not scored' : `${quality.score}/100`}
             </span>
           </div>
-          <Progress value={quality.score ?? 0} className="h-3" />
+          <Progress value={quality.score ?? 0} className="h-3" aria-label="Uncertainty quality score" />
           <p className="text-xs text-muted-foreground mt-1">
             {quality.score === null
               ? 'This event reports none of the four uncertainty fields, so no quality score can be computed.'

@@ -89,10 +89,11 @@ describe('#31 merged-results table keeps unknown depth unknown', () => {
     render(<MergeActions events={events} catalogueMetadata={{ name: 'Merged' }} />);
     fireEvent.mouseDown(screen.getByRole('tab', { name: /Table View/ }), { button: 0, ctrlKey: false });
 
-    const unknownRow = screen.getByText('6.5').closest('tr')!;
+    // EventTable rows are ARIA table rows (role="row"), not <tr> elements.
+    const unknownRow = screen.getByText('6.5').closest<HTMLElement>('[role="row"]')!;
     expect(within(unknownRow).queryByText('0.0')).toBeNull();
     expect(within(unknownRow).getByText('—')).toBeInTheDocument();
-    const knownRow = screen.getByText('7.8').closest('tr')!;
+    const knownRow = screen.getByText('7.8').closest<HTMLElement>('[role="row"]')!;
     expect(within(knownRow).getByText('15.1')).toBeInTheDocument();
   });
 });

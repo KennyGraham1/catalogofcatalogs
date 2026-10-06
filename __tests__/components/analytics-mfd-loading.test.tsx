@@ -2,7 +2,13 @@ import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor, cleanup } from '@testing-library/react';
 import AnalyticsPage from '@/app/analytics/page';
 const catalogues = [{id:'a',name:'Catalogue A',event_count:2},{id:'b',name:'Catalogue B',event_count:3},{id:'c',name:'Catalogue C',event_count:1}];
-jest.mock('@/hooks/use-cached-fetch',()=>({useCachedFetch:()=>({data:catalogues,loading:false})}));
+jest.mock('@/contexts/CatalogueContext', () => ({
+  // The page reads the shared catalogue list (finding 4 of the 2026-10-05 UI audit).
+  useCatalogues: () => ({
+    catalogues, status: 'loaded', loading: false, error: null, errorStatus: null, refreshing: false,
+    lastSuccessAt: null, retry: async () => {}, refreshCatalogues: async () => {},
+  }),
+}));
 jest.mock('next/dynamic',()=>()=>function MockMap({earthquakes}:any){return <div data-testid="map">{earthquakes.length}</div>});
 jest.mock('@/hooks/use-seismological-worker',()=>({useSeismologicalAnalyses:()=>({grAnalysis:{data:null},completeness:{data:null},temporalAnalysis:{data:null},timeSeriesAnalysis:{data:null},momentAnalysis:{data:null}})}));
 jest.mock('@/components/charts',()=>({

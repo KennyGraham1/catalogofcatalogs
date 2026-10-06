@@ -87,7 +87,7 @@ function ResetPasswordContent() {
         <CardHeader className="space-y-1">
           <div className="flex items-center gap-2">
             <Lock className="h-5 w-5 text-primary" />
-            <CardTitle className="text-2xl font-bold">Reset password</CardTitle>
+            <CardTitle as="h1" className="text-2xl font-bold">Reset password</CardTitle>
           </div>
           <CardDescription>
             Enter a new password for your account.

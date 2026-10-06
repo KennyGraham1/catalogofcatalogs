@@ -57,6 +57,11 @@ const adminToken = { id: 'u1', role: UserRole.ADMIN, jwtVersion: 0 };
 const viewerToken = { id: 'u2', role: UserRole.VIEWER, jwtVersion: 0 };
 
 const originalFetch = globalThis.fetch;
+// Redirects are built on NEXTAUTH_URL (the public URL); pin it so the expected locations
+// do not depend on the developer's local environment file.
+const originalNextAuthUrl = process.env.NEXTAUTH_URL;
+beforeAll(() => { process.env.NEXTAUTH_URL = 'http://localhost'; });
+afterAll(() => { process.env.NEXTAUTH_URL = originalNextAuthUrl; });
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -179,5 +184,56 @@ describe('server2 :: authorized callback still gates on the presence of a token'
     expect(authorized({ token: adminToken, req: req('/admin') })).toBe(true);
     expect(authorized({ token: null, req: req('/login') })).toBe(true);
     expect(authorized({ token: null, req: req('/catalogues') })).toBe(true);
+  });
+});
+
+describe('signed-in visit to /login or /register (remaining issues, 2026-10-06)', () => {
+  const live = () => serverSession({ user: { id: 'u2', role: UserRole.VIEWER } });
+
+  it('goes to the safe callback the sign-in link carried, not always home', async () => {
+    live();
+    const response = await captured.middleware(request('/login?callbackUrl=%2Fmerge', viewerToken));
+    expect(response!.status).toBe(307);
+    expect(response!.headers.get('location')).toBe('http://localhost/merge');
+    live();
+    const register = await captured.middleware(request('/register?callbackUrl=%2Fcatalogues%2Fabc%2Fmap%3Ftab%3Devents', viewerToken));
+    expect(register!.headers.get('location')).toBe('http://localhost/catalogues/abc/map?tab=events');
+  });
+
+  it('never follows an off-site or auth-page callback', async () => {
+    for (const callback of ['https://evil.example/x', '//evil.example', '/login?callbackUrl=%2Fmerge', '/register']) {
+      live();
+      const response = await captured.middleware(request(`/login?callbackUrl=${encodeURIComponent(callback)}`, viewerToken));
+      expect(response!.headers.get('location')).toBe('http://localhost/');
+    }
+  });
+
+  // `next start` hands middleware its own bind name in the URL, Host and X-Forwarded-Host
+  // (measured: localhost:3110 while the browser was on 127.0.0.1:3110).
+  const boundRequest = (headers: Record<string, string> = {}) => Object.assign(
+    new NextRequest('http://localhost:3110/login?callbackUrl=%2Fsettings', { headers: { cookie: SESSION_COOKIE, host: 'localhost:3110', ...headers } }),
+    { nextauth: { token: viewerToken } },
+  );
+
+  it('redirects on the public origin (NEXTAUTH_URL), not the server bind name', async () => {
+    process.env.NEXTAUTH_URL = 'http://127.0.0.1:3110';
+    try {
+      live();
+      const response = await captured.middleware(boundRequest());
+      expect(response!.headers.get('location')).toBe('http://127.0.0.1:3110/settings');
+    } finally {
+      process.env.NEXTAUTH_URL = 'http://localhost';
+    }
+  });
+
+  it('without NEXTAUTH_URL, uses the forwarded host', async () => {
+    delete process.env.NEXTAUTH_URL;
+    try {
+      live();
+      const response = await captured.middleware(boundRequest({ 'x-forwarded-host': 'catalogues.example.org', 'x-forwarded-proto': 'https' }));
+      expect(response!.headers.get('location')).toBe('https://catalogues.example.org/settings');
+    } finally {
+      process.env.NEXTAUTH_URL = 'http://localhost';
+    }
   });
 });

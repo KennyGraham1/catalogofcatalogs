@@ -13,6 +13,20 @@ interface QualityScoreCardProps {
   showDetails?: boolean;
 }
 
+/** #ffffff or near-black, whichever contrasts more with a #rrggbb background. */
+export function readableTextOn(background: string): string {
+  const hex = /^#?([0-9a-f]{6})$/i.exec(background.trim())?.[1];
+  if (!hex) return '#ffffff';
+  const channel = (offset: number) => {
+    const c = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+  const onWhite = 1.05 / (luminance + 0.05);
+  const onDark = (luminance + 0.05) / (0.0091 + 0.05); // #111827
+  return onWhite >= onDark ? '#ffffff' : '#111827';
+}
+
 export function QualityScoreCard({ score, showDetails = true }: QualityScoreCardProps) {
   return (
     <Card>
@@ -27,7 +41,8 @@ export function QualityScoreCard({ score, showDetails = true }: QualityScoreCard
             className="text-lg px-3 py-1"
             style={{
               backgroundColor: getQualityColor(score.overall),
-              color: 'white'
+              // The grade colours run from dark to light: white text only where it keeps 4.5:1.
+              color: readableTextOn(getQualityColor(score.overall))
             }}
           >
             Grade: {score.grade}
@@ -45,6 +60,7 @@ export function QualityScoreCard({ score, showDetails = true }: QualityScoreCard
             <span className="text-muted-foreground">{score.overall}%</span>
           </div>
           <Progress 
+            aria-label="Overall quality score"
             value={score.overall} 
             className="h-3"
             style={{
@@ -57,7 +73,7 @@ export function QualityScoreCard({ score, showDetails = true }: QualityScoreCard
           <>
             {/* Component Scores */}
             <div className="space-y-3 pt-2">
-              <h4 className="font-semibold text-sm">Component Scores</h4>
+              <h3 className="font-semibold text-sm">Component Scores</h3>
               
               <ScoreComponent
                 name="Location Quality"

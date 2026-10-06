@@ -183,7 +183,7 @@ export default function AdminUsersPage() {
     <div className="container mx-auto px-4 py-12">
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl font-bold">User Management</CardTitle>
+          <CardTitle as="h1" className="text-2xl font-bold">User Management</CardTitle>
           <CardDescription>
             Manage user accounts and permissions
           </CardDescription>
@@ -217,7 +217,7 @@ export default function AdminUsersPage() {
                       onValueChange={(value) => handleRoleChange(account.id, value as UserRole)}
                       disabled={updatingUserId === account.id || account.id === user.id}
                     >
-                      <SelectTrigger className="w-32">
+                      <SelectTrigger className="w-32" aria-label={`Role for ${account.name || account.email}`}>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>

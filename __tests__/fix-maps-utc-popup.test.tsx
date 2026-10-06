@@ -58,7 +58,8 @@ const KAIKOURA = {
   depth: 15.1, magnitude: 7.8, magnitude_type: 'Mw', region: 'Kaikoura',
 };
 /** en-GB day/month/year to the second, with the zone: by hand from the instant above. */
-const EXPECTED = '13/11/2016, 11:02:56 UTC';
+// ISO 8601 in UTC, the platform's one event-time format (the day-first form was ambiguous).
+const EXPECTED = '2016-11-13 11:02:56 UTC';
 /** The shared event popup (OptimizedEventPopup, spec S5) writes it ISO-style, zone named. */
 const EXPECTED_ISO = '2016-11-13 11:02:56 UTC';
 
@@ -68,9 +69,9 @@ beforeEach(() => {
 
 const MAPS: Array<[string, () => JSX.Element, string, string]> = [
   ['analytics map (UnifiedEarthquakeMap)', () => <UnifiedEarthquakeMap earthquakes={[KAIKOURA]} />, EXPECTED_ISO, '2016-11-14'],
-  ['catalogue MapView', () => <MapView events={[KAIKOURA] as any} />, EXPECTED, '14/11/2016'],
-  ['NZEarthquakeMap', () => <NZEarthquakeMap earthquakes={[KAIKOURA] as any} />, EXPECTED, '14/11/2016'],
-  ['EnhancedMapView', () => <EnhancedMapView events={[KAIKOURA]} />, EXPECTED, '14/11/2016'],
+  ['catalogue MapView', () => <MapView events={[KAIKOURA] as any} />, EXPECTED, '2016-11-14'],
+  ['NZEarthquakeMap', () => <NZEarthquakeMap earthquakes={[KAIKOURA] as any} />, EXPECTED, '2016-11-14'],
+  ['EnhancedMapView', () => <EnhancedMapView events={[KAIKOURA]} />, EXPECTED, '2016-11-14'],
 ];
 
 describe.each(MAPS)('%s popup', (_name, renderMap, expected, aucklandDay) => {

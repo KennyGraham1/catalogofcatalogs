@@ -22,14 +22,18 @@ export const CatalogueMap = memo(function CatalogueMap() {
   const [cataloguesLoading, setCataloguesLoading] = useState(true);
   const [cataloguesError, setCataloguesError] = useState<string | null>(null);
   const [sampleSize, setSampleSize] = useState<MapDetail>('auto');
+  // Bumped by "Retry" after the catalogue list failed to load.
+  const [catalogueAttempt, setCatalogueAttempt] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
+    setCataloguesLoading(true);
+    setCataloguesError(null);
     async function fetchCatalogues() {
       try {
         const response = await fetch('/api/catalogues', { signal: controller.signal });
-        if (!response.ok) throw new Error('Failed to fetch catalogues');
+        if (!response.ok) throw new Error(`The catalogue list could not be loaded (HTTP ${response.status}).`);
         const data = await response.json();
         if (!active) return;
         const available = Array.isArray(data) ? data : [];
@@ -38,13 +42,13 @@ export const CatalogueMap = memo(function CatalogueMap() {
         setCataloguesLoading(false);
       } catch (err) {
         if (!active) return;
-        setCataloguesError(err instanceof Error ? err.message : 'Failed to load catalogues');
+        setCataloguesError(err instanceof Error ? err.message : 'The catalogue list could not be loaded.');
         setCataloguesLoading(false);
       }
     }
     fetchCatalogues();
     return () => { active = false; controller.abort(); };
-  }, []);
+  }, [catalogueAttempt]);
 
   const { events, loading: eventsLoading, complete, loadedCount, error: eventsError, retry: reload } = useCatalogueEvents(catalogues, selectedCatalogue);
   const loading = cataloguesLoading || (eventsLoading && events.length === 0);
@@ -75,11 +79,15 @@ export const CatalogueMap = memo(function CatalogueMap() {
     if (error && events.length === 0) {
       return (
         <div className={emptyHeight}>
-          <div className="text-center text-muted-foreground">
-            <MapPin className="h-12 w-12 mx-auto mb-2 opacity-50" />
-            <p>Failed to load map data</p>
+          <div className="text-center text-muted-foreground px-4" role="alert">
+            <MapPin className="h-12 w-12 mx-auto mb-2 opacity-50" aria-hidden="true" />
+            <p>The map could not be loaded</p>
             <p className="text-sm mt-1">{error}</p>
-            {eventsError && <Button variant="outline" onClick={reload}>Retry loading events</Button>}
+            {cataloguesError ? (
+              <Button variant="outline" className="mt-3" onClick={() => setCatalogueAttempt((n) => n + 1)}>Retry</Button>
+            ) : (
+              eventsError && <Button variant="outline" className="mt-3" onClick={reload}>Retry loading events</Button>
+            )}
           </div>
         </div>
       );
@@ -89,8 +97,8 @@ export const CatalogueMap = memo(function CatalogueMap() {
       return (
         <div className={emptyHeight}>
           <div className="text-center text-muted-foreground">
-            <MapPin className="h-12 w-12 mx-auto mb-2 opacity-50" />
-            <p>No catalogues found</p>
+            <MapPin className="h-12 w-12 mx-auto mb-2 opacity-50" aria-hidden="true" />
+            <p>No catalogues yet</p>
             <p className="text-sm mt-1">Import or create catalogues to see events on the map</p>
           </div>
         </div>

@@ -14,6 +14,7 @@ import { useAuth } from '@/lib/auth/hooks';
 import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import { UserRole } from '@/lib/auth/types';
 import { invalidateCatalogueData } from '@/lib/client-cache';
+import { formatLocalDateTime } from '@/lib/date-format';
 
 interface Catalogue {
   id: string;
@@ -289,14 +290,7 @@ export default function EditCataloguePage() {
               <div className="space-y-2">
                 <Label>Created</Label>
                 <p className="text-sm text-muted-foreground">
-                  {new Date(catalogue.created_at).toLocaleString('en-GB', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                  })}
+                  {formatLocalDateTime(catalogue.created_at)}
                 </p>
               </div>
 

@@ -66,26 +66,13 @@ export interface OptimizedEventPopupProps {
  * Hoisted to module scope on purpose: popups are rebuilt per event over thousands of
  * events, and constructing an Intl.DateTimeFormat per render costs ~82 ms per 1000 rows.
  */
-const UTC_SECOND_FORMAT = new Intl.DateTimeFormat('en-GB', {
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  timeZone: 'UTC',
-  timeZoneName: 'short',
-});
-
 /**
- * Render an ISO origin time in UTC ("13/11/2016, 11:02:56 UTC"); unparseable values are
- * shown verbatim. Used by tables and review lists; the map popup itself uses the
- * ISO-style formatOriginTimeUtc ("2016-11-13 11:02:56 UTC", lib/map-format.ts).
+ * An origin time in UTC as ISO 8601 ("2016-11-13 11:02:56 UTC"), the one format every
+ * event time on the platform uses (the old "13/11/2016" read as November 13th or the 11th
+ * of the 13th month, depending on the reader). Unparseable values are shown verbatim.
  */
 export function formatOriginTime(time: string): string {
-  const date = new Date(time);
-  if (Number.isNaN(date.getTime())) return time;
-  return UTC_SECOND_FORMAT.format(date);
+  return formatOriginTimeUtc(time);
 }
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);

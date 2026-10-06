@@ -123,7 +123,7 @@ export default function ChangePasswordPage() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <Lock className="h-6 w-6 text-primary" />
-            <CardTitle>Change Password</CardTitle>
+            <CardTitle as="h1">Change Password</CardTitle>
           </div>
           <CardDescription>
             Update your password to keep your account secure

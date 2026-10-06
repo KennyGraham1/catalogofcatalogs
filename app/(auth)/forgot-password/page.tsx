@@ -5,15 +5,20 @@
  * Request a password reset link via email
  */
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { LoadingCard } from '@/components/ui/loading-spinner';
+import { loginHref } from '@/lib/auth/login-href';
 
-export default function ForgotPasswordPage() {
+function ForgotPasswordForm() {
+  // Back to sign-in keeps the destination the user was signing in for.
+  const signInHref = loginHref(useSearchParams().get('callbackUrl'));
   const [email, setEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -57,7 +62,7 @@ export default function ForgotPasswordPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12 sm:px-6 lg:px-8">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold">Forgot password</CardTitle>
+          <CardTitle as="h1" className="text-2xl font-bold">Forgot password</CardTitle>
           <CardDescription>
             Enter your email and we will send you a reset link.
           </CardDescription>
@@ -99,7 +104,7 @@ export default function ForgotPasswordPage() {
 
             <p className="text-center text-sm text-muted-foreground">
               Remembered your password?{' '}
-              <Link href="/login" className="font-medium text-primary hover:text-primary/80">
+              <Link href={signInHref} className="font-medium text-primary hover:text-primary/80">
                 Back to login
               </Link>
             </p>
@@ -107,5 +112,13 @@ export default function ForgotPasswordPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function ForgotPasswordPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><LoadingCard text="Loading…" /></div>}>
+      <ForgotPasswordForm />
+    </Suspense>
   );
 }

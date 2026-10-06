@@ -16,13 +16,6 @@ import type { CatalogueStatistics } from '@/app/api/catalogues/[id]/statistics/r
  * shown as UTC calendar days with the zone named, as on the analytics page. The
  * browser's zone put a boundary event on the next day under NZDT (UTC+13).
  */
-const UTC_DATE_FORMAT = new Intl.DateTimeFormat('en-GB', {
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  timeZone: 'UTC',
-  timeZoneName: 'short',
-});
 
 interface CatalogueStatsPopoverProps {
   catalogueId: string;
@@ -63,7 +56,8 @@ export function CatalogueStatsPopover({ catalogueId, catalogueName }: CatalogueS
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return Number.isNaN(date.getTime()) ? dateString : UTC_DATE_FORMAT.format(date);
+    // ISO calendar day in UTC ("2016-11-13 UTC"), like every event time on the platform.
+    return Number.isNaN(date.getTime()) ? dateString : `${date.toISOString().slice(0, 10)} UTC`;
   };
 
   return (

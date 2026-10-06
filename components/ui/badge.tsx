@@ -12,8 +12,10 @@ const badgeVariants = cva(
           'border-transparent bg-primary text-primary-foreground hover:bg-primary/80',
         secondary:
           'border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80',
+        // /90 on hover, not /80: with the light theme's --destructive, 80% over white
+        // leaves the badge text at 4.46:1 (90%: 5.36:1).
         destructive:
-          'border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80',
+          'border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/90',
         outline: 'text-foreground',
       },
     },
@@ -27,10 +29,11 @@ export interface BadgeProps
   extends React.HTMLAttributes<HTMLDivElement>,
     VariantProps<typeof badgeVariants> {}
 
-function Badge({ className, variant, ...props }: BadgeProps) {
-  return (
-    <div className={cn(badgeVariants({ variant }), className)} {...props} />
-  );
-}
+// forwardRef: a Badge can be a Radix trigger (asChild), which needs its DOM node; as a
+// plain function component it logged "Function components cannot be given refs".
+const Badge = React.forwardRef<HTMLDivElement, BadgeProps>(({ className, variant, ...props }, ref) => (
+  <div ref={ref} className={cn(badgeVariants({ variant }), className)} {...props} />
+));
+Badge.displayName = 'Badge';
 
 export { Badge, badgeVariants };

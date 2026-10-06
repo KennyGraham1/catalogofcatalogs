@@ -18,11 +18,11 @@ export function DelimiterSelector({ value, onChange, disabled }: DelimiterSelect
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
-        <Label htmlFor="delimiter-select">Text File Delimiter</Label>
+        <Label id="delimiter-select-label" htmlFor="delimiter-select">Text File Delimiter</Label>
         <InfoTooltip content="Character that separates columns in your file (e.g., comma or tab)." />
       </div>
       <Select value={value} onValueChange={onChange} disabled={disabled}>
-        <SelectTrigger id="delimiter-select">
+        <SelectTrigger id="delimiter-select" aria-labelledby="delimiter-select-label">
           <SelectValue placeholder="Select delimiter" />
         </SelectTrigger>
         <SelectContent>

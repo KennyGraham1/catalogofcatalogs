@@ -127,6 +127,7 @@ export function FilterPanel({ onFiltersChange, onSaveFilter, onClearFilters, rea
             max={10}
             step={0.1}
             onValueChange={setMagnitudeRange}
+            thumbLabels={['Minimum magnitude', 'Maximum magnitude']}
             className="mt-2"
           />
         </div>
@@ -147,6 +148,7 @@ export function FilterPanel({ onFiltersChange, onSaveFilter, onClearFilters, rea
             max={700}
             step={10}
             onValueChange={setDepthRange}
+            thumbLabels={['Minimum depth (km)', 'Maximum depth (km)']}
             className="mt-2"
           />
         </div>
@@ -178,7 +180,7 @@ export function FilterPanel({ onFiltersChange, onSaveFilter, onClearFilters, rea
             Event Type
           </Label>
           <Select value={eventType} onValueChange={setEventType}>
-            <SelectTrigger>
+            <SelectTrigger id="event-type">
               <SelectValue placeholder="Select event type" />
             </SelectTrigger>
             <SelectContent>

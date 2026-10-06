@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useParams } from 'next/navigation';
+import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,7 +24,8 @@ import {
   BarChart3,
   Activity,
   ChevronDown,
-  FilterX
+  FilterX,
+  RefreshCw
 } from 'lucide-react';
 import { EventTable } from '@/components/events/EventTable';
 import { EventFilters, applyEventFilters, type EventFilterValues } from '@/components/event-filters';
@@ -39,6 +41,11 @@ import { useAuth, usePermission } from '@/lib/auth/hooks';
 import { Permission, UserRole } from '@/lib/auth/types';
 import { ReviewQueue } from '@/components/merge/ReviewQueue';
 import { MergeQcCard } from '@/components/merge/MergeQcCard';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { OptimizedEventPopup } from '@/components/map/OptimizedEventPopup';
+import { formatOriginTimeUtc } from '@/lib/map-format';
+import { eventOpenLabel } from '@/components/events/event-table-model';
+import { formatLocalDate } from '@/lib/date-format';
 
 interface Event {
   id: string | number;
@@ -97,7 +104,6 @@ const GRADE_DISPLAY_ORDER: QualityGrade[] = ['A+', 'A', 'B+', 'B', 'C', 'D', 'F'
 
 export default function CatalogueDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const catalogueId = params.id as string;
   const { user } = useAuth();
   const canExportCatalogues = usePermission(Permission.CATALOGUE_EXPORT);
@@ -106,7 +112,7 @@ export default function CatalogueDetailPage() {
     : 'Log in to export catalogues.';
 
   // Use cached fetch for catalogues list
-  const { data: catalogues, loading: cataloguesLoading, error: cataloguesError } = useCachedFetch<Catalogue[]>(
+  const { data: catalogues, loading: cataloguesLoading, error: cataloguesError, refetch: refetchCatalogues } = useCachedFetch<Catalogue[]>(
     '/api/catalogues',
     { cacheTime: 5 * 60 * 1000 } // 5 minutes
   );
@@ -173,9 +179,28 @@ export default function CatalogueDetailPage() {
     }
   }, [error]);
 
+  // Opening an event (a row click, or its keyboard-operable time button) shows the event's
+  // full record in a dialog: the same fields and formats as its map popup.
+  const [openEvent, setOpenEvent] = useState<Event | null>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  // The opened event, kept past the state reset: Radix calls onCloseAutoFocus from the
+  // render in which openEvent is already null.
+  const openedEventRef = useRef<Event | null>(null);
   const handleEventClick = (event: Event) => {
-    // Could navigate to event detail page or show modal
-    // console.log('Event clicked:', event);
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    openedEventRef.current = event;
+    setOpenEvent(event);
+  };
+  // On close, focus returns to the event's open button (the table may have re-rendered it
+  // meanwhile, so it is found again by its name), not to the top of the page.
+  const returnFocusToEvent = (e: globalThis.Event) => {
+    const event = openedEventRef.current;
+    if (!event) return;
+    e.preventDefault();
+    const opener = openerRef.current?.isConnected && openerRef.current !== document.body ? openerRef.current : null;
+    const byName = Array.from(document.querySelectorAll<HTMLElement>('button[aria-label]'))
+      .find(button => button.getAttribute('aria-label') === eventOpenLabel(event));
+    (opener ?? byName)?.focus();
   };
 
   const handleExport = async (format: 'csv' | 'json' | 'geojson' | 'kml' | 'quakeml', filterParams?: URLSearchParams) => {
@@ -252,24 +277,54 @@ export default function CatalogueDetailPage() {
 
   if (loading) {
     return (
-      <div className="container mx-auto py-6 space-y-6">
-        <Skeleton className="h-12 w-64" />
+      <div className="container mx-auto py-6 space-y-6" aria-busy="true">
+        <h1 className="sr-only">Loading catalogue</h1>
+        <Skeleton className="h-12 w-full max-w-[16rem]" />
         <Skeleton className="h-[600px] w-full" />
       </div>
     );
   }
 
   if ((error && events.length === 0) || !catalogue) {
+    // Three different situations: the catalogue list request failed, the catalogue's events
+    // failed to load, or the request succeeded and has no catalogue with this id.
+    const listFailed = !!cataloguesError;
+    const title = listFailed || (catalogue && eventsError)
+      ? 'Catalogue could not be loaded'
+      : 'Catalogue not found';
+    const explanation = listFailed
+      ? 'The request to the server failed, so this catalogue cannot be shown right now. This does not mean that it has been removed.'
+      : catalogue && eventsError
+        ? 'The events of this catalogue could not be loaded.'
+        : 'No catalogue with this address exists. It may have been deleted, or the link may be incorrect.';
     return (
       <div className="container mx-auto py-6">
         <Card className="border-destructive">
-          <CardContent className="pt-6">
-            <p className="text-destructive">{error || 'Catalogue not found'}</p>
-            {eventsError && <Button onClick={retry}>Retry loading events</Button>}
-            <Button onClick={() => router.push('/catalogues')} className="mt-4">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Catalogues
-            </Button>
+          <CardContent className="pt-6 space-y-4">
+            <div className="space-y-1" role={listFailed || eventsError ? 'alert' : undefined}>
+              <h1 className="text-xl font-semibold">{title}</h1>
+              <p>{explanation}</p>
+              {error && <p className="text-sm text-muted-foreground break-words">Details: {error}</p>}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {listFailed ? (
+                <Button onClick={() => refetchCatalogues()} className="gap-2">
+                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                  Retry
+                </Button>
+              ) : eventsError ? (
+                <Button onClick={retry} className="gap-2">
+                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                  Retry loading events
+                </Button>
+              ) : null}
+              <Button asChild variant="outline">
+                <Link href="/catalogues">
+                  <ArrowLeft className="mr-2 h-4 w-4" aria-hidden="true" />
+                  Back to catalogues
+                </Link>
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -279,38 +334,34 @@ export default function CatalogueDetailPage() {
 
   return (
     <div className="container mx-auto py-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => router.push('/catalogues')}
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-            <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-              <FileText className="h-8 w-8 text-primary" />
-              {catalogue.name}
+      {/* Header: title and actions stack on narrow screens so neither is pushed off screen. */}
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="flex min-w-0 items-start gap-2">
+          <Button asChild variant="ghost" size="icon" className="shrink-0">
+            <Link href="/catalogues" aria-label="Back to catalogues" title="Back to catalogues">
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            </Link>
+          </Button>
+          <div className="min-w-0 space-y-2">
+            <h1 className="flex min-w-0 items-start gap-2 text-2xl font-bold tracking-tight sm:text-3xl">
+              <FileText className="mt-0.5 h-6 w-6 shrink-0 text-primary sm:h-8 sm:w-8" aria-hidden="true" />
+              <span className="min-w-0 break-words">{catalogue.name}</span>
             </h1>
-            <Badge variant={catalogue.status === 'complete' ? 'default' : 'secondary'}>
-              {catalogue.status}
-            </Badge>
-            <Badge variant="outline" title="Catalogue version">
-              v{catalogue.version || '1.0.0'}
-            </Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={catalogue.status === 'complete' ? 'default' : 'secondary'}>
+                {catalogue.status}
+              </Badge>
+              <Badge variant="outline" title="Catalogue version">
+                v{catalogue.version || '1.0.0'}
+              </Badge>
+              <p className="text-sm text-muted-foreground">
+                Created {formatLocalDate(catalogue.created_at)}
+              </p>
+            </div>
           </div>
-          <p className="text-muted-foreground ml-12">
-            Created {new Date(catalogue.created_at).toLocaleDateString('en-GB', {
-              year: 'numeric',
-              month: '2-digit',
-              day: '2-digit',
-            })}
-          </p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 md:shrink-0">
           {canExportCatalogues ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -362,68 +413,75 @@ export default function CatalogueDetailPage() {
               <ChevronDown className="ml-2 h-4 w-4" />
             </Button>
           )}
-          <Button onClick={() => router.push(`/catalogues/${catalogueId}/map`)}>
-            <MapIcon className="mr-2 h-4 w-4" />
-            View Map
+          <Button asChild>
+            <Link href={`/catalogues/${catalogueId}/map`}>
+              <MapIcon className="mr-2 h-4 w-4" aria-hidden="true" />
+              View Map
+            </Link>
           </Button>
         </div>
       </div>
 
-      {!complete && <div className="rounded-lg border p-3" role={eventsError ? 'alert' : 'status'}>
-        {eventsError || `Preview · ${loadedCount.toLocaleString()} events received. Loading remaining events...`}
+      {!complete && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3" role={eventsError ? 'alert' : 'status'}>
+        <span className="min-w-0 break-words">
+          {eventsError || `Preview · ${loadedCount.toLocaleString()} events received. Loading remaining events...`}
+        </span>
         {eventsError && <Button variant="outline" onClick={retry}>Retry loading events</Button>}
       </div>}
 
       {/* Statistics Cards */}
-      {complete && <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Events</CardTitle>
-            <Activity className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.total.toLocaleString()}</div>
-          </CardContent>
-        </Card>
+      {complete && <section aria-labelledby="catalogue-summary-heading">
+        <h2 id="catalogue-summary-heading" className="sr-only">Summary</h2>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle as="h3" className="text-sm font-medium">Total Events</CardTitle>
+              <Activity className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.total.toLocaleString()}</div>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Avg Magnitude</CardTitle>
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.avgMagnitude}</div>
-          </CardContent>
-        </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle as="h3" className="text-sm font-medium">Avg Magnitude</CardTitle>
+              <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.avgMagnitude}</div>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Avg Depth</CardTitle>
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.avgDepth} km</div>
-          </CardContent>
-        </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle as="h3" className="text-sm font-medium">Avg Depth</CardTitle>
+              <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.avgDepth} km</div>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Mean Quality (Q)</CardTitle>
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {stats.meanQuality != null ? stats.meanQuality.toFixed(0) : '—'}
-              <span className="text-sm font-normal text-muted-foreground ml-1">/ 100</span>
-            </div>
-            <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-2">
-              {GRADE_DISPLAY_ORDER.filter(grade => stats.gradeCounts[grade]).map(grade => (
-                <span key={grade}>{grade}: {stats.gradeCounts[grade]}</span>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle as="h3" className="text-sm font-medium">Mean Quality (Q)</CardTitle>
+              <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {stats.meanQuality != null ? stats.meanQuality.toFixed(0) : '—'}
+                <span className="text-sm font-normal text-muted-foreground ml-1">/ 100</span>
+              </div>
+              <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-2">
+                {GRADE_DISPLAY_ORDER.filter(grade => stats.gradeCounts[grade]).map(grade => (
+                  <span key={grade}>{grade}: {stats.gradeCounts[grade]}</span>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </section>}
 
       {/* Merge review queue: only a merged catalogue can hold events for review. */}
       {mergedSourceNames && (
@@ -480,6 +538,27 @@ export default function CatalogueDetailPage() {
           />
         </CardContent>
       </Card>
+
+      <Dialog open={openEvent !== null} onOpenChange={open => { if (!open) setOpenEvent(null); }}>
+        <DialogContent className="max-h-[85vh] max-w-md overflow-y-auto" onCloseAutoFocus={returnFocusToEvent}>
+          {openEvent && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Event {formatOriginTimeUtc(openEvent.time)}</DialogTitle>
+                <DialogDescription>{catalogue.name}</DialogDescription>
+              </DialogHeader>
+              <OptimizedEventPopup
+                event={{ ...openEvent, region: openEvent.location_name ?? null }}
+                quality={resolveEventQuality(openEvent)}
+                showFaults
+              />
+              <Button asChild variant="outline" className="mt-2 w-full">
+                <Link href={`/catalogues/${catalogueId}/map`}>View catalogue map</Link>
+              </Button>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

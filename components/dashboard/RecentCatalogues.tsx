@@ -1,6 +1,6 @@
 'use client';
 
-import { FileText, Download, ExternalLink, Layers } from 'lucide-react';
+import { FileText, ExternalLink, Layers, CloudOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useCatalogues } from '@/contexts/CatalogueContext';
@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation';
 import { getCatalogueSourceType } from '@/lib/catalogue-source-type';
 
 export function RecentCatalogues() {
-  const { catalogues, loading } = useCatalogues();
+  const { catalogues, status } = useCatalogues();
   const router = useRouter();
 
   // Get the 5 most recent catalogues
@@ -41,16 +41,16 @@ export function RecentCatalogues() {
     error: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300',
   };
 
-  if (loading) {
+  if (status === 'loading') {
     return (
       <div className="space-y-4">
         {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="flex items-center justify-between p-3 border rounded-md">
-            <div className="flex items-center gap-3 flex-1">
-              <Skeleton className="h-5 w-5 rounded" />
-              <div className="flex-1">
-                <Skeleton className="h-4 w-48 mb-2" />
-                <Skeleton className="h-3 w-64" />
+          <div key={i} className="flex items-center justify-between gap-3 p-3 border rounded-md">
+            <div className="flex min-w-0 items-center gap-3 flex-1">
+              <Skeleton className="h-5 w-5 shrink-0 rounded" />
+              <div className="min-w-0 flex-1">
+                <Skeleton className="h-4 w-full max-w-[12rem] mb-2" />
+                <Skeleton className="h-3 w-full max-w-[16rem]" />
               </div>
             </div>
             <div className="flex gap-1">
@@ -60,6 +60,16 @@ export function RecentCatalogues() {
           </div>
         ))}
       </div>
+    );
+  }
+
+  if (status === 'failed') {
+    return (
+      <EmptyState
+        icon={CloudOff}
+        title="Recent catalogues are unavailable"
+        description="The catalogue list could not be loaded. Use Retry at the top of the page to try again."
+      />
     );
   }
 
@@ -82,18 +92,18 @@ export function RecentCatalogues() {
   }
 
   return (
-    <div className="space-y-4">
+    <ul className="space-y-4">
       {recentCatalogues.map((catalogue) => (
-        <div key={catalogue.id} className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/50 transition-colors">
-          <div className="flex items-center gap-3">
+        <li key={catalogue.id} className="flex items-center justify-between gap-3 p-3 border rounded-md hover:bg-muted/50 transition-colors">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             {catalogue.isMerged ? (
-              <Layers className="h-5 w-5 text-indigo-500" />
+              <Layers className="h-5 w-5 shrink-0 text-indigo-500" aria-hidden="true" />
             ) : (
-              <FileText className="h-5 w-5 text-muted-foreground" />
+              <FileText className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
             )}
-            <div>
-              <p className="font-medium truncate max-w-[180px] sm:max-w-xs">{catalogue.name}</p>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+            <div className="min-w-0">
+              <p className="font-medium truncate" title={catalogue.name}>{catalogue.name}</p>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground mt-1">
                 <span>{catalogue.date}</span>
                 <span>•</span>
                 <Badge variant="outline" className={statusColors[catalogue.status] || ''}>
@@ -104,21 +114,21 @@ export function RecentCatalogues() {
                 {catalogue.isMerged && (
                   <>
                     <span>•</span>
-                    <span className="text-indigo-500">Merged</span>
+                    <span className="text-indigo-700 dark:text-indigo-300">Merged</span>
                   </>
                 )}
               </div>
             </div>
           </div>
-          <div className="flex gap-1">
+          <div className="flex shrink-0 gap-1">
             <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-              <Link href={`/catalogues/${catalogue.id}`}>
-                <ExternalLink className="h-4 w-4" />
+              <Link href={`/catalogues/${catalogue.id}`} aria-label={`Open ${catalogue.name}`} title={`Open ${catalogue.name}`}>
+                <ExternalLink className="h-4 w-4" aria-hidden="true" />
               </Link>
             </Button>
           </div>
-        </div>
+        </li>
       ))}
-    </div>
+    </ul>
   );
 }

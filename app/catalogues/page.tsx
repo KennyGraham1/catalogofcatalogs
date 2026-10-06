@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useCatalogues } from '@/contexts/CatalogueContext';
@@ -71,6 +72,9 @@ import { Permission, UserRole } from '@/lib/auth/types';
 import { ToastAction } from '@/components/ui/toast';
 import { getApiError } from '@/lib/api';
 import { invalidateCatalogueData } from '@/lib/client-cache';
+import { loginHref } from '@/lib/auth/login-href';
+import { CatalogueLoadNotice } from '@/components/catalogues/CatalogueLoadNotice';
+import { formatLocalDate } from '@/lib/date-format';
 
 interface Catalogue {
   id: string;
@@ -124,10 +128,21 @@ export default function CataloguesPage() {
     : 'Log in to export catalogues.';
 
   // Use global catalogue context
-  const { catalogues: contextCatalogues, loading: contextLoading, refreshCatalogues } = useCatalogues();
+  const {
+    catalogues: contextCatalogues,
+    loading: contextLoading,
+    status: listStatus,
+    error: listError,
+    lastSuccessAt,
+    retry: retryCatalogues,
+    refreshCatalogues,
+  } = useCatalogues();
+  // Sign-in links return here afterwards.
+  const signInHref = loginHref('/catalogues');
 
   const [catalogues, setCatalogues] = useState<Catalogue[]>(contextCatalogues);
-  const [loading, setLoading] = useState(contextLoading);
+  // Skeleton rows only before the first response: a refresh keeps the current rows.
+  const [loading, setLoading] = useState(listStatus === 'loading');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAllResults, setShowAllResults] = useState(false);
   const [statusFilter, setStatusFilter] = useState<CatalogueStatus>('all');
@@ -174,9 +189,13 @@ export default function CataloguesPage() {
   useEffect(() => {
     if (!geoSearchActive) {
       setCatalogues(contextCatalogues);
-      setLoading(contextLoading);
+      setLoading(listStatus === 'loading');
     }
-  }, [contextCatalogues, contextLoading, geoSearchActive]);
+  }, [contextCatalogues, listStatus, geoSearchActive]);
+
+  // The region search shows its own results; otherwise the shared list's state applies.
+  const listFailed = !geoSearchActive && listStatus === 'failed';
+  const listStale = !geoSearchActive && listStatus === 'stale';
 
   const fetchCatalogues = async () => {
     await refreshCatalogues();
@@ -774,11 +793,7 @@ export default function CataloguesPage() {
 
   function formatDate(dateString: string): string {
     try {
-      return new Date(dateString).toLocaleDateString('en-GB', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      });
+      return formatLocalDate(dateString);
     } catch {
       return dateString;
     }
@@ -798,7 +813,7 @@ export default function CataloguesPage() {
           action: (
             <ToastAction
               altText={user ? 'View role' : 'Log in'}
-              onClick={() => router.push(user ? '/profile' : '/login')}
+              onClick={() => router.push(user ? '/profile' : signInHref)}
             >
               {user ? 'View role' : 'Log in'}
             </ToastAction>
@@ -877,7 +892,7 @@ export default function CataloguesPage() {
         action: (
           <ToastAction
             altText={user ? 'View role' : 'Log in'}
-            onClick={() => router.push(user ? '/profile' : '/login')}
+            onClick={() => router.push(user ? '/profile' : signInHref)}
           >
             {user ? 'View role' : 'Log in'}
           </ToastAction>
@@ -917,7 +932,7 @@ export default function CataloguesPage() {
         action: (
           <ToastAction
             altText={user ? 'View role' : 'Log in'}
-            onClick={() => router.push(user ? '/profile' : '/login')}
+            onClick={() => router.push(user ? '/profile' : signInHref)}
           >
             {user ? 'View role' : 'Log in'}
           </ToastAction>
@@ -940,7 +955,7 @@ export default function CataloguesPage() {
         action: (
           <ToastAction
             altText={user ? 'View role' : 'Log in'}
-            onClick={() => router.push(user ? '/profile' : '/login')}
+            onClick={() => router.push(user ? '/profile' : signInHref)}
           >
             {user ? 'View role' : 'Log in'}
           </ToastAction>
@@ -969,7 +984,7 @@ export default function CataloguesPage() {
             action: (
               <ToastAction
                 altText={response.status === 401 ? 'Log in' : 'View role'}
-                onClick={() => router.push(response.status === 401 ? '/login' : '/profile')}
+                onClick={() => router.push(response.status === 401 ? signInHref : '/profile')}
               >
                 {response.status === 401 ? 'Log in' : 'View role'}
               </ToastAction>
@@ -1002,7 +1017,42 @@ export default function CataloguesPage() {
     }
   };
 
-  const renderCatalogueTable = (catalogues: CatalogueMeta[]) => (
+  // An empty table after a successful load says why it is empty; a failed load never
+  // reaches this (renderCatalogueTable shows the failure instead).
+  const emptyTableState = geoSearchActive
+    ? {
+        title: 'No catalogues in this region',
+        description: 'No catalogue has events inside the selected region. Try a larger region or clear the filter.',
+        action: undefined,
+      }
+    : cataloguesWithMeta.length === 0
+      ? {
+          title: 'No catalogues yet',
+          description: canManageCatalogues
+            ? 'Upload a QuakeML file or import from GeoNet to create the first catalogue.'
+            : 'No catalogues have been added yet. Catalogues added by editors will appear here.',
+          action: canManageCatalogues
+            ? { label: 'Import from GeoNet', onClick: () => router.push('/import') }
+            : undefined,
+        }
+      : {
+          title: 'No matching catalogues',
+          description: 'No catalogue matches the current search or status filter. Adjust the search or choose another status.',
+          action: undefined,
+        };
+
+  const renderCatalogueTable = (catalogues: CatalogueMeta[]) => listFailed ? (
+    <div className="p-4 sm:p-6">
+      <CatalogueLoadNotice
+        status="failed"
+        error={listError}
+        lastSuccessAt={lastSuccessAt}
+        onRetry={retryCatalogues}
+        retrying={contextLoading}
+        unavailable="The catalogue list"
+      />
+    </div>
+  ) : (
     <div className="rounded-md border">
       <Table>
         <TableHeader>
@@ -1061,22 +1111,11 @@ export default function CataloguesPage() {
             <CatalogueTableSkeleton rows={5} />
           ) : catalogues.length === 0 ? (
             <TableEmptyState
-              colSpan={8}
+              colSpan={7}
               icon={Database}
-              title="No catalogues found"
-              description={
-                searchQuery || geoSearchActive
-                  ? "Try adjusting your search or filters to find catalogues."
-                  : "Get started by uploading a QuakeML file or importing from GeoNet."
-              }
-              action={
-                !searchQuery && !geoSearchActive
-                  ? {
-                      label: "Import from GeoNet",
-                      onClick: () => router.push('/import')
-                    }
-                  : undefined
-              }
+              title={emptyTableState.title}
+              description={emptyTableState.description}
+              action={emptyTableState.action}
             />
           ) : (
             catalogues.map((catalogueMeta) => {
@@ -1085,9 +1124,14 @@ export default function CataloguesPage() {
                 <TableRow key={catalogue.id}>
                 <TableCell className="font-medium">
                   <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-muted-foreground" />
-                    <span>{catalogue.name}</span>
-                    <span className="text-xs text-muted-foreground font-normal" title="Catalogue version">
+                    <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <Link
+                      href={`/catalogues/${catalogue.id}`}
+                      className="rounded-sm underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background"
+                    >
+                      {catalogue.name}
+                    </Link>
+                    <span className="text-xs text-muted-foreground font-normal whitespace-nowrap" title="Catalogue version">
                       v{catalogue.version || '1.0.0'}
                     </span>
                   </div>
@@ -1239,8 +1283,8 @@ export default function CataloguesPage() {
     <>
       <div className="container py-6 max-w-7xl mx-auto">
         <div className="flex flex-col gap-6">
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
               <h1 className="text-2xl font-bold tracking-tight">Catalogues</h1>
               <p className="text-sm text-muted-foreground">
                 Manage your earthquake catalogues and datasets
@@ -1249,14 +1293,25 @@ export default function CataloguesPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={refreshCatalogues}
-              disabled={loading}
+              onClick={() => refreshCatalogues()}
+              disabled={contextLoading}
               className="gap-2"
             >
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`h-4 w-4 ${contextLoading ? 'animate-spin' : ''}`} aria-hidden="true" />
               Refresh
             </Button>
           </div>
+
+          {/* Rows from the last successful load stay visible, marked as possibly out of date. */}
+          {listStale && (
+            <CatalogueLoadNotice
+              status="stale"
+              error={listError}
+              lastSuccessAt={lastSuccessAt}
+              onRetry={retryCatalogues}
+              retrying={contextLoading}
+            />
+          )}
 
           {/* Geographic Search Panel */}
           <GeographicSearchPanel
@@ -1267,9 +1322,9 @@ export default function CataloguesPage() {
 
           {geoSearchActive && geoSearchBounds && (
             <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Map className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Map className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" aria-hidden="true" />
                   <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
                     Showing catalogues in region: Lat {geoSearchBounds.minLatitude.toFixed(2)}° to {geoSearchBounds.maxLatitude.toFixed(2)}°,
                     Lon {geoSearchBounds.minLongitude.toFixed(2)}° to {geoSearchBounds.maxLongitude.toFixed(2)}°
@@ -1304,9 +1359,11 @@ export default function CataloguesPage() {
             </div>
           )}
 
+          <h2 id="catalogue-list-heading" className="sr-only">Catalogue list</h2>
           <Tabs defaultValue="all" value={statusFilter} onValueChange={(value) => setStatusFilter(value as CatalogueStatus)}>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-              <TabsList>
+              {/* Wraps instead of widening the page on narrow screens. */}
+              <TabsList className="h-auto flex-wrap justify-start" aria-label="Filter by status">
                 <TabsTrigger value="all">All Catalogues</TabsTrigger>
                 <TabsTrigger value="complete">Complete</TabsTrigger>
                 <TabsTrigger value="processing">Processing</TabsTrigger>
@@ -1315,11 +1372,12 @@ export default function CataloguesPage() {
 
               <div className="flex flex-col sm:flex-row gap-2">
                 <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <div className="relative min-w-0 flex-1">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
                     <Input
                       ref={searchInputRef}
                       type="search"
+                      aria-label="Search catalogues"
                       placeholder="Search catalogues... (Ctrl+F)"
                       className="pl-8 w-full sm:w-[250px]"
                       value={searchQuery}
@@ -1329,8 +1387,8 @@ export default function CataloguesPage() {
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <Info className="h-4 w-4" />
+                        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" aria-label="Search help">
+                          <Info className="h-4 w-4" aria-hidden="true" />
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent className="max-w-xs">

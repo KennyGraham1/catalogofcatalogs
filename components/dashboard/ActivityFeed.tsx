@@ -6,7 +6,8 @@ import {
   AlertTriangle,
   CheckCircle,
   FileText,
-  Activity as ActivityIcon
+  Activity as ActivityIcon,
+  CloudOff
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCatalogues } from '@/contexts/CatalogueContext';
@@ -43,14 +44,14 @@ const activityIcons: Record<ActivityType, React.ElementType> = {
 };
 
 const activityColors: Record<ActivityType, string> = {
-  upload: 'text-blue-500 bg-blue-100 dark:bg-blue-900 dark:text-blue-300',
-  merge: 'text-indigo-500 bg-indigo-100 dark:bg-indigo-900 dark:text-indigo-300',
-  error: 'text-red-500 bg-red-100 dark:bg-red-900 dark:text-red-300',
-  complete: 'text-green-500 bg-green-100 dark:bg-green-900 dark:text-green-300'
+  upload: 'text-blue-700 bg-blue-100 dark:bg-blue-900 dark:text-blue-300',
+  merge: 'text-indigo-700 bg-indigo-100 dark:bg-indigo-900 dark:text-indigo-300',
+  error: 'text-red-700 bg-red-100 dark:bg-red-900 dark:text-red-300',
+  complete: 'text-green-700 bg-green-100 dark:bg-green-900 dark:text-green-300'
 };
 
 export function ActivityFeed() {
-  const { catalogues, loading } = useCatalogues();
+  const { catalogues, status } = useCatalogues();
   const router = useRouter();
 
   // Generate activities from real catalogue data. Sorted on a copy: the provider's
@@ -122,7 +123,7 @@ export function ActivityFeed() {
       };
     });
 
-  if (loading) {
+  if (status === 'loading') {
     return (
       <div className="space-y-6">
         {[1, 2, 3, 4, 5].map((i) => (
@@ -136,6 +137,16 @@ export function ActivityFeed() {
           </div>
         ))}
       </div>
+    );
+  }
+
+  if (status === 'failed') {
+    return (
+      <EmptyState
+        icon={CloudOff}
+        title="Activity is unavailable"
+        description="The catalogue list could not be loaded. Use Retry at the top of the page to try again."
+      />
     );
   }
 
@@ -165,11 +176,11 @@ export function ActivityFeed() {
               "flex-shrink-0 h-10 w-10 rounded-full flex items-center justify-center",
               colorClass
             )}>
-              <Icon className="h-5 w-5" />
+              <Icon className="h-5 w-5" aria-hidden="true" />
             </div>
-            <div className="flex-1 space-y-1">
+            <div className="min-w-0 flex-1 space-y-1">
               <p className="font-medium leading-none">{activity.title}</p>
-              <p className="text-sm text-muted-foreground">{activity.description}</p>
+              <p className="text-sm text-muted-foreground break-words">{activity.description}</p>
               <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
                 <span>{activity.time}</span>
               </div>

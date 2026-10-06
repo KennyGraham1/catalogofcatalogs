@@ -18,6 +18,13 @@ import { SEISMIC_COLORS, getMagnitudeColor, magnitudeClass } from '@/lib/chart-c
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Colour for annotation text drawn in the fit colour. The light theme's fit green
+ * (#16a34a) is 3.3:1 on white, under the 4.5:1 that 12 px text needs, so its labels
+ * use green-700 (5.0:1); lines keep the fit colour. The dark theme's green passes.
+ */
+const fitLabelColor = (c: { fit: string }) => (c.fit === SEISMIC_COLORS.fit.light ? '#15803d' : c.fit);
+
 /** Calendar day (UTC): time-series bins are UTC days, ISO weeks and months. */
 const UTC_DAY_FORMAT = new Intl.DateTimeFormat('en-GB', {
   day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC',
@@ -78,14 +85,18 @@ export const GutenbergRichterChart = memo(function GutenbergRichterChart({
           markArea: {
             silent: true,
             itemStyle: { color: c.reference, opacity: 0.06 },
-            label: { show: true, position: 'insideTop', color: c.subtext, fontSize: 10, formatter: 'incomplete' },
+            // At the band's foot: the lower left of a cumulative G-R plot holds no points, so
+            // the label stays readable when it is wider than a narrow band. Body text colour
+            // (10:1); the grey subtext was 4.4:1 on the tinted band.
+            label: { show: true, position: 'insideBottom', color: c.text, fontSize: 11, formatter: 'incomplete' },
             data: [[{ xAxis: minMag }, { xAxis: result.completeness }]],
           },
           markLine: {
             silent: true,
             symbol: 'none',
             lineStyle: { color: c.reference, type: 'dashed', width: 2 },
-            label: { formatter: `Mc = ${result.completeness.toFixed(1)}`, color: c.reference, fontWeight: 'bold', fontSize: 12, position: 'insideEndTop' },
+            // Horizontal, above the line's top end, clear of the shaded band and the points.
+            label: { formatter: `Mc = ${result.completeness.toFixed(1)}`, color: c.reference, fontWeight: 'bold', fontSize: 12, position: 'end' },
             data: [{ xAxis: result.completeness }],
           },
         },
@@ -457,7 +468,7 @@ export const GoodnessOfFitChart = memo(function GoodnessOfFitChart({
             silent: true,
             symbol: 'none',
             data: [
-              { yAxis: 95, lineStyle: { color: c.fit, type: 'dashed', width: 1.5 }, label: { formatter: '95%', color: c.fit, position: 'insideStartTop' } },
+              { yAxis: 95, lineStyle: { color: c.fit, type: 'dashed', width: 1.5 }, label: { formatter: '95%', color: fitLabelColor(c), position: 'insideStartTop' } },
               { yAxis: 90, lineStyle: { color: c.subtext, type: 'dashed', width: 1.5 }, label: { formatter: '90%', color: c.subtext, position: 'insideStartTop' } },
               ...(mc != null ? [{ xAxis: mc, lineStyle: { color: c.reference, type: 'dashed' as const, width: 2 }, label: { formatter: `Mc = ${mc.toFixed(1)}`, color: c.reference, fontWeight: 'bold' as const, position: 'insideEndTop' as const } }] : []),
             ],

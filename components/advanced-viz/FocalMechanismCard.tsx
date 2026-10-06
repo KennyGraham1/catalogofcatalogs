@@ -103,7 +103,7 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
 
         {/* Fault Type Explanation */}
         <div className="pt-2 border-t">
-          <h4 className="font-semibold text-sm mb-2">Fault Type</h4>
+          <h3 className="font-semibold text-sm mb-2">Fault Type</h3>
           <div className="space-y-2 text-sm text-muted-foreground">
             <p>{faultType ? getFaultTypeExplanation(faultType.type) : 'Fault type is not reported because at least one nodal-plane angle is missing.'}</p>
             {mechanism.preferredPlane && preferenceHonoured ? (
@@ -126,7 +126,7 @@ export function FocalMechanismCard({ mechanism }: FocalMechanismCardProps) {
         {/* Legend: in the ball's own colours. The unshaded quadrants hold the P axis,
             so they are dilatational, not "tensional". */}
         <div className="pt-2 border-t">
-          <h4 className="font-semibold text-sm mb-2">Beach Ball Legend</h4>
+          <h3 className="font-semibold text-sm mb-2">Beach Ball Legend</h3>
           <BeachballLegend className="grid grid-cols-2 gap-2 text-xs text-muted-foreground" />
         </div>
       </CardContent>
@@ -171,7 +171,7 @@ function PlanePanel({ plane }: { plane: NodalPlane }) {
       </div>
 
       <div className="pt-2 border-t">
-        <h4 className="font-semibold text-sm mb-2">Interpretation</h4>
+        <h3 className="font-semibold text-sm mb-2">Interpretation</h3>
         <p className="text-sm text-muted-foreground">
           {isCompletePlane(plane) ? getPlaneInterpretation(plane) : 'Not reported: one or more angles are missing from the source.'}
         </p>

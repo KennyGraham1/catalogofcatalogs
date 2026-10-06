@@ -1220,7 +1220,7 @@ export default function UploadPage() {
                     {crossFieldValidation && (crossFieldValidation.summary.errors > 0 || crossFieldValidation.summary.warnings > 0) && (
                       <Card className={`shadow-sm ${crossFieldValidation.summary.errors > 0 ? 'border-red-200 dark:border-red-800' : 'border-amber-200 dark:border-amber-800'}`}>
                         <CardHeader className="pb-3">
-                          <CardTitle className={`text-base ${crossFieldValidation.summary.errors > 0 ? 'text-red-800 dark:text-red-300' : 'text-amber-800 dark:text-amber-300'}`}>
+                          <CardTitle as="h3" className={`text-base ${crossFieldValidation.summary.errors > 0 ? 'text-red-800 dark:text-red-300' : 'text-amber-800 dark:text-amber-300'}`}>
                             Cross-Field Review
                           </CardTitle>
                           <CardDescription className="text-xs">
@@ -1290,7 +1290,7 @@ export default function UploadPage() {
               <TabsContent value="metadata" className="pt-6 space-y-6">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Catalogue Name</CardTitle>
+                    <CardTitle as="h3">Catalogue Name</CardTitle>
                     <CardDescription>Provide a unique name for this catalogue</CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -1356,7 +1356,7 @@ export default function UploadPage() {
                   <div className="mt-6 space-y-4">
                     <Card>
                       <CardHeader>
-                        <CardTitle>Report Preview</CardTitle>
+                        <CardTitle as="h3">Report Preview</CardTitle>
                         <CardDescription>
                           Preview of the downloadable processing report.
                         </CardDescription>

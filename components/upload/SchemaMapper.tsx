@@ -156,10 +156,11 @@ export function SchemaMapper({ validationResults, isProcessing, onSchemaReady }:
         <div className="flex items-center space-x-2">
           <Switch
             id="auto-mapping"
+                aria-labelledby="auto-mapping-label"
             checked={autoMapping}
             onCheckedChange={setAutoMapping}
           />
-          <Label htmlFor="auto-mapping">Auto-mapping</Label>
+          <Label id="auto-mapping-label" htmlFor="auto-mapping">Auto-mapping</Label>
         </div>
       </div>
       
@@ -190,7 +191,7 @@ export function SchemaMapper({ validationResults, isProcessing, onSchemaReady }:
                     value={fieldMappings[sourceField] || 'unmapped'}
                     onValueChange={(value) => updateMapping(sourceField, value)}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger aria-label={`Field for source column ${sourceField}`}>
                       <SelectValue placeholder="Select a field" />
                     </SelectTrigger>
                     <SelectContent>

@@ -6,8 +6,7 @@ import { ButtonProps, buttonVariants } from '@/components/ui/button';
 
 const Pagination = ({ className, ...props }: React.ComponentProps<'nav'>) => (
   <nav
-    role="navigation"
-    aria-label="pagination"
+    aria-label="Pagination"
     className={cn('mx-auto flex w-full justify-center', className)}
     {...props}
   />
@@ -96,11 +95,10 @@ const PaginationEllipsis = ({
   ...props
 }: React.ComponentProps<'span'>) => (
   <span
-    aria-hidden
     className={cn('flex h-9 w-9 items-center justify-center', className)}
     {...props}
   >
-    <MoreHorizontal className="h-4 w-4" />
+    <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
     <span className="sr-only">More pages</span>
   </span>
 );

@@ -108,6 +108,7 @@ export function StationCoverageCard({ coverage }: StationCoverageCardProps) {
           ) : (
             <>
               <Progress
+                aria-label="Azimuthal coverage"
                 value={Math.max(0, 100 - (coverage.azimuthalGap / 360) * 100)}
                 className="h-2"
               />
@@ -135,6 +136,7 @@ export function StationCoverageCard({ coverage }: StationCoverageCardProps) {
               </Badge>
             </div>
             <Progress
+              aria-label="Station distribution"
               value={(1 - distributionRatio) * 100}
               className="h-2"
             />
@@ -176,7 +178,7 @@ export function StationCoverageCard({ coverage }: StationCoverageCardProps) {
         {/* Station List */}
         {coverage.stations.length > 0 && (
           <div className="pt-2 border-t">
-            <h4 className="font-semibold text-sm mb-2">Recording Stations</h4>
+            <h3 className="font-semibold text-sm mb-2">Recording Stations</h3>
             <div className="max-h-32 overflow-y-auto">
               <div className="grid grid-cols-2 gap-1 text-xs">
                 {coverage.stations.map((station, i) => (
@@ -193,7 +195,7 @@ export function StationCoverageCard({ coverage }: StationCoverageCardProps) {
 
         {/* Coverage Summary */}
         <div className="pt-2 border-t">
-          <h4 className="font-semibold text-sm mb-2">Coverage Assessment</h4>
+          <h3 className="font-semibold text-sm mb-2">Coverage Assessment</h3>
           <p className="text-sm text-muted-foreground">
             {coverage.coverageQuality === 'excellent' && 
               'Excellent station coverage with well-distributed stations providing reliable location constraints.'}
@@ -212,7 +214,7 @@ export function StationCoverageCard({ coverage }: StationCoverageCardProps) {
             omitted entirely when the arrivals carry no azimuths. */}
         {gapDetail.gap !== null && gapDetail.startAzimuth !== null && gapDetail.endAzimuth !== null && (
           <div className="pt-2 border-t">
-            <h4 className="font-semibold text-sm mb-2">Azimuthal Coverage</h4>
+            <h3 className="font-semibold text-sm mb-2">Azimuthal Coverage</h3>
             <div className="flex justify-center">
               <AzimuthalCoverageDiagram
                 azimuths={coverage.azimuths}

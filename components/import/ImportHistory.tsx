@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Loader2, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { formatLocalDateTime } from '@/lib/date-format';
 
 interface ImportHistoryRecord {
   id: string;
@@ -82,17 +83,8 @@ export function ImportHistory({ catalogueId, limit = 10 }: ImportHistoryProps) {
     fetchHistory();
   }, [catalogueId, limit]);
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleString('en-GB', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
-  };
+  // The reader's local date and time, ISO-ordered with the zone named (lib/date-format.ts).
+  const formatDate = (dateString: string) => formatLocalDateTime(dateString);
 
   const formatDuration = (startTime: string, endTime: string) => {
     const start = new Date(startTime);

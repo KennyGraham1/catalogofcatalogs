@@ -4,7 +4,13 @@ import AnalyticsPage from '@/app/analytics/page';
 
 const catalogues = [{ id: 'a', name: 'Catalogue A', event_count: 2 }];
 let mockAnalysisError: string | null = null;
-jest.mock('@/hooks/use-cached-fetch', () => ({ useCachedFetch: () => ({ data: catalogues, loading: false }) }));
+jest.mock('@/contexts/CatalogueContext', () => ({
+  // The page reads the shared catalogue list (finding 4 of the 2026-10-05 UI audit).
+  useCatalogues: () => ({
+    catalogues, status: 'loaded', loading: false, error: null, errorStatus: null, refreshing: false,
+    lastSuccessAt: null, retry: async () => {}, refreshCatalogues: async () => {},
+  }),
+}));
 jest.mock('next/dynamic', () => () => function MockMap({ earthquakes }: any) {
   return <div data-testid="preview-map">{earthquakes.length} events on map</div>;
 });

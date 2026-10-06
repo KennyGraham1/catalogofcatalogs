@@ -1,9 +1,13 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback, useDeferredValue, useTransition, memo } from 'react';
+import { useState, useEffect, useMemo, useCallback, useContext, useDeferredValue, useId, useTransition, memo, type ReactNode } from 'react';
+import Link from 'next/link';
+import { SessionContext } from 'next-auth/react';
 import { useCatalogueEvents } from '@/hooks/use-catalogue-events';
 import { useEventDetails } from '@/hooks/use-event-details';
-import { CatalogueEventCache, type CatalogueEvent as AnalyticsEvent } from '@/lib/catalogue-event-loader';
+import { CatalogueEventCache, EVENTS_SIGN_IN_MESSAGE, type CatalogueEvent as AnalyticsEvent } from '@/lib/catalogue-event-loader';
+import { useLoginHref } from '@/lib/auth/login-href';
+import { formatOriginTimeUtc } from '@/lib/map-format';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -21,6 +25,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
+import { NumericRangeInputs } from '@/components/ui/numeric-range-inputs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -44,7 +49,9 @@ import {
   Image as ImageIcon,
   FileJson,
   ChevronsUpDown,
-  Check
+  Check,
+  AlertTriangle,
+  LogIn,
 } from 'lucide-react';
 import { QualityScoreCard } from '@/components/advanced-viz/QualityScoreCard';
 import { UncertaintyVisualization } from '@/components/advanced-viz/UncertaintyVisualization';
@@ -71,7 +78,8 @@ import {
   magnitudeAtOrBelow,
 } from '@/lib/seismological-analysis';
 import { type MergedCatalogue } from '@/lib/db';
-import { useCachedFetch } from '@/hooks/use-cached-fetch';
+import { useCatalogues } from '@/contexts/CatalogueContext';
+import { formatLastSuccess } from '@/contexts/catalogue-load-status';
 import { useSeismologicalAnalyses } from '@/hooks/use-seismological-worker';
 import {
   MagnitudeDistributionChart,
@@ -110,22 +118,9 @@ import {
  * Hoisted to module scope on purpose: these render once per event over lists of thousands of
  * events, and constructing an Intl.DateTimeFormat per row costs ~82 ms per 1000 rows.
  */
-const UTC_SECOND_FORMAT = new Intl.DateTimeFormat('en-GB', {
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  timeZone: 'UTC',
-  timeZoneName: 'short',
-});
-
-/** Render an ISO origin time in UTC; unparseable values are shown verbatim. */
+/** An origin time in UTC as ISO 8601 ("2016-11-13 11:02:56 UTC"); unparseable values verbatim. */
 function formatOriginTime(time: string): string {
-  const date = new Date(time);
-  if (Number.isNaN(date.getTime())) return time;
-  return UTC_SECOND_FORMAT.format(date);
+  return formatOriginTimeUtc(time);
 }
 
 /** Filter label for a slider range; a handle left at its end applies no bound. */
@@ -454,9 +449,9 @@ const MagnitudeTypeTable = memo(function MagnitudeTypeTable({
   return (
     <section aria-label="Magnitude types of the analysed events" className="rounded-lg border px-4 py-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <p className="text-sm font-medium">
+        <h2 className="text-sm font-medium">
           Magnitude types <span className="text-xs font-normal text-muted-foreground">in {scope} ({total.toLocaleString()} events)</span>
-        </p>
+        </h2>
         <p className="text-xs text-muted-foreground">
           {summary.families.length > 1
             ? `${summary.families.length} magnitude scales pooled; the Magnitude types filter (Map tab) analyses one at a time`
@@ -510,15 +505,17 @@ const McSettings = memo(function McSettings({
   onCorrectionChange: (correction: number) => void;
   usedMaxc?: boolean;
 }) {
+  const methodLabelId = useId();
+  const correctionLabelId = useId();
   return (
     <div className="flex flex-wrap items-end gap-4 p-3 rounded-lg border bg-muted/30" aria-label="Mc estimation settings" role="group">
-      <div className="space-y-1">
+      <div className="w-full min-w-0 space-y-1 sm:w-auto">
         <div className="flex items-center gap-1.5">
-          <Label className="text-xs font-medium">Mc method</Label>
+          <Label id={methodLabelId} className="text-xs font-medium">Mc method</Label>
           <InfoTooltip content="b-value stability (MBS): the lowest cut-off whose b-value is within its uncertainty of the mean b over the next 0.5 units (Cao & Gao, 2002; Woessner & Wiemer, 2005); falls back to GFT. Goodness of fit (GFT): the lowest cut-off above which a fitted Gutenberg-Richter law reproduces 95% (else 90%) of the observed cumulative counts (Wiemer & Wyss, 2000); falls back to MAXC. Maximum curvature (MAXC): the fullest magnitude bin plus a correction (Wiemer & Wyss, 2000)." />
         </div>
         <Select value={method} onValueChange={value => onMethodChange(value as McMethod)}>
-          <SelectTrigger className="h-8 w-[280px] text-xs">
+          <SelectTrigger aria-labelledby={methodLabelId} className="h-8 w-full text-xs sm:w-[280px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -531,11 +528,11 @@ const McSettings = memo(function McSettings({
       {(method === 'MAXC' || usedMaxc) && (
         <div className="space-y-1">
           <div className="flex items-center gap-1.5">
-            <Label className="text-xs font-medium">MAXC correction</Label>
+            <Label id={correctionLabelId} className="text-xs font-medium">MAXC correction</Label>
             <InfoTooltip content="Added to the MAXC bin, because maximum curvature underestimates Mc by about 0.1-0.2 for typical networks (Woessner & Wiemer, 2005). Default +0.2. Also applies when another method falls back to MAXC." />
           </div>
           <Select value={String(correction)} onValueChange={value => onCorrectionChange(Number(value))}>
-            <SelectTrigger className="h-8 w-[160px] text-xs">
+            <SelectTrigger aria-labelledby={correctionLabelId} className="h-8 w-[160px] text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -555,7 +552,7 @@ const McSettings = memo(function McSettings({
 // One panel's analysis still running, or its error.
 const SectionStatus = memo(function SectionStatus({ error, pending }: { error: string | null; pending: string }) {
   return error ? (
-    <p role="alert" className="text-sm text-destructive">{error}</p>
+    <p role="alert" className="text-sm text-red-700 dark:text-red-400">{error}</p>
   ) : (
     <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
       <Loader2 className="h-4 w-4 animate-spin" />
@@ -579,6 +576,136 @@ const StatisticsCardSkeleton = memo(function StatisticsCardSkeleton() {
     </Card>
   );
 });
+
+// Ids of the visible labels that name the filter controls (their thumbs and selects
+// point at them with aria-labelledby, so a control is named by its purpose).
+const FILTER_LABEL_IDS = {
+  magnitude: 'analytics-filter-magnitude-label',
+  depth: 'analytics-filter-depth-label',
+  time: 'analytics-filter-time-label',
+  quality: 'analytics-filter-quality-label',
+  gap: 'analytics-filter-gap-label',
+} as const;
+
+/** Spoken value of a range thumb; a thumb left at its end applies no bound. */
+function boundValueText(value: number, index: number, ends: [number, number], text: string): string {
+  if (index === 0 && value <= ends[0]) return `${text}, no lower bound`;
+  if (index === 1 && value >= ends[1]) return `${text}, no upper bound`;
+  return text;
+}
+
+/** How long the page keeps a shared catalogue list before refreshing it on opening. */
+const CATALOGUE_LIST_MAX_AGE_MS = 10 * 60 * 1000;
+
+/** A request that failed, described for the reader. */
+interface RequestFailure {
+  /** The failure as reported: the catalogue list and event loader give a sentence. */
+  message: string;
+  /** HTTP status, when the server answered. */
+  status: number | null;
+  /** Refused for want of a session (HTTP 401): signing in, not retrying, is the remedy. */
+  needsSignIn: boolean;
+}
+
+function describeRequestFailure(error: unknown, knownStatus: number | null = null): RequestFailure | null {
+  if (!error) return null;
+  const message = error instanceof Error ? error.message : String(error);
+  // The catalogue list reports its status (CatalogueContext errorStatus); the event loader
+  // only says "(HTTP 500)" in its message, so that is read as a fallback.
+  const match = /\bHTTP\s*(\d{3})\b/i.exec(message);
+  const status = knownStatus ?? (match ? Number(match[1]) : null);
+  return { message, status, needsSignIn: status === 401 };
+}
+
+/** A catalogue's stored event count, or null where the list does not give one. */
+function storedEventCount(catalogue: { event_count?: number | null }): number | null {
+  return typeof catalogue.event_count === 'number' && Number.isFinite(catalogue.event_count) ? catalogue.event_count : null;
+}
+
+function describeEventCount(count: number | null): string {
+  return count == null ? 'event count unavailable' : `${count.toLocaleString()} events`;
+}
+
+/**
+ * Event records summed over the listed catalogues. A catalogue without a stored count
+ * makes the sum a lower bound, and none known makes it unavailable: an unknown count
+ * is never shown as 0.
+ */
+function describeEventRecordTotal(list: { event_count?: number | null }[]): string {
+  let total = 0;
+  let unknown = 0;
+  for (const catalogue of list) {
+    const count = storedEventCount(catalogue);
+    if (count == null) unknown++;
+    else total += count;
+  }
+  if (list.length > 0 && unknown === list.length) return 'event record count unavailable';
+  return `${unknown > 0 ? 'at least ' : ''}${total.toLocaleString()} event records`;
+}
+
+/** The page title, the one h1, shown in every state of the page. */
+function AnalyticsPageHeader({ description, children }: { description?: ReactNode; children?: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+      <div className="min-w-0 md:flex-1">
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Visualization &amp; Analytics</h1>
+        {description && <p className="break-words text-muted-foreground">{description}</p>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** A whole-page state (failed, empty, sign-in needed) under the page title. */
+function StatePanel({ icon, title, live, children, actions }: {
+  icon: ReactNode;
+  title: string;
+  /** role for the title and message: 'alert' for a failure, 'status' otherwise. */
+  live?: 'alert' | 'status';
+  children: ReactNode;
+  actions?: ReactNode;
+}) {
+  const titleId = useId();
+  return (
+    <section aria-labelledby={titleId} className="mx-auto flex w-full max-w-xl flex-col items-center gap-4 rounded-lg border bg-card p-6 text-center">
+      {icon}
+      <div role={live} className="space-y-2">
+        <h2 id={titleId} className="text-xl font-semibold">{title}</h2>
+        <div className="space-y-2 text-sm text-muted-foreground">{children}</div>
+      </div>
+      {actions && <div className="flex flex-wrap justify-center gap-2">{actions}</div>}
+    </section>
+  );
+}
+
+function SignInButton({ href }: { href: string }) {
+  return (
+    <Button asChild>
+      <Link href={href}><LogIn className="mr-2 h-4 w-4" aria-hidden="true" />Sign in</Link>
+    </Button>
+  );
+}
+
+/** The list shown is the last one that loaded; the latest refresh failed. */
+function StaleListNotice({ failure, loadedAt, onRetry, retrying }: {
+  failure: RequestFailure;
+  loadedAt: Date | null;
+  onRetry: () => void;
+  retrying: boolean;
+}) {
+  return (
+    <div role="status" className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950/30 sm:flex-row sm:items-center sm:justify-between">
+      <p>
+        <span className="font-medium">The catalogue list may be out of date.</span>{' '}
+        The latest refresh failed: {failure.message} The catalogues shown are from the last successful
+        load{loadedAt ? `, at ${formatLastSuccess(loadedAt)}` : ''}.
+      </p>
+      <Button size="sm" variant="outline" className="shrink-0" onClick={onRetry} disabled={retrying}>
+        {retrying ? 'Refreshing...' : 'Try again'}
+      </Button>
+    </div>
+  );
+}
 
 export default function AnalyticsPage() {
   // Core state
@@ -637,17 +764,49 @@ export default function AnalyticsPage() {
     }
   }, [catalogueSelectOpen]);
 
-  // Use cached fetch for catalogues (fetched once and cached)
-  const { data: catalogueData, loading: cataloguesLoading } = useCachedFetch<MergedCatalogue[]>(
-    '/api/catalogues',
-    { cacheTime: 10 * 60 * 1000 } // 10 minute cache
-  );
+  // The shared catalogue list (CatalogueProvider): refreshed on an interval and after
+  // this tab's own changes, kept on screen when a refresh fails (status 'stale').
+  const {
+    catalogues: sharedCatalogues,
+    status: sharedListStatus,
+    error: listError,
+    errorStatus: listErrorStatus,
+    refreshing: listRefreshing,
+    lastSuccessAt: listLastSuccessAt,
+    retry: retrySharedList,
+  } = useCatalogues();
 
-  // Derive catalogues array from fetched data (no separate state needed)
-  const catalogues = useMemo(() =>
-    Array.isArray(catalogueData) ? catalogueData : [],
-    [catalogueData]
-  );
+  // The provider replaces its array on every refresh. Rebuild the page's list only when
+  // its content changes, so a refresh that changes nothing does not restart the selected
+  // catalogue's event loading (useCatalogueEvents reloads on a new list).
+  const catalogueListKey = useMemo(() => JSON.stringify(sharedCatalogues), [sharedCatalogues]);
+  const catalogues = useMemo(() => JSON.parse(catalogueListKey) as MergedCatalogue[], [catalogueListKey]);
+
+  // The page used to cache the list for 10 minutes; on opening it, refresh a shared
+  // list older than that.
+  useEffect(() => {
+    if (listLastSuccessAt && Date.now() - listLastSuccessAt.getTime() > CATALOGUE_LIST_MAX_AGE_MS) {
+      void retrySharedList();
+    }
+  }, [listLastSuccessAt, retrySharedList]);
+
+  // A failed request is not an empty list: 'failed' until a list loads; a list loaded
+  // earlier stays on screen, marked stale, when a later refresh fails.
+  const listFailure = useMemo(() => describeRequestFailure(listError, listErrorStatus ?? null), [listError, listErrorStatus]);
+  const listStatus: 'loading' | 'failed' | 'empty' | 'ready' =
+    sharedListStatus === 'failed' ? 'failed'
+      : sharedListStatus === 'loading' ? 'loading'
+        : catalogues.length > 0 ? 'ready' : 'empty';
+  const listStale = sharedListStatus === 'stale' && listFailure != null;
+  const cataloguesLoading = listStatus === 'loading';
+  const retryCatalogueList = useCallback(() => { void retrySharedList(); }, [retrySharedList]);
+
+  // A guest can browse the catalogue list, but the events behind every view need a
+  // signed-in account (the events API answers 401). Read without useSession, which
+  // throws outside a SessionProvider; no provider means the session is unknown.
+  const sessionContext = useContext(SessionContext);
+  const isGuest = sessionContext?.status === 'unauthenticated';
+  const loginHref = useLoginHref();
 
   const [eventCache] = useState(() => new CatalogueEventCache());
   const { events, loading, complete: eventsLoaded, loadedCount, error: eventsError,
@@ -1178,43 +1337,85 @@ export default function AnalyticsPage() {
     });
   }, []);
 
-  // No catalogues available (only show after loading completes)
-  if (!cataloguesLoading && catalogues.length === 0) {
+  const pageDescription = 'Comprehensive visualization, quality assessment, and seismological analysis';
+
+  const staleListNotice = listStale && listFailure
+    ? <StaleListNotice failure={listFailure} loadedAt={listLastSuccessAt} onRetry={retryCatalogueList} retrying={listRefreshing} />
+    : null;
+
+  // The catalogue list failed and no list loaded earlier. Say so: a failed request is
+  // not an empty inventory, and its counts are unknown, not zero.
+  if (listStatus === 'failed' && listFailure) {
     return (
-      <div className="container py-8">
-        <div className="flex flex-col items-center justify-center min-h-[calc(100vh-9rem)] gap-4">
-          <MapPin className="h-12 w-12 text-muted-foreground" />
-          <h2 className="text-2xl font-bold">No Catalogues Available</h2>
-          <p className="text-muted-foreground text-center max-w-md">
-            Upload catalogues or create merged catalogues to visualize earthquake data.
-          </p>
-          <Button onClick={() => window.location.href = '/upload'}>
-            Upload Catalogue
-          </Button>
-        </div>
+      <div className="container mx-auto py-6 space-y-6">
+        <AnalyticsPageHeader description={pageDescription} />
+        {listFailure.needsSignIn ? (
+          <StatePanel
+            icon={<LogIn className="h-10 w-10 text-muted-foreground" aria-hidden="true" />}
+            title="Sign in to view analytics"
+            live="status"
+            actions={<SignInButton href={loginHref} />}
+          >
+            <p>Viewing analytics needs an account. After signing in you return to this page.</p>
+          </StatePanel>
+        ) : (
+          <StatePanel
+            icon={<AlertTriangle className="h-10 w-10 text-amber-600 dark:text-amber-400" aria-hidden="true" />}
+            title="The catalogue list could not be loaded"
+            live="alert"
+            actions={<Button onClick={retryCatalogueList}>Retry</Button>}
+          >
+            <p>{listFailure.message}</p>
+            <p>This does not mean there are no catalogues: none can be shown until the list loads.</p>
+          </StatePanel>
+        )}
       </div>
     );
   }
 
-  // Get total events count from catalogue metadata
-  const totalEventsFromMetadata = catalogues.reduce((sum, cat) => sum + (cat.event_count || 0), 0);
+  // The list loaded and holds no catalogues.
+  if (listStatus === 'empty') {
+    return (
+      <div className="container mx-auto py-6 space-y-6">
+        <AnalyticsPageHeader description={pageDescription} />
+        {staleListNotice}
+        <StatePanel
+          icon={<MapPin className="h-10 w-10 text-muted-foreground" aria-hidden="true" />}
+          title="No catalogues available"
+          live="status"
+          actions={<Button asChild><Link href="/upload">Upload Catalogue</Link></Button>}
+        >
+          <p>The catalogue list loaded and holds no catalogues. Upload or import a catalogue, or create a merged catalogue, to visualize and analyse its events.</p>
+        </StatePanel>
+      </div>
+    );
+  }
+
+  // Event records summed from the catalogue list (an unknown count is never shown as 0).
+  const eventRecordTotal = describeEventRecordTotal(catalogues);
+  const knownEventCounts = catalogues.map(storedEventCount).filter((count): count is number => count != null);
+  const knownEventSum = knownEventCounts.reduce((sum, count) => sum + count, 0);
+  const unavailable = <>—<span className="sr-only"> (unavailable)</span></>;
 
   // No catalogue selected - show selection prompt (immediately, with loading state for catalogue list)
   if (!selectedCatalogue) {
     return (
       <div className="container mx-auto py-6 space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Visualization & Analytics</h1>
-            <p className="text-muted-foreground">
-              Comprehensive visualization, quality assessment, and seismological analysis
+        <AnalyticsPageHeader description={pageDescription} />
+        {staleListNotice}
+
+        {isGuest && (
+          <div role="note" className="mx-auto flex max-w-2xl flex-col gap-3 rounded-lg border p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
+            <p>
+              <span className="font-medium">Viewing analytics needs an account.</span>{' '}
+              You can browse the catalogue list as a guest; a catalogue&apos;s events and analyses are shown after you sign in.
             </p>
+            <SignInButton href={loginHref} />
           </div>
-        </div>
+        )}
 
         {/* Catalogue Selection Card */}
-        <Card className="max-w-2xl mx-auto mt-12">
+        <Card className="max-w-2xl mx-auto mt-6 sm:mt-12">
           <CardHeader className="text-center">
             <div className="mx-auto mb-4 p-4 bg-primary/10 rounded-full w-fit">
               <BarChart3 className="h-12 w-12 text-primary" />
@@ -1226,9 +1427,9 @@ export default function AnalyticsPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label>Available Catalogues</Label>
+              <Label id="analytics-catalogue-picker-label">Catalogue to analyse</Label>
               {cataloguesLoading ? (
-                <div className="space-y-2">
+                <div className="space-y-2" role="status">
                   <Skeleton className="h-10 w-full" />
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -1242,6 +1443,7 @@ export default function AnalyticsPage() {
                       variant="outline"
                       role="combobox"
                       aria-expanded={catalogueSelectOpen}
+                      aria-labelledby="analytics-catalogue-picker-label"
                       className="w-full justify-between"
                     >
                       <span className="truncate">Select a catalogue...</span>
@@ -1274,8 +1476,8 @@ export default function AnalyticsPage() {
                                 />
                                 <span className="truncate">{cat.name}</span>
                               </div>
-                              <Badge variant="secondary" className="ml-2">
-                                {(cat.event_count || 0).toLocaleString()} events
+                              <Badge variant="secondary" className="ml-2 shrink-0">
+                                {describeEventCount(storedEventCount(cat))}
                               </Badge>
                             </CommandItem>
                           ))}
@@ -1298,7 +1500,7 @@ export default function AnalyticsPage() {
 
             <Button
               variant="outline"
-              className="w-full"
+              className="h-auto min-h-10 w-full whitespace-normal"
               onClick={() => handleCatalogueChange('all')}
               disabled={cataloguesLoading}
             >
@@ -1309,8 +1511,8 @@ export default function AnalyticsPage() {
                 </>
               ) : (
                 <>
-                  <Activity className="h-4 w-4 mr-2" />
-                  Load All Catalogues ({totalEventsFromMetadata.toLocaleString()} event records)
+                  <Activity className="h-4 w-4 mr-2 shrink-0" />
+                  Load All Catalogues ({eventRecordTotal})
                 </>
               )}
             </Button>
@@ -1321,8 +1523,8 @@ export default function AnalyticsPage() {
         </Card>
 
         {/* Quick Stats */}
-        <div className="max-w-2xl mx-auto">
-          <h3 className="text-sm font-medium text-muted-foreground mb-3">Available Catalogues Summary</h3>
+        <section className="max-w-2xl mx-auto" aria-labelledby="analytics-summary-heading">
+          <h2 id="analytics-summary-heading" className="text-sm font-medium text-muted-foreground mb-3">Available Catalogues Summary</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {cataloguesLoading ? (
               <>
@@ -1341,7 +1543,10 @@ export default function AnalyticsPage() {
                 </Card>
                 <Card>
                   <CardContent className="p-4">
-                    <div className="text-2xl font-bold">{totalEventsFromMetadata.toLocaleString()}</div>
+                    <div className="text-2xl font-bold">
+                      {knownEventCounts.length === 0 ? unavailable
+                        : `${knownEventCounts.length < catalogues.length ? '≥ ' : ''}${knownEventSum.toLocaleString()}`}
+                    </div>
                     {/* Summed over every catalogue, merged ones included: records, not distinct earthquakes. */}
                     <div className="text-xs text-muted-foreground">Event records</div>
                   </CardContent>
@@ -1349,9 +1554,8 @@ export default function AnalyticsPage() {
                 <Card>
                   <CardContent className="p-4">
                     <div className="text-2xl font-bold">
-                      {catalogues.length > 0
-                        ? Math.round(totalEventsFromMetadata / catalogues.length).toLocaleString()
-                        : 0}
+                      {knownEventCounts.length === 0 ? unavailable
+                        : Math.round(knownEventSum / knownEventCounts.length).toLocaleString()}
                     </div>
                     <div className="text-xs text-muted-foreground">Avg Events/Catalogue</div>
                   </CardContent>
@@ -1359,9 +1563,7 @@ export default function AnalyticsPage() {
                 <Card>
                   <CardContent className="p-4">
                     <div className="text-2xl font-bold">
-                      {catalogues.length > 0
-                        ? Math.max(...catalogues.map(c => c.event_count || 0)).toLocaleString()
-                        : 0}
+                      {knownEventCounts.length === 0 ? unavailable : Math.max(...knownEventCounts).toLocaleString()}
                     </div>
                     <div className="text-xs text-muted-foreground">Largest Catalogue</div>
                   </CardContent>
@@ -1369,7 +1571,7 @@ export default function AnalyticsPage() {
               </>
             )}
           </div>
-        </div>
+        </section>
       </div>
     );
   }
@@ -1377,8 +1579,9 @@ export default function AnalyticsPage() {
   // Loading events for selected catalogue
   if (loading && events.length === 0) {
     return (
-      <div className="container py-8">
-        <div className="flex flex-col items-center justify-center min-h-[calc(100vh-9rem)]">
+      <div className="container mx-auto py-6 space-y-6">
+        <AnalyticsPageHeader description={pageDescription} />
+        <div className="flex flex-col items-center justify-center min-h-[calc(100vh-18rem)]">
           <Card className="w-full max-w-md border-0 shadow-lg bg-gradient-to-br from-background to-muted/30">
             <CardContent className="pt-8 pb-6">
               <div className="flex flex-col items-center gap-6">
@@ -1392,10 +1595,10 @@ export default function AnalyticsPage() {
                 </div>
 
                 {/* Loading message */}
-                <div className="text-center space-y-2">
-                  <h3 className="text-lg font-semibold">
+                <div className="text-center space-y-2" role="status">
+                  <h2 className="text-lg font-semibold">
                     {loadingMessage || 'Loading earthquake data...'}
-                  </h3>
+                  </h2>
                   <p className="text-sm text-muted-foreground">
                     Fetching seismic events from the database
                   </p>
@@ -1405,7 +1608,7 @@ export default function AnalyticsPage() {
                 {loadingProgress > 0 && loadingProgress < 100 ? (
                   <div className="w-full space-y-2">
                     <div className="relative">
-                      <Progress value={loadingProgress} className="h-2" />
+                      <Progress value={loadingProgress} className="h-2" aria-label="Loading events" />
                       <div
                         className="absolute top-0 h-2 bg-primary/30 rounded-full animate-pulse"
                         style={{ width: `${Math.min(loadingProgress + 10, 100)}%`, opacity: 0.5 }}
@@ -1446,33 +1649,70 @@ export default function AnalyticsPage() {
     );
   }
 
+  // The events request was refused for want of a session: signing in is the remedy, so
+  // it is the action offered (retrying would be refused again).
+  const eventsNeedSignIn = eventsError === EVENTS_SIGN_IN_MESSAGE;
+
   if (eventsError && events.length === 0) {
-    return <div className="container py-8 space-y-4">
-      <p role="alert">{eventsError}</p>
-      <Button onClick={reloadEvents}>Retry loading events</Button>
-      <Button variant="outline" onClick={() => handleCatalogueChange('')}>Select Different Catalogue</Button>
-    </div>;
+    const eventsFailure = describeRequestFailure(eventsError);
+    return (
+      <div className="container mx-auto py-6 space-y-6">
+        <AnalyticsPageHeader description={pageDescription} />
+        {staleListNotice}
+        {eventsNeedSignIn ? (
+          <StatePanel
+            icon={<LogIn className="h-10 w-10 text-muted-foreground" aria-hidden="true" />}
+            title="Sign in to view analytics"
+            live="status"
+            actions={<>
+              <SignInButton href={loginHref} />
+              <Button variant="outline" onClick={() => handleCatalogueChange('')}>Back to catalogue selection</Button>
+            </>}
+          >
+            <p>
+              Viewing a catalogue&apos;s events and analyses needs an account. The catalogue list can be browsed
+              without one. If you were signed in, your session may have expired.
+            </p>
+            <p>After signing in you return to this page.</p>
+          </StatePanel>
+        ) : (
+          <StatePanel
+            icon={<AlertTriangle className="h-10 w-10 text-amber-600 dark:text-amber-400" aria-hidden="true" />}
+            title={eventsError === 'Event loading cancelled' ? 'Event loading cancelled' : 'The events could not be loaded'}
+            live="alert"
+            actions={<>
+              <Button onClick={reloadEvents}>Retry loading events</Button>
+              <Button variant="outline" onClick={() => handleCatalogueChange('')}>Select Different Catalogue</Button>
+            </>}
+          >
+            <p>{eventsError}</p>
+            {eventsFailure?.status != null && eventsFailure.status >= 500 && (
+              <p>The server could not complete the request. No analysis is shown from a failed load.</p>
+            )}
+          </StatePanel>
+        )}
+      </div>
+    );
   }
 
   // Events loaded but empty (shouldn't normally happen)
   if (eventsLoaded && events.length === 0) {
     const currentCatalogue = catalogues.find(c => c.id === selectedCatalogue);
     return (
-      <div className="container py-8">
-        <div className="flex flex-col items-center justify-center min-h-[calc(100vh-9rem)] gap-4">
-          <MapPin className="h-12 w-12 text-muted-foreground" />
-          <h2 className="text-2xl font-bold">No Events Found</h2>
-          <p className="text-muted-foreground text-center max-w-md">
+      <div className="container mx-auto py-6 space-y-6">
+        <AnalyticsPageHeader description={pageDescription} />
+        <StatePanel
+          icon={<MapPin className="h-10 w-10 text-muted-foreground" aria-hidden="true" />}
+          title="No Events Found"
+          live="status"
+          actions={<Button variant="outline" onClick={() => handleCatalogueChange('')}>Select Different Catalogue</Button>}
+        >
+          <p>
             {selectedCatalogue === 'all'
               ? 'No events found in any catalogue.'
               : `No events found in "${currentCatalogue?.name || 'selected catalogue'}".`}
           </p>
-          <Button variant="outline" onClick={() => {
-            handleCatalogueChange('');
-          }}>
-            Select Different Catalogue
-          </Button>
-        </div>
+        </StatePanel>
       </div>
     );
   }
@@ -1484,44 +1724,60 @@ export default function AnalyticsPage() {
 
   return (
     <div className="container mx-auto py-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Visualization & Analytics</h1>
-          <p className="text-muted-foreground">
-            Analyzing: <span className="font-medium text-foreground">{currentCatalogueName}</span>
-            {' '}({events.length.toLocaleString()} {loadedCatalogueCount > 1 ? 'event records' : 'events'})
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
+      {/* Header: title and catalogue selector stack below md, the selector full width. */}
+      <AnalyticsPageHeader
+        description={<>
+          Analyzing: <span className="font-medium text-foreground">{currentCatalogueName}</span>
+          {' '}({events.length.toLocaleString()} {loadedCatalogueCount > 1 ? 'event records' : 'events'})
+        </>}
+      >
+        <div className="flex w-full min-w-0 flex-col gap-1 md:w-80 md:flex-none">
+          <Label id="analytics-catalogue-select-label" className="text-xs font-medium">Catalogue to analyse</Label>
           <Select value={selectedCatalogue} onValueChange={handleCatalogueChange}>
-            <SelectTrigger className="w-[300px]">
+            <SelectTrigger
+              aria-labelledby="analytics-catalogue-select-label"
+              aria-describedby="analytics-catalogue-select-hint"
+              className="w-full min-w-0 text-left [&>span]:min-w-0"
+            >
               <SelectValue placeholder="Select catalogue" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="max-w-[calc(100vw-2rem)]">
               <SelectItem value="all">
-                All Catalogues ({totalEventsFromMetadata.toLocaleString()} event records)
+                All Catalogues ({eventRecordTotal})
               </SelectItem>
               {catalogues.map((cat) => (
                 <SelectItem key={cat.id} value={cat.id}>
-                  {cat.name} ({(cat.event_count || 0).toLocaleString()} events)
+                  {cat.name} ({describeEventCount(storedEventCount(cat))})
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">
+          <p id="analytics-catalogue-select-hint" className="text-xs text-muted-foreground">
             {selectedCatalogue === 'all' ? 'Comparing all catalogues' : 'Switch catalogue to analyze different data'}
           </p>
         </div>
-      </div>
+      </AnalyticsPageHeader>
 
-      {!eventsLoaded && (loading || eventsError) && <div className="rounded-lg border bg-muted/50 p-4 space-y-2" role={eventsError ? 'alert' : 'status'}>
-        <p>{eventsError || `${loadingMessage}. Showing a preview while the remaining events load.`}</p>
-        {loading && <Progress value={loadingProgress} className="h-2" />}
+      {staleListNotice}
+
+      {!eventsLoaded && (loading || eventsError) && <div className="rounded-lg border bg-muted/50 p-4 space-y-2" role={eventsError && !eventsNeedSignIn ? 'alert' : 'status'}>
+        {eventsNeedSignIn ? (
+          <p>
+            Loading stopped: viewing a catalogue&apos;s events needs an account, and your session may have expired.
+            Sign in to load the remaining events. The {events.length.toLocaleString()} events shown are a partial preview.
+          </p>
+        ) : (
+          <p>{eventsError || `${loadingMessage}. Showing a preview while the remaining events load.`}</p>
+        )}
+        {loading && <Progress value={loadingProgress} className="h-2" aria-label="Loading events" />}
         <p className="text-sm text-muted-foreground">Charts and analyses become available when loading finishes.</p>
-        <Button size="sm" variant="outline" onClick={loading ? cancelEventLoading : reloadEvents}>
-          {loading ? 'Cancel loading' : 'Retry loading events'}
-        </Button>
+        {eventsNeedSignIn && !loading ? (
+          <SignInButton href={loginHref} />
+        ) : (
+          <Button size="sm" variant="outline" onClick={loading ? cancelEventLoading : reloadEvents}>
+            {loading ? 'Cancel loading' : 'Retry loading events'}
+          </Button>
+        )}
       </div>}
 
       {/* Performance indicator */}
@@ -1543,11 +1799,13 @@ export default function AnalyticsPage() {
       )}
 
       {/* Statistics Cards */}
+      <section aria-labelledby="analytics-loaded-summary-heading">
+      <h2 id="analytics-loaded-summary-heading" className="sr-only">Summary of the loaded events</h2>
       {statistics ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">{loadedCatalogueCount > 1 ? 'Event records' : 'Total Events'}</CardTitle>
+              <CardTitle as="h3" className="text-sm font-medium">{loadedCatalogueCount > 1 ? 'Event records' : 'Total Events'}</CardTitle>
               <BarChart3 className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
@@ -1565,7 +1823,7 @@ export default function AnalyticsPage() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">With Uncertainty Data</CardTitle>
+              <CardTitle as="h3" className="text-sm font-medium">With Uncertainty Data</CardTitle>
               <Target className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
@@ -1578,7 +1836,7 @@ export default function AnalyticsPage() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">With Focal Mechanisms</CardTitle>
+              <CardTitle as="h3" className="text-sm font-medium">With Focal Mechanisms</CardTitle>
               <Award className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
@@ -1591,7 +1849,7 @@ export default function AnalyticsPage() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">With Station Data</CardTitle>
+              <CardTitle as="h3" className="text-sm font-medium">With Station Data</CardTitle>
               <Radio className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
@@ -1610,6 +1868,7 @@ export default function AnalyticsPage() {
           <StatisticsCardSkeleton />
         </div>
       )}
+      </section>
 
       {eventsLoaded && (
         <MagnitudeTypeTable summary={analysedMagnitudeTypes} scope={analysedSampleScope} />
@@ -1697,15 +1956,19 @@ export default function AnalyticsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
-                {/* Magnitude Range */}
+                {/* Magnitude Range: a thumb for each bound, named by the visible label
+                    ("Minimum Magnitude" / "Maximum Magnitude"), and exact inputs. */}
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
-                    <Label className="text-xs font-medium">
-                      Magnitude: {describeRange(magnitudeRange, MAGNITUDE_SLIDER, value => value.toFixed(1), '')}
-                    </Label>
+                    <Label id={FILTER_LABEL_IDS.magnitude} className="text-xs font-medium">Magnitude</Label>
                     <TechnicalTermTooltip term="magnitude" />
+                    <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                      {describeRange(magnitudeRange, MAGNITUDE_SLIDER, value => value.toFixed(1), '')}
+                    </span>
                   </div>
                   <Slider
+                    aria-labelledby={FILTER_LABEL_IDS.magnitude}
+                    getAriaValueText={(value, index) => boundValueText(value, index, MAGNITUDE_SLIDER, `M ${value.toFixed(1)}`)}
                     min={MAGNITUDE_SLIDER[0]}
                     max={MAGNITUDE_SLIDER[1]}
                     step={0.1}
@@ -1713,23 +1976,43 @@ export default function AnalyticsPage() {
                     onValueChange={setMagnitudeRange}
                     className="w-full"
                   />
+                  <NumericRangeInputs
+                    label="magnitude"
+                    value={magnitudeRange}
+                    min={MAGNITUDE_SLIDER[0]}
+                    max={MAGNITUDE_SLIDER[1]}
+                    step={0.1}
+                    onValueChange={setMagnitudeRange}
+                  />
                 </div>
 
                 {/* Depth Range */}
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
-                    <Label className="text-xs font-medium">
-                      Depth: {describeRange(depthRange, DEPTH_SLIDER, value => String(value), ' km')}
-                    </Label>
+                    <Label id={FILTER_LABEL_IDS.depth} className="text-xs font-medium">Depth (km)</Label>
                     <TechnicalTermTooltip term="depth" />
+                    <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                      {describeRange(depthRange, DEPTH_SLIDER, value => String(value), ' km')}
+                    </span>
                   </div>
                   <Slider
+                    aria-labelledby={FILTER_LABEL_IDS.depth}
+                    getAriaValueText={(value, index) => boundValueText(value, index, DEPTH_SLIDER, `${value} km`)}
                     min={DEPTH_SLIDER[0]}
                     max={DEPTH_SLIDER[1]}
                     step={5}
                     value={depthRange}
                     onValueChange={setDepthRange}
                     className="w-full"
+                  />
+                  <NumericRangeInputs
+                    label="depth"
+                    unit="km"
+                    value={depthRange}
+                    min={DEPTH_SLIDER[0]}
+                    max={DEPTH_SLIDER[1]}
+                    step={5}
+                    onValueChange={setDepthRange}
                   />
                   {(depthRange[0] > DEPTH_SLIDER[0] || depthRange[1] < DEPTH_SLIDER[1]) && (
                     <p className="text-xs text-muted-foreground">Events of unknown depth are excluded while a depth range is set.</p>
@@ -1739,11 +2022,11 @@ export default function AnalyticsPage() {
                 {/* Time Filter */}
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
-                    <Label className="text-xs font-medium">Time Period</Label>
+                    <Label id={FILTER_LABEL_IDS.time} className="text-xs font-medium">Time Period</Label>
                     <InfoTooltip content="Limits events to a relative time window based on origin time." />
                   </div>
                   <Select value={timeFilter} onValueChange={setTimeFilter}>
-                    <SelectTrigger className="h-8 text-xs">
+                    <SelectTrigger aria-labelledby={FILTER_LABEL_IDS.time} className="h-8 text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1758,14 +2041,19 @@ export default function AnalyticsPage() {
                 {/* Minimum quality score */}
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
-                    <Label className="text-xs font-medium">
-                      Minimum quality: {qualityRange[0] > QUALITY_SLIDER[0]
+                    <Label id={FILTER_LABEL_IDS.quality} className="text-xs font-medium">Minimum quality (Q)</Label>
+                    <InfoTooltip content="Keeps events whose quality score Q (0-100) is at least this value: the score stored with the event, or one computed from its fields for events stored before scores were saved. The paper's guidance is to filter (e.g. Q ≥ 50) before statistical analysis." />
+                    <span className="ml-auto text-right text-xs tabular-nums text-muted-foreground">
+                      {qualityRange[0] > QUALITY_SLIDER[0]
                         ? `Q ≥ ${qualityRange[0]} (grade ${scoreToGrade(qualityRange[0])} or better)`
                         : 'any'}
-                    </Label>
-                    <InfoTooltip content="Keeps events whose quality score Q (0-100) is at least this value: the score stored with the event, or one computed from its fields for events stored before scores were saved. The paper's guidance is to filter (e.g. Q ≥ 50) before statistical analysis." />
+                    </span>
                   </div>
                   <Slider
+                    aria-labelledby={FILTER_LABEL_IDS.quality}
+                    getAriaValueText={value => value > QUALITY_SLIDER[0]
+                      ? `Q ${value} or higher, grade ${scoreToGrade(value)} or better`
+                      : `Q ${value}, any quality`}
                     min={QUALITY_SLIDER[0]}
                     max={QUALITY_SLIDER[1]}
                     step={5}
@@ -1778,12 +2066,15 @@ export default function AnalyticsPage() {
                 {/* Maximum azimuthal gap */}
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
-                    <Label className="text-xs font-medium">
-                      Azimuthal gap: {gapRange[0] < GAP_SLIDER[1] ? `≤ ${gapRange[0]}°` : 'any'}
-                    </Label>
+                    <Label id={FILTER_LABEL_IDS.gap} className="text-xs font-medium">Maximum azimuthal gap (°)</Label>
                     <InfoTooltip content="Keeps events whose largest azimuthal gap between recording stations is at most this value. Gaps above 180° mean the network did not surround the event, so its location is poorly constrained." />
+                    <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                      {gapRange[0] < GAP_SLIDER[1] ? `≤ ${gapRange[0]}°` : 'any'}
+                    </span>
                   </div>
                   <Slider
+                    aria-labelledby={FILTER_LABEL_IDS.gap}
+                    getAriaValueText={value => value < GAP_SLIDER[1] ? `${value}° or less` : `${value}°, any gap`}
                     min={GAP_SLIDER[0]}
                     max={GAP_SLIDER[1]}
                     step={10}
@@ -1807,10 +2098,13 @@ export default function AnalyticsPage() {
                       <div key={type || '(none)'} className="flex items-center space-x-2">
                         <Checkbox
                           id={`magnitude-type-${encodeURIComponent(type) || 'none'}`}
+                          // Named by its label (a Radix checkbox is a button: name it explicitly).
+                          aria-labelledby={`magnitude-type-${encodeURIComponent(type) || 'none'}-label`}
                           checked={selectedMagnitudeTypes.includes(type)}
                           onCheckedChange={() => handleMagnitudeTypeToggle(type)}
                         />
                         <label
+                          id={`magnitude-type-${encodeURIComponent(type) || 'none'}-label`}
                           htmlFor={`magnitude-type-${encodeURIComponent(type) || 'none'}`}
                           className="text-xs cursor-pointer flex-1"
                         >
@@ -1827,11 +2121,12 @@ export default function AnalyticsPage() {
                   <div className="flex items-center space-x-2">
                     <Checkbox
                       id="include-agency-flagged"
+                      aria-labelledby="include-agency-flagged-label"
                       checked={includeFlagged}
                       disabled={flaggedCount === 0}
                       onCheckedChange={checked => startTransition(() => setIncludeFlagged(checked === true))}
                     />
-                    <label htmlFor="include-agency-flagged" className="text-xs cursor-pointer flex-1">
+                    <label id="include-agency-flagged-label" htmlFor="include-agency-flagged" className="text-xs cursor-pointer flex-1">
                       Include agency-flagged records ({flaggedCount.toLocaleString()})
                     </label>
                     <InfoTooltip content="Records the source agency typed duplicate, not existing or not locatable: a second record of an earthquake catalogued under another id, a false event, or an event that could not be located. They are excluded by default because they would count phantom or duplicate earthquakes." />
@@ -1853,12 +2148,15 @@ export default function AnalyticsPage() {
                     {availableRegions.slice(0, 10).map(region => (
                       <div key={region} className="flex items-center space-x-2">
                         <Checkbox
-                          id={`region-${region}`}
+                          // Encoded: region names contain spaces, which are not valid in an id.
+                          id={`region-${encodeURIComponent(region)}`}
+                          aria-labelledby={`region-${encodeURIComponent(region)}-label`}
                           checked={selectedRegions.includes(region)}
                           onCheckedChange={() => handleRegionToggle(region)}
                         />
                         <label
-                          htmlFor={`region-${region}`}
+                          id={`region-${encodeURIComponent(region)}-label`}
+                          htmlFor={`region-${encodeURIComponent(region)}`}
                           className="text-xs cursor-pointer flex-1"
                         >
                           {region}
@@ -2034,7 +2332,7 @@ export default function AnalyticsPage() {
                   <span className="ml-2">({timeSeriesData.length} data points)</span>
                 )}
                 {timelineDaysPerBin > 1 && (
-                  <span className="ml-2 text-amber-600">({timelineDaysPerBin} days per point)</span>
+                  <span className="ml-2 text-amber-700 dark:text-amber-400">({timelineDaysPerBin} days per point)</span>
                 )}
               </CardDescription>
               <AxisLegendHints
@@ -2062,7 +2360,7 @@ export default function AnalyticsPage() {
               <CardDescription className="text-xs">
                 Sortable table of all events in the selected catalogue. Click column headers to sort.
                 {displayEvents.length > 100 && (
-                  <span className="ml-2 text-blue-600">(Virtual scrolling enabled for {displayEvents.length.toLocaleString()} events)</span>
+                  <span className="ml-2 text-blue-700 dark:text-blue-400">(Virtual scrolling enabled for {displayEvents.length.toLocaleString()} events)</span>
                 )}
               </CardDescription>
             </CardHeader>
@@ -2107,7 +2405,7 @@ export default function AnalyticsPage() {
               {/* Event Selector */}
               <Card>
                 <CardHeader>
-                  <CardTitle>Select Event</CardTitle>
+                  <CardTitle id="analytics-event-select-label">Event to inspect</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <Select
@@ -2117,10 +2415,10 @@ export default function AnalyticsPage() {
                       if (event) setSelectedEvent(event);
                     }}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger aria-labelledby="analytics-event-select-label" className="min-w-0 text-left [&>span]:min-w-0">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="max-w-[calc(100vw-2rem)]">
                       {/* Only show first 100 events in dropdown to prevent performance issues */}
                       {events.slice(0, 100).filter((event) => event.id && event.id !== '').map((event) => (
                         <SelectItem key={event.id} value={event.id}>
@@ -2138,7 +2436,7 @@ export default function AnalyticsPage() {
               </Card>
 
               {detailsLoading && <p role="status" className="text-sm text-muted-foreground">Loading event details...</p>}
-              {detailsError && <p role="alert" className="text-sm text-destructive">{detailsError}</p>}
+              {detailsError && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{detailsError}</p>}
               {/* Event Analysis Cards */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <QualityScoreCard score={calculateQualityScore(metricsFromEvent(detailedEvent))} />
@@ -2203,7 +2501,7 @@ export default function AnalyticsPage() {
                   </div>
 
                   <div className="pt-4 border-t">
-                    <h4 className="font-semibold mb-2">Data Completeness</h4>
+                    <h3 className="font-semibold mb-2">Data Completeness</h3>
                     <div className="space-y-2">
                       <div>
                         <div className="flex justify-between text-sm mb-1">
@@ -2313,7 +2611,7 @@ export default function AnalyticsPage() {
                         <Card className="bg-gradient-to-br from-violet-50 to-violet-100/50 dark:from-violet-950/50 dark:to-violet-900/30 border-violet-200 dark:border-violet-800">
                           <CardHeader className="pb-2">
                             <div className="flex items-center gap-2">
-                              <CardTitle className="text-sm font-medium text-violet-700 dark:text-violet-300 flex items-center gap-2">
+                              <CardTitle as="h3" className="text-sm font-medium text-violet-700 dark:text-violet-300 flex items-center gap-2">
                                 <span className="w-2 h-2 bg-violet-500 rounded-full"></span>
                                 b-value
                               </CardTitle>
@@ -2344,7 +2642,7 @@ export default function AnalyticsPage() {
                         <Card className="bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/50 dark:to-blue-900/30 border-blue-200 dark:border-blue-800">
                           <CardHeader className="pb-2">
                             <div className="flex items-center gap-2">
-                              <CardTitle className="text-sm font-medium text-blue-700 dark:text-blue-300 flex items-center gap-2">
+                              <CardTitle as="h3" className="text-sm font-medium text-blue-700 dark:text-blue-300 flex items-center gap-2">
                                 <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
                                 a-value
                               </CardTitle>
@@ -2362,7 +2660,7 @@ export default function AnalyticsPage() {
                         <Card className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 dark:from-emerald-950/50 dark:to-emerald-900/30 border-emerald-200 dark:border-emerald-800">
                           <CardHeader className="pb-2">
                             <div className="flex items-center gap-2">
-                              <CardTitle className="text-sm font-medium text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                              <CardTitle as="h3" className="text-sm font-medium text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
                                 <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
                                 R² Goodness of Fit
                               </CardTitle>
@@ -2387,7 +2685,7 @@ export default function AnalyticsPage() {
                         <Card className="bg-gradient-to-br from-amber-50 to-amber-100/50 dark:from-amber-950/50 dark:to-amber-900/30 border-amber-200 dark:border-amber-800">
                           <CardHeader className="pb-2">
                             <div className="flex items-center gap-2">
-                              <CardTitle className="text-sm font-medium text-amber-700 dark:text-amber-300 flex items-center gap-2">
+                              <CardTitle as="h3" className="text-sm font-medium text-amber-700 dark:text-amber-300 flex items-center gap-2">
                                 <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
                                 {magnitudeCutoff != null ? 'Magnitude cut-off' : 'Mc (Completeness)'}
                               </CardTitle>
@@ -2414,7 +2712,7 @@ export default function AnalyticsPage() {
                       <Card className="border border-border/50">
                         <CardHeader className="pb-2">
                           <div className="flex items-center gap-2">
-                            <CardTitle className="text-base">Frequency-Magnitude Relationship</CardTitle>
+                            <CardTitle as="h3" className="text-base">Frequency-Magnitude Relationship</CardTitle>
                             <TechnicalTermTooltip term="magnitudeFrequencyDistribution" />
                           </div>
                           <CardDescription>
@@ -2433,10 +2731,10 @@ export default function AnalyticsPage() {
                       {/* Interpretation panel */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="p-4 bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/50 dark:to-slate-800/30 rounded-lg border">
-                          <h4 className="font-semibold mb-3 flex items-center gap-2">
+                          <h3 className="font-semibold mb-3 flex items-center gap-2">
                             <Info className="h-4 w-4 text-blue-500" />
                             Parameter Interpretation
-                          </h4>
+                          </h3>
                           <ul className="space-y-2 text-sm">
                             <li className="flex items-start gap-2">
                               <span className="w-1.5 h-1.5 bg-violet-500 rounded-full mt-2"></span>
@@ -2453,10 +2751,10 @@ export default function AnalyticsPage() {
                           </ul>
                         </div>
                         <div className="p-4 bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/50 dark:to-slate-800/30 rounded-lg border">
-                          <h4 className="font-semibold mb-3 flex items-center gap-2">
+                          <h3 className="font-semibold mb-3 flex items-center gap-2">
                             <TrendingUp className="h-4 w-4 text-emerald-500" />
                             Analysis Summary
-                          </h4>
+                          </h3>
                           <ul className="space-y-2 text-sm">
                             <li className="flex items-start gap-2">
                               <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mt-2"></span>
@@ -2567,7 +2865,7 @@ export default function AnalyticsPage() {
                         <Card className="bg-gradient-to-br from-cyan-50 to-cyan-100/50 dark:from-cyan-950/50 dark:to-cyan-900/30 border-cyan-200 dark:border-cyan-800">
                           <CardHeader className="pb-2">
                             <div className="flex items-center gap-2">
-                              <CardTitle className="text-sm font-medium text-cyan-700 dark:text-cyan-300 flex items-center gap-2">
+                              <CardTitle as="h3" className="text-sm font-medium text-cyan-700 dark:text-cyan-300 flex items-center gap-2">
                                 <span className="w-2 h-2 bg-cyan-500 rounded-full"></span>
                                 Completeness Magnitude
                               </CardTitle>
@@ -2588,7 +2886,7 @@ export default function AnalyticsPage() {
                         <Card className="bg-gradient-to-br from-teal-50 to-teal-100/50 dark:from-teal-950/50 dark:to-teal-900/30 border-teal-200 dark:border-teal-800">
                           <CardHeader className="pb-2">
                             <div className="flex items-center gap-2">
-                              <CardTitle className="text-sm font-medium text-teal-700 dark:text-teal-300 flex items-center gap-2">
+                              <CardTitle as="h3" className="text-sm font-medium text-teal-700 dark:text-teal-300 flex items-center gap-2">
                                 <span className="w-2 h-2 bg-teal-500 rounded-full"></span>
                                 Events at or above Mc
                               </CardTitle>
@@ -2610,7 +2908,7 @@ export default function AnalyticsPage() {
                         <Card className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 dark:from-emerald-950/50 dark:to-emerald-900/30 border-emerald-200 dark:border-emerald-800">
                           <CardHeader className="pb-2">
                             <div className="flex items-center gap-2">
-                              <CardTitle className="text-sm font-medium text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                              <CardTitle as="h3" className="text-sm font-medium text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
                                 <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
                                 Detection Method
                               </CardTitle>
@@ -2637,7 +2935,7 @@ export default function AnalyticsPage() {
                       <Card className="border border-border/50">
                         <CardHeader className="pb-2">
                           <div className="flex items-center gap-2">
-                            <CardTitle className="text-base">Frequency-Magnitude Distribution</CardTitle>
+                            <CardTitle as="h3" className="text-base">Frequency-Magnitude Distribution</CardTitle>
                             <TechnicalTermTooltip term="magnitudeFrequencyDistribution" />
                           </div>
                           <CardDescription>
@@ -2656,7 +2954,7 @@ export default function AnalyticsPage() {
                       {Array.isArray(completeness.mbsCurve) && (
                         <Card className="border border-border/50">
                           <CardHeader className="pb-2">
-                            <CardTitle className="text-base">b-value stability</CardTitle>
+                            <CardTitle as="h3" className="text-base">b-value stability</CardTitle>
                             <CardDescription>
                               b above each cut-off Mi with its Shi &amp; Bolt (1982) uncertainty δb, and the mean b over Mi to Mi + 0.5
                               (Woessner &amp; Wiemer, 2005); MBS takes the lowest Mi where |b̄ − b| ≤ δb.
@@ -2681,7 +2979,7 @@ export default function AnalyticsPage() {
                       {Array.isArray(completeness.gftCurve) && (
                         <Card className="border border-border/50">
                           <CardHeader className="pb-2">
-                            <CardTitle className="text-base">Goodness-of-Fit Test</CardTitle>
+                            <CardTitle as="h3" className="text-base">Goodness-of-Fit Test</CardTitle>
                             <CardDescription>
                               R = 100 − 100·Σ|Bᵢ − Sᵢ| / ΣBᵢ: how much of the observed cumulative counts Bᵢ above each
                               candidate cut-off a Gutenberg-Richter law fitted by maximum likelihood above it (Sᵢ) reproduces
@@ -2706,10 +3004,10 @@ export default function AnalyticsPage() {
 
                       {/* Interpretation panel */}
                       <div className="p-4 bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/50 dark:to-slate-800/30 rounded-lg border">
-                        <h4 className="font-semibold mb-3 flex items-center gap-2">
+                        <h3 className="font-semibold mb-3 flex items-center gap-2">
                           <Info className="h-4 w-4 text-cyan-500" />
                           Understanding Mc
-                        </h4>
+                        </h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                           <div>
                             <p className="mb-2"><strong>What is Mc?</strong></p>
@@ -2794,7 +3092,7 @@ export default function AnalyticsPage() {
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                       <Card className="bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/50 dark:to-blue-900/30 border-blue-200 dark:border-blue-800">
                         <CardHeader className="pb-2">
-                          <CardTitle className="text-sm font-medium text-blue-700 dark:text-blue-300 flex items-center gap-2">
+                          <CardTitle as="h3" className="text-sm font-medium text-blue-700 dark:text-blue-300 flex items-center gap-2">
                             <Calendar className="h-4 w-4" />
                             Time Span
                           </CardTitle>
@@ -2811,7 +3109,7 @@ export default function AnalyticsPage() {
 
                       <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100/50 dark:from-indigo-950/50 dark:to-indigo-900/30 border-indigo-200 dark:border-indigo-800">
                         <CardHeader className="pb-2">
-                          <CardTitle className="text-sm font-medium text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
+                          <CardTitle as="h3" className="text-sm font-medium text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
                             <TrendingUp className="h-4 w-4" />
                             Daily Rate
                           </CardTitle>
@@ -2826,7 +3124,7 @@ export default function AnalyticsPage() {
 
                       <Card className="bg-gradient-to-br from-violet-50 to-violet-100/50 dark:from-violet-950/50 dark:to-violet-900/30 border-violet-200 dark:border-violet-800">
                         <CardHeader className="pb-2">
-                          <CardTitle className="text-sm font-medium text-violet-700 dark:text-violet-300 flex items-center gap-2">
+                          <CardTitle as="h3" className="text-sm font-medium text-violet-700 dark:text-violet-300 flex items-center gap-2">
                             <Activity className="h-4 w-4" />
                             Monthly Rate
                           </CardTitle>
@@ -2841,7 +3139,7 @@ export default function AnalyticsPage() {
 
                       <Card className="bg-gradient-to-br from-orange-50 to-orange-100/50 dark:from-orange-950/50 dark:to-orange-900/30 border-orange-200 dark:border-orange-800">
                         <CardHeader className="pb-2">
-                          <CardTitle className="text-sm font-medium text-orange-700 dark:text-orange-300 flex items-center gap-2">
+                          <CardTitle as="h3" className="text-sm font-medium text-orange-700 dark:text-orange-300 flex items-center gap-2">
                             <Zap className="h-4 w-4" />
                             Clusters
                           </CardTitle>
@@ -2863,13 +3161,13 @@ export default function AnalyticsPage() {
 
                   {/* Time bins of the rate and release series (paper, sec:viz) */}
                   <div className="flex flex-wrap items-end gap-4 p-3 rounded-lg border bg-muted/30" role="group" aria-label="Time series settings">
-                    <div className="space-y-1">
+                    <div className="w-full min-w-0 space-y-1 sm:w-auto">
                       <div className="flex items-center gap-1.5">
-                        <Label className="text-xs font-medium">Time bins</Label>
+                        <Label id="analytics-time-bins-label" className="text-xs font-medium">Time bins</Label>
                         <InfoTooltip content="Bins of the seismicity-rate and cumulative-release series, in UTC: calendar days, ISO weeks (Monday to Sunday) or calendar months. Auto uses days for a span of up to 365 days and weeks beyond." />
                       </div>
                       <Select value={rateInterval} onValueChange={value => setRateInterval(value as RateIntervalOption)}>
-                        <SelectTrigger className="h-8 w-[260px] text-xs">
+                        <SelectTrigger aria-labelledby="analytics-time-bins-label" className="h-8 w-full text-xs sm:w-[260px]">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -2895,7 +3193,7 @@ export default function AnalyticsPage() {
                   {/* Seismicity rate above Mc (paper, temporal pattern analysis) */}
                   <Card className="border border-border/50">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-base">Seismicity Rate</CardTitle>
+                      <CardTitle as="h3" className="text-base">Seismicity Rate</CardTitle>
                       <CardDescription>
                         {timeSeriesAnalysis ? describeRateSeries(timeSeriesAnalysis) : 'Events at or above Mc per time bin'}
                       </CardDescription>
@@ -2933,7 +3231,7 @@ export default function AnalyticsPage() {
                   {temporalAnalysis && (
                     <Card className="border border-border/50">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-base">Cumulative Event Time Series</CardTitle>
+                        <CardTitle as="h3" className="text-base">Cumulative Event Time Series</CardTitle>
                         <CardDescription>
                           Temporal evolution of seismicity showing cumulative events over time
                         </CardDescription>
@@ -2953,7 +3251,7 @@ export default function AnalyticsPage() {
                   {/* Magnitude against time (paper, sec:viz) */}
                   <Card className="border border-border/50">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-base">Magnitude vs Time</CardTitle>
+                      <CardTitle as="h3" className="text-base">Magnitude vs Time</CardTitle>
                       <CardDescription>
                         Magnitude of every analysed event against its origin time (UTC)
                       </CardDescription>
@@ -2981,7 +3279,7 @@ export default function AnalyticsPage() {
                     <CardHeader className="pb-2">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
-                          <CardTitle className="text-base">
+                          <CardTitle as="h3" className="text-base">
                             {releaseQuantity === 'moment' ? 'Cumulative Seismic Moment Release' : 'Cumulative Radiated Energy Release'}
                           </CardTitle>
                           <CardDescription>
@@ -2990,10 +3288,10 @@ export default function AnalyticsPage() {
                               : "E from log₁₀E = 1.5·M + 4.8 (E in joules; Gutenberg & Richter, 1956), summed per time bin and accumulated. For Mw this is Kanamori's (1977) E = M₀ / (2 × 10⁴), so the curve is the moment curve scaled by 5 × 10⁻⁵"}
                           </CardDescription>
                         </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs font-medium">Quantity</Label>
+                        <div className="w-full min-w-0 space-y-1 sm:w-auto">
+                          <Label id="analytics-release-quantity-label" className="text-xs font-medium">Quantity</Label>
                           <Select value={releaseQuantity} onValueChange={value => setReleaseQuantity(value as 'moment' | 'energy')}>
-                            <SelectTrigger className="h-8 w-[200px] text-xs">
+                            <SelectTrigger aria-labelledby="analytics-release-quantity-label" className="h-8 w-full text-xs sm:w-[200px]">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -3031,7 +3329,7 @@ export default function AnalyticsPage() {
                       {temporalAnalysis.clusters && temporalAnalysis.clusters.length > 0 && (
                         <Card className="border border-border/50">
                           <CardHeader className="pb-3">
-                            <CardTitle className="text-base flex items-center gap-2">
+                            <CardTitle as="h3" className="text-base flex items-center gap-2">
                               <Zap className="h-4 w-4 text-orange-500" />
                               Detected Seismicity Clusters
                               <Badge variant="outline" className="ml-2 text-xs font-normal">
@@ -3220,7 +3518,7 @@ export default function AnalyticsPage() {
                     <Card className="bg-gradient-to-br from-red-50 to-red-100/50 dark:from-red-950/50 dark:to-red-900/30 border-red-200 dark:border-red-800">
                       <CardHeader className="pb-2">
                         <div className="flex items-center gap-2">
-                          <CardTitle className="text-sm font-medium text-red-700 dark:text-red-300 flex items-center gap-2">
+                          <CardTitle as="h3" className="text-sm font-medium text-red-700 dark:text-red-300 flex items-center gap-2">
                             <span className="w-2 h-2 bg-red-500 rounded-full"></span>
                             Total Seismic Moment
                           </CardTitle>
@@ -3248,7 +3546,7 @@ export default function AnalyticsPage() {
                     <Card className="bg-gradient-to-br from-orange-50 to-orange-100/50 dark:from-orange-950/50 dark:to-orange-900/30 border-orange-200 dark:border-orange-800">
                       <CardHeader className="pb-2">
                         <div className="flex items-center gap-2">
-                          <CardTitle className="text-sm font-medium text-orange-700 dark:text-orange-300 flex items-center gap-2">
+                          <CardTitle as="h3" className="text-sm font-medium text-orange-700 dark:text-orange-300 flex items-center gap-2">
                             <span className="w-2 h-2 bg-orange-500 rounded-full"></span>
                             Equivalent Magnitude
                           </CardTitle>
@@ -3267,7 +3565,7 @@ export default function AnalyticsPage() {
 
                     <Card className="bg-gradient-to-br from-amber-50 to-amber-100/50 dark:from-amber-950/50 dark:to-amber-900/30 border-amber-200 dark:border-amber-800">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-amber-700 dark:text-amber-300 flex items-center gap-2">
+                        <CardTitle as="h3" className="text-sm font-medium text-amber-700 dark:text-amber-300 flex items-center gap-2">
                           <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
                           Largest Event
                         </CardTitle>
@@ -3277,7 +3575,7 @@ export default function AnalyticsPage() {
                           M{momentAnalysis.largestEvent.magnitude.toFixed(1)}
                         </div>
                         <div className="mt-2">
-                          <Progress value={momentAnalysis.largestEvent.percentOfTotal} className="h-2" />
+                          <Progress value={momentAnalysis.largestEvent.percentOfTotal} className="h-2" aria-label="Largest event's share of the total seismic moment" />
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
                           {momentAnalysis.largestEvent.percentOfTotal.toFixed(1)}% of total moment
@@ -3290,7 +3588,7 @@ export default function AnalyticsPage() {
                   <Card className="border border-border/50">
                     <CardHeader className="pb-2">
                       <div className="flex items-center gap-2">
-                        <CardTitle className="text-base">Moment Release by Magnitude</CardTitle>
+                        <CardTitle as="h3" className="text-base">Moment Release by Magnitude</CardTitle>
                         <TechnicalTermTooltip term="seismicMoment" />
                       </div>
                       <CardDescription>
@@ -3306,10 +3604,10 @@ export default function AnalyticsPage() {
                   {/* Key Insights */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="p-4 bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/50 dark:to-slate-800/30 rounded-lg border">
-                      <h4 className="font-semibold mb-3 flex items-center gap-2">
+                      <h3 className="font-semibold mb-3 flex items-center gap-2">
                         <TrendingUp className="h-4 w-4 text-red-500" />
                         Energy Release Summary
-                      </h4>
+                      </h3>
                       <ul className="space-y-2 text-sm">
                         <li className="flex items-start gap-2">
                           <span className="w-1.5 h-1.5 bg-red-500 rounded-full mt-2"></span>
@@ -3326,10 +3624,10 @@ export default function AnalyticsPage() {
                       </ul>
                     </div>
                     <div className="p-4 bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/50 dark:to-slate-800/30 rounded-lg border">
-                      <h4 className="font-semibold mb-3 flex items-center gap-2">
+                      <h3 className="font-semibold mb-3 flex items-center gap-2">
                         <Info className="h-4 w-4 text-blue-500" />
                         About Seismic Moment
-                      </h4>
+                      </h3>
                       <p className="text-sm text-muted-foreground">
                         Seismic moment (M₀) measures faulting strength: rigidity × rupture area × average slip.
                         It is distinct from radiated seismic energy.
@@ -3389,7 +3687,7 @@ export default function AnalyticsPage() {
                 <div className="lg:col-span-1 space-y-4">
                   <Card>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium flex items-center justify-between">
+                      <CardTitle as="h3" className="text-sm font-medium flex items-center justify-between">
                         Select Catalogues
                         <div className="flex gap-1">
                           <Button variant="ghost" size="sm" onClick={handleMfdSelectAll} className="h-6 text-xs px-2">
@@ -3409,6 +3707,7 @@ export default function AnalyticsPage() {
                         <div key={catalogue.id} className="flex items-center space-x-2">
                           <Checkbox
                             id={`mfd-cat-${catalogue.id}`}
+                            aria-labelledby={`mfd-cat-${catalogue.id}-label`}
                             checked={mfdSelectedCatalogues.includes(catalogue.id)}
                             onCheckedChange={() => handleMfdCatalogueToggle(catalogue.id)}
                           />
@@ -3421,6 +3720,7 @@ export default function AnalyticsPage() {
                             }}
                           />
                           <label
+                            id={`mfd-cat-${catalogue.id}-label`}
                             htmlFor={`mfd-cat-${catalogue.id}`}
                             className="text-xs cursor-pointer flex-1 truncate"
                             title={catalogue.name}
@@ -3438,17 +3738,18 @@ export default function AnalyticsPage() {
                   {/* Chart Options */}
                   <Card>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium">Display Options</CardTitle>
+                      <CardTitle as="h3" className="text-sm font-medium">Display Options</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3">
                       <div className="flex items-center space-x-2">
                         <Checkbox
                           id="mfd-cumulative"
+                          aria-labelledby="mfd-cumulative-label"
                           checked={mfdShowCumulative}
                           onCheckedChange={(checked) => setMfdShowCumulative(checked as boolean)}
                         />
                         <div className="flex items-center gap-1.5">
-                          <label htmlFor="mfd-cumulative" className="text-xs cursor-pointer">
+                          <label id="mfd-cumulative-label" htmlFor="mfd-cumulative" className="text-xs cursor-pointer">
                             Show cumulative (N≥M)
                           </label>
                           <InfoTooltip content="Shows cumulative counts of events with magnitude greater than or equal to M." />
@@ -3457,11 +3758,12 @@ export default function AnalyticsPage() {
                       <div className="flex items-center space-x-2">
                         <Checkbox
                           id="mfd-histogram"
+                          aria-labelledby="mfd-histogram-label"
                           checked={mfdShowHistogram}
                           onCheckedChange={(checked) => setMfdShowHistogram(checked as boolean)}
                         />
                         <div className="flex items-center gap-1.5">
-                          <label htmlFor="mfd-histogram" className="text-xs cursor-pointer">
+                          <label id="mfd-histogram-label" htmlFor="mfd-histogram" className="text-xs cursor-pointer">
                             Show histogram (filled)
                           </label>
                           <InfoTooltip content="Adds filled bars behind the line for visual density." />
@@ -3470,11 +3772,12 @@ export default function AnalyticsPage() {
                       <div className="flex items-center space-x-2">
                         <Checkbox
                           id="mfd-log-scale"
+                          aria-labelledby="mfd-log-scale-label"
                           checked={mfdLogScale}
                           onCheckedChange={(checked) => setMfdLogScale(checked as boolean)}
                         />
                         <div className="flex items-center gap-1.5">
-                          <label htmlFor="mfd-log-scale" className="text-xs cursor-pointer">
+                          <label id="mfd-log-scale-label" htmlFor="mfd-log-scale" className="text-xs cursor-pointer">
                             Logarithmic Y-axis
                           </label>
                           <InfoTooltip content="Uses log scale to emphasize low-frequency bins." />
@@ -3485,14 +3788,14 @@ export default function AnalyticsPage() {
                       {mfdShowCumulative && (
                         <div className="pt-2 border-t space-y-1">
                           <div className="flex items-center gap-1.5">
-                            <label className="text-xs text-muted-foreground">Cumulative line style</label>
+                            <label id="analytics-mfd-line-style-label" className="text-xs text-muted-foreground">Cumulative line style</label>
                             <InfoTooltip content="Controls the line style for the cumulative curve." />
                           </div>
                           <Select
                             value={mfdCumulativeStyle}
                             onValueChange={(value) => setMfdCumulativeStyle(value as 'solid' | 'dotted')}
                           >
-                            <SelectTrigger className="h-7 text-xs">
+                            <SelectTrigger aria-labelledby="analytics-mfd-line-style-label" className="h-7 text-xs">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -3506,14 +3809,14 @@ export default function AnalyticsPage() {
                       {/* Bin width */}
                       <div className="pt-2 border-t space-y-1">
                         <div className="flex items-center gap-1.5">
-                          <label className="text-xs text-muted-foreground">Magnitude bin width</label>
+                          <label id="analytics-mfd-bin-width-label" className="text-xs text-muted-foreground">Magnitude bin width</label>
                           <InfoTooltip content="Smaller bins show more detail but can be noisier." />
                         </div>
                         <Select
                           value={mfdBinWidth.toString()}
                           onValueChange={(value) => setMfdBinWidth(parseFloat(value))}
                         >
-                          <SelectTrigger className="h-7 text-xs">
+                          <SelectTrigger aria-labelledby="analytics-mfd-bin-width-label" className="h-7 text-xs">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -3527,14 +3830,14 @@ export default function AnalyticsPage() {
                       {/* Min magnitude truncation */}
                       <div className="pt-2 border-t space-y-1">
                         <div className="flex items-center gap-1.5">
-                          <label className="text-xs text-muted-foreground">Min magnitude cutoff</label>
+                          <label id="analytics-mfd-min-magnitude-label" className="text-xs text-muted-foreground">Min magnitude cutoff</label>
                           <InfoTooltip content="Exclude events below this magnitude for the analysis." />
                         </div>
                         <Select
                           value={mfdMinMagnitude?.toString() || 'none'}
                           onValueChange={(value) => setMfdMinMagnitude(value === 'none' ? undefined : parseFloat(value))}
                         >
-                          <SelectTrigger className="h-7 text-xs">
+                          <SelectTrigger aria-labelledby="analytics-mfd-min-magnitude-label" className="h-7 text-xs">
                             <SelectValue placeholder="No cutoff" />
                           </SelectTrigger>
                           <SelectContent>
@@ -3554,7 +3857,7 @@ export default function AnalyticsPage() {
                   {mfdComparison && mfdComparison.catalogues.length > 0 && (
                     <Card>
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Statistics</CardTitle>
+                        <CardTitle as="h3" className="text-sm font-medium">Statistics</CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-2 text-xs">
                         {mfdComparison.catalogues.map((cat, idx) => (
@@ -3590,7 +3893,7 @@ export default function AnalyticsPage() {
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between">
                         <div>
-                          <CardTitle className="text-base">Frequency-Magnitude Distribution</CardTitle>
+                          <CardTitle as="h3" className="text-base">Frequency-Magnitude Distribution</CardTitle>
                           <CardDescription>
                             {mfdShowCumulative && mfdShowHistogram
                               ? 'Cumulative N(≥M) lines and incremental N(M) stepped areas'
@@ -3635,10 +3938,10 @@ export default function AnalyticsPage() {
                   {/* MFD Information */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                     <div className="p-4 bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/50 dark:to-slate-800/30 rounded-lg border">
-                      <h4 className="font-semibold mb-3 flex items-center gap-2">
+                      <h3 className="font-semibold mb-3 flex items-center gap-2">
                         <Info className="h-4 w-4 text-indigo-500" />
                         About MFD
-                      </h4>
+                      </h3>
                       <p className="text-sm text-muted-foreground">
                         The Magnitude-Frequency Distribution shows how earthquake frequency varies with magnitude.
                         The cumulative plot (N≥M) typically follows the Gutenberg-Richter relation:
@@ -3646,10 +3949,10 @@ export default function AnalyticsPage() {
                       </p>
                     </div>
                     <div className="p-4 bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/50 dark:to-slate-800/30 rounded-lg border">
-                      <h4 className="font-semibold mb-3 flex items-center gap-2">
+                      <h3 className="font-semibold mb-3 flex items-center gap-2">
                         <TrendingUp className="h-4 w-4 text-emerald-500" />
                         Interpreting the Plot
-                      </h4>
+                      </h3>
                       <ul className="text-sm text-muted-foreground space-y-1">
                         <li className="flex items-start gap-2">
                           <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full mt-2"></span>

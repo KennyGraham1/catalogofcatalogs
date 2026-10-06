@@ -1,8 +1,13 @@
 'use client';
 
-import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, ReactNode } from 'react';
 import { getCatalogueSourceType } from '@/lib/catalogue-source-type';
 import { invalidateCatalogueData, subscribeToCatalogueInvalidation } from '@/lib/client-cache';
+import {
+  deriveCatalogueLoadStatus,
+  describeCatalogueLoadFailure,
+  type CatalogueLoadStatus,
+} from './catalogue-load-status';
 
 // Types
 interface Catalogue {
@@ -27,15 +32,46 @@ interface CatalogueStats {
 }
 
 interface CatalogueContextType {
+  /** Catalogues from the most recent successful response; empty when none has succeeded. */
   catalogues: Catalogue[];
+  /**
+   * Totals over `catalogues`. They are all 0 until a request succeeds, so check `status`
+   * (or hasCatalogueData) before showing them: an unknown total is not a zero total.
+   */
   stats: CatalogueStats;
+  /** A request for the list is in flight (the first load, a refresh or a retry). */
   loading: boolean;
+  /** Why the most recent request failed; kept until a request succeeds, then null. */
   error: string | null;
+  /** HTTP status of that failure when the server answered (401: sign in), else null. */
+  errorStatus: number | null;
   refreshCatalogues: () => Promise<void>;
   invalidateCache: () => void;
+  /** When the list last loaded successfully; null when it never has. Same as lastSuccessAt. */
   lastUpdated: Date | null;
   /** How often the provider refetches the catalogue list, in ms; 0 when it does not. */
   autoRefreshInterval: number;
+  /** loading | loaded | empty | failed | stale; see contexts/catalogue-load-status.ts. */
+  status: CatalogueLoadStatus;
+  /** A request is in flight while data from an earlier success is shown. */
+  refreshing: boolean;
+  /** Requests the list again (the same request as refreshCatalogues). */
+  retry: () => Promise<void>;
+  /** When the list last loaded successfully; null when it never has. */
+  lastSuccessAt: Date | null;
+}
+
+/** A failed catalogue-list request, with a message fit to show to the user. */
+class CatalogueLoadError extends Error {
+  readonly reason?: unknown;
+  readonly status: number | null;
+
+  constructor(message: string, reason?: unknown, status: number | null = null) {
+    super(message);
+    this.name = 'CatalogueLoadError';
+    this.reason = reason;
+    this.status = status;
+  }
 }
 
 // Create context
@@ -61,7 +97,19 @@ export function CatalogueProvider({
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  // Only the latest request may update state, so an overlapping request (auto-refresh,
+  // invalidation, a retry) that resolves late cannot replace newer results.
+  const requestSeq = useRef(0);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   // Calculate statistics from catalogues
   const calculateStats = useCallback((catalogueList: Catalogue[]): CatalogueStats => {
@@ -104,29 +152,51 @@ export function CatalogueProvider({
     };
   }, []);
 
-  // Fetch catalogues from API
+  // Fetch catalogues from API. A failure keeps the catalogues and stats of the last
+  // successful response (reported as stale) instead of replacing them with an empty list,
+  // and a failure before any success is reported as failed, not as an empty list.
   const fetchCatalogues = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
+    const seq = ++requestSeq.current;
+    const isCurrent = () => mounted.current && seq === requestSeq.current;
+    setLoading(true);
 
-      // no-store: a browser or intermediate HTTP cache serving a stale response here
-      // would silently undo invalidateCatalogueData()'s refetch (gc#0).
-      const response = await fetch('/api/catalogues', { cache: 'no-store' });
+    try {
+      let response: Response;
+      try {
+        // no-store: a browser or intermediate HTTP cache serving a stale response here
+        // would silently undo invalidateCatalogueData()'s refetch (gc#0).
+        response = await fetch('/api/catalogues', { cache: 'no-store' });
+      } catch (err) {
+        throw new CatalogueLoadError(describeCatalogueLoadFailure({ kind: 'network' }), err);
+      }
       if (!response.ok) {
-        throw new Error('Failed to fetch catalogues');
+        throw new CatalogueLoadError(describeCatalogueLoadFailure({ kind: 'http', status: response.status }), undefined, response.status);
       }
 
-      const data = await response.json();
-      setCatalogues(data);
-      setStats(calculateStats(data));
+      let data: unknown;
+      try {
+        data = await response.json();
+      } catch (err) {
+        throw new CatalogueLoadError(describeCatalogueLoadFailure({ kind: 'format' }), err);
+      }
+      if (!Array.isArray(data)) {
+        throw new CatalogueLoadError(describeCatalogueLoadFailure({ kind: 'format' }));
+      }
+
+      if (!isCurrent()) return;
+      const list = data as Catalogue[];
+      setCatalogues(list);
+      setStats(calculateStats(list));
       setLastUpdated(new Date());
+      setError(null);
+      setErrorStatus(null);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load catalogues';
-      setError(errorMessage);
-      console.error('Error fetching catalogues:', err);
+      if (!isCurrent()) return;
+      setError(err instanceof CatalogueLoadError ? err.message : describeCatalogueLoadFailure({ kind: 'format' }));
+      setErrorStatus(err instanceof CatalogueLoadError ? err.status : null);
+      console.error('Error fetching catalogues:', err instanceof CatalogueLoadError && err.reason ? err.reason : err);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [calculateStats]);
 
@@ -170,16 +240,28 @@ export function CatalogueProvider({
     }
   }, [autoRefreshInterval, fetchCatalogues]);
 
-  const value: CatalogueContextType = {
+  const status = deriveCatalogueLoadStatus({
+    inFlight: loading,
+    lastSuccessAt: lastUpdated,
+    lastAttemptFailed: error !== null,
+    count: catalogues.length,
+  });
+
+  const value = useMemo<CatalogueContextType>(() => ({
     catalogues,
     stats,
     loading,
     error,
+    errorStatus,
     refreshCatalogues,
     invalidateCache,
     lastUpdated,
     autoRefreshInterval,
-  };
+    status,
+    refreshing: loading && lastUpdated !== null,
+    retry: refreshCatalogues,
+    lastSuccessAt: lastUpdated,
+  }), [catalogues, stats, loading, error, errorStatus, refreshCatalogues, invalidateCache, lastUpdated, autoRefreshInterval, status]);
 
   return (
     <CatalogueContext.Provider value={value}>
@@ -198,5 +280,4 @@ export function useCatalogues() {
 }
 
 // Export types
-export type { Catalogue, CatalogueStats, CatalogueContextType };
-
+export type { Catalogue, CatalogueStats, CatalogueContextType, CatalogueLoadStatus };

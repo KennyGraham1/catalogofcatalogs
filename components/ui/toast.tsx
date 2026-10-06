@@ -13,14 +13,16 @@ const ToastViewport = React.forwardRef<
   React.ElementRef<typeof ToastPrimitives.Viewport>,
   React.ComponentPropsWithoutRef<typeof ToastPrimitives.Viewport>
 >(({ className, ...props }, ref) => (
-  <ToastPrimitives.Viewport
-    ref={ref}
-    className={cn(
-      'fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]',
-      className
-    )}
-    {...props}
-  />
+  // A div, not Radix's default <ol>: each toast is a status live region (role="status"),
+  // which is not a list item, so the list semantics were invalid (axe "list").
+  <ToastPrimitives.Viewport ref={ref} asChild {...props}>
+    <div
+      className={cn(
+        'fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]',
+        className
+      )}
+    />
+  </ToastPrimitives.Viewport>
 ));
 ToastViewport.displayName = ToastPrimitives.Viewport.displayName;
 
@@ -44,13 +46,13 @@ const Toast = React.forwardRef<
   React.ElementRef<typeof ToastPrimitives.Root>,
   React.ComponentPropsWithoutRef<typeof ToastPrimitives.Root> &
     VariantProps<typeof toastVariants>
->(({ className, variant, ...props }, ref) => {
+>(({ className, variant, children, ...props }, ref) => {
+  // A div carrying Radix's role="status" (an <li> may not take that role: axe
+  // "aria-allowed-role"); swipe, Escape and announcements are Radix's, unchanged.
   return (
-    <ToastPrimitives.Root
-      ref={ref}
-      className={cn(toastVariants({ variant }), className)}
-      {...props}
-    />
+    <ToastPrimitives.Root ref={ref} asChild {...props}>
+      <div className={cn(toastVariants({ variant }), className)}>{children}</div>
+    </ToastPrimitives.Root>
   );
 });
 Toast.displayName = ToastPrimitives.Root.displayName;
@@ -81,9 +83,10 @@ const ToastClose = React.forwardRef<
       className
     )}
     toast-close=""
+    aria-label="Close notification"
     {...props}
   >
-    <X className="h-4 w-4" />
+    <X className="h-4 w-4" aria-hidden="true" />
   </ToastPrimitives.Close>
 ));
 ToastClose.displayName = ToastPrimitives.Close.displayName;

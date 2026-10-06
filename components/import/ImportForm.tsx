@@ -407,12 +407,13 @@ export function ImportForm({ readOnly = false, catalogues = [], onImportComplete
               <div className="flex items-center space-x-2">
                 <Switch
                   id="updateExisting"
+                  aria-labelledby="updateExisting-label"
                   checked={addingToExisting && updateExisting}
                   onCheckedChange={setUpdateExisting}
                   disabled={!addingToExisting}
                 />
                 <div className="flex items-center gap-1.5">
-                  <Label htmlFor="updateExisting" className="cursor-pointer">
+                  <Label id="updateExisting-label" htmlFor="updateExisting" className="cursor-pointer">
                     Update existing events if data has changed
                   </Label>
                   <InfoTooltip content="When adding to an existing catalogue: events already stored are compared with GeoNet's current solution, and only those GeoNet has revised are rewritten. A new catalogue has nothing to update." />
@@ -423,11 +424,11 @@ export function ImportForm({ readOnly = false, catalogues = [], onImportComplete
             {/* Time Range */}
             <div className="space-y-4">
               <div className="flex items-center gap-1.5">
-                <Label>Time Range</Label>
+                <Label id="time-range-label">Time Range</Label>
                 <InfoTooltip content="Choose a rolling window or specify exact start and end times." />
               </div>
               <Select value={timeRange} onValueChange={(value: 'hours' | 'custom') => setTimeRange(value)}>
-                <SelectTrigger>
+                <SelectTrigger aria-labelledby="time-range-label">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -439,11 +440,11 @@ export function ImportForm({ readOnly = false, catalogues = [], onImportComplete
               {timeRange === 'hours' ? (
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
-                    <Label htmlFor="hours">Hours</Label>
+                    <Label id="hours-label" htmlFor="hours">Hours</Label>
                     <InfoTooltip content="Relative lookback window from now." />
                   </div>
                   <Select value={hours} onValueChange={setHours}>
-                    <SelectTrigger id="hours">
+                    <SelectTrigger id="hours" aria-labelledby="hours-label">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>

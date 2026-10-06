@@ -59,18 +59,19 @@ describe('read-only banner', () => {
   });
 
   it('shows Login and Sign Up exactly where the header does not', () => {
-    // The header's buttons are in its desktop navigation; below its breakpoint they are
+    // The header's links are in its desktop navigation; below its breakpoint they are
     // folded into the menu, and the banner's links take over, at the same breakpoint.
+    // Both return the visitor to this page afterwards (UI audit 2026-10-05, finding 9).
     signedOut();
     render(<Layout><p>page content</p></Layout>);
-    const nav = within(screen.getByRole('banner')).getByRole('button', { name: /login/i }).closest('nav')!;
+    const nav = within(screen.getByRole('banner')).getByRole('link', { name: /^login$/i }).closest('nav')!;
     const breakpoint = nav.className.match(/\bhidden (\w+):flex\b/)?.[1];
     expect(breakpoint).toBeDefined();
 
     const main = within(screen.getByRole('main'));
-    const login = main.getByRole('link', { name: /login/i });
-    expect(login).toHaveAttribute('href', '/login');
-    expect(main.getByRole('link', { name: /sign up/i })).toHaveAttribute('href', '/register');
+    const login = main.getByRole('link', { name: /^login$/i });
+    expect(login).toHaveAttribute('href', '/login?callbackUrl=%2Fcatalogues');
+    expect(main.getByRole('link', { name: /sign up/i })).toHaveAttribute('href', '/register?callbackUrl=%2Fcatalogues');
     expect(login.closest(`[class~="${breakpoint}:hidden"]`)).not.toBeNull();
   });
 

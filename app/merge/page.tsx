@@ -28,6 +28,8 @@ import { usePagination } from '@/hooks/use-pagination';
 import { useAuth } from '@/lib/auth/hooks';
 import { AuthGateCard } from '@/components/auth/AuthGateCard';
 import { UserRole } from '@/lib/auth/types';
+import { loginHref } from '@/lib/auth/login-href';
+import { requestAccessHref } from '@/lib/auth/access-request';
 
 // Dynamically import MergePreviewQC to avoid SSR issues with Leaflet
 const MergePreviewQC = dynamic(
@@ -81,6 +83,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { DataPagination } from '@/components/ui/data-pagination';
 import { getApiError } from '@/lib/api';
 import { loadCatalogueEvents } from '@/lib/catalogue-event-loader';
+import { formatLocalDate } from '@/lib/date-format';
 
 type CatalogueStatus = 'all' | 'complete' | 'processing' | 'incomplete';
 type SortField = 'name' | 'date' | 'events' | 'sourceType' | 'source';
@@ -299,19 +302,19 @@ const statusLabels: Record<MergeStatus, string> = {
   error: 'Error'
 };
 
-// Helper function to get status color
+// Helper function to get status color: 700 shades, so the badge's white text keeps 4.5:1
 const getStatusColor = (status: MergeStatus): string => {
   switch (status) {
     case 'idle':
-      return 'bg-blue-500';
+      return 'bg-blue-700 text-white hover:bg-blue-700';
     case 'merging':
-      return 'bg-yellow-500';
+      return 'bg-amber-700 text-white hover:bg-amber-700';
     case 'complete':
-      return 'bg-green-500';
+      return 'bg-green-700 text-white hover:bg-green-700';
     case 'error':
-      return 'bg-red-500';
+      return 'bg-red-700 text-white hover:bg-red-700';
     default:
-      return 'bg-gray-500';
+      return 'bg-gray-700 text-white hover:bg-gray-700';
   }
 };
 
@@ -1314,11 +1317,7 @@ export default function MergePage() {
   function formatDate(dateString: string | undefined): string {
     if (!dateString) return '—';
     try {
-      return new Date(dateString).toLocaleDateString('en-GB', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      });
+      return formatLocalDate(dateString);
     } catch {
       return dateString;
     }
@@ -1545,14 +1544,28 @@ export default function MergePage() {
       );
     }
 
+    // Read-only visitors get a way forward rather than a dead button: sign-in (back to
+    // this page) for a guest, the Editor access request for a signed-in viewer.
+    if (isReadOnly) {
+      return isAuthenticated ? (
+        <Button asChild variant="outline">
+          <Link href={requestAccessHref(true)}>Request Editor access</Link>
+        </Button>
+      ) : (
+        <Button asChild>
+          <Link href={loginHref('/merge')}>Sign in to merge</Link>
+        </Button>
+      );
+    }
+
     return (
       <Button
         onClick={handleStartMerge}
-        disabled={isReadOnly || !previewIsCurrent}
+        disabled={!previewIsCurrent}
         aria-describedby={mergeNeedsPreview ? 'start-merge-hint' : undefined}
       >
         <Save className="mr-2 h-4 w-4" />
-        {isReadOnly ? 'Login to Merge' : 'Start Merge'}
+        Start Merge
       </Button>
     );
   };
@@ -1603,12 +1616,20 @@ export default function MergePage() {
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="select" value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="select">Select Catalogues</TabsTrigger>
+              {/* Below sm the three steps stack (side by side their labels overlapped at
+                  390 px); the step number is visual only, the tab's name is its label. A step
+                  not yet available shows its number in a dashed ring. */}
+              <TabsList className="grid h-auto w-full grid-cols-1 gap-1 sm:h-10 sm:grid-cols-3 sm:gap-0">
+                <TabsTrigger value="select" className="justify-start gap-2 sm:justify-center [&:disabled>span]:border-dashed">
+                  <span aria-hidden="true" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-current text-xs">1</span>
+                  Select Catalogues
+                </TabsTrigger>
                 <TabsTrigger
                   value="configure"
                   disabled={selectedCatalogues.length < 2}
+                  className="justify-start gap-2 sm:justify-center [&:disabled>span]:border-dashed"
                 >
+                  <span aria-hidden="true" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-current text-xs">2</span>
                   Configure Merge
                 </TabsTrigger>
                 <TabsTrigger
@@ -1616,7 +1637,9 @@ export default function MergePage() {
                   // Also require a non-empty name here so tab-header navigation enforces the
                   // same rule as the footer "Preview Merge" button (handleNextStep).
                   disabled={selectedCatalogues.length < 2 || activeTab === 'select' || !mergedName.trim()}
+                  className="justify-start gap-2 sm:justify-center [&:disabled>span]:border-dashed"
                 >
+                  <span aria-hidden="true" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-current text-xs">3</span>
                   Preview & Merge
                 </TabsTrigger>
               </TabsList>
@@ -1762,11 +1785,13 @@ export default function MergePage() {
                             <div className="grid grid-cols-[auto_minmax(0,2fr)_120px_120px_120px_minmax(0,1fr)] items-center gap-3">
                               <Checkbox
                                 id={`catalogue-${catalogue.id}`}
+                                aria-labelledby={`catalogue-${catalogue.id}-label`}
                                 checked={selectedCatalogues.includes(catalogue.id)}
                                 onCheckedChange={() => handleCatalogueSelect(catalogue.id)}
                               />
                               <div className="min-w-0">
                                 <Label
+                                  id={`catalogue-${catalogue.id}-label`}
                                   htmlFor={`catalogue-${catalogue.id}`}
                                   className="text-sm font-medium flex items-center gap-1.5"
                                 >
@@ -2159,7 +2184,7 @@ export default function MergePage() {
                   <div className="space-y-4">
                     <Card>
                       <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
+                        <CardTitle as="h3" className="flex items-center gap-2">
                           <FileDown className="h-5 w-5" />
                           Export Options
                         </CardTitle>
@@ -2316,7 +2341,7 @@ export default function MergePage() {
                 {mergeStatus === 'complete' && completedQc && (
                   <Card className="mb-4" data-testid="completed-merge-qc">
                     <CardHeader>
-                      <CardTitle>Merge QC summary</CardTitle>
+                      <CardTitle as="h3">Merge QC summary</CardTitle>
                       <CardDescription>
                         {mergedCatalogueId
                           ? 'Kept with the merged catalogue and shown on its page.'

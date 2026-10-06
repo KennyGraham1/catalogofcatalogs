@@ -25,6 +25,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 import type { RoleChangeRequest, RoleChangeRequestForReview } from '@/lib/auth/types';
 import { UserRole } from '@/lib/auth/types';
+import { formatLocalDate } from '@/lib/date-format';
 
 type StatusFilter = 'pending' | 'approved' | 'rejected' | 'all';
 
@@ -165,7 +166,7 @@ export default function AdminRoleRequestsPage() {
     <div className="container mx-auto px-4 py-12">
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl font-bold">Role Requests</CardTitle>
+          <CardTitle as="h1" className="text-2xl font-bold">Role Requests</CardTitle>
           <CardDescription>
             Review and approve or reject role upgrade requests
           </CardDescription>
@@ -180,7 +181,7 @@ export default function AdminRoleRequestsPage() {
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm text-muted-foreground">Filter by status:</span>
             <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
-              <SelectTrigger className="w-48">
+              <SelectTrigger className="w-48" aria-label="Filter requests by status">
                 <SelectValue placeholder="Select status" />
               </SelectTrigger>
               <SelectContent>
@@ -289,7 +290,7 @@ export default function AdminRoleRequestsPage() {
                       </div>
                     ) : (
                       <p className="text-xs text-muted-foreground">
-                        Reviewed {requestItem.reviewed_at ? new Date(requestItem.reviewed_at).toLocaleDateString('en-GB') : ''}
+                        Reviewed {requestItem.reviewed_at ? formatLocalDate(requestItem.reviewed_at) : ''}
                       </p>
                     )}
                   </TableCell>

@@ -111,6 +111,7 @@ export default function ImportPage() {
             />
           ) : (
             <AuthGateCard
+              headingLevel="h2"
               title={isAuthenticated ? 'Editor access required' : 'Login required'}
               description={importBlockedMessage}
               requiredRole={UserRole.EDITOR}
@@ -163,6 +164,7 @@ export default function ImportPage() {
             </>
           ) : (
             <AuthGateCard
+              headingLevel="h2"
               title={isAuthenticated ? 'Editor access required' : 'Login required'}
               description={importBlockedMessage}
               requiredRole={UserRole.EDITOR}

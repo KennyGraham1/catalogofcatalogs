@@ -18,6 +18,15 @@ const config: Config = {
         'gradient-conic':
           'conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))',
       },
+      // Error text and icons (text-destructive) read their own token: the dark theme's
+      // --destructive is a deep red made for backgrounds under white text, which as text on
+      // the dark page measured 1.98:1 (UI audit 2026-10-05). bg-/border-destructive keep it.
+      textColor: {
+        destructive: {
+          DEFAULT: 'hsl(var(--destructive-text))',
+          foreground: 'hsl(var(--destructive-foreground))',
+        },
+      },
       borderRadius: {
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',

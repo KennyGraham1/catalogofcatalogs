@@ -1,3 +1,5 @@
+'use client';
+
 import * as React from 'react';
 
 import { cn } from '@/lib/utils';
@@ -5,15 +7,39 @@ import { cn } from '@/lib/utils';
 const Table = React.forwardRef<
   HTMLTableElement,
   React.HTMLAttributes<HTMLTableElement>
->(({ className, ...props }, ref) => (
-  <div className="relative w-full overflow-auto">
-    <table
-      ref={ref}
-      className={cn('w-full caption-bottom text-sm', className)}
-      {...props}
-    />
-  </div>
-));
+>(({ className, ...props }, ref) => {
+  // A table wider than its box scrolls sideways, and keyboard users must be able to reach
+  // that scroll region: the wrapper takes focus only while it actually overflows, so tables
+  // that fit add no tab stop (axe scrollable-region-focusable, UI audit 2026-10-05).
+  const wrapperRef = React.useRef<HTMLDivElement>(null);
+  const [scrollable, setScrollable] = React.useState(false);
+  React.useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+    const check = () => setScrollable(wrapper.scrollWidth > wrapper.clientWidth + 1);
+    check();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(check);
+    observer.observe(wrapper);
+    if (wrapper.firstElementChild) observer.observe(wrapper.firstElementChild);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div
+      ref={wrapperRef}
+      className="relative w-full overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      {...(scrollable
+        ? { tabIndex: 0, role: 'region', 'aria-label': props['aria-label'] ?? 'Table (scrolls horizontally)' }
+        : {})}
+    >
+      <table
+        ref={ref}
+        className={cn('w-full caption-bottom text-sm', className)}
+        {...props}
+      />
+    </div>
+  );
+});
 Table.displayName = 'Table';
 
 const TableHeader = React.forwardRef<

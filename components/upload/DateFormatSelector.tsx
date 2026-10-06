@@ -28,7 +28,7 @@ export function DateFormatSelector({ value, onChange, disabled = false }: DateFo
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
-        <Label htmlFor="date-format-select">Date Format</Label>
+        <Label id="date-format-select-label" htmlFor="date-format-select">Date Format</Label>
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -50,7 +50,7 @@ export function DateFormatSelector({ value, onChange, disabled = false }: DateFo
       </div>
       
       <Select value={value} onValueChange={onChange} disabled={disabled}>
-        <SelectTrigger id="date-format-select" className="w-full">
+        <SelectTrigger id="date-format-select" aria-labelledby="date-format-select-label" className="w-full">
           <SelectValue placeholder="Select date format" />
         </SelectTrigger>
         <SelectContent>
