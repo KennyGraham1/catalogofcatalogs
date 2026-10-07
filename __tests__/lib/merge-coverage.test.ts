@@ -92,6 +92,21 @@ describe('eventsMatchAdaptive (untested core predicate)', () => {
   });
 });
 
+describe('getDistanceMultiplier / getTimeMultiplier — the bands the merge page states', () => {
+  // app/merge/page.tsx ADAPTIVE_WINDOW_BANDS shows these to the user; change both together.
+  it.each([
+    [3.9, 1, 1],
+    [4.0, 1.5, 1.5],
+    [5.4, 1.5, 1.5],
+    [5.5, 2, 2.5],
+    [6.9, 2, 2.5],
+    [7.0, 3, 4],
+  ])('M%s: time ×%s, distance ×%s', (magnitude, time, distance) => {
+    expect(getTimeMultiplier(magnitude)).toBe(time);
+    expect(getDistanceMultiplier(magnitude)).toBe(distance);
+  });
+});
+
 describe('getDistanceMultiplier / getTimeMultiplier — non-finite guards (regression)', () => {
   it('returns 1.0 (base) for NaN/undefined instead of the max else-branch', () => {
     expect(getDistanceMultiplier(NaN)).toBe(1.0);

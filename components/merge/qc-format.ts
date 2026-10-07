@@ -367,15 +367,15 @@ export function magnitudeOffsetNotes(summary: Pick<MergeQcSummary, 'pairwise'>):
 
 /**
  * How close the matched pairs came to the edges of the matching windows, one sentence per
- * window, e.g. "120 of 1,890 matched pairs used more than 80 % of the time window: results
- * are sensitive to the thresholds".
+ * window, e.g. "120 of 1,890 matched pairs used more than 80 % of the time window; a window
+ * 20 % smaller would leave them unmatched".
  */
 export function windowUseNotes(windowUse: MergeQcSummary['windowUse'] | null | undefined): string[] {
   if (!windowUse || !isNum(windowUse.matchedPairs) || windowUse.matchedPairs <= 0) return [];
   const total = windowUse.matchedPairs;
   const sentence = (count: number, window: string): string => {
     const base = `${formatCount(count)} of ${countOf(total, 'matched pair', 'matched pairs')} used more than 80 % of the ${window} window`;
-    return count / total >= WINDOW_SENSITIVE_FRACTION ? `${base}: results are sensitive to the thresholds` : base;
+    return count / total >= WINDOW_SENSITIVE_FRACTION ? `${base}; a window 20 % smaller would leave them unmatched` : base;
   };
   const near = [windowUse.nearTimeLimit, windowUse.nearDistanceLimit].map(n => (isNum(n) ? n : 0));
   if (near[0] === 0 && near[1] === 0) {

@@ -96,9 +96,9 @@ describe('"newest" is described as the most recently determined solution', () =>
   it('explains the Most Recent Solution strategy by determination time, not update or origin time', async () => {
     openConfiguration();
     await choose('Merge Strategy', 'Most Recent Solution');
-    const help = screen.getByText(/Keeps the most recently determined solution/);
+    const help = screen.getByText(/Publishes the most recently computed solution: the one whose origin/);
     expect(help).toHaveTextContent(/creation time/);
-    expect(help).toHaveTextContent(/reviewed or final solutions win over preliminary ones/);
+    expect(help).toHaveTextContent(/reviewed or final solutions are preferred to preliminary ones/);
     expect(document.body).not.toHaveTextContent(/most recently updated event data/i);
   });
 
@@ -106,7 +106,7 @@ describe('"newest" is described as the most recently determined solution', () =>
     openConfiguration();
     // Source Priority with its default option (Most Recent Solution).
     expect(screen.getByRole('combobox', { name: 'Source Priority' }))
-      .toHaveAccessibleDescription(expect.stringMatching(/most recently determined solution is kept/i));
+      .toHaveAccessibleDescription(expect.stringMatching(/Publishes the most recently computed solution \(the latest origin creation time/i));
   });
 
   it('names the strategy in the merge summary by its label', async () => {

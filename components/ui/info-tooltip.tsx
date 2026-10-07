@@ -126,11 +126,11 @@ export const TECHNICAL_TERMS = {
   },
   timeWindow: {
     term: 'Time Window',
-    definition: 'Maximum time difference between events to consider them duplicates during merging. Smaller windows reduce false matches but may miss duplicates.'
+    definition: 'Largest origin-time difference at which two entries from different catalogues can be matched as one earthquake, for a mean magnitude below M4.0 (widened for larger events). A narrower window wrongly pairs fewer nearby earthquakes but leaves more true pairs unmatched.'
   },
   distanceThreshold: {
-    term: 'Distance Threshold',
-    definition: 'Maximum spatial separation (in kilometers) between events to consider them duplicates during merging.'
+    term: 'Distance Window',
+    definition: 'Largest epicentral distance (km) at which two entries from different catalogues can be matched as one earthquake, for a mean magnitude below M4.0 and depths shallower than 100 km (widened for larger and deeper events).'
   },
   uncertainty: {
     term: 'Location Uncertainty',

@@ -301,7 +301,7 @@ describe('#28 Source Priority: Custom Order ranking and honest fallback text', (
     render(<MergePage />);
     selectCatalogues('Alpha catalogue', 'Bravo catalogue', 'Charlie catalogue');
     goToConfigure();
-    await chooseSourcePriority('Custom Order');
+    await chooseSourcePriority('Custom catalogue order');
 
     const ranking = screen.getByRole('list', { name: 'Catalogue priority order' });
     const names = () => within(ranking).getAllByRole('listitem').map(item => item.textContent);
@@ -355,7 +355,7 @@ describe('#28 Source Priority: Custom Order ranking and honest fallback text', (
     render(<MergePage />);
     selectCatalogues('Alpha catalogue', 'Bravo catalogue');
     goToConfigure();
-    await chooseSourcePriority('GeoNet > Others');
+    await chooseSourcePriority('GeoNet first');
     expect(document.body).not.toHaveTextContent(/falls back to quality-based/i);
     expect(sourcePriorityHelp()).toHaveAccessibleDescription(expect.stringMatching(/authority/i));
     expect(sourcePriorityHelp()).toHaveAccessibleDescription(expect.stringMatching(/quality score/i));

@@ -121,7 +121,7 @@ describe('MergePreviewQC kept-apart entries', () => {
   // from a server that predates splitKey, so it is a cluster of its own.
   const separatedGroup = {
     id: 'g2', selectedEventIndex: 0, isSuspicious: false, separated: true,
-    validationWarnings: ['Matched with another entry but kept apart because the group failed consistency validation. Reason: Large magnitude range'],
+    validationWarnings: ['Matched with another entry but kept apart because the group failed the consistency checks. Reason: Magnitudes differ by 0.70 units, more than the tolerance of 0.5 for this magnitude.'],
     events: [report('d', 'ISC')],
   };
 
@@ -136,7 +136,7 @@ describe('MergePreviewQC kept-apart entries', () => {
     act(() => { fireEvent.mouseDown(tab, { button: 0, ctrlKey: false }); });
     expect(screen.getByRole('heading', { name: 'Kept apart' })).toBeInTheDocument();
     expect(screen.getByTestId('split-outcome')).toHaveTextContent('Published on its own');
-    expect(screen.getByTestId('split-reason')).toHaveTextContent('Kept apart because: Large magnitude range');
+    expect(screen.getByTestId('split-reason')).toHaveTextContent('Kept apart because: Magnitudes differ by 0.70 units, more than the tolerance of 0.5 for this magnitude');
     // The flagged group is not in this list.
     expect(screen.queryByText('Group #1')).toBeNull();
   });

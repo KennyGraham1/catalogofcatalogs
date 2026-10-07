@@ -266,16 +266,23 @@ The system automatically detects suspicious matches:
 **Magnitude Inconsistency**
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-- **Trigger:** Magnitude range > 1.0 units
-- **Warning:** "Large magnitude range: X.XX units"
-- **Example:** M4.2 matched with M6.5 (probably wrong)
+- **Trigger:** magnitudes differ by more than 0.5 units for a mean below M4.0,
+  0.8 from M4.0, 1.2 from M5.5 or 1.5 from M7.0 (widened by the reported
+  magnitude uncertainties for close, uncontested pairs, up to twice these values)
+- **Warning:** "Magnitudes differ by X.XX units, more than the tolerance of T for
+  this magnitude"
+- **Example:** M4.2 matched with M6.5 (not one earthquake)
 
 **Depth Inconsistency**
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-- **Trigger:** Depth range > 100-200 km (depending on max depth)
-- **Warning:** "Large depth range: XXX.X km"
-- **Example:** 10 km depth matched with 300 km depth (probably wrong)
+- **Trigger:** solved depths differ by more than 30 km (mean depth shallower
+  than 70 km), 50 km (70–300 km) or 100 km (deeper), for a mean magnitude below
+  M5.0; 50, 100 and 150 km from M5.0. The tolerance is widened to three combined
+  reported depth uncertainties when that is larger. Fixed depths are not compared.
+- **Warning:** "Solved depths differ by XX.X km, more than the tolerance of T km
+  for this depth and magnitude"
+- **Example:** 10 km depth matched with 300 km depth (not one earthquake)
 
 
 
@@ -420,11 +427,11 @@ Users can now perform comprehensive QC on merge operations before committing to 
    │                                                         │
    │ Merge Summary                                           │
    │ ├─ Merged Catalogue Name: "Merged NZ Catalogue"        │
-   │ ├─ Estimated Events: 12,450                            │
+   │ ├─ Entries: 14,312                                     │
    │ ├─ Selected Catalogues: 2                              │
    │ ├─ Merge Strategy: quality                             │
-   │ ├─ Time Threshold: 60 seconds                          │
-   │ └─ Distance Threshold: 10 km                           │
+   │ ├─ Time window: 60 s                                   │
+   │ └─ Distance window: 10 km                              │
    │                                                         │
    │ Catalogues to be Merged                                │
    │ ├─ GeoNet Catalogue (8,234 events)                     │
@@ -473,7 +480,7 @@ Users can now perform comprehensive QC on merge operations before committing to 
    │ │ Δt: 2.3s  Δd: 5.2 km  ΔM: 0.15                  │   │
    │ │                                                 │   │
    │ │ ⚠️  Validation Warnings:                        │   │
-   │ │ • Large magnitude range: 1.2 units              │   │
+   │ │ • Magnitudes differ by 1.20 units               │   │
    │ │                                                 │   │
    │ │ [ View on Map ] [ ▼ ]                           │   │
    │ └─────────────────────────────────────────────────┘   │
@@ -502,7 +509,7 @@ Users can now perform comprehensive QC on merge operations before committing to 
    │ Δt: 2.3s  Δd: 5.2 km  ΔM: 0.15                                          │
    │                                                                         │
    │ ⚠️  Validation Warnings:                                                │
-   │ • Large magnitude range: 1.2 units                                      │
+   │ • Magnitudes differ by 1.20 units                                       │
    │                                                                         │
    │ [ View on Map ] [ ▲ ]                                                   │
    ├─────────────────────────────────────────────────────────────────────────┤
@@ -607,7 +614,7 @@ Users can now perform comprehensive QC on merge operations before committing to 
          ],
          "selectedEventIndex": 0,
          "isSuspicious": true,
-         "validationWarnings": ["Large magnitude range: 1.2 units"]
+         "validationWarnings": ["Magnitudes differ by 1.20 units"]
        }
      ],
      "statistics": {

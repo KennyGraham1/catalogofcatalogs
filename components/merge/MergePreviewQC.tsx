@@ -205,8 +205,9 @@ export function MergePreviewQC({ previewData, holdForReview = false, strategy, p
             {countOf(flaggedCount, 'flagged group', 'flagged groups')} {plural(flaggedCount, 'needs', 'need')} review
           </AlertTitle>
           <AlertDescription className="text-amber-900 dark:text-amber-100">
-            {flaggedCount === 1 ? 'It' : 'Each'} failed at least one consistency check (magnitude, depth, epicentre or
-            origin-time agreement, or an ambiguous match); the reasons are listed on {flaggedCount === 1 ? 'the group' : 'each group'} under Flagged.
+            A group is flagged when its magnitudes or solved depths differ by more than the tolerance, when it was
+            formed by splitting a larger group that failed the consistency checks, or when its association is ambiguous; the
+            reason is given on {flaggedCount === 1 ? 'the group' : 'each group'} under Flagged.
             {holdForReview
               ? ` The merge will write ${flaggedCount === 1 ? 'it' : 'them'} with a provisional solution and list ${flaggedCount === 1 ? 'it' : 'them'} for review on the catalogue page.`
               : ` The merge will publish the strategy's solution for ${flaggedCount === 1 ? 'it' : 'each'}; choose Hold for review in the configuration to have a reviewer decide instead.`}

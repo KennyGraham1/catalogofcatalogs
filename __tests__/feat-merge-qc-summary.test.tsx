@@ -207,7 +207,7 @@ describe('MergeQcSummaryView', () => {
   it('says how many matched pairs came close to the window edges', () => {
     render(<MergeQcSummaryView summary={SUMMARY} />);
     expect(within(screen.getByTestId('window-use-notes')).getAllByRole('listitem').map(item => item.textContent)).toEqual([
-      '120 of 1,890 matched pairs used more than 80 % of the time window: results are sensitive to the thresholds',
+      '120 of 1,890 matched pairs used more than 80 % of the time window; a window 20 % smaller would leave them unmatched',
       '15 of 1,890 matched pairs used more than 80 % of the distance window',
     ]);
     expect(windowUseNotes({ nearTimeLimit: 0, nearDistanceLimit: 0, matchedPairs: 10 })).toEqual([

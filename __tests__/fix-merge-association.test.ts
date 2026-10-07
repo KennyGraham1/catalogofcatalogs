@@ -168,7 +168,7 @@ describe('#20 one-to-one best-match association', () => {
     const groups = performMergeWithGroups([g1, g2, i], UI_DEFAULT);
     const pair = groups.find(g => g.events.length === 2)!;
     expect(pair.isSuspicious).toBe(true);
-    expect(pair.validationWarnings.some(w => /Ambiguous association/.test(w))).toBe(true);
+    expect(pair.validationWarnings.some(w => /^Ambiguous association: .*twice that of the kept pair plus 0\.1/.test(w))).toBe(true);
   });
 });
 

@@ -255,23 +255,23 @@ Priority-Based Strategy
 
 **How it works:**
 
-Choose which entry wins when the same event appears in more than one
-catalogue:
+Choose which entry is published when an earthquake has entries in more than
+one catalogue:
 
-* **GeoNet > Others** / **GNS > Others** — keeps the GeoNet entry when the
-  group has one. GeoNet is recognised by its agency code (e.g. ``WEL``) or
+* **GeoNet first** — publishes the GeoNet entry when the group has one (GNS
+  Science operates GeoNet, so the API's ``gns`` option is the same rule). GeoNet is recognised by its agency code (e.g. ``WEL``) or
   the catalogue's own provider/import metadata, never by matching words in
   a catalogue's name.
-* **Most Recent Solution** — keeps the solution whose origin the reporting
+* **Most recent solution** — publishes the solution whose origin the reporting
   agency computed last (see the Most Recent Solution strategy below).
-* **Quality-Based** — keeps the best-constrained solution, comparing only
-  the metrics every catalogue in the group reports (see the Quality Score
-  strategy below).
-* **Custom Order** — you rank the selected catalogues yourself; the record
-  from the highest-ranked catalogue in a group wins.
+* **Highest quality score** — publishes the best-constrained solution,
+  comparing only the metrics every catalogue in the group reports (see the
+  Quality Score strategy below).
+* **Custom catalogue order** — you rank the selected catalogues yourself; the
+  entry from the highest-ranked catalogue in a group is published.
 
 Whenever the preferred agency/solution is not present in a group (or, for
-Custom Order, when catalogues tie), the network-authority ranking decides
+a custom catalogue order, when catalogues tie), the network-authority ranking decides
 instead (by default GeoNet, GCMT, ISC, USGS, then other agencies; an
 administrator can edit the table — see :ref:`network-authority`). Entries
 that are equally authoritative (the same rank, or no ranking applies to
@@ -284,7 +284,7 @@ This approach follows the principle of network authority, where local
 networks are prioritized for regional events as recommended by Bondár &
 Storchak (2011).
 
-**Example (GeoNet > Others):**
+**Example (GeoNet first):**
 
 .. code-block:: text
 
@@ -731,10 +731,11 @@ Rules that apply to every field
 Flagged groups: resolve or hold for review
 ------------------------------------------
 
-The QC preview flags a matched group when it was salvaged from a larger
-cluster that failed consistency validation, when its pairing was ambiguous
-(another entry was nearly as close), or when its magnitudes or depths fail the
-consistency checks (the group's warnings). Exactly the same test decides what
+The QC preview flags a matched group when it was formed by splitting a larger
+matched group that failed the consistency checks, when its association was
+ambiguous (a second candidate was almost as close: normalised separation within
+twice that of the kept pair plus 0.1), or when its magnitudes or solved depths
+differ by more than the tolerance (the group's warnings). Exactly the same test decides what
 the merge writes, so the preview's counts equal the stored result.
 
 An entry the windows matched but the validation split off is not a flagged
@@ -993,7 +994,7 @@ M7.0 and above; on top of that, distance gets a further 1.2× between 100 and
    Stricter: ± 30 seconds (fewer false matches)
    Looser:   ± 120 seconds (catch more duplicates)
 
-**Distance Threshold**
+**Distance Window**
 
 .. code-block:: text
 
@@ -1027,10 +1028,10 @@ M7.0 and above; on top of that, distance gets a further 1.2× between 100 and
 Step 4: Choose Merge Strategy
 =============================
 
-Select your conflict resolution strategy:
+Under **Published solution**, select the merge strategy:
 
 * **Quality-Based (Recommended)** - Scores each duplicate event 0–100 and keeps the highest-scoring one (station count, azimuthal gap, RMS, magnitude uncertainty, magnitude type, review status); falls back to network authority when an entry in the group states none of these metrics.
-* **Priority-Based** - Choose GeoNet/GNS, Most Recent Solution, Quality-Based, or your own Custom Order to decide which entry wins (see :ref:`merge-strategies` above).
+* **Priority-Based** - Choose GeoNet first, Most recent solution, Highest quality score, or a Custom catalogue order to decide which entry is published (see :ref:`merge-strategies` above).
 * **Average Values** - Computes a weighted-average location, selects (does not average) the magnitude by type preference, and picks the depth from the best-constrained solution.
 * **Median Values** - Takes the component-wise median epicentre and median origin time, with magnitude and depth resolved as for Average Values (see :ref:`merge-strategies` above).
 * **Most Recent Solution** - Keeps the solution whose origin was computed last.
@@ -1064,7 +1065,7 @@ Two further settings refine any strategy:
 Step 5: Configure Priority (if applicable)
 ==========================================
 
-If Priority-Based is set to **Custom Order**, rank the selected catalogues
+If Priority-Based is set to **Custom catalogue order**, rank the selected catalogues
 with the up/down buttons (the list starts in your catalogue-selection
 order):
 

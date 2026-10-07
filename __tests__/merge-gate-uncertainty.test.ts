@@ -222,11 +222,13 @@ describe('magnitude gate — a contested pairing stays strict', () => {
     const pair = groups.find(g => g.events.length === 2)!;
     const assessed = assessMatchGroup(pair, config);
     expect(assessed.warnings.some(w => /^Ambiguous association/.test(w))).toBe(true);
-    expect(assessed.warnings.some(w => /Large magnitude range/.test(w))).toBe(false);
+    expect(assessed.warnings.some(w => /Magnitudes differ by/.test(w))).toBe(false);
     const lone = groups.find(g => g.events[0].id === 'b1')!;
     const loneAssessed = assessMatchGroup(lone, config);
     expect(loneAssessed.separated).toBe(true);
-    expect(loneAssessed.warnings.join(' ')).toMatch(/Large magnitude range: 0\.63 units \(threshold: 0\.5\)/);
+    expect(loneAssessed.warnings.join(' ')).toMatch(/Magnitudes differ by 0\.63 units, more than the tolerance of 0\.5 for this magnitude/);
+    // The kept-apart card splits reasons at semicolons, so no message may contain one.
+    expect(loneAssessed.warnings.join(' ')).not.toMatch(/;/);
   });
 });
 
@@ -256,7 +258,7 @@ describe('depth gate — fixed depths are not compared, solved depths by their u
     expect(groups).toHaveLength(1);
     expect(groups[0].isSuspicious).toBe(false);
     expect(groups[0].validationWarnings).toEqual([
-      expect.stringMatching(/^Depth range of 35\.0 km includes a fixed depth \(operator assigned\)/),
+      expect.stringMatching(/^Depths differ by 35\.0 km including a fixed depth \(assigned, not solved for\), which carries no depth information/),
     ]);
   });
 
@@ -268,7 +270,8 @@ describe('depth gate — fixed depths are not compared, solved depths by their u
     const groups = performMergeWithGroups([shallow, deep], config);
     expect(ids(groups)).toEqual([['a'], ['b']]);
     expect(groups.every(g => g.separated)).toBe(true);
-    expect(groups[0].validationWarnings.join(' ')).toMatch(/Large depth range: 40\.0 km \(threshold: 30 km\)/);
+    expect(groups[0].validationWarnings.join(' ')).toMatch(/Solved depths differ by 40\.0 km, more than the tolerance of 30 km for this depth and magnitude/);
+    expect(groups[0].validationWarnings.join(' ')).not.toMatch(/;/);
   });
 
   it('accepts two poorly constrained depths within what their own errors allow', () => {
@@ -278,7 +281,8 @@ describe('depth gate — fixed depths are not compared, solved depths by their u
     expect(validateEventGroup([a, b], false)).toBe(true);
     const assessed = assessMatchGroup(groupMatchingEvents([a, b], config)[0], config);
     expect(assessed.suspicious).toBe(false);
-    expect(assessed.warnings).toEqual([expect.stringMatching(/^Depth range of 40\.0 km exceeds the tier \(30 km\); accepted — within 46\.9 km/)]);
+    expect(assessed.warnings).toEqual([expect.stringMatching(/^Solved depths differ by 40\.0 km: more than the tolerance of 30 km for this depth and magnitude, but within 46\.9 km, .*so the group is accepted$/)]);
+    expect(assessed.warnings.join(' ')).not.toMatch(/;/);
     // ...and rejects them past it: 50 km > 46.9 km.
     const c = { ...b, depth: 55 };
     expect(validateEventGroup([a, c], false)).toBe(false);

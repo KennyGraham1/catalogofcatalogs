@@ -193,7 +193,7 @@ describe('M1 onConflict: flagged duplicate groups', () => {
   it('sends onConflict only when holding for review', async () => {
     openConfiguration();
     fireEvent.click(screen.getByRole('radio', { name: 'Hold for review' }));
-    expect(screen.getByRole('radio', { name: 'Hold for review' }).parentElement).toHaveTextContent(/Merge provisionally and list them for review/);
+    expect(screen.getByRole('radio', { name: 'Hold for review' }).parentElement).toHaveTextContent(/Publish the strategy's solution provisionally and list the group for review/);
     // The detail (nothing is dropped) is in the section's tooltip.
     fireEvent.focus(within(screen.getByText('Flagged groups').parentElement!).getByRole('button', { name: 'More information' }));
     expect(await screen.findByRole('tooltip')).toHaveTextContent(/Holding never drops an entry/);
@@ -271,15 +271,27 @@ describe('what the published depth and magnitude will be', () => {
     await choose('Depth', 'Network authority');
     expect(screen.queryByText(/From the entry the strategy picks|Best-constrained depth; a fixed depth/)).toBeNull();
     // Matching behaviour sits with the matching settings; the old algorithm box is gone.
-    expect(screen.getByText(/Events either side of 180° are matched/)).toBeInTheDocument();
+    expect(screen.getByText(/Distances are measured across the 180° meridian/)).toBeInTheDocument();
     expect(screen.queryByText('Enhanced Merge Algorithm')).toBeNull();
+    // The adaptive windows, stated as the values that apply (multipliers as in lib/merge.ts,
+    // pinned on the engine side by __tests__/lib/merge-coverage.test.ts).
+    const time = Number(screen.getByRole('slider', { name: 'Time window in seconds' }).getAttribute('aria-valuenow'));
+    const distance = Number(screen.getByRole('slider', { name: 'Distance window in kilometres' }).getAttribute('aria-valuenow'));
+    const rows = within(screen.getByTestId('adaptive-windows')).getAllByRole('row').slice(1).map(row => row.textContent);
+    const fmt = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
+    expect(rows).toEqual([
+      `Below M4.0${fmt(time)} s (×1)${fmt(distance)} km (×1)`,
+      `M4.0 to M5.5${fmt(time * 1.5)} s (×1.5)${fmt(distance * 1.5)} km (×1.5)`,
+      `M5.5 to M7.0${fmt(time * 2)} s (×2)${fmt(distance * 2.5)} km (×2.5)`,
+      `M7.0 and above${fmt(time * 3)} s (×3)${fmt(distance * 4)} km (×4)`,
+    ]);
   });
 });
 
 describe('network-authority help text points at the settings table', () => {
   it('says the ranking comes from Settings › Merge authority', async () => {
     openConfiguration();
-    await choose('Source Priority', 'GeoNet > Others');
+    await choose('Source Priority', 'GeoNet first');
     expect(screen.getByRole('combobox', { name: 'Source Priority' }))
       .toHaveAccessibleDescription(expect.stringMatching(/configured in Settings › Merge authority/));
     expect(document.body).not.toHaveTextContent(/built-in network-authority ranking/);

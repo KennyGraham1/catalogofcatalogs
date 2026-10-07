@@ -330,11 +330,11 @@ describe('wording and actions', () => {
     const flagged = (id: string) => group(id, [entry(A, 0), entry(B, 40)], { isSuspicious: true });
     render(<MergePreviewQC previewData={payload([flagged('f1')])} />);
     expect(screen.getByText('1 flagged group needs review')).toBeInTheDocument();
-    expect(screen.getByText(/It failed at least one consistency check/)).toHaveTextContent(/choose Hold for review/);
+    expect(screen.getByText(/A group is flagged when its magnitudes or solved depths differ/)).toHaveTextContent(/the reason is given on the group under Flagged.*choose Hold for review/);
     cleanup();
     render(<MergePreviewQC previewData={payload([flagged('f1'), flagged('f2'), flagged('f3')])} holdForReview />);
     expect(screen.getByText('3 flagged groups need review')).toBeInTheDocument();
-    expect(screen.getByText(/Each failed at least one consistency check/)).toHaveTextContent(/list them for review on the catalogue page/);
+    expect(screen.getByText(/A group is flagged when its magnitudes or solved depths differ/)).toHaveTextContent(/the reason is given on each group under Flagged.*list them for review on the catalogue page/);
     expect(screen.queryByText(/All matched groups passed/)).toBeNull();
   });
 

@@ -2309,9 +2309,12 @@ function assessMagnitudeConsistency(
   const verdict = widened ? judge(true) : atTier;
   const { threshold, worstScale, mw, failure } = verdict;
 
-  // A threshold as the messages state it: the tier, or the tolerance it was widened to.
+  // A tolerance as the messages state it: the tier for the group's mean magnitude, or the
+  // tolerance the reported magnitude uncertainties widened it to.
   const limit = (value: number) =>
-    value > tier ? `${value.toFixed(2)}, tier ${tier} widened by the reported magnitude uncertainties` : `${tier}`;
+    value > tier
+      ? `${value.toFixed(2)} (${tier} for this magnitude, widened by the reported magnitude uncertainties)`
+      : `${tier} for this magnitude`;
 
   let reason: string | null = null;
   let failedValue: number | null = null;
@@ -2319,20 +2322,20 @@ function assessMagnitudeConsistency(
   if (failure === 'raw-range') {
     failedValue = rawRange;
     failedThreshold = threshold;
-    reason = `Large magnitude range: ${rawRange.toFixed(2)} units (threshold: ${limit(threshold)})`;
+    reason = `Magnitudes differ by ${rawRange.toFixed(2)} units, more than the tolerance of ${limit(threshold)}`;
   } else if (failure === 'within-scale-range') {
     failedValue = worstScale!.range;
     failedThreshold = worstScale!.threshold;
     reason =
-      `Large magnitude range within a single scale (${worstScale!.category}): ` +
-      `${worstScale!.range.toFixed(2)} units (threshold: ${limit(worstScale!.threshold)})`;
+      `Magnitudes on one scale (${worstScale!.category}) differ by ${worstScale!.range.toFixed(2)} units, ` +
+      `more than the tolerance of ${limit(worstScale!.threshold)}`;
   } else if (failure === 'mw-range') {
     failedValue = mw!.range;
     failedThreshold = mw!.threshold;
     reason =
-      `Magnitudes disagree once converted to a common scale: ` +
-      `${mw!.range.toFixed(2)} units of Mw (threshold: ${mw!.threshold.toFixed(2)}, ` +
-      `tier ${tier} widened by ${widened ? 'the magnitude and ' : ''}conversion uncertainty)`;
+      `Magnitudes converted to Mw differ by ${mw!.range.toFixed(2)} units, more than the tolerance of ` +
+      `${mw!.threshold.toFixed(2)} (${tier} for this magnitude, widened by the ` +
+      `${widened ? 'magnitude and ' : ''}conversion uncertainties)`;
   }
 
   const ok = failure == null;
@@ -2357,13 +2360,14 @@ function assessMagnitudeConsistency(
           : [atTier.mw!.range, atTier.mw!.threshold, mw!.threshold];
     const atTierText = atTierLimit === tier ? `${tier}` : atTierLimit.toFixed(2);
     reason =
-      `Magnitude range of ${value.toFixed(2)} units exceeds the tier threshold (${atTierText}); accepted — ` +
-      `within ${tolerance.toFixed(2)}, the tolerance the entries' reported magnitude uncertainties allow ` +
-      `for solutions this close in origin time and epicentre`;
+      `Magnitudes differ by ${value.toFixed(2)} units: more than the tolerance of ${atTierText} for this ` +
+      `magnitude, but within ${tolerance.toFixed(2)}, the tolerance the entries' reported magnitude ` +
+      `uncertainties allow for solutions this close in origin time and epicentre, so the group is accepted`;
   } else if (rescuedByMw) {
     reason =
-      `Large raw magnitude range: ${rawRange.toFixed(2)} units (threshold: ${tier}); ` +
-      `accepted — Mw-equivalent range is ${mw!.range.toFixed(2)} units across mixed magnitude scales`;
+      `Magnitudes differ by ${rawRange.toFixed(2)} units as reported, more than the tolerance of ${tier} ` +
+      `for this magnitude, but by only ${mw!.range.toFixed(2)} units once the mixed magnitude scales are ` +
+      `converted to Mw, so the group is accepted`;
   }
 
   return {
@@ -2437,8 +2441,10 @@ function assessDepthConsistency(events: EventData[], avgMag: number): DepthConsi
   // depths out is what accepted it, and the reviewer is told so.
   const fixedNote = (): string | null =>
     fixed > 0 && allCount >= 2 && allHi - allLo > depthRangeTier(allSum / allCount, avgMag)
-      ? `Depth range of ${(allHi - allLo).toFixed(1)} km includes ${fixed === 1 ? 'a fixed depth' : `${fixed} fixed depths`} ` +
-        `(operator assigned), which carry no depth information and are not compared`
+      ? `Depths differ by ${(allHi - allLo).toFixed(1)} km including ` +
+        (fixed === 1
+          ? 'a fixed depth (assigned, not solved for), which carries no depth information and is not compared'
+          : `${fixed} fixed depths (assigned, not solved for), which carry no depth information and are not compared`)
       : null;
 
   if (points.length < 2) {
@@ -2464,12 +2470,13 @@ function assessDepthConsistency(events: EventData[], avgMag: number): DepthConsi
   let reason: string | null;
   if (!ok) {
     reason = threshold > tier
-      ? `Large depth range: ${range.toFixed(1)} km (threshold: ${threshold.toFixed(1)} km, tier ${tier} km widened by the reported depth uncertainties)`
-      : `Large depth range: ${range.toFixed(1)} km (threshold: ${tier} km)`;
+      ? `Solved depths differ by ${range.toFixed(1)} km, more than the tolerance of ${threshold.toFixed(1)} km (${tier} km for this depth and magnitude, widened by the reported depth uncertainties)`
+      : `Solved depths differ by ${range.toFixed(1)} km, more than the tolerance of ${tier} km for this depth and magnitude`;
   } else if (range > tier) {
     reason =
-      `Depth range of ${range.toFixed(1)} km exceeds the tier (${tier} km); accepted — within ` +
-      `${threshold.toFixed(1)} km, the tolerance the entries' reported depth uncertainties allow`;
+      `Solved depths differ by ${range.toFixed(1)} km: more than the tolerance of ${tier} km for this depth ` +
+      `and magnitude, but within ${threshold.toFixed(1)} km, the tolerance the entries' reported depth ` +
+      `uncertainties allow, so the group is accepted`;
   } else {
     reason = fixedNote();
   }
@@ -2513,7 +2520,7 @@ function validateEventGroup(
     logConflict(
       'same_agency',
       'warning',
-      `Two different ${sameAgency.label} events in one group: ${sameAgency.ids.join(' vs ')} - split`,
+      `Two different ${sameAgency.label} events in one group (${sameAgency.ids.join(', ')}), so the group is split`,
       {
         eventIds,
         sources,
@@ -2631,7 +2638,7 @@ function validateGroupConsistency(
     logConflict(
       'group_size',
       'error',
-      `Group of ${events.length} entries exceeds the limit of 15: the matching windows probably joined several events`,
+      `The group holds ${events.length} entries, more than the limit of 15: a group this large usually joins several earthquakes`,
       {
         eventIds,
         sources,
@@ -2669,7 +2676,7 @@ function validateGroupConsistency(
       logConflict(
         'spatial_spread',
         'warning',
-        `Large spatial spread: ${spreadKm.toFixed(1)} km (threshold: ${maxSpread} km)`,
+        `Epicentres spread over ${spreadKm.toFixed(1)} km, more than the limit of ${maxSpread} km for this magnitude`,
         {
           eventIds,
           sources,
@@ -2702,7 +2709,7 @@ function validateGroupConsistency(
     logConflict(
       'network_mismatch',
       'warning',
-      `Same network appears multiple times in group: ${duplicateSources.map(({ label }) => label).join(', ')} — likely distinct events`,
+      `${duplicateSources.map(({ label }) => label).join(', ')} ${duplicateSources.length === 1 ? 'contributes' : 'contribute'} more than one entry to the group, and two entries of one catalogue are treated as different earthquakes`,
       {
         eventIds,
         sources,
@@ -2724,7 +2731,7 @@ function validateGroupConsistency(
     logConflict(
       'time_inconsistency',
       'info',
-      `Wide time spread within group: ${timeSpreadSec.toFixed(1)}s (informational threshold: ${timeConsistencyThreshold}s)`,
+      `Origin times span ${timeSpreadSec.toFixed(1)} s, more than ${timeConsistencyThreshold} s (a note only: the group is not failed)`,
       {
         eventIds,
         sources,
@@ -5454,8 +5461,8 @@ function assessMatchGroup(
     const why = group.splitReasons.length > 0 ? ` Reason: ${group.splitReasons.join('; ')}.` : '';
     warnings.push(
       matchingEvents.length > 1
-        ? `Salvaged from a larger matched cluster that failed consistency validation and was split.${why}`
-        : `Matched with another entry but kept apart because the group failed consistency validation.${why}`
+        ? `Formed by splitting a larger matched group that failed the consistency checks.${why}`
+        : `Matched with another entry but kept apart because the group failed the consistency checks.${why}`
     );
   }
 
@@ -5463,9 +5470,9 @@ function assessMatchGroup(
   // reviewer should confirm it — dense sequences are where fixed windows mislead.
   if (group.ambiguous) {
     warnings.push(
-      'Ambiguous association: an entry in this group was nearly as close, in time and distance, to ' +
-      'another event that could not join it (a second entry from a catalogue already in the group, ' +
-      'or one too far from the rest); the closest match was kept.'
+      'Ambiguous association: an entry had a second candidate almost as close as the match kept (normalised ' +
+      'separation |Δt|/τ + d/δ within twice that of the kept pair plus 0.1), which could not join this group ' +
+      'because its catalogue was already in it or it lay too far from the other entries. The closer match was kept.'
     );
   }
 

@@ -222,12 +222,12 @@ const FIELD_RULE_OPTIONS: Array<{
 // accessible description.
 const STRATEGY_TEXT: Record<string, { summary: string; details: string }> = {
   quality: {
-    summary: 'Uses the catalogue entry with the best-constrained solution (station count, azimuthal gap, RMS residual, uncertainties). The other entries are stored with the merged event as provenance.',
-    details: 'Keeps the best-constrained solution, comparing only the quality metrics every catalogue in the group reports (station count, azimuthal gap, RMS residual, magnitude uncertainty and type, evaluation status). If a catalogue reports none of them, network authority decides.',
+    summary: 'Publishes the best-constrained solution, judged on station count, azimuthal gap, RMS residual, magnitude uncertainty and type, and evaluation status. The other entries are kept with the merged event as provenance.',
+    details: 'Publishes the best-constrained solution, comparing only the quality metrics that every catalogue in the group reports (station count, azimuthal gap, RMS residual, magnitude uncertainty and type, evaluation status). If one catalogue reports none of them, the network-authority ranking decides.',
   },
   priority: {
-    summary: 'Uses the catalogue entry from the agency or catalogue you rank highest (set under Source Priority). The other entries are stored with the merged event as provenance.',
-    details: 'Keeps the record from the source you rank highest when the same event appears in more than one catalogue.',
+    summary: 'Publishes the entry of the source ranked first under Source Priority. The other entries are kept with the merged event as provenance.',
+    details: 'Publishes the entry of the source ranked first under Source Priority: GeoNet, a catalogue order you set, the highest quality score, or the most recent solution. A group with no entry from the preferred source falls back to the network-authority ranking, then quality score.',
   },
   average: {
     summary: 'Averages the epicentres of all entries, weighted by 1/σ² when every entry reports a location uncertainty. Magnitude and depth are selected, not averaged.',
@@ -238,12 +238,12 @@ const STRATEGY_TEXT: Record<string, { summary: string; details: string }> = {
     details: 'Takes the median of the reported epicentres, latitude and longitude separately (longitudes unwrapped across the date line), and the median origin time; with two entries the median is their mean. Magnitude and depth are selected, not averaged: magnitude by type (Mw first; below M6.2 local ML ahead of mb, from M6.2 Ms ahead), depth from the best-constrained solution that solved for depth, falling back to a fixed depth only when none did. No single entry\'s origin details (time uncertainty, station counts, agency) are carried onto the median epicentre.',
   },
   newest: {
-    summary: 'Uses the latest reported solution creation time, falling back to review status and quality when times are missing. The other entries are stored with the merged event as provenance.',
-    details: 'Keeps the most recently determined solution: the one whose origin the agency computed last (QuakeML creation time). When times are missing or tied and every entry states its review status, reviewed or final solutions win over preliminary ones; remaining ties use quality score. A rejected solution is used only if every entry is rejected.',
+    summary: 'Publishes the most recently computed solution (QuakeML creation time); review status, then quality score, decide when times are missing or tied. The other entries are kept with the merged event as provenance.',
+    details: 'Publishes the most recently computed solution: the one whose origin the agency computed last (QuakeML creation time). When times are missing or tied and every entry states its review status, reviewed or final solutions are preferred to preliminary ones; remaining ties are broken by quality score. A rejected solution is published only if every entry is rejected.',
   },
   complete: {
-    summary: 'Uses the catalogue entry with the most populated fields (uncertainties, quality metrics, focal mechanisms). The other entries are stored with the merged event as provenance.',
-    details: 'Keeps the record with the most complete information (the most populated fields).',
+    summary: 'Publishes the entry with the most populated fields, with extra weight for QuakeML content. The other entries are kept with the merged event as provenance.',
+    details: 'Publishes the entry with the highest completeness score: one point per populated field, plus points for QuakeML content (10 for any; 5 each for origins and magnitudes; 3 each for phase picks, arrivals and origin quality; 2 each for focal mechanisms, amplitudes and origin uncertainty). Ties go to the earliest origin time, then catalogue, then entry id.',
   },
 };
 
@@ -251,20 +251,20 @@ const STRATEGY_TEXT: Record<string, { summary: string; details: string }> = {
 // authority, then quality (lib/merge.ts mergeByPriority).
 const SOURCE_PRIORITY_TEXT: Record<string, { summary: string; details: string }> = {
   quality: {
-    summary: 'Best quality score wins.',
-    details: 'The record with the best quality score is kept, comparing only the metrics every catalogue in the group reports; network authority decides when a catalogue reports none.',
+    summary: 'Publishes the entry with the highest quality score.',
+    details: 'Publishes the entry with the highest quality score, comparing only the metrics that every catalogue in the group reports; the network-authority ranking decides when one catalogue reports none.',
   },
   newest: {
-    summary: 'Most recently computed solution wins.',
-    details: 'The most recently determined solution is kept (the latest origin creation time the agencies report); when times are missing or tied and every entry states its review status, reviewed or final solutions win over preliminary ones; remaining ties use quality score. A rejected solution is used only if every entry is rejected.',
+    summary: 'Publishes the most recently computed solution.',
+    details: 'Publishes the most recently computed solution (the latest origin creation time the agencies report). When times are missing or tied and every entry states its review status, reviewed or final solutions are preferred to preliminary ones; remaining ties are broken by quality score. A rejected solution is published only if every entry is rejected.',
   },
   geonet: {
-    summary: 'GeoNet\'s entry is used; otherwise network authority decides.',
-    details: 'The GeoNet record (GNS operates GeoNet) is kept when the group has one. It is recognised by its agency code (such as WEL) or the catalogue\'s provider or import source, not by words in a catalogue name. Otherwise the network-authority ranking configured in Settings › Merge authority decides (by default GeoNet, GCMT, ISC, USGS, then other agencies), and quality score breaks ties.',
+    summary: 'Publishes GeoNet\'s entry; a group without one falls back to the network-authority ranking.',
+    details: 'Publishes the GeoNet entry (GNS Science operates GeoNet) when the group has one. It is recognised by its agency code (such as WEL) or the catalogue\'s provider or import source, not by words in a catalogue name. Otherwise the network-authority ranking configured in Settings › Merge authority decides (by default GeoNet, GCMT, ISC, USGS, then other agencies), and quality score breaks ties.',
   },
   custom: {
-    summary: 'Your ranking below decides.',
-    details: 'Your ranking below decides: the record from the highest-ranked catalogue is kept, and quality score breaks any remaining tie.',
+    summary: 'Publishes the entry of the highest-ranked catalogue in your ranking below.',
+    details: 'Publishes the entry of the highest-ranked catalogue in your ranking below; quality score breaks any remaining tie.',
   },
 };
 SOURCE_PRIORITY_TEXT.gns = SOURCE_PRIORITY_TEXT.geonet;
@@ -287,6 +287,37 @@ function fieldRuleHint(field: FieldRuleName, rule: string, strategy: string): st
     return rule === 'strategy' ? 'From the entry the strategy picks.' : null;
   }
   return null;
+}
+
+// The adaptive matching windows (lib/merge.ts getTimeMultiplier, getDistanceMultiplier): the
+// multipliers applied to the configured windows for the mean magnitude of the two entries.
+const ADAPTIVE_WINDOW_BANDS = [
+  { label: 'Below M4.0', time: 1, distance: 1 },
+  { label: 'M4.0 to M5.5', time: 1.5, distance: 1.5 },
+  { label: 'M5.5 to M7.0', time: 2, distance: 2.5 },
+  { label: 'M7.0 and above', time: 3, distance: 4 },
+] as const;
+
+/** A window value without spurious decimals (90, 62.5). */
+function formatWindow(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+// The merge is one server request (match, check and resolve the entries and, unless
+// export-only, write the catalogue), followed by loading the merged events for display. The
+// server reports no progress within its request, so no percentage or time estimate is shown:
+// one driven by a timer would be invented.
+function initialMergeSteps(exportOnly: boolean): MergeStep[] {
+  return [
+    {
+      id: 'merge',
+      label: exportOnly
+        ? 'Matching, checking and resolving the entries on the server'
+        : 'Matching, checking and resolving the entries, and writing the catalogue, on the server',
+      status: 'pending',
+    },
+    { id: 'load', label: 'Loading the merged events for display', status: 'pending' },
+  ];
 }
 
 const CONFLICT_LABELS: Record<ConflictHandling, string> = {
@@ -373,15 +404,9 @@ export default function MergePage() {
   // New state for metadata and export-only mode
   const [mergeMetadata, setMergeMetadata] = useState<MergeMetadata>({});
   const [exportOnly, setExportOnly] = useState(false);
-  const [mergeProgress, setMergeProgress] = useState(0);
-  const [mergeSteps, setMergeSteps] = useState<MergeStep[]>([
-    { id: 'fetch-1', label: 'Fetching first catalogue events', status: 'pending' },
-    { id: 'fetch-2', label: 'Fetching second catalogue events', status: 'pending' },
-    { id: 'match', label: 'Matching duplicate events', status: 'pending' },
-    { id: 'merge', label: 'Merging events', status: 'pending' },
-    { id: 'bounds', label: 'Calculating geographic bounds', status: 'pending' },
-    { id: 'save', label: 'Saving merged catalogue', status: 'pending' }
-  ]);
+  // When the running merge started (the progress card shows the elapsed time).
+  const [mergeStartedAt, setMergeStartedAt] = useState<number | null>(null);
+  const [mergeSteps, setMergeSteps] = useState<MergeStep[]>(() => initialMergeSteps(false));
   const [previewData, setPreviewData] = useState<any>(null);
   // The selection and config the shown preview was generated for. Start Merge is enabled
   // only while they equal the current ones, so a merge always follows a preview of exactly
@@ -392,8 +417,6 @@ export default function MergePage() {
   const [completedQc, setCompletedQc] = useState<MergeQcSummary | null>(null);
   const [confirmMergeOpen, setConfirmMergeOpen] = useState(false);
 
-  // Ref to track progress interval for cleanup
-  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
   // Guards against re-entrant / concurrent merge submissions (a double-click on Start Merge
   // or on the confirmation).
   const mergeInFlightRef = useRef(false);
@@ -425,13 +448,9 @@ export default function MergePage() {
     setPreviewConfigKey(null);
   }, [selectedCatalogues]);
 
-  // Cleanup progress interval and any in-flight merged-event load on unmount
+  // Cancel any in-flight merged-event load on unmount
   useEffect(() => {
     return () => {
-      if (progressIntervalRef.current) {
-        clearInterval(progressIntervalRef.current);
-        progressIntervalRef.current = null;
-      }
       mergedEventsAbortRef.current?.abort();
     };
   }, []);
@@ -694,7 +713,7 @@ export default function MergePage() {
     mergeInFlightRef.current = true;
 
     setMergeStatus('merging');
-    setMergeProgress(0);
+    setMergeStartedAt(Date.now());
     setMergedCatalogueId(null);
     setCompletedMerge(null);
     setCompletedQc(null);
@@ -703,27 +722,10 @@ export default function MergePage() {
     // runs), so after a failed merge it can be retried without generating it again.
     previewRequestIdRef.current++;
 
-    // Reset all steps to pending
-    setMergeSteps(steps => steps.map(s => ({ ...s, status: 'pending' as const })));
-
-    // Clear any existing progress interval
-    if (progressIntervalRef.current) {
-      clearInterval(progressIntervalRef.current);
-    }
-
-    // Simulate progress updates using ref for proper cleanup
-    progressIntervalRef.current = setInterval(() => {
-      setMergeProgress(prev => {
-        if (prev >= 95) {
-          if (progressIntervalRef.current) {
-            clearInterval(progressIntervalRef.current);
-            progressIntervalRef.current = null;
-          }
-          return prev;
-        }
-        return prev + 5;
-      });
-    }, 300);
+    // The server merge is under way from here on.
+    setMergeSteps(initialMergeSteps(exportOnly).map(s =>
+      s.id === 'merge' ? { ...s, status: 'in-progress' as const } : s
+    ));
 
     try {
       const selectedCatalogueData = getSelectedCatalogues;
@@ -739,11 +741,6 @@ export default function MergePage() {
       }));
 
       const config = buildMergeConfig();
-
-      // Update step 1
-      setMergeSteps(steps => steps.map(s =>
-        s.id === 'fetch-1' ? { ...s, status: 'in-progress' as const } : s
-      ));
 
       const response = await fetch('/api/merge', {
         method: 'POST',
@@ -773,22 +770,13 @@ export default function MergePage() {
       // The QC summary of the merge as run; an older server sends none.
       setCompletedQc(isMergeQcSummary(result.qc) ? result.qc : null);
 
-      // Server accepted and returned the merge result — only now mark the
-      // fetch/match/merge/bounds steps complete (they previously flipped green
-      // right after the POST resolved, before the response was validated).
+      // The server returned the merge result (validated above): its step is done, and the
+      // merged events are loaded for display next.
       setMergeSteps(steps => steps.map(s =>
-        s.id.startsWith('fetch') || s.id === 'match' || s.id === 'merge' || s.id === 'bounds'
-          ? { ...s, status: 'complete' as const }
-          : s
+        s.id === 'merge' ? { ...s, status: 'complete' as const }
+          : s.id === 'load' ? { ...s, status: 'in-progress' as const }
+            : s
       ));
-      setMergeProgress(prev => Math.max(prev, 80));
-
-      // Update save step
-      if (!exportOnly) {
-        setMergeSteps(steps => steps.map(s =>
-          s.id === 'save' ? { ...s, status: 'in-progress' as const } : s
-        ));
-      }
 
       // Fetch the actual merged events from the newly created catalogue
       if (result.catalogueId && !exportOnly) {
@@ -827,13 +815,6 @@ export default function MergePage() {
 
       // Mark all steps as complete
       setMergeSteps(steps => steps.map(s => ({ ...s, status: 'complete' as const })));
-      setMergeProgress(100);
-
-      // Clear progress interval using ref
-      if (progressIntervalRef.current) {
-        clearInterval(progressIntervalRef.current);
-        progressIntervalRef.current = null;
-      }
 
       // A saved merge created a catalogue: clear every client cache of catalogue data and
       // refresh the catalogue list on all pages (contract C5). Export-only writes nothing.
@@ -850,12 +831,6 @@ export default function MergePage() {
           : `Successfully merged ${mergedCount} catalogues into "${mergedName}"`,
       });
     } catch (error) {
-      // Clear progress interval using ref on error
-      if (progressIntervalRef.current) {
-        clearInterval(progressIntervalRef.current);
-        progressIntervalRef.current = null;
-      }
-
       setMergeStatus('error');
       setMergeSteps(steps => steps.map(s =>
         s.status === 'in-progress' ? { ...s, status: 'error' as const } : s
@@ -902,27 +877,13 @@ export default function MergePage() {
     );
   };
 
-  // Memoized total events calculation
+  // Entries in the selected catalogues (before matching; the QC preview counts the events after)
   const getTotalSelectedEvents = useMemo(() => {
     return getSelectedCatalogues.reduce((total, catalogue) => {
       const eventCount = catalogue.event_count || 0;
       return total + eventCount;
     }, 0);
   }, [getSelectedCatalogues]);
-
-  // Memoized estimated merged events calculation
-  const estimatedMergedEvents = useMemo(() => {
-    const selected = getSelectedCatalogues;
-    if (selected.length === 0) return 0;
-    if (selected.length === 1) {
-      const eventCount = selected[0].event_count || 0;
-      return eventCount;
-    }
-
-    const totalEvents = getTotalSelectedEvents;
-    const overlapFactor = Math.min(0.9, Math.max(0, 0.15 * (selected.length - 1)));
-    return Math.round(totalEvents * (1 - overlapFactor));
-  }, [getSelectedCatalogues, getTotalSelectedEvents]);
 
   // Memoized geographic search handler
   const handleGeoSearch = useCallback(async (bounds: GeographicBounds) => {
@@ -1536,8 +1497,8 @@ export default function MergePage() {
           setCompletedMerge(null);
           setCompletedQc(null);
           setHeldForReviewCount(0);
-          setMergeProgress(0);
-          setMergeSteps(steps => steps.map(s => ({ ...s, status: 'pending' as const })));
+          setMergeStartedAt(null);
+          setMergeSteps(initialMergeSteps(false));
         }}>
           Start New Merge
         </Button>
@@ -1596,7 +1557,7 @@ export default function MergePage() {
         <div className="space-y-1">
           <h1 className="text-2xl font-bold tracking-tight">Merge Catalogues</h1>
           <p className="text-sm text-muted-foreground">
-            Combine multiple earthquake catalogues into a unified dataset
+            Match the entries that different catalogues hold for the same earthquake and publish one solution for each
           </p>
         </div>
 
@@ -1606,7 +1567,7 @@ export default function MergePage() {
               <div>
                 <CardTitle className="text-base">Catalogue Merging Wizard</CardTitle>
                 <CardDescription className="text-xs">
-                  Merge multiple earthquake catalogues using configurable rules for matching events
+                  Entries are matched within time and distance windows, checked for consistency, and resolved to one published solution per earthquake
                 </CardDescription>
               </div>
               <Badge className={getStatusColor(mergeStatus)}>
@@ -1648,7 +1609,7 @@ export default function MergePage() {
                 <div className="flex items-center gap-2 bg-muted p-3 rounded-md">
                   <AlertTriangle className="h-5 w-5 text-amber-500" />
                   <p className="text-sm">
-                    Select at least two catalogues to merge. Catalogues should cover overlapping time periods or regions.
+                    Select at least two catalogues. Only entries inside the overlap of their time spans and regions can be matched; the rest are published unchanged.
                   </p>
                 </div>
 
@@ -1833,20 +1794,19 @@ export default function MergePage() {
                 {selectedCatalogues.length > 0 && (
                   <div className="bg-muted/30 p-4 rounded-md mt-4">
                     <h3 className="font-medium mb-2">Selection Summary</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <p className="text-sm text-muted-foreground">Catalogues</p>
                         <p className="text-xl font-semibold">{getSelectedCatalogues.length}</p>
                       </div>
                       <div>
-                        <p className="text-sm text-muted-foreground">Total Events</p>
+                        <p className="text-sm text-muted-foreground">Entries</p>
                         <p className="text-xl font-semibold">{getTotalSelectedEvents.toLocaleString()}</p>
                       </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">Est. Merged Events</p>
-                        <p className="text-xl font-semibold">{estimatedMergedEvents.toLocaleString()}</p>
-                      </div>
                     </div>
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      The number of events after merging is counted by the QC preview (step 3).
+                    </p>
                   </div>
                 )}
               </TabsContent>
@@ -1874,9 +1834,10 @@ export default function MergePage() {
                   <Separator className="my-6" />
 
                   <div>
-                    <h3 className="text-base font-medium mb-1">Event Matching Criteria</h3>
+                    <h3 className="text-base font-medium mb-1">Matching windows</h3>
                     <p className="text-sm text-muted-foreground mb-4">
-                      Define how to identify the same event across different catalogues
+                      Two entries from different catalogues are candidates for the same earthquake when their origin-time
+                      difference and their epicentral distance both lie within these windows.
                     </p>
 
                     <div className="space-y-6">
@@ -1890,23 +1851,41 @@ export default function MergePage() {
                           </div>
                           <div className="flex-1">
                             <h4 className="text-sm font-medium text-blue-900 mb-1">
-                              Adaptive Thresholds Active
+                              The windows widen with magnitude and depth
                             </h4>
                             {/* Derived from the engine's actual multipliers (lib/merge.ts):
                                 time 1.0/1.5/2.0/3.0 and distance 1.0/1.5/2.5/4.0 across the
                                 M<4 / 4-5.5 / 5.5-7 / >=7 bands, with a further 1.2x (100-300 km)
                                 or 1.5x (>300 km) on distance. Hard-coding example windows here
                                 let the text drift out of step with the configured baselines. */}
-                            <p className="text-xs text-blue-800 leading-relaxed">
-                              The merge algorithm automatically widens the matching thresholds for larger and deeper events.
-                              Your configured values ({timeThreshold}s, {distanceThreshold} km) apply as-is below M4.0
-                              and are scaled up with magnitude, reaching {timeThreshold * 3}s and {distanceThreshold * 4} km
-                              at M7.0 and above. Events deeper than 300 km get a further 1.5× on distance
-                              (1.2× between 100 and 300 km).
+                            <table className="mt-1 text-xs text-blue-900 tabular-nums" data-testid="adaptive-windows">
+                              <caption className="sr-only">Matching windows by the mean magnitude of the two entries</caption>
+                              <thead>
+                                <tr className="text-left">
+                                  <th scope="col" className="pr-6 font-medium">Mean magnitude</th>
+                                  <th scope="col" className="pr-6 font-medium">Time window</th>
+                                  <th scope="col" className="font-medium">Distance window</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {ADAPTIVE_WINDOW_BANDS.map(band => (
+                                  <tr key={band.label}>
+                                    <th scope="row" className="pr-6 text-left font-normal">{band.label}</th>
+                                    <td className="pr-6">{formatWindow(timeThreshold * band.time)} s (×{band.time})</td>
+                                    <td>{formatWindow(distanceThreshold * band.distance)} km (×{band.distance})</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            <p className="mt-2 text-xs text-blue-800 leading-relaxed">
+                              The distance window is multiplied by a further 1.2 when the deeper entry lies between 100
+                              and 300 km, and by 1.5 when it is deeper than 300 km.
                             </p>
                             <p className="mt-1 text-xs text-blue-800 leading-relaxed">
-                              Events either side of 180° are matched, and entries that cannot be one earthquake
-                              (e.g. M4.0 with M7.0) are never merged.
+                              Distances are measured across the 180° meridian. A matched group is merged only if its
+                              entries also agree in magnitude, depth, epicentre and origin time: magnitudes, for example,
+                              must agree within 0.5 units for a mean below M4.0 (0.8 from M4.0, 1.2 from M5.5, 1.5 from
+                              M7.0). The QC preview lists the groups that fail these checks.
                             </p>
                           </div>
                         </div>
@@ -1916,9 +1895,9 @@ export default function MergePage() {
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5">
                             <Clock className="h-4 w-4 text-muted-foreground" />
-                            <LabelWithTooltip label="Time Window (seconds)" term="timeWindow" />
+                            <LabelWithTooltip label="Time window (s)" term="timeWindow" />
                           </div>
-                          <span className="text-sm font-medium">{timeThreshold}s</span>
+                          <span className="text-sm font-medium">{timeThreshold} s</span>
                         </div>
                         <Slider
                           value={[timeThreshold]}
@@ -1930,7 +1909,7 @@ export default function MergePage() {
                           aria-valuetext={`${timeThreshold} seconds`}
                         />
                         <p className="text-xs text-muted-foreground">
-                          Events within {timeThreshold} seconds of each other may be considered the same event. Automatically adjusted by magnitude.
+                          Origin times of matched entries may differ by up to {timeThreshold} s (mean magnitude below M4.0).
                         </p>
                       </div>
 
@@ -1938,7 +1917,7 @@ export default function MergePage() {
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5">
                             <MapPin className="h-4 w-4 text-muted-foreground" />
-                            <LabelWithTooltip label="Distance Threshold (km)" term="distanceThreshold" />
+                            <LabelWithTooltip label="Distance window (km)" term="distanceThreshold" />
                           </div>
                           <span className="text-sm font-medium">{distanceThreshold} km</span>
                         </div>
@@ -1948,11 +1927,12 @@ export default function MergePage() {
                           max={100}
                           step={1}
                           onValueChange={values => setDistanceThreshold(values[0])}
-                          aria-label="Distance threshold in kilometres"
+                          aria-label="Distance window in kilometres"
                           aria-valuetext={`${distanceThreshold} kilometres`}
                         />
                         <p className="text-xs text-muted-foreground">
-                          Events within {distanceThreshold} km of each other may be considered the same event. Automatically adjusted by magnitude and depth.
+                          Epicentres of matched entries may lie up to {distanceThreshold} km apart (mean magnitude below M4.0,
+                          depth shallower than 100 km).
                         </p>
                       </div>
                     </div>
@@ -1962,9 +1942,10 @@ export default function MergePage() {
 
                   <div className="space-y-4">
                     <div>
-                      <h3 className="text-base font-medium mb-1">Conflict Resolution</h3>
+                      <h3 className="text-base font-medium mb-1">Published solution</h3>
                       <p className="text-sm text-muted-foreground mb-4">
-                        Choose how to handle conflicting data for the same event
+                        For each matched group the strategy decides which solution is published. Every entry is kept with
+                        the merged event as provenance.
                       </p>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2007,16 +1988,16 @@ export default function MergePage() {
                                 <SelectValue placeholder="Select priority" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="quality">Quality-Based</SelectItem>
-                                <SelectItem value="newest">Most Recent Solution</SelectItem>
-                                <SelectItem value="geonet">GeoNet &gt; Others</SelectItem>
-                                <SelectItem value="gns">GNS &gt; Others</SelectItem>
-                                <SelectItem value="custom">Custom Order</SelectItem>
+                                <SelectItem value="quality">Highest quality score</SelectItem>
+                                <SelectItem value="newest">Most recent solution</SelectItem>
+                                {/* GNS Science operates GeoNet: 'gns' is the same rule, accepted for old requests. */}
+                                <SelectItem value="geonet">GeoNet first</SelectItem>
+                                <SelectItem value="custom">Custom catalogue order</SelectItem>
                               </SelectContent>
                             </Select>
                             <p className="text-xs text-muted-foreground">{SOURCE_PRIORITY_TEXT[priority]?.summary}</p>
                             <p id="source-priority-help" className="sr-only">
-                              Choose whose record is kept when the same event appears in more than one catalogue.{' '}
+                              Which entry is published when an earthquake has entries in more than one catalogue.{' '}
                               {SOURCE_PRIORITY_TEXT[priority]?.details}
                             </p>
                             {priority === 'custom' && (
@@ -2137,7 +2118,7 @@ export default function MergePage() {
                         <div>
                           <div className="flex items-center gap-1.5">
                             <h4 id="on-conflict-label" className="text-sm font-medium">Flagged groups</h4>
-                            <InfoTooltip content="The preview flags groups that were regrouped, are ambiguous, fail validation, or disagree on magnitude or depth, and entries that were matched but kept apart because their group failed the consistency checks (Kept apart). Holding never drops an entry: the row is written with the strategy's provisional solution and a reviewer keeps it or publishes one entry's solution instead." />
+                            <InfoTooltip content="A group is flagged when its magnitudes or solved depths differ by more than the tolerance, when it was formed by splitting a larger matched group that failed the consistency checks, or when its association is ambiguous: an entry had a second candidate almost as close as the match kept (normalised separation within twice that of the kept pair plus 0.1). Entries left alone by such a split are listed as Kept apart. Holding never drops an entry: the event is written with the strategy's provisional solution, and a reviewer keeps it or publishes one entry's solution instead." />
                           </div>
                         </div>
                         <RadioGroup
@@ -2151,7 +2132,7 @@ export default function MergePage() {
                               <Label htmlFor="on-conflict-resolve" className="text-sm font-medium">
                                 {CONFLICT_LABELS.resolve}
                               </Label>
-                              <p className="text-xs text-muted-foreground">Merge them like any other group.</p>
+                              <p className="text-xs text-muted-foreground">Publish the strategy&apos;s solution, as for any other group.</p>
                             </div>
                           </div>
                           <div className="flex items-start gap-2">
@@ -2160,7 +2141,7 @@ export default function MergePage() {
                               <Label htmlFor="on-conflict-hold" className="text-sm font-medium">
                                 {CONFLICT_LABELS.hold}
                               </Label>
-                              <p className="text-xs text-muted-foreground">Merge provisionally and list them for review on the catalogue page.</p>
+                              <p className="text-xs text-muted-foreground">Publish the strategy&apos;s solution provisionally and list the group for review on the catalogue page.</p>
                             </div>
                           </div>
                         </RadioGroup>
@@ -2231,8 +2212,8 @@ export default function MergePage() {
                           <p className="font-medium">{mergedName}</p>
                         </div>
                         <div>
-                          <p className="text-sm text-muted-foreground">Estimated Events</p>
-                          <p className="font-medium">{estimatedMergedEvents.toLocaleString()}</p>
+                          <p className="text-sm text-muted-foreground">Entries</p>
+                          <p className="font-medium">{getTotalSelectedEvents.toLocaleString()}</p>
                         </div>
                         <div>
                           <p className="text-sm text-muted-foreground">Selected Catalogues</p>
@@ -2243,11 +2224,11 @@ export default function MergePage() {
                           <p className="font-medium">{MERGE_STRATEGY_LABELS[mergeStrategy] ?? mergeStrategy}</p>
                         </div>
                         <div>
-                          <p className="text-sm text-muted-foreground">Time Threshold</p>
-                          <p className="font-medium">{timeThreshold} seconds</p>
+                          <p className="text-sm text-muted-foreground">Time window</p>
+                          <p className="font-medium">{timeThreshold} s</p>
                         </div>
                         <div>
-                          <p className="text-sm text-muted-foreground">Distance Threshold</p>
+                          <p className="text-sm text-muted-foreground">Distance window</p>
                           <p className="font-medium">{distanceThreshold} km</p>
                         </div>
                         <div>
@@ -2275,7 +2256,7 @@ export default function MergePage() {
                             <div className="flex-1">
                               <p className="font-medium">{catalogue.name}</p>
                               <p className="text-sm text-muted-foreground">
-                                {catalogue.event_count?.toLocaleString() || 0} events
+                                {catalogue.event_count?.toLocaleString() || 0} entries
                               </p>
                             </div>
                             {index < getSelectedCatalogues.length - 1 && (
@@ -2315,9 +2296,7 @@ export default function MergePage() {
                 {(mergeStatus === 'merging' || mergeStatus === 'error') && (
                   <MergeProgressIndicator
                     steps={mergeSteps}
-                    currentStep={mergeSteps.findIndex(s => s.status === 'in-progress')}
-                    progress={mergeProgress}
-                    estimatedTimeRemaining={mergeStatus === 'merging' && mergeProgress < 100 ? ((100 - mergeProgress) / 5) * 0.3 : 0}
+                    startedAt={mergeStartedAt}
                   />
                 )}
 
@@ -2376,8 +2355,8 @@ export default function MergePage() {
                   <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 p-3 rounded-md">
                     <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0" />
                     <p className="text-sm text-amber-800 dark:text-amber-300">
-                      Merging multiple catalogues may take several minutes depending on the size of the datasets.
-                      The process cannot be interrupted once started.
+                      The merge repeats the preview&apos;s matching and then writes the catalogue, so it takes at least as long
+                      as the preview. It cannot be cancelled once started.
                     </p>
                   </div>
                 )}
@@ -2433,7 +2412,7 @@ export default function MergePage() {
                 {getSelectedCatalogues.length} sources
                 {previewStatistics
                   ? ` (${formatCount(previewStatistics.totalEventsAfter)} events, as in the QC preview).`
-                  : ` (~${estimatedMergedEvents.toLocaleString()} events after combining matched entries).`}
+                  : ` (${formatCount(getTotalSelectedEvents)} entries before matching).`}
                 {previewStatistics && previewStatistics.suspiciousGroupsCount > 0 && (
                   // Held rows exist only in a saved catalogue; an export-only merge holds nothing.
                   onConflict === 'hold' && !exportOnly

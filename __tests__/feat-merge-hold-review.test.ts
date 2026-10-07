@@ -75,9 +75,9 @@ describe("onConflict 'hold'", () => {
     const pair = held.find(r => members(r).length === 2)!;
     const lone = held.find(r => members(r).length === 1)!;
     expect(members(pair)).toEqual(['a', 'b']);
-    expect(pair.review_reasons).toEqual([expect.stringMatching(/^Salvaged from a larger matched cluster.*Reason: Large magnitude range: 0\.70 units/)]);
+    expect(pair.review_reasons).toEqual([expect.stringMatching(/^Formed by splitting a larger matched group that failed the consistency checks\. Reason: Magnitudes differ by 0\.70 units/)]);
     expect(members(lone)).toEqual(['c']);
-    expect(lone.review_reasons).toEqual([expect.stringMatching(/^Matched with another entry but kept apart.*Reason: Large magnitude range/)]);
+    expect(lone.review_reasons).toEqual([expect.stringMatching(/^Matched with another entry but kept apart.*Reason: Magnitudes differ by/)]);
     // A provisional solution: the strategy still published coordinates.
     expect([pair.latitude, pair.longitude, pair.magnitude]).toEqual([-41.3, 174.8, 3.5]);
     const d = saved.find(r => members(r)[0] === 'd')!;
@@ -146,13 +146,13 @@ describe('assessMatchGroup and the review columns', () => {
     const pair = groups.find(g => g.events.length === 2)!;
     const verdict = assessMatchGroup(pair, base as any);
     expect(verdict.suspicious).toBe(true);
-    expect(verdict.warnings).toEqual([expect.stringContaining('Salvaged')]);
+    expect(verdict.warnings).toEqual([expect.stringContaining('Formed by splitting a larger matched group')]);
     // The report the split left on its own is flagged too, with the gate's reason.
     const lone = groups.find(g => g.events.length === 1)!;
     expect(assessMatchGroup(lone, base as any)).toEqual({
       suspicious: false,
       separated: true,
-      warnings: [expect.stringMatching(/^Matched with another entry but kept apart.*Large magnitude range/)],
+      warnings: [expect.stringMatching(/^Matched with another entry but kept apart.*Magnitudes differ by/)],
     });
 
     const clean = groupMatchingEvents([ev('a', 3.5, 0), ev('b', 3.8, 2)], base as any);

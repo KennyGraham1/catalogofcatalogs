@@ -1588,7 +1588,7 @@ Requires the Editor role or higher.
      - array
      - Optional. Up to 50 catalogue IDs (each 1-255 chars), highest priority first.
        Every id must be one of ``sourceCatalogues[].id``, each listed at most once.
-       Used only for the "Custom Order" priority (``priority: "custom"``)
+       Used only for the "Custom catalogue order" priority (``priority: "custom"``)
    * - ``fieldRules``
      - object
      - Optional. Per-field resolution rules applied on top of the strategy:
@@ -1681,9 +1681,9 @@ recorded in ``merge_parameters.fieldRules``.
 **Conflict Handling** (``config.onConflict``):
 
 - ``"resolve"`` (default): every duplicate group is resolved by the strategy.
-- ``"hold"``: a group the preview flags (``isSuspicious``: regrouped after failed
-  validation, ambiguous association, a failed validation gate, a magnitude-consistency
-  reason or a depth-range warning) is still written with the strategy's provisional
+- ``"hold"``: a group the preview flags (``isSuspicious``: formed by splitting a larger
+  group that failed the consistency checks, an ambiguous association, a failed consistency
+  check, or magnitudes or solved depths that differ by more than the tolerance) is still written with the strategy's provisional
   solution, but with ``review_status: "pending"`` and ``review_reasons`` set to the
   group's ``validationWarnings``. Every other row carries ``review_status: null``.
   Held rows are resolved through the *Review Held Events* endpoints below.
@@ -1826,17 +1826,18 @@ the request has ``onConflict: "hold"`` and the group is flagged or separated;
 ``statistics.heldForReviewCount``
 totals such groups and equals the number of ``review_status: "pending"`` rows an actual
 merge with the same request would write. ``isSuspicious`` and
-``validationWarnings`` flag a group for reviewer attention; the warnings include large
-magnitude disagreement or depth range within the group, a cluster that was split
-because it failed consistency validation, and **ambiguous association** — a report in
-the group was nearly as close, in time and distance, to another event that could not
-join it (already in the group from the same catalogue, or too far from the rest); the
-closest match was still kept, but a reviewer should confirm it.
+``validationWarnings`` flag a group for reviewer attention; the warnings include
+magnitudes or solved depths that differ by more than the tolerance, a group formed by
+splitting a larger one that failed the consistency checks, and **ambiguous
+association**: an entry of the group had a second candidate almost as close as the match
+kept (normalised separation within twice that of the kept pair plus 0.1) that could not
+join the group (its catalogue was already in it, or it lay too far from the other
+entries). The closer match is kept, but a reviewer should confirm it.
 
 **Error Responses**:
 
 - ``400 Bad Request``: Request failed schema validation (including a source catalogue
-  listed more than once, or a Custom Order ``priorityOrder`` entry that is unknown or
+  listed more than once, or a custom catalogue order ``priorityOrder`` entry that is unknown or
   repeated), or fewer than 2 source catalogues
 - ``500 Internal Server Error``: A source catalogue was not found, or the preview failed
 
